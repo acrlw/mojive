@@ -9,6 +9,7 @@ from design.tools.ui_icon_concepts import (
     ICON_BOUND_DIAMETER,
     ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
+    ICON_GLYPH_PADDING_DEFAULTS,
     ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_LAYOUT_REFERENCES,
@@ -185,6 +186,7 @@ def _render(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
+    rotate_ring_gap_ratio: float = 0.5,
 ) -> _RecordingDraw:
     draw = _RecordingDraw()
     draw_concept_icon(
@@ -196,6 +198,7 @@ def _render(
         padding=padding,
         mouse_width=mouse_width,
         stroke_width=stroke_width,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
     )
     return draw
 
@@ -248,7 +251,7 @@ def test_default_layout_fits_candidates_to_the_reference_family_padding(name: st
         if name == "tool-rotate"
         else REVIEW_LOCKED_PADDING
         if name in icon_concepts.REVIEW_LOCKED_ICONS
-        else ICON_GROUP_LAYOUT_DEFAULTS[group]
+        else ICON_GLYPH_PADDING_DEFAULTS.get(name, ICON_GROUP_LAYOUT_DEFAULTS[group])
     )
     assert icon_metrics(name).circular_clearance == pytest.approx(expected, abs=1e-5)
 
@@ -304,11 +307,23 @@ def test_rotate_outer_frame_matches_the_placement_circle() -> None:
     assert metrics.circular_clearance == pytest.approx(-ROTATE_FRAME_STROKE_OVERSHOOT, abs=1e-5)
 
 
-def test_rotate_frame_ignores_candidate_padding_control() -> None:
-    baseline = _render("tool-rotate", ICON_GRID)
+def test_rotate_padding_insets_the_outer_frame_centerline() -> None:
     adjusted = _render("tool-rotate", ICON_GRID, padding=ICON_MAX_PADDING)
+    metrics = icon_metrics("tool-rotate", padding=ICON_MAX_PADDING)
+    _center, ring_radius, _ring_width = adjusted.circles[0]
 
-    assert adjusted.__dict__ == baseline.__dict__
+    assert ring_radius == pytest.approx(ICON_BOUND_DIAMETER * 0.5 - ICON_MAX_PADDING, abs=1e-6)
+    assert metrics.circular_clearance == pytest.approx(
+        ICON_MAX_PADDING - ROTATE_FRAME_STROKE_OVERSHOOT, abs=1e-5
+    )
+
+
+def test_rotate_gap_ratio_changes_only_the_inner_ring_construction() -> None:
+    compact = _render("tool-rotate", ICON_GRID, rotate_ring_gap_ratio=0.25)
+    open_gap = _render("tool-rotate", ICON_GRID, rotate_ring_gap_ratio=1.0)
+
+    assert compact.circles == open_gap.circles
+    assert compact.filled_paths != open_gap.filled_paths
 
 
 @pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE, ICON_DEFAULT_PADDING, ICON_MAX_PADDING))
@@ -735,10 +750,18 @@ def test_transport_contours_do_not_use_raw_stroked_corners(name: str) -> None:
     assert all(len(path) > 4 for path in draw.filled_paths)
 
 
-@pytest.mark.parametrize("prefix", ("playback", "transport"))
-def test_directional_playback_marks_share_the_component_padding(prefix: str) -> None:
+def test_viewport_playback_directions_are_smaller_than_play_and_pause() -> None:
     clearances = tuple(
-        icon_metrics(f"{prefix}-{kind}").circular_clearance
+        icon_metrics(f"playback-{kind}").circular_clearance
+        for kind in ("previous", "play", "pause", "next")
+    )
+
+    assert clearances == pytest.approx((4.0, 2.0, 2.0, 4.0), abs=1e-5)
+
+
+def test_keyframe_transport_directions_keep_the_component_padding() -> None:
+    clearances = tuple(
+        icon_metrics(f"transport-{kind}").circular_clearance
         for kind in ("previous", "play", "pause", "next")
     )
 

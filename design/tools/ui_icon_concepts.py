@@ -167,6 +167,13 @@ ICON_GROUP_LAYOUT_DEFAULTS = {
     "Scene helpers": ICON_DEFAULT_PADDING,
     "Status & input": ICON_DEFAULT_PADDING,
 }
+ICON_GLYPH_PADDING_DEFAULTS = {
+    "tool-rotate": ROTATE_FRAME_PADDING,
+    "playback-previous": 4.0,
+    "playback-next": 4.0,
+    "playback-more": 4.0,
+}
+ICON_GROUP_STROKE_DEFAULTS = dict.fromkeys(ICON_GROUP_LAYOUT_DEFAULTS, ICON_STROKE)
 
 # Closely related marks share one fitted master so their authored dimensions
 # remain comparable after placement. More is a shorter, rotated Previous at the
@@ -266,14 +273,34 @@ def _simple_polygon_indices(points: tuple[tuple[float, float], ...]) -> tuple[in
 def minimum_enclosing_circle(points) -> tuple[tuple[float, float], float]:
     """Return the exact smallest circle for a finite set of sampled boundary points."""
 
-    values = list(dict.fromkeys((float(x), float(y)) for x, y in points))
+    values = sorted({(float(x), float(y)) for x, y in points})
     if not values:
         return (0.0, 0.0), 0.0
+    if len(values) > 2:
+        # Interior samples can never define the minimum enclosing circle.  A
+        # stroked polyline contributes many overlapping round-cap samples, so
+        # reducing them to their convex hull keeps the exact result while
+        # avoiding millions of repeated containment checks during a slider drag.
+        def cross(origin, a, b) -> float:
+            return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+        lower = []
+        for point in values:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+                lower.pop()
+            lower.append(point)
+        upper = []
+        for point in reversed(values):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+                upper.pop()
+            upper.append(point)
+        values = lower[:-1] + upper[:-1]
     random.Random(0).shuffle(values)
 
     def contains(circle, point) -> bool:
         center, radius = circle
-        return math.dist(center, point) <= radius + 1e-7
+        dx, dy = center[0] - point[0], center[1] - point[1]
+        return dx * dx + dy * dy <= (radius + 1e-7) ** 2
 
     def diameter(a, b):
         center = ((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5)
@@ -325,12 +352,16 @@ class _Painter:
         *,
         stroke_width: float = ICON_STROKE,
         stroke_compensation: float = 1.0,
+        rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+        rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
     ) -> None:
         self.draw = draw
         self.cx, self.cy = (float(center[0]), float(center[1]))
         self.scale = float(size) / ICON_GRID
         self.stroke_width = float(stroke_width)
         self.stroke_compensation = float(stroke_compensation)
+        self.rotate_ring_gap_ratio = float(rotate_ring_gap_ratio)
+        self.rotate_ring_cap = str(rotate_ring_cap)
         self.color = color
         self.stroke = self.stroke_width * self.stroke_compensation * self.scale
 
@@ -718,11 +749,26 @@ def _arc_arrow(
     )
 
 
+@lru_cache(maxsize=512)
+def _concept_rotate_ring_polygons(
+    stroke_width: float,
+    gap_ratio: float,
+    cap: str,
+):
+    return _rotate_visible_ring_polygons(
+        stroke_width,
+        gap_ratio,
+        cap,
+        CAPSULE_SMOOTHING,
+    )
+
+
 def _draw_tool(p: _Painter, name: str) -> None:
     if name == "tool-move":
         # Keep the accepted Icon Library candidate as one connected G3 outline;
         # the wider central cross remains legible at the 14-point specimen.
-        tip, base, wing = 8.7, 5.6, 2.65
+        tip, wing = 8.7, 2.65
+        base = tip - math.sqrt(3.0) * wing
         shaft = p.stroke_width * p.stroke_compensation * 0.5
         p.smooth_polygon(
             (
@@ -762,11 +808,10 @@ def _draw_tool(p: _Painter, name: str) -> None:
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
         p.circle(0.0, 0.0, 10.0 * glyph_scale)
-        for ring in _rotate_visible_ring_polygons(
+        for ring in _concept_rotate_ring_polygons(
             p.stroke_width * p.stroke_compensation / production_scale,
-            OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-            OVERLAY_GEOMETRY.rotate_ring_cap,
-            CAPSULE_SMOOTHING,
+            p.rotate_ring_gap_ratio,
+            p.rotate_ring_cap,
         ):
             for local in ring:
                 p.polygon(tuple((x * glyph_scale, y * glyph_scale) for x, y in local))
@@ -802,9 +847,9 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # Sparse stroked symbols need a larger authored envelope than solid
         # tools to carry comparable visual weight in the same 24-unit slot.
         source_width = p.stroke_width * p.stroke_compensation
-        p.circle(0.0, 0.0, 8.75)
         # Centerline endpoints account for both strokes. The round caps meet
-        # the globe's inner edge instead of painting through the outer ring.
+        # the globe's inner edge. Paint the outer ring last so antialiasing at
+        # the junction belongs to the frame rather than the internal strokes.
         inner_reach = 8.75 - source_width
         p.line((-inner_reach, 0.0), (inner_reach, 0.0))
         ellipse = tuple(
@@ -815,6 +860,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
             for index in range(32)
         )
         p.polyline(ellipse, closed=True)
+        p.circle(0.0, 0.0, 8.75)
     elif name == "tool-body":
         top = (0.0, -8.62)
         left = (-7.50, -4.31)
@@ -827,7 +873,8 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # a fourth face. Inset the spoke ends below the outer stroke and paint
         # the G3 shell last so no round cap protrudes through a cube vertex.
         junction = (0.0, 0.0)
-        inset = 1.62
+        source_width = p.stroke_width * p.stroke_compensation
+        inset = source_width * 1.12
         for endpoint in (left, right, bottom):
             length = math.hypot(endpoint[0], endpoint[1])
             end = (
@@ -1051,9 +1098,7 @@ def _search_icon_mesh(stroke: float = ICON_STROKE):
 def _draw_panel(p: _Painter, name: str) -> None:
     kind = name.removeprefix("panel-")
     if kind == "search":
-        vertices, indices, outline, hole = _search_icon_mesh(
-            p.stroke_width * p.stroke_compensation
-        )
+        vertices, indices, outline, hole = _search_icon_mesh(p.stroke_width * p.stroke_compensation)
         p.indexed_fill(vertices, indices, outline=outline, hole=hole)
     elif kind == "sort":
         for y, end in ((-5.09, 2.24), (0.11, 0.04), (5.31, -2.16)):
@@ -1259,6 +1304,8 @@ def _draw_concept_icon_raw(
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
     stroke_compensation: float = 1.0,
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
 ) -> None:
     """Draw authored geometry before shared placement is applied."""
 
@@ -1269,6 +1316,8 @@ def _draw_concept_icon_raw(
         color,
         stroke_width=stroke_width,
         stroke_compensation=stroke_compensation,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        rotate_ring_cap=rotate_ring_cap,
     )
     if name.startswith("tool-"):
         _draw_tool(painter, name)
@@ -1289,6 +1338,8 @@ def _draw_concept_icon_raw(
 class _MetricsDraw:
     """Measure visible bounds and the minimum enclosing circle."""
 
+    _ROUND_SUPPORT_SAMPLES = 64
+
     def __init__(self) -> None:
         self.bounds = [float("inf"), float("inf"), float("-inf"), float("-inf")]
         self.boundary_points: list[tuple[float, float]] = []
@@ -1303,10 +1354,10 @@ class _MetricsDraw:
             if pad > 0.0:
                 self.boundary_points.extend(
                     (
-                        x + pad * math.cos(index * math.tau / 128),
-                        y + pad * math.sin(index * math.tau / 128),
+                        x + pad * math.cos(index * math.tau / self._ROUND_SUPPORT_SAMPLES),
+                        y + pad * math.sin(index * math.tau / self._ROUND_SUPPORT_SAMPLES),
                     )
-                    for index in range(128)
+                    for index in range(self._ROUND_SUPPORT_SAMPLES)
                 )
             else:
                 self.boundary_points.append((x, y))
@@ -1412,6 +1463,8 @@ def _measure_raw_icon(
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
     stroke_compensation: float = 1.0,
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
 ) -> IconMetrics:
     draw = _MetricsDraw()
     _draw_concept_icon_raw(
@@ -1423,14 +1476,15 @@ def _measure_raw_icon(
         mouse_width=mouse_width,
         stroke_width=stroke_width,
         stroke_compensation=stroke_compensation,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        rotate_ring_cap=rotate_ring_cap,
     )
     bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
     anchor_center = _alignment_center_values(name, bounds, enclosing_center)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
     anchor_extent = max(
-        math.hypot(x - anchor_center[0], y - anchor_center[1])
-        for x, y in draw.boundary_points
+        math.hypot(x - anchor_center[0], y - anchor_center[1]) for x, y in draw.boundary_points
     )
     return IconMetrics(bounds, enclosing_center, enclosing_radius, origin_extent, anchor_extent)
 
@@ -1459,29 +1513,32 @@ def _icon_layout(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
 ) -> tuple[float, tuple[float, float], float]:
     """Center the declared anchor and fit every visible point to the requested padding."""
 
-    default_padding = ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
+    default_padding = ICON_GLYPH_PADDING_DEFAULTS.get(
+        name, ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
+    )
     if padding is None:
         padding = default_padding
     if name in REVIEW_LOCKED_ICONS:
         padding = REVIEW_LOCKED_PADDING
     padding = float(padding)
-    if not ICON_MIN_CLEARANCE <= padding <= ICON_MAX_PADDING:
+    minimum_padding = 0.0 if name == "tool-rotate" else ICON_MIN_CLEARANCE
+    if not minimum_padding <= padding <= ICON_MAX_PADDING:
         raise ValueError(
-            f"icon padding must be between {ICON_MIN_CLEARANCE:g} and {ICON_MAX_PADDING:g}"
+            f"icon padding must be between {minimum_padding:g} and {ICON_MAX_PADDING:g}"
         )
     stroke_width = float(stroke_width)
     if not ICON_MIN_STROKE <= stroke_width <= ICON_MAX_STROKE:
-        raise ValueError(
-            f"icon stroke must be between {ICON_MIN_STROKE:g} and {ICON_MAX_STROKE:g}"
-        )
+        raise ValueError(f"icon stroke must be between {ICON_MIN_STROKE:g} and {ICON_MAX_STROKE:g}")
     # Rotate's outer screen-ring centerline is itself the slot frame. Its stroke
     # straddles the orange guide exactly as the production Tool Column painter
     # does, so the visible edge extends by half of the canonical stroke.
     reference_name = ICON_LAYOUT_REFERENCES.get(name, name)
-    target_padding = ROTATE_FRAME_PADDING if name == "tool-rotate" else padding
+    target_padding = padding
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
     if name == "tool-rotate":
         safe_radius += stroke_width * 0.5
@@ -1495,6 +1552,8 @@ def _icon_layout(
             mouse_width=mouse_width,
             stroke_width=stroke_width,
             stroke_compensation=compensation,
+            rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+            rotate_ring_cap=rotate_ring_cap,
         )
         return safe_radius / reference_raw.anchor_extent
 
@@ -1503,19 +1562,28 @@ def _icon_layout(
     # thin to very heavy. Counter-scale the construction stroke and solve only
     # for the envelope. A short fixed-point solve also handles the implicit
     # search mesh and filled G3 ribbons whose visible bounds depend on width.
-    layout_scale = 1.0
-    for _ in range(16):
-        updated_scale = fitted_scale(layout_scale)
-        if math.isclose(updated_scale, layout_scale, rel_tol=0.0, abs_tol=1e-10):
+    if name == "tool-rotate":
+        # The outer ring centerline is the slot frame, so its scale is known
+        # directly and does not need the expensive iterative ring construction.
+        layout_scale = (ICON_BOUND_DIAMETER * 0.5 - target_padding) / (
+            10.0 * 0.82 * TOOL_GLYPH_SCALE
+        )
+    else:
+        layout_scale = 1.0
+        for _ in range(16):
+            updated_scale = fitted_scale(layout_scale)
+            if math.isclose(updated_scale, layout_scale, rel_tol=0.0, abs_tol=1e-6):
+                layout_scale = updated_scale
+                break
             layout_scale = updated_scale
-            break
-        layout_scale = updated_scale
     stroke_compensation = 1.0 / layout_scale if normalize_stroke else 1.0
     raw = _measure_raw_icon(
         name,
         mouse_width=mouse_width,
         stroke_width=stroke_width,
         stroke_compensation=stroke_compensation,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        rotate_ring_cap=rotate_ring_cap,
     )
     anchor_center = _alignment_center(name, raw)
     offset = (-anchor_center[0], -anchor_center[1])
@@ -1543,17 +1611,26 @@ def icon_alignment_center(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
 ) -> tuple[float, float]:
     """Return the declared anchor center after candidate placement."""
 
     layout_scale, offset, stroke_compensation = _icon_layout(
-        name, padding, mouse_width, stroke_width
+        name,
+        padding,
+        mouse_width,
+        stroke_width,
+        rotate_ring_gap_ratio,
+        rotate_ring_cap,
     )
     raw = _measure_raw_icon(
         name,
         mouse_width=mouse_width,
         stroke_width=stroke_width,
         stroke_compensation=stroke_compensation,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        rotate_ring_cap=rotate_ring_cap,
     )
     source_center = _alignment_center(name, raw)
     return (
@@ -1573,11 +1650,18 @@ def draw_concept_icon(
     accent_color=None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
 ) -> None:
     """Draw one declared-anchor candidate fitted to a padded circular slot."""
 
     layout_scale, offset, stroke_compensation = _icon_layout(
-        name, padding, mouse_width, stroke_width
+        name,
+        padding,
+        mouse_width,
+        stroke_width,
+        rotate_ring_gap_ratio,
+        rotate_ring_cap,
     )
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
@@ -1594,6 +1678,8 @@ def draw_concept_icon(
         mouse_width=mouse_width,
         stroke_width=stroke_width,
         stroke_compensation=stroke_compensation,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        rotate_ring_cap=rotate_ring_cap,
     )
 
 
@@ -1603,6 +1689,8 @@ def icon_metrics(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
+    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
 ) -> IconMetrics:
     """Return placement and geometry measurements for one 24-unit candidate."""
 
@@ -1616,14 +1704,15 @@ def icon_metrics(
         padding=padding,
         mouse_width=mouse_width,
         stroke_width=stroke_width,
+        rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        rotate_ring_cap=rotate_ring_cap,
     )
     bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
     anchor_center = _alignment_center_values(name, bounds, enclosing_center)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
     anchor_extent = max(
-        math.hypot(x - anchor_center[0], y - anchor_center[1])
-        for x, y in draw.boundary_points
+        math.hypot(x - anchor_center[0], y - anchor_center[1]) for x, y in draw.boundary_points
     )
     return IconMetrics(bounds, enclosing_center, enclosing_radius, origin_extent, anchor_extent)
 

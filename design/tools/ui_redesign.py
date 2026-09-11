@@ -319,12 +319,14 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                 nominal_diameter = 2.0 * OVERLAY_GEOMETRY.icon_radius * icon_scale
                 if vertical:
                     nominal_diameter *= TOOL_GLYPH_SCALE
-                group = "Viewport tools" if vertical else "Viewport playback"
-                if hasattr(geometry, "icon_padding_for"):
-                    padding = geometry.icon_padding_for(group)
+                if hasattr(geometry, "icon_padding_for_glyph"):
+                    padding = geometry.icon_padding_for_glyph(concept_name)
                 else:
                     padding = getattr(geometry, "icon_padding", ICON_DEFAULT_PADDING)
-                stroke_width = getattr(geometry, "icon_stroke_width", ICON_STROKE)
+                if hasattr(geometry, "icon_stroke_for_glyph"):
+                    stroke_width = geometry.icon_stroke_for_glyph(concept_name)
+                else:
+                    stroke_width = ICON_STROKE
                 draw_concept_icon(
                     target,
                     center,
@@ -333,6 +335,16 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     color,
                     padding=padding,
                     stroke_width=stroke_width,
+                    rotate_ring_gap_ratio=getattr(
+                        geometry,
+                        "rotate_ring_gap_ratio",
+                        OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
+                    ),
+                    rotate_ring_cap=getattr(
+                        geometry,
+                        "rotate_ring_cap",
+                        OVERLAY_GEOMETRY.rotate_ring_cap,
+                    ),
                 )
             elif vertical:
                 draw_tool_glyph(
