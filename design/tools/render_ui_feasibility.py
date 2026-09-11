@@ -704,28 +704,6 @@ def _preview_searchable_header(state: ProbeState, *args, **kwargs):
     return searchable_ordered_list_header(*args, **kwargs)
 
 
-_KEYFRAME_CONCEPT_ICONS = {
-    "first": "transport-first",
-    "last": "transport-last",
-    "previous": "transport-previous",
-    "next": "transport-next",
-    "play": "transport-play",
-    "pause": "transport-pause",
-    "stop": "transport-stop",
-    "loop": "transport-reset",
-    "reset": "transport-reset",
-    "options": "transport-more",
-    "record": "transport-record",
-    "add": "key-add",
-    "clear": "key-clear",
-    "key-previous": "key-previous",
-    "key-next": "key-next",
-    "fit": "key-fit",
-    "follow": "key-follow",
-    "view": "key-view",
-}
-
-
 def _draw_icon_library_command_icon(
     draw,
     center,
@@ -741,13 +719,13 @@ def _draw_icon_library_command_icon(
     """Render one Keyframes command through its Icon Library candidate."""
 
     del smoothing
-    name = (
-        "key-keyframe"
-        if kind == "key" and scale < context_scale * 0.9
-        else "key-snapshot"
-        if kind == "key"
-        else _KEYFRAME_CONCEPT_ICONS[kind]
-    )
+    if kind == "key" and scale < context_scale * 0.9:
+        name = "key-keyframe"
+    else:
+        try:
+            name = keyframes_panel_module._COMMAND_ICON_NAMES[kind]
+        except KeyError as exc:
+            raise ValueError(f"unknown keyframe command icon: {kind!r}") from exc
     if state is not None:
         padding = state.icon_padding_for_glyph(name)
         stroke_width = state.icon_stroke_for_glyph(name)
