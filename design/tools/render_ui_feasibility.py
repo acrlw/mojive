@@ -89,7 +89,7 @@ from mojive.ui import perturb as perturb_ui
 from mojive.ui import theme as theme_mod
 from mojive.ui import viewcube as view_ui
 from mojive.ui.compound_fields import draw_joined_field_frame
-from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link
+from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link, text_line_y
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import (
@@ -3775,7 +3775,7 @@ _ICON_REVIEW_SIZES = (14.0, 24.0, 56.0, 112.0)
 
 
 def _icon_library_canvas_size(family: str) -> tuple[float, float]:
-    if family == "Overview":
+    if family in {"Overview", "UI context"}:
         return GEOMETRY_CANVAS_SIZE
     rows = len(icon_family(family))
     required_height = 260.0 + (max(_ICON_REVIEW_SIZES) + 20.0) * rows
@@ -3813,7 +3813,7 @@ def _draw_concept_icon_specimen(draw, center, size: float, name: str, scale: flo
     else:
         draw_concept_icon(draw, center, size, name, _concept_icon_color(name))
     # Draw the boundary last so any collision remains visible instead of being
-    # hidden below opaque icon ink.
+    # hidden below opaque icon geometry.
     draw.circle(
         center,
         guide_radius,
@@ -3824,7 +3824,7 @@ def _draw_concept_icon_specimen(draw, center, size: float, name: str, scale: flo
 
 
 def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float, float, float]:
-    """Return radial, box, bounding-circle, and ink diagnostics on the 24-unit grid."""
+    """Return radial, box, bounding-circle, and area diagnostics on the 24-unit grid."""
 
     if name.startswith("status-") and name.removeprefix("status-") in {
         "info",
@@ -3841,8 +3841,8 @@ def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float, 
         )
         radial_extent = float(np.linalg.norm(points, axis=1).max())
         bounding_center, _bounding_radius = minimum_enclosing_circle(points)
-        ink_area = 0.0
-        ink_moment = np.zeros(2, np.float64)
+        filled_area = 0.0
+        area_moment = np.zeros(2, np.float64)
         for vertices, indices, _outline, _hole in meshes:
             vertices = np.asarray(vertices, np.float64)
             for offset in range(0, len(indices), 3):
@@ -3850,17 +3850,17 @@ def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float, 
                 first = triangle[1] - triangle[0]
                 second = triangle[2] - triangle[0]
                 area = abs(float(first[0] * second[1] - first[1] * second[0])) * 0.5
-                ink_area += area
-                ink_moment += area * triangle.mean(axis=0)
-        ink_center = ink_moment / ink_area
+                filled_area += area
+                area_moment += area * triangle.mean(axis=0)
+        area_centroid = area_moment / filled_area
         return (
             ICON_BOUND_DIAMETER * 0.5 - radial_extent,
             (bounds[0] + bounds[2]) * 0.5,
             (bounds[1] + bounds[3]) * 0.5,
             bounding_center[0],
             bounding_center[1],
-            float(ink_center[0]),
-            float(ink_center[1]),
+            float(area_centroid[0]),
+            float(area_centroid[1]),
         )
     metrics = icon_metrics(name)
     offset_x, offset_y = metrics.center_offset
@@ -3869,7 +3869,7 @@ def _icon_review_metrics(name: str) -> tuple[float, float, float, float, float, 
         offset_x,
         offset_y,
         *metrics.bounding_center,
-        *metrics.ink_center,
+        *metrics.area_centroid,
     )
 
 
@@ -3917,6 +3917,214 @@ def _draw_icon_library_overview(draw, origin, scale: float) -> None:
             )
 
 
+def _draw_context_row(
+    draw,
+    origin,
+    width: float,
+    row_height: float,
+    icon_size: float,
+    icon_name: str,
+    label: str,
+    detail: str,
+    scale: float,
+    *,
+    production_kind: str | None = None,
+) -> None:
+    """Place one candidate in current Mojive row metrics with text guides."""
+
+    x0, y0 = float(origin[0]), float(origin[1])
+    width *= scale
+    row_height *= scale
+    icon_size *= scale
+    center_y = y0 + row_height * 0.5
+    draw.rect_filled(
+        (x0, y0),
+        (x0 + width, y0 + row_height),
+        CONCEPT_THEME.bg_frame,
+        rounding=5.0 * scale,
+    )
+    icon_center = (x0 + 22.0 * scale, center_y)
+    text_x = x0 + 40.0 * scale
+    text_y = text_line_y(draw, center_y)
+    reference = draw.text_ink_bounds("H")
+    cap_y = text_y + (reference[1] if reference else 0.0)
+    baseline_y = text_y + float(imgui.get_font_baked().ascent)
+    guide_right = x0 + width - 250.0 * scale
+    draw.line(
+        (x0 + 8.0 * scale, center_y),
+        (guide_right, center_y),
+        (*CONCEPT_THEME.warning[:3], 0.18),
+        max(0.5, 0.7 * scale),
+    )
+    draw.line(
+        (text_x, cap_y),
+        (guide_right, cap_y),
+        (*CONCEPT_THEME.primary[:3], 0.48),
+        max(0.5, 0.7 * scale),
+    )
+    draw.line(
+        (text_x, baseline_y),
+        (guide_right, baseline_y),
+        (*CONCEPT_THEME.info[:3], 0.52),
+        max(0.5, 0.7 * scale),
+    )
+    if production_kind is None:
+        draw_concept_icon(draw, icon_center, icon_size, icon_name, CONCEPT_THEME.text)
+    else:
+        _draw_command_icon(draw, icon_center, production_kind, CONCEPT_THEME.text, scale)
+    draw.circle(
+        icon_center,
+        icon_size * 0.5,
+        (*CONCEPT_THEME.warning[:3], 0.72),
+        max(0.75, 0.9 * scale),
+        segments=max(32, round(icon_size * 2.0)),
+    )
+    draw.text((text_x, text_y), CONCEPT_THEME.text, label, pixel_snap=False)
+    draw.text(
+        (x0 + width - 230.0 * scale, text_y),
+        CONCEPT_THEME.text_disabled,
+        detail,
+        pixel_snap=False,
+    )
+
+
+def _draw_icon_context_page(draw, origin, scale: float) -> None:
+    """Review candidate alignment in Mojive's actual row and font metrics."""
+
+    x0, y0 = float(origin[0]), float(origin[1])
+    draw.text((x0, y0 + 10.0 * scale), CONCEPT_THEME.text, "Alignment in UI")
+    draw.text(
+        (x0, y0 + 34.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Candidates use current Mojive row heights and font metrics; orange guides are review-only.",
+    )
+    draw.text(
+        (x0, y0 + 58.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Green = H cap line · blue = text baseline · faint amber = row and icon-slot center",
+    )
+
+    card_x = x0 - 10.0 * scale
+    card_width = 1370.0 * scale
+    first_y = y0 + 96.0 * scale
+    draw.rect_filled(
+        (card_x, first_y),
+        (card_x + card_width, first_y + 250.0 * scale),
+        (*CONCEPT_THEME.bg_frame[:3], 0.55),
+        rounding=6.0 * scale,
+    )
+    draw.text(
+        (x0 + 10.0 * scale, first_y + 14.0 * scale),
+        CONCEPT_THEME.text,
+        "Camera master · why automatic centers disagreed",
+    )
+    draw.text(
+        (x0 + 10.0 * scale, first_y + 38.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "key-snapshot and helper-camera call the same contour. They previously used different automatic anchors.",
+    )
+    metrics = icon_metrics("key-snapshot")
+    samples = (
+        ("Box baseline · current", (0.0, 0.0)),
+        (
+            f"Radial = 0 · shift {-metrics.bounding_center[1]:+.2f}u Y",
+            (-metrics.bounding_center[0], -metrics.bounding_center[1]),
+        ),
+        (
+            f"Area = 0 · shift {-metrics.area_centroid[1]:+.2f}u Y",
+            (-metrics.area_centroid[0], -metrics.area_centroid[1]),
+        ),
+    )
+    for index, (label, offset) in enumerate(samples):
+        center = (x0 + (250.0 + index * 420.0) * scale, first_y + 132.0 * scale)
+        shifted = (
+            center[0] + offset[0] * 112.0 / ICON_GRID * scale,
+            center[1] + offset[1] * 112.0 / ICON_GRID * scale,
+        )
+        draw_concept_icon(draw, shifted, 112.0 * scale, "key-snapshot", CONCEPT_THEME.text)
+        draw.circle(
+            center,
+            56.0 * scale,
+            (*CONCEPT_THEME.warning[:3], 0.72),
+            max(0.75, 0.9 * scale),
+            segments=max(64, round(112.0 * scale * 2.0)),
+        )
+        draw.centered_label(
+            label,
+            (center[0], first_y + 215.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            360.0 * scale,
+        )
+
+    second_y = first_y + 274.0 * scale
+    draw.text((x0, second_y), CONCEPT_THEME.text, "Current UI metrics")
+    draw.text(
+        (x0, second_y + 24.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "The current Keyframes command still uses a diamond; camera rows below show candidate placement before production wiring.",
+    )
+    row_x = x0 + 10.0 * scale
+    row_width = 1320.0
+    _draw_context_row(
+        draw,
+        (row_x, second_y + 62.0 * scale),
+        row_width,
+        28.0,
+        16.0,
+        "key-keyframe",
+        "Capture snapshot",
+        "production · 28 pt row / 16 pt slot",
+        scale,
+        production_kind="key",
+    )
+    _draw_context_row(
+        draw,
+        (row_x, second_y + 112.0 * scale),
+        row_width,
+        28.0,
+        16.0,
+        "key-snapshot",
+        "Capture snapshot",
+        "candidate · box anchor",
+        scale,
+    )
+    _draw_context_row(
+        draw,
+        (row_x, second_y + 162.0 * scale),
+        row_width,
+        26.0,
+        14.0,
+        "helper-camera",
+        "camera0",
+        "candidate · 26 pt hierarchy row",
+        scale,
+    )
+    _draw_context_row(
+        draw,
+        (row_x, second_y + 212.0 * scale),
+        row_width,
+        26.0,
+        14.0,
+        "helper-light",
+        "light0",
+        "candidate · 26 pt hierarchy row",
+        scale,
+    )
+
+    note_y = second_y + 270.0 * scale
+    draw.text((x0, note_y), CONCEPT_THEME.text, "Review rule")
+    draw.text(
+        (x0, note_y + 24.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "First align the slot center to the H cap-height center and text baseline. Add a small explicit offset only when the rendered row still looks unbalanced.",
+    )
+    draw.text(
+        (x0, note_y + 48.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Area is an approximate primitive-area centroid; overlaps can count twice. Neither area nor radial center chooses the optical correction.",
+    )
+
+
 def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
     icons = icon_family(family)
     centers = tuple(origin[0] + offset * scale for offset in (330.0, 535.0, 765.0, 1085.0))
@@ -3925,7 +4133,7 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange = 24-unit placement bound · anchor = bounding circle, optical ink, semantic center, or box",
+        "Orange = 24-unit placement bound · layout = box or named semantic center · radial/area are diagnostics",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(
@@ -3956,13 +4164,15 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
             _draw_concept_icon_specimen(draw, (center_x, center_y), size * scale, name, scale)
 
         meta_x = origin[0] + 1160.0 * scale
-        clearance, offset_x, offset_y, sphere_x, sphere_y, ink_x, ink_y = _icon_review_metrics(name)
+        clearance, offset_x, offset_y, radial_x, radial_y, area_x, area_y = _icon_review_metrics(
+            name
+        )
         anchor = icon_alignment_anchor(name)
         for line, line_y in (
             (f"{name} · pad {clearance:.2f}u", -40.0),
             (f"box  {offset_x:+.2f},{offset_y:+.2f}u", -20.0),
-            (f"sphere  {sphere_x:+.2f},{sphere_y:+.2f}u", 0.0),
-            (f"ink  {ink_x:+.2f},{ink_y:+.2f}u", 20.0),
+            (f"radial  {radial_x:+.2f},{radial_y:+.2f}u", 0.0),
+            (f"area  {area_x:+.2f},{area_y:+.2f}u", 20.0),
             (f"anchor  {anchor}", 40.0),
         ):
             draw.text(
@@ -3998,6 +4208,8 @@ def _draw_icon_library_page(
     content_origin = (x0 + 42.0 * scale, content_y)
     if state.icon_library_tab == "Overview":
         _draw_icon_library_overview(draw, content_origin, scale)
+    elif state.icon_library_tab == "UI context":
+        _draw_icon_context_page(draw, content_origin, scale)
     else:
         _draw_icon_family_detail(draw, content_origin, state.icon_library_tab, scale)
 

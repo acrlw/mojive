@@ -160,7 +160,7 @@ def test_concept_icons_stay_inside_the_shared_canvas(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", _icons())
-def test_concept_icon_ink_stays_inside_circular_placement_bound(name: str) -> None:
+def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) -> None:
     size = ICON_GRID
     draw = _render(name, size)
     guide_radius = ICON_BOUND_DIAMETER * 0.5
@@ -170,12 +170,7 @@ def test_concept_icon_ink_stays_inside_circular_placement_bound(name: str) -> No
 
 @pytest.mark.parametrize(
     "name",
-    tuple(
-        name
-        for name in _icons()
-        if name not in {"tool-scale", "tool-snap", "helper-camera"}
-        and not name.startswith(("transport-", "key-", "panel-"))
-    ),
+    tuple(name for name in _icons() if name not in {"tool-scale", "tool-snap"}),
 )
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
     draw = _render(name, ICON_GRID)
@@ -199,16 +194,25 @@ def test_body_cube_has_three_interior_edges() -> None:
     "name",
     ("tool-move", "tool-world", "tool-body"),
 )
-def test_symmetric_tool_icons_center_their_ink_mass(name: str) -> None:
-    assert icon_metrics(name).ink_center == pytest.approx((0.0, 0.0), abs=0.05)
+def test_symmetric_tool_icons_center_their_filled_area(name: str) -> None:
+    assert icon_metrics(name).area_centroid == pytest.approx((0.0, 0.0), abs=0.05)
+
+
+def test_camera_candidates_share_one_master_and_box_anchor() -> None:
+    snapshot = _render("key-snapshot", ICON_GRID)
+    helper = _render("helper-camera", ICON_GRID)
+
+    assert snapshot.__dict__ == helper.__dict__
+    assert icon_alignment_anchor("key-snapshot") == "box"
+    assert icon_alignment_anchor("helper-camera") == "box"
 
 
 @pytest.mark.parametrize(
     "name",
-    ("tool-scale", "helper-camera"),
+    ("tool-scale",),
 )
-def test_optically_anchored_icons_center_their_ink_mass(name: str) -> None:
-    assert icon_metrics(name).ink_center == pytest.approx((0.0, 0.0), abs=0.05)
+def test_semantically_anchored_symmetric_icons_center_their_area(name: str) -> None:
+    assert icon_metrics(name).area_centroid == pytest.approx((0.0, 0.0), abs=0.05)
 
 
 @pytest.mark.parametrize("name", ("transport-play", "panel-right", "panel-down"))
@@ -293,33 +297,18 @@ def test_sort_arrow_tail_and_tip_align_with_visible_bar_extents() -> None:
     assert round_tail
 
 
-@pytest.mark.parametrize(
-    "name",
-    (
-        *(name for name in _icons() if name.startswith("key-")),
-        *(
-            name
-            for name in _icons()
-            if name.startswith("panel-") and name not in {"panel-right", "panel-down"}
-        ),
-    ),
-)
-def test_bounding_circle_anchored_icons_center_their_sphere(name: str) -> None:
+@pytest.mark.parametrize("name", _icons())
+def test_minimum_bounding_circle_is_only_a_containment_diagnostic(name: str) -> None:
     metrics = icon_metrics(name)
 
-    assert metrics.bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
     assert metrics.bounding_radius <= ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE + 1e-6
 
 
 @pytest.mark.parametrize(
     "name",
-    (
-        "panel-right",
-        "panel-down",
-        *(name for name in _icons() if name.startswith("transport-")),
-    ),
+    (*(name for name in _icons() if name not in {"tool-scale", "tool-snap"}),),
 )
-def test_envelope_anchored_directional_icons_center_their_box(name: str) -> None:
+def test_box_anchored_icons_center_their_visible_bounds(name: str) -> None:
     assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.05)
 
 
