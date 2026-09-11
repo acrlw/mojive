@@ -110,8 +110,10 @@ also form one intentional contour. A camera integrates its top housing into the 
 a bulb connects its dome, shoulder, and base before adding interior detail or separated rays.
 Rotation and reset also need distinct structures. Mojive's transform rotation mark reuses the
 runtime Tool Column geometry: three cyclically occluded half-rings inside a screen ring. Reset uses
-one nearly complete circular arrow. Color or a small positional change does not separate two icons
-that share the same silhouette.
+one nearly complete circular arrow. The rotation mark limits each inner-ring antialias fringe to
+half of the rendered knockout gap, with the normal one-pixel fringe as its upper bound. The two
+opposing ramps therefore cannot overlap and erase the gap when the glyph is small. Color or a small
+positional change does not separate two icons that share the same silhouette.
 
 The Icon Library owns its Move, Rotate, and Scale candidate contours. Keep this experimental drawing
 inside `design/tools/ui_icon_concepts.py`; do not change `viewport_widgets.py` while tuning a concept
@@ -225,7 +227,7 @@ edge of the frame is about 4.58 grid units on each side.
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
 | Rotate is clean in a large Pillow export but breaks in the live ImGui UI | Ear clipping runs after narrow concave contours are translated to large screen coordinates and loses precision | Triangulate the contour around its local origin, then translate the completed mesh during submission; verify the actual target-size ImGui capture |
-| Rotate has visibly different stair stepping from neighboring small glyphs | A custom subpixel fill fringe replaced the established production AA paths | Use ImGui's antialiased circle stroke for the outer ring and the standard one-pixel filled-contour fringe for the local inner rings |
+| Rotate's crossing gaps disappear as the glyph shrinks | Fixed one-pixel fringes from opposing inner-ring contours overlap inside a subpixel knockout | Keep the authored gap proportional and cap each contour fringe at half of the rendered gap, up to the normal one-pixel width |
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
 | Playback and Transport More do not match | Separate painters or size adjustments have drifted | Rotate the shared Previous construction and reuse the corresponding Previous layout scale |
