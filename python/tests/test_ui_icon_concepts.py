@@ -1001,6 +1001,37 @@ def test_hidden_eye_is_one_lashed_silhouette_without_translucent_overdraw() -> N
             assert not (cross(a, b, c) * cross(a, b, d) < 0 and cross(c, d, a) * cross(c, d, b) < 0)
 
 
+def test_translucent_light_details_do_not_overlap_the_shell() -> None:
+    draw = _render("helper-light", ICON_GRID)
+    shell, shell_width, _shell_options = next(
+        item for item in draw.polylines if item[2].get("closed")
+    )
+    details = tuple((*line[:2], line[2]) for line in draw.lines)
+
+    def point_segment_distance(point, start, end) -> float:
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        amount = max(
+            0.0,
+            min(
+                1.0,
+                ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / (dx * dx + dy * dy),
+            ),
+        )
+        return math.hypot(
+            point[0] - start[0] - amount * dx,
+            point[1] - start[1] - amount * dy,
+        )
+
+    shell_segments = tuple(zip(shell, (*shell[1:], shell[0]), strict=True))
+    for start, end, detail_width in details:
+        distance = min(
+            point_segment_distance(point, shell_start, shell_end)
+            for point in (start, end)
+            for shell_start, shell_end in shell_segments
+        )
+        assert distance > (shell_width + detail_width) * 0.5
+
+
 def test_key_fit_uses_four_joined_g3_corner_contours() -> None:
     draw = _render("key-fit", ICON_GRID)
 
