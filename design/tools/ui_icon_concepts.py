@@ -8,6 +8,7 @@ any production glyph is replaced.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
@@ -144,10 +145,8 @@ ICON_FAMILIES = (
     ),
 )
 
-# Placement is owned by the component that consumes the glyph. Viewport tools
-# use their authored/semantic centers and the tight half-unit margin requested
-# for the vertical capsule. Playback and Keyframes keep the same visible-box
-# baseline, but own independent values so either component can be tuned alone.
+# Every group uses the same minimum enclosing-circle placement. Groups own only
+# their circular padding so component sizing can still be tuned independently.
 ICON_GROUP_LAYOUT_DEFAULTS = {
     "Viewport tools": 0.5,
     "Viewport playback": ICON_DEFAULT_PADDING,
@@ -163,28 +162,12 @@ ICON_GROUP_LAYOUT_DEFAULTS = {
 ICON_PADDING_BIAS = {
     "playback-previous": 1.85,
     "playback-next": 1.85,
-    # A circular Record mark otherwise fills the complete radial envelope and
+    # A circular Record mark otherwise fills the complete circular envelope and
     # looks much larger than the diagonally constrained Stop square.
     "playback-record": 3.30,
+    "transport-record": 3.30,
     "transport-previous": 1.7,
     "transport-next": 1.7,
-}
-
-# These placement rules are part of the component contract. Every viewport
-# playback control and Keyframe transport mark centers its complete stroked
-# bounding box.
-ICON_FIXED_ALIGNMENT = {
-    "playback-play": "box",
-    "playback-previous": "box",
-    "playback-pause": "box",
-    "playback-next": "box",
-    "playback-more": "box",
-    **{
-        name: "box"
-        for family, icons in ICON_FAMILIES
-        for _label, name in icons
-        if family == "Keyframe transport"
-    },
 }
 
 ICON_LIBRARY_TABS = (
@@ -201,7 +184,8 @@ ICON_GROUP_BY_SLUG = {
 @dataclass(frozen=True)
 class IconMetrics:
     bounds: tuple[float, float, float, float]
-    circular_extent: float
+    enclosing_center: tuple[float, float]
+    enclosing_radius: float
 
     @property
     def center_offset(self) -> tuple[float, float]:
@@ -210,7 +194,7 @@ class IconMetrics:
 
     @property
     def circular_clearance(self) -> float:
-        return ICON_BOUND_DIAMETER * 0.5 - self.circular_extent
+        return ICON_BOUND_DIAMETER * 0.5 - self.enclosing_radius
 
 
 def _signed_polygon_area(points: tuple[tuple[float, float], ...]) -> float:
@@ -263,6 +247,58 @@ def _simple_polygon_indices(points: tuple[tuple[float, float], ...]) -> tuple[in
             raise RuntimeError("icon contour could not be triangulated")
     indices.extend(vertices)
     return tuple(indices)
+
+
+def minimum_enclosing_circle(points) -> tuple[tuple[float, float], float]:
+    """Return the exact smallest circle for a finite set of sampled boundary points."""
+
+    values = list(dict.fromkeys((float(x), float(y)) for x, y in points))
+    if not values:
+        return (0.0, 0.0), 0.0
+    random.Random(0).shuffle(values)
+
+    def contains(circle, point) -> bool:
+        center, radius = circle
+        return math.dist(center, point) <= radius + 1e-7
+
+    def diameter(a, b):
+        center = ((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5)
+        return center, math.dist(a, b) * 0.5
+
+    def through_three(a, b, c):
+        cross = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]))
+        if abs(cross) <= 1e-12:
+            candidates = (diameter(a, b), diameter(a, c), diameter(b, c))
+            return min(
+                (
+                    candidate
+                    for candidate in candidates
+                    if all(contains(candidate, point) for point in (a, b, c))
+                ),
+                key=lambda candidate: candidate[1],
+            )
+        a2 = a[0] * a[0] + a[1] * a[1]
+        b2 = b[0] * b[0] + b[1] * b[1]
+        c2 = c[0] * c[0] + c[1] * c[1]
+        center = (
+            (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / cross,
+            (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / cross,
+        )
+        return center, math.dist(center, a)
+
+    circle = (values[0], 0.0)
+    for index, point in enumerate(values):
+        if contains(circle, point):
+            continue
+        circle = (point, 0.0)
+        for second_index, second in enumerate(values[:index]):
+            if contains(circle, second):
+                continue
+            circle = diameter(point, second)
+            for third in values[:second_index]:
+                if not contains(circle, third):
+                    circle = through_three(point, second, third)
+    return circle
 
 
 class _Painter:
@@ -504,8 +540,10 @@ def _triangle_source(
     )
 
 
-def _triangle(p: _Painter, direction: float, *, center_x: float = 0.0, scale: float = 1.0) -> None:
-    """Draw an equilateral G3 triangle with its visible box on ``center_x``."""
+def _triangle_path(
+    direction: float, center_x: float = 0.0, scale: float = 1.0
+) -> tuple[tuple[float, float], ...]:
+    """Return the equilateral triangle's final G3 contour."""
 
     path = smooth_polygon_corners(
         _triangle_source(direction, center_x, scale),
@@ -515,7 +553,11 @@ def _triangle(p: _Painter, direction: float, *, center_x: float = 0.0, scale: fl
     )
     visible_center_x = (float(path[:, 0].min()) + float(path[:, 0].max())) * 0.5
     path[:, 0] += center_x - visible_center_x
-    p.polygon(tuple(map(tuple, path.tolist())))
+    return tuple(map(tuple, path.tolist()))
+
+
+def _triangle(p: _Painter, direction: float, *, center_x: float = 0.0, scale: float = 1.0) -> None:
+    p.polygon(_triangle_path(direction, center_x, scale))
 
 
 def _rounded_polyline(
@@ -587,10 +629,10 @@ def _rotate_fringe_width(p: _Painter, ring_width: float, gap: float) -> float:
 def _chevron_centerline(
     direction: float, x: float, scale: float = 1.0
 ) -> tuple[tuple[float, float], ...]:
-    """Return a 60-degree chevron centerline matching the Play triangle tip."""
+    """Return the original right-angle transport chevron centerline."""
 
     half_height = 4.4 * scale
-    run = math.sqrt(3.0) * half_height
+    run = half_height
     return (
         (x - direction * run * 0.5, -half_height),
         (x + direction * run * 0.5, 0.0),
@@ -825,9 +867,12 @@ def _draw_transport(p: _Painter, name: str) -> None:
         direction = -1.0 if kind == "first" else 1.0
         # A skip-to-end symbol pairs one filled transport triangle with a bar.
         # The small separation is intentional and stays symmetrical when mirrored.
-        _triangle(p, direction, center_x=-direction * 1.27, scale=0.72)
+        triangle = _triangle_path(direction, center_x=-direction * 1.27, scale=0.72)
+        p.polygon(triangle)
         x = direction * 5.13
-        _g3_rect(p, x - 0.75, -5.8, x + 0.75, 5.8, 0.58)
+        triangle_min_y = min(point[1] for point in triangle)
+        triangle_max_y = max(point[1] for point in triangle)
+        _g3_rect(p, x - 0.75, triangle_min_y, x + 0.75, triangle_max_y, 0.58)
     elif kind == "reset":
         _arc_arrow(p, 6.8, -52.0, 255.0, center=(0.0, 0.47))
     elif kind == "record":
@@ -1174,11 +1219,11 @@ def _draw_concept_icon_raw(
 
 
 class _MetricsDraw:
-    """Measure visible bounds and circular extent from authored primitives."""
+    """Measure visible bounds and the minimum enclosing circle."""
 
     def __init__(self) -> None:
         self.bounds = [float("inf"), float("inf"), float("-inf"), float("-inf")]
-        self.circular_extent = 0.0
+        self.boundary_points: list[tuple[float, float]] = []
 
     def _add(self, points, pad: float = 0.0) -> None:
         for raw_x, raw_y in points:
@@ -1187,7 +1232,16 @@ class _MetricsDraw:
             self.bounds[1] = min(self.bounds[1], y - pad)
             self.bounds[2] = max(self.bounds[2], x + pad)
             self.bounds[3] = max(self.bounds[3], y + pad)
-            self.circular_extent = max(self.circular_extent, math.hypot(x, y) + pad)
+            if pad > 0.0:
+                self.boundary_points.extend(
+                    (
+                        x + pad * math.cos(index * math.tau / 128),
+                        y + pad * math.sin(index * math.tau / 128),
+                    )
+                    for index in range(128)
+                )
+            else:
+                self.boundary_points.append((x, y))
 
     def line(self, a, b, _color, width, **_kwargs) -> None:
         width = float(width)
@@ -1256,10 +1310,13 @@ class _MetricsDraw:
 
     def rect(self, lo, hi, _color, width, **_kwargs) -> None:
         width = float(width)
-        self._add((lo, hi), width * 0.5)
+        self._add(
+            ((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])),
+            width * 0.5,
+        )
 
     def rect_filled(self, lo, hi, _color, **_kwargs) -> None:
-        self._add((lo, hi))
+        self._add(((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])))
 
 
 def _measure_raw_icon(
@@ -1278,7 +1335,8 @@ def _measure_raw_icon(
         (1.0, 1.0, 1.0, 1.0),
         mouse_width=mouse_width,
     )
-    return IconMetrics(tuple(draw.bounds), draw.circular_extent)
+    enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
+    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius)
 
 
 @lru_cache(maxsize=256)
@@ -1287,7 +1345,7 @@ def _icon_layout(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> tuple[float, tuple[float, float]]:
-    """Return the fixed placement anchor and scale at the requested circular padding."""
+    """Center the minimum enclosing circle and fit it to the requested padding."""
 
     raw = _measure_raw_icon(name, mouse_width=mouse_width)
     default_padding = ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
@@ -1295,17 +1353,7 @@ def _icon_layout(
         padding = default_padding
     if name in REVIEW_LOCKED_ICONS:
         padding = ICON_DEFAULT_PADDING
-    anchor = icon_alignment_anchor(name)
-    if anchor in {"arc", "hub"}:
-        # Snap's lower-arc center and Scale's three-axis hub are authored at
-        # the origin. These declared centers take priority over a box.
-        base_offset = (0.0, 0.0)
-    else:
-        base_offset = (-raw.center_offset[0], -raw.center_offset[1])
-    offset = base_offset
-    # Measure after placement so centering happens before the complete master
-    # is fitted. Scaling first would preserve each source contour's old drift.
-    shifted = _measure_raw_icon(name, offset, mouse_width=mouse_width)
+    offset = (-raw.enclosing_center[0], -raw.enclosing_center[1])
     padding = float(padding)
     if not ICON_MIN_CLEARANCE <= padding <= ICON_MAX_PADDING:
         raise ValueError(
@@ -1319,20 +1367,15 @@ def _icon_layout(
         else padding + ICON_PADDING_BIAS.get(name, 0.0)
     )
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
-    layout_scale = safe_radius / shifted.circular_extent
+    layout_scale = safe_radius / raw.enclosing_radius
     return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
 
 
 def icon_alignment_anchor(name: str) -> str:
-    """Return the reviewed placement anchor for one concept icon."""
+    """Return the single placement anchor used by every concept icon."""
 
-    if name in ICON_FIXED_ALIGNMENT:
-        return ICON_FIXED_ALIGNMENT[name]
-    if name == "tool-snap":
-        return "arc"
-    if name == "tool-scale":
-        return "hub"
-    return "box"
+    icon_component_group(name)
+    return "circle"
 
 
 def draw_concept_icon(
@@ -1346,7 +1389,7 @@ def draw_concept_icon(
     accent_color=None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
 ) -> None:
-    """Draw one anchor-centered candidate fitted to a padded circular slot."""
+    """Draw one minimum-circle-centered candidate fitted to a padded circular slot."""
 
     layout_scale, offset = _icon_layout(name, padding, mouse_width)
     unit_scale = float(size) / ICON_GRID
@@ -1383,7 +1426,8 @@ def icon_metrics(
         padding=padding,
         mouse_width=mouse_width,
     )
-    return IconMetrics(tuple(draw.bounds), draw.circular_extent)
+    enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
+    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius)
 
 
 def icon_family(label: str):

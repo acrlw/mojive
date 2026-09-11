@@ -293,11 +293,13 @@ def test_icon_library_reuses_production_output_severity_painter(monkeypatch):
 
 @pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
 def test_production_severity_stays_centered_inside_icon_library_boundary(name):
-    clearance, center_x, center_y = probe._icon_review_metrics(name)
+    clearance, circle_x, circle_y, box_x, box_y = probe._icon_review_metrics(name)
 
     assert clearance >= 0.6
-    assert center_x == pytest.approx(0.0, abs=1e-6)
-    assert center_y == pytest.approx(0.0, abs=1e-6)
+    assert circle_x == pytest.approx(0.0, abs=1e-6)
+    assert circle_y == pytest.approx(0.0, abs=1e-6)
+    assert box_x == pytest.approx(0.0, abs=1e-6)
+    assert box_y == pytest.approx(0.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
