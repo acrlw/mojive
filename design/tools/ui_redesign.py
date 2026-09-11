@@ -215,6 +215,13 @@ def _hint(state, text, key=""):
         imgui.set_tooltip(state.tr(text) + (f"  [{key}]" if key else ""))
 
 
+def _capsule_icon_color(kind, color, disabled_alpha: float = 1.0):
+    """Apply viewport semantic color before any disabled-state attenuation."""
+
+    semantic = THEME.viewport.record if kind == "record" else color
+    return (*semantic[:3], semantic[3] * disabled_alpha)
+
+
 def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
     items = (
         (
@@ -285,8 +292,11 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
         )
 
         def icon(target, center, color, icon_scale, _surface, kind=kind, disabled=disabled):
-            if disabled:
-                color = (*color[:3], color[3] * imgui.get_style().disabled_alpha)
+            color = _capsule_icon_color(
+                kind if not vertical else "",
+                color,
+                imgui.get_style().disabled_alpha if disabled else 1.0,
+            )
             if getattr(geometry, "preview_icon_library", False):
                 concept_name = (
                     {
@@ -316,7 +326,7 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     concept_name,
                     color,
                     radial_alignment=(
-                        getattr(geometry, "capsule_radial_alignment", 1.0) if not vertical else None
+                        getattr(geometry, "capsule_radial_alignment", 0.0) if not vertical else None
                     ),
                 )
             elif vertical:
@@ -339,7 +349,7 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                 draw_reset_glyph(target, center, color, icon_scale, geometry.tool_stroke_width)
             elif kind == "record":
                 draw_recording_glyph(
-                    target, center, THEME.danger, icon_scale, recording=bool(state.recording)
+                    target, center, color, icon_scale, recording=bool(state.recording)
                 )
             elif kind == "menu":
                 draw_recording_options_glyph(
