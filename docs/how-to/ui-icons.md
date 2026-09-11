@@ -258,7 +258,12 @@ uses that expose weak dots, crowded safe areas, and mismatched weights.
 
 For the full candidate set, `make ui-icon-concepts` writes 14, 24, 56, and 112-point family pages
 under `output/ui-icon-concepts/`, plus `tools-max-gap.png` at the production 1.46-pixel stroke and
-the full `gap / stroke = 1.00` setting. It also writes `context-workspace.png`,
+the full `gap / stroke = 1.00` setting. `capsules.png` uses the actual playback and viewport-tool
+capsules with their icon slots and state circles exposed. The `Glyph radial center` control blends
+from visible-box centering at zero to minimum-enclosing-circle centering at one; capsule candidates
+default to one so the glyph envelope and hover circle share a center. `playback-layout-4x.png`
+checks that the Geometry page sections remain disjoint at its maximum inspection zoom.
+It also writes `context-workspace.png`,
 `context-panels.png`, `context-keyframes.png`, and `context-redesign.png` with the same candidates
 placed in real feasibility controls. In interactive mode, use the always-visible `Icon Library
 preview` menu-bar switch, or the matching item under `Probe`, to apply or remove that substitution

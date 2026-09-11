@@ -82,6 +82,20 @@ def test_icon_library_canvas_reaches_the_last_row_of_the_longest_family():
 
     assert probe._icon_library_canvas_size(family)[1] >= required_height
     assert probe._icon_library_canvas_size("Overview") == probe.GEOMETRY_CANVAS_SIZE
+    assert probe._icon_library_canvas_size("Capsules")[1] >= 1260.0
+
+
+def test_geometry_canvas_reserves_zoomed_playback_and_tool_extents():
+    state = probe.ProbeState(construction_playback_scale=4.0, construction_tool_scale=3.0)
+    playback_width, playback_height = probe._geometry_canvas_size("Playback", state)
+    _centers, playback_length = probe.capsule_layout(6, (3, 4), state)
+
+    assert playback_width >= 54.0 + playback_length * 4.0 + 54.0 + 360.0 + 24.0
+    assert playback_height > probe.GEOMETRY_CANVAS_SIZE[1]
+    _centers, tool_length = probe.capsule_layout(5, (3,), state)
+    assert probe._geometry_canvas_size("Tools", state)[1] >= max(
+        probe.GEOMETRY_CANVAS_SIZE[1], 120.0 + tool_length * 3.0
+    )
 
 
 def test_geometry_export_names_production_overlay_fields():
@@ -102,6 +116,7 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
+    assert state.capsule_radial_alignment == 1.0
 
 
 @pytest.mark.parametrize(
