@@ -21,11 +21,11 @@ from mojive.curves2d import (
     smooth_rect_points,
 )
 from mojive.draglink2d import smooth_union
+from mojive.gizmo import DIMENSION_CORNER_RADIUS_RATIO
 from mojive.ui.viewport_widgets import (
     CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
     TOOL_GLYPH_SCALE,
-    _dimensions_glyph_geometry,
     _rotate_visible_ring_polygons,
     _snap_glyph_shape,
     mouse_button_geometry,
@@ -62,8 +62,6 @@ BOX_CENTERED_ICONS = frozenset(
         "transport-next",
         "transport-last",
         "transport-more",
-        "panel-right",
-        "panel-down",
     )
 )
 RING_CENTERED_ICONS = frozenset(("playback-reset", "transport-reset"))
@@ -174,6 +172,18 @@ ICON_GLYPH_PADDING_DEFAULTS = {
     "playback-more": 4.0,
 }
 ICON_GROUP_STROKE_DEFAULTS = dict.fromkeys(ICON_GROUP_LAYOUT_DEFAULTS, ICON_STROKE)
+
+
+@dataclass(frozen=True)
+class IconTuning:
+    """Authored shape controls that are independent of fit and stroke."""
+
+    move_head_scale: float = 1.0
+    scale_handle_scale: float = 1.0
+    key_fit_arm_length: float = 3.0
+
+
+ICON_TUNING_DEFAULTS = IconTuning()
 
 # Closely related marks share one fitted master so their authored dimensions
 # remain comparable after placement. More is a shorter, rotated Previous at the
@@ -354,6 +364,7 @@ class _Painter:
         stroke_compensation: float = 1.0,
         rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
         rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+        tuning: IconTuning = ICON_TUNING_DEFAULTS,
     ) -> None:
         self.draw = draw
         self.cx, self.cy = (float(center[0]), float(center[1]))
@@ -362,6 +373,7 @@ class _Painter:
         self.stroke_compensation = float(stroke_compensation)
         self.rotate_ring_gap_ratio = float(rotate_ring_gap_ratio)
         self.rotate_ring_cap = str(rotate_ring_cap)
+        self.tuning = tuning
         self.color = color
         self.stroke = self.stroke_width * self.stroke_compensation * self.scale
 
@@ -765,10 +777,12 @@ def _concept_rotate_ring_polygons(
 
 def _draw_tool(p: _Painter, name: str) -> None:
     if name == "tool-move":
-        # Keep the accepted Icon Library candidate as one connected G3 outline;
-        # the wider central cross remains legible at the 14-point specimen.
-        tip, wing = 8.7, 2.65
-        base = tip - math.sqrt(3.0) * wing
+        # Restore the original compact arrowhead proportions. The head control
+        # scales that accepted shape around each tip without moving its reach.
+        tip = 8.7
+        head_scale = p.tuning.move_head_scale
+        base = tip - (tip - 5.6) * head_scale
+        wing = 2.65 * head_scale
         shaft = p.stroke_width * p.stroke_compensation * 0.5
         p.smooth_polygon(
             (
@@ -834,15 +848,27 @@ def _draw_tool(p: _Painter, name: str) -> None:
                 / source_tool_stroke
             ),
         )
-        paths, dot_radius = _dimensions_glyph_geometry(
-            (0.0, 0.0),
-            1.0,
-            scale_geometry,
-            smoothing=CAPSULE_SMOOTHING,
+        glyph_scale = TOOL_GLYPH_SCALE
+        handle_half = 1.5 * p.tuning.scale_handle_scale
+        reach = math.sqrt((9.0 * glyph_scale) ** 2 - handle_half**2) - handle_half
+        clear_radius = (
+            scale_geometry.frame_center_radius * glyph_scale
+            + scale_geometry.tool_stroke * scale_geometry.frame_center_gap_ratio
+        )
+        paths = tuple(
+            box_handle_points(
+                (ux * clear_radius, uy * clear_radius),
+                (ux * reach, uy * reach),
+                max(source_tool_stroke * 0.45, source_tool_stroke - 1.0),
+                2.0 * handle_half,
+                corner_radius=(2.0 * handle_half * DIMENSION_CORNER_RADIUS_RATIO),
+                smoothing=CAPSULE_SMOOTHING,
+            )
+            for ux, uy in ((0.0, -1.0), (0.866025, 0.5), (-0.866025, 0.5))
         )
         for path in paths:
             p.polygon(path)
-        p.circle_filled(0.0, 0.0, dot_radius)
+        p.circle_filled(0.0, 0.0, scale_geometry.frame_center_radius * glyph_scale)
     elif name == "tool-world":
         # Sparse stroked symbols need a larger authored envelope than solid
         # tools to carry comparable visual weight in the same 24-unit slot.
@@ -975,13 +1001,15 @@ def _draw_keyframe(p: _Painter, name: str) -> None:
         _chevron(p, direction, direction * 4.4, scale=0.68)
         _diamond(p, center=(-direction * 3.2, 0.0), radius=3.5, filled=True)
     elif kind == "fit":
+        arm_length = p.tuning.key_fit_arm_length
+        inner = 6.5 - arm_length
         for sx, sy in ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)):
             _rounded_polyline(
                 p,
                 (
-                    (sx * 3.5, sy * 6.5),
+                    (sx * inner, sy * 6.5),
                     (sx * 6.5, sy * 6.5),
-                    (sx * 6.5, sy * 3.5),
+                    (sx * 6.5, sy * inner),
                 ),
             )
     elif kind == "follow":
@@ -1146,9 +1174,9 @@ def _draw_panel(p: _Painter, name: str) -> None:
             0.52,
         )
     elif kind == "right":
-        p.smooth_polygon(((-3.8, -6.2), (3.8, 0.0), (-3.8, 6.2)), 0.62)
+        _triangle(p, 1.0)
     else:
-        p.smooth_polygon(((-6.2, -3.8), (0.0, 3.8), (6.2, -3.8)), 0.62)
+        p.polygon(tuple((-y, x) for x, y in _triangle_path(1.0)))
 
 
 def _draw_camera(p: _Painter) -> None:
@@ -1306,6 +1334,7 @@ def _draw_concept_icon_raw(
     stroke_compensation: float = 1.0,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> None:
     """Draw authored geometry before shared placement is applied."""
 
@@ -1318,6 +1347,7 @@ def _draw_concept_icon_raw(
         stroke_compensation=stroke_compensation,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
     if name.startswith("tool-"):
         _draw_tool(painter, name)
@@ -1465,6 +1495,7 @@ def _measure_raw_icon(
     stroke_compensation: float = 1.0,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> IconMetrics:
     draw = _MetricsDraw()
     _draw_concept_icon_raw(
@@ -1478,6 +1509,7 @@ def _measure_raw_icon(
         stroke_compensation=stroke_compensation,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
     bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
@@ -1515,6 +1547,7 @@ def _icon_layout(
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> tuple[float, tuple[float, float], float]:
     """Center the declared anchor and fit every visible point to the requested padding."""
 
@@ -1554,6 +1587,7 @@ def _icon_layout(
             stroke_compensation=compensation,
             rotate_ring_gap_ratio=rotate_ring_gap_ratio,
             rotate_ring_cap=rotate_ring_cap,
+            tuning=tuning,
         )
         return safe_radius / reference_raw.anchor_extent
 
@@ -1584,6 +1618,7 @@ def _icon_layout(
         stroke_compensation=stroke_compensation,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
     anchor_center = _alignment_center(name, raw)
     offset = (-anchor_center[0], -anchor_center[1])
@@ -1613,6 +1648,7 @@ def icon_alignment_center(
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> tuple[float, float]:
     """Return the declared anchor center after candidate placement."""
 
@@ -1623,6 +1659,7 @@ def icon_alignment_center(
         stroke_width,
         rotate_ring_gap_ratio,
         rotate_ring_cap,
+        tuning,
     )
     raw = _measure_raw_icon(
         name,
@@ -1631,6 +1668,7 @@ def icon_alignment_center(
         stroke_compensation=stroke_compensation,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
     source_center = _alignment_center(name, raw)
     return (
@@ -1652,6 +1690,7 @@ def draw_concept_icon(
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> None:
     """Draw one declared-anchor candidate fitted to a padded circular slot."""
 
@@ -1662,6 +1701,7 @@ def draw_concept_icon(
         stroke_width,
         rotate_ring_gap_ratio,
         rotate_ring_cap,
+        tuning,
     )
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
@@ -1680,6 +1720,7 @@ def draw_concept_icon(
         stroke_compensation=stroke_compensation,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
 
 
@@ -1691,6 +1732,7 @@ def icon_metrics(
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> IconMetrics:
     """Return placement and geometry measurements for one 24-unit candidate."""
 
@@ -1706,6 +1748,7 @@ def icon_metrics(
         stroke_width=stroke_width,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
     bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
