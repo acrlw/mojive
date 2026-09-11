@@ -103,8 +103,8 @@ def test_geometry_export_names_production_overlay_fields():
     values = probe._geometry_values_text(probe.ProbeState())
 
     assert "icon_radius=10," in values
-    assert "icon_layout_viewport_tools=(0.0, 0.5)," in values
-    assert "icon_layout_viewport_playback=(0.0, 0.75)," in values
+    assert "icon_padding_viewport_tools=0.5," in values
+    assert "icon_padding_viewport_playback=0.75," in values
     assert "tool_stroke=" in values
     assert "hint_mouse_wheel_gap_ratio=" in values
 
@@ -119,21 +119,18 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
-    assert state.icon_layout_for("Viewport tools") == (0.0, 0.5)
-    assert state.icon_layout_for("Viewport playback") == (0.0, probe.ICON_DEFAULT_PADDING)
-    assert state.icon_layout_for("Keyframe transport") == (
-        0.0,
-        probe.ICON_DEFAULT_PADDING,
-    )
+    assert state.icon_padding_for("Viewport tools") == 0.5
+    assert state.icon_padding_for("Viewport playback") == probe.ICON_DEFAULT_PADDING
+    assert state.icon_padding_for("Keyframe transport") == probe.ICON_DEFAULT_PADDING
 
 
 def test_icon_layout_controls_are_stored_per_actual_component_group() -> None:
     state = probe.ProbeState()
 
-    state.set_icon_layout_for("Viewport tools", radial_alignment=0.4, padding=1.2)
+    state.set_icon_padding_for("Viewport tools", 1.2)
 
-    assert state.icon_layout_for("Viewport tools") == (0.4, 1.2)
-    assert state.icon_layout_for("Viewport playback") == (0.0, probe.ICON_DEFAULT_PADDING)
+    assert state.icon_padding_for("Viewport tools") == 1.2
+    assert state.icon_padding_for("Viewport playback") == probe.ICON_DEFAULT_PADDING
 
 
 @pytest.mark.parametrize("button", ("left", "right", "wheel"))
@@ -178,7 +175,6 @@ def test_status_mouse_preview_uses_neutral_status_colors(monkeypatch, muted):
         probe.CONCEPT_THEME.text_disabled if muted else probe.CONCEPT_THEME.text
     )
     assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.bg_frame_active
-    assert calls[0][1]["radial_alignment"] == 0.0
 
 
 def test_status_mouse_width_control_changes_candidate_aspect_ratio() -> None:
@@ -269,7 +265,6 @@ def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind
     probe._draw_icon_library_command_icon(None, (10.0, 20.0), kind, (1, 1, 1, 1), scale)
 
     assert calls[0][0][3] == expected
-    assert calls[0][1]["radial_alignment"] == 0.0
     assert calls[0][1]["padding"] == probe.ICON_DEFAULT_PADDING
 
 
@@ -298,15 +293,11 @@ def test_icon_library_reuses_production_output_severity_painter(monkeypatch):
 
 @pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
 def test_production_severity_stays_centered_inside_icon_library_boundary(name):
-    clearance, center_x, center_y, sphere_x, sphere_y, _ink_x, _ink_y = probe._icon_review_metrics(
-        name
-    )
+    clearance, center_x, center_y = probe._icon_review_metrics(name)
 
     assert clearance >= 0.6
     assert center_x == pytest.approx(0.0, abs=1e-6)
     assert center_y == pytest.approx(0.0, abs=1e-6)
-    assert sphere_x == pytest.approx(0.0, abs=1e-6)
-    assert sphere_y == pytest.approx(0.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
@@ -314,12 +305,3 @@ def test_production_severity_metrics_ignore_candidate_layout_controls(name):
     assert probe._icon_review_metrics(name, 1.0, probe.ICON_MAX_PADDING) == pytest.approx(
         probe._icon_review_metrics(name, 0.0, probe.ICON_MIN_CLEARANCE)
     )
-
-
-def test_production_information_and_warning_ink_are_mirrored():
-    info = probe._icon_review_metrics("status-info")
-    warning = probe._icon_review_metrics("status-warning")
-
-    assert info[5] == pytest.approx(0.0, abs=1e-6)
-    assert warning[5] == pytest.approx(0.0, abs=1e-6)
-    assert info[6] == pytest.approx(-warning[6], abs=1e-6)

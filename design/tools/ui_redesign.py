@@ -320,10 +320,9 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                 if vertical:
                     nominal_diameter *= TOOL_GLYPH_SCALE
                 group = "Viewport tools" if vertical else "Viewport playback"
-                if hasattr(geometry, "icon_layout_for"):
-                    radial_alignment, padding = geometry.icon_layout_for(group)
+                if hasattr(geometry, "icon_padding_for"):
+                    padding = geometry.icon_padding_for(group)
                 else:
-                    radial_alignment = getattr(geometry, "icon_radial_alignment", 0.0)
                     padding = getattr(geometry, "icon_padding", ICON_DEFAULT_PADDING)
                 draw_concept_icon(
                     target,
@@ -331,7 +330,6 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     nominal_diameter,
                     concept_name,
                     color,
-                    radial_alignment=radial_alignment,
                     padding=padding,
                 )
             elif vertical:
