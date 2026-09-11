@@ -141,6 +141,58 @@ class IconMetrics:
         return ICON_BOUND_DIAMETER * 0.5 - self.radial_extent
 
 
+def _signed_polygon_area(points: tuple[tuple[float, float], ...]) -> float:
+    return 0.5 * sum(
+        a[0] * b[1] - a[1] * b[0] for a, b in zip(points, points[1:] + points[:1], strict=True)
+    )
+
+
+def _triangle_cross(a, b, c) -> float:
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _inside_counterclockwise_triangle(point, a, b, c, epsilon: float) -> bool:
+    return (
+        _triangle_cross(a, b, point) >= -epsilon
+        and _triangle_cross(b, c, point) >= -epsilon
+        and _triangle_cross(c, a, point) >= -epsilon
+    )
+
+
+@lru_cache(maxsize=128)
+def _simple_polygon_indices(points: tuple[tuple[float, float], ...]) -> tuple[int, ...]:
+    """Triangulate one simple screen-clockwise contour without an ImGui context."""
+
+    if len(points) < 3:
+        return ()
+    vertices = list(range(len(points)))
+    if _signed_polygon_area(points) < 0.0:
+        vertices.reverse()
+    scale = max(max(abs(value) for point in points for value in point), 1.0)
+    epsilon = scale * scale * 1e-10
+    indices: list[int] = []
+    while len(vertices) > 3:
+        for offset, current in enumerate(vertices):
+            previous = vertices[offset - 1]
+            following = vertices[(offset + 1) % len(vertices)]
+            a, b, c = points[previous], points[current], points[following]
+            if _triangle_cross(a, b, c) <= epsilon:
+                continue
+            if any(
+                candidate not in (previous, current, following)
+                and _inside_counterclockwise_triangle(points[candidate], a, b, c, epsilon)
+                for candidate in vertices
+            ):
+                continue
+            indices.extend((previous, current, following))
+            del vertices[offset]
+            break
+        else:
+            raise RuntimeError("icon contour could not be triangulated")
+    indices.extend(vertices)
+    return tuple(indices)
+
+
 def minimum_enclosing_circle(points) -> tuple[tuple[float, float], float]:
     """Return the exact smallest circle for a finite set of sampled boundary points."""
 
@@ -251,16 +303,38 @@ class _Painter:
             cap="butt" if closed else "round",
         )
 
-    def polygon(self, points) -> None:
-        self.draw.fringed_concave_fill(self.points(points), self.color)
+    def polygon(self, points, *, fringe_width: float | None = None) -> None:
+        if fringe_width is None:
+            self.draw.fringed_concave_fill(self.points(points), self.color)
+            return
+        local = tuple((float(x) * self.scale, float(y) * self.scale) for x, y in points)
+        if _signed_polygon_area(local) < 0.0:
+            local = local[::-1]
+        screen = tuple((self.cx + x, self.cy + y) for x, y in local)
+        self.draw.indexed_fill(
+            screen,
+            _simple_polygon_indices(local),
+            self.color,
+            outline=screen,
+            fringe_width=fringe_width,
+        )
 
-    def indexed_fill(self, points, indices, *, outline, hole=()) -> None:
+    def indexed_fill(
+        self,
+        points,
+        indices,
+        *,
+        outline,
+        hole=(),
+        fringe_width: float = 1.0,
+    ) -> None:
         self.draw.indexed_fill(
             self.points(points),
             indices,
             self.color,
             outline=self.points(outline),
             hole=self.points(hole),
+            fringe_width=fringe_width,
         )
 
     def smooth_polygon(
@@ -424,6 +498,55 @@ def _g3_rect(p: _Painter, x0: float, y0: float, x1: float, y1: float, radius: fl
     p.polygon(smooth_rect_points(x0, y0, x1, y1, radius, smoothing=CORNER_SMOOTHING))
 
 
+def _filled_ring(
+    p: _Painter,
+    radius: float,
+    width: float,
+    *,
+    fringe_width: float = 1.0,
+    segments: int = 64,
+) -> None:
+    """Draw an annulus through the same filled-mesh path as the inner Rotate rings."""
+
+    outer_radius = radius + width * 0.5
+    inner_radius = radius - width * 0.5
+    outer = tuple(
+        (
+            outer_radius * math.cos(index * math.tau / segments),
+            outer_radius * math.sin(index * math.tau / segments),
+        )
+        for index in range(segments)
+    )
+    inner = tuple(
+        (
+            inner_radius * math.cos(index * math.tau / segments),
+            inner_radius * math.sin(index * math.tau / segments),
+        )
+        for index in range(segments)
+    )
+    points = outer + inner
+    indices = []
+    for index in range(segments):
+        following = (index + 1) % segments
+        indices.extend((index, following, segments + following))
+        indices.extend((index, segments + following, segments + index))
+    p.indexed_fill(
+        points,
+        tuple(indices),
+        outline=outer,
+        hole=inner,
+        fringe_width=fringe_width,
+    )
+
+
+def _rotate_fringe_width(p: _Painter, ring_width: float, gap: float) -> float:
+    """Keep two AA ramps from consuming a subpixel Rotate crossing gap."""
+
+    stroke_pixels = ring_width * p.scale
+    gap_pixels = gap * p.scale
+    return min(1.0, stroke_pixels * 0.5, gap_pixels * (3.0 / 8.0))
+
+
 def _chevron(p: _Painter, direction: float, x: float, *, scale: float = 1.0) -> None:
     _rounded_polyline(
         p,
@@ -544,11 +667,14 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # separate one-arrow grammar, and production geometry remains untouched.
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
-        p.circle(
-            0.0,
-            0.0,
+        ring_width = OVERLAY_GEOMETRY.tool_stroke * production_scale
+        ring_gap = OVERLAY_GEOMETRY.rotate_ring_gap * production_scale
+        fringe_width = _rotate_fringe_width(p, ring_width, ring_gap)
+        _filled_ring(
+            p,
             10.0 * glyph_scale,
-            width=OVERLAY_GEOMETRY.tool_stroke * production_scale,
+            ring_width,
+            fringe_width=fringe_width,
         )
         for ring in _rotate_visible_ring_polygons(
             OVERLAY_GEOMETRY.tool_stroke,
@@ -557,7 +683,10 @@ def _draw_tool(p: _Painter, name: str) -> None:
             CAPSULE_SMOOTHING,
         ):
             for local in ring:
-                p.polygon(tuple((x * glyph_scale, y * glyph_scale) for x, y in local))
+                p.polygon(
+                    tuple((x * glyph_scale, y * glyph_scale) for x, y in local),
+                    fringe_width=fringe_width,
+                )
     elif name == "tool-scale":
         # Keep the accepted viewport Scale glyph as the source of truth. It
         # supplies the original reach, center clearance, joined G3 shafts and

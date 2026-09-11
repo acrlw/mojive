@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from design.tools import render_ui_feasibility as probe
+from design.tools.ui_redesign import _capsule_icon_color
 
 from mojive.ui.viewport_widgets import draw_status, draw_tool_glyph
 
@@ -116,7 +117,18 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
-    assert state.capsule_radial_alignment == 1.0
+    assert state.capsule_radial_alignment == 0.0
+
+
+def test_capsule_record_and_stop_share_the_viewport_danger_color():
+    ordinary = (0.1, 0.2, 0.3, 1.0)
+
+    assert _capsule_icon_color("play", ordinary) == ordinary
+    assert _capsule_icon_color("record", ordinary) == probe.THEME.viewport.record
+    assert _capsule_icon_color("record", ordinary, 0.4) == (
+        *probe.THEME.viewport.record[:3],
+        probe.THEME.viewport.record[3] * 0.4,
+    )
 
 
 @pytest.mark.parametrize(

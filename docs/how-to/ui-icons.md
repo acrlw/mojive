@@ -31,9 +31,13 @@ Do not clamp one authored dimension with `max(minimum_pixels, value * scale)`. A
 floor changes the icon's proportions at the threshold. In particular, a minimum stroke width makes
 the stem and dot consume more of a small circle while its safe area continues to shrink.
 
-The antialias fringe is different from authored geometry. `ImguiDraw2D` keeps that fringe one
-framebuffer pixel wide so an edge remains smooth at each display density. Do not feed the fringe
-width back into the icon's frame, mark, or spacing dimensions.
+The antialias fringe is different from authored geometry. `ImguiDraw2D` normally keeps that fringe
+one logical pixel wide so an edge remains smooth at each display density. Do not feed the fringe
+width back into the icon's frame, mark, or spacing dimensions. A compound mark with subpixel
+knockout gaps needs one shared, size-aware fringe for every contour: limit each fringe to a
+documented fraction of the rendered gap until the gap can contain the normal one-pixel ramp. This
+preserves the authored stroke and gap ratios instead of changing either geometry value at small
+sizes.
 
 ### Separate placement bounds from geometry diagnostics
 
@@ -89,6 +93,13 @@ and compare related or mirrored icons. If the geometric baseline still looks dis
 smallest explicit grid-relative offset that fixes the family in those contexts. Keep the before and
 after capture in the review output. Do not accept a correction merely because `area` or `radial`
 becomes zero.
+
+Apply interaction color at the control boundary rather than baking it into the icon master. Capsule
+controls use `viewport.off_foreground` at rest, `hover_foreground` on hover,
+`press_foreground` while pressed, and `on_foreground` when selected; the current theme maps the last
+three to Primary Bright. Record and Stop are one semantic recording action and always use
+`viewport.record` (Danger red), including selected and pressed states. Disabled alpha attenuates the
+resolved semantic color after this mapping.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
@@ -206,6 +217,7 @@ edge of the frame is about 4.58 grid units on each side.
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
 | Rotate is clean in a large Pillow export but breaks in the live ImGui UI | Ear clipping runs after narrow concave contours are translated to large screen coordinates and loses precision | Triangulate the contour around its local origin, then translate the completed mesh during submission; verify the actual target-size ImGui capture |
+| Rotate's inner rings look thicker and their gaps close only at small sizes | A fixed one-pixel fill fringe is larger than the proportionally scaled stroke and knockout gap | Submit all four rings through one filled-mesh path and scale their shared fringe against the rendered gap until the normal one-pixel fringe fits |
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
 | Transport marks move toward their point although area is centered | Area-centroid alignment overcorrected directional silhouettes | Center their stroked envelope box and compare mirrored pairs at 112 points |
@@ -261,7 +273,7 @@ under `output/ui-icon-concepts/`, plus `tools-max-gap.png` at the production 1.4
 the full `gap / stroke = 1.00` setting. `capsules.png` uses the actual playback and viewport-tool
 capsules with their icon slots and state circles exposed. The `Glyph radial center` control blends
 from visible-box centering at zero to minimum-enclosing-circle centering at one; capsule candidates
-default to one so the glyph envelope and hover circle share a center. `playback-layout-4x.png`
+default to zero and keep the latter as an optional diagnostic. `playback-layout-4x.png`
 checks that the Geometry page sections remain disjoint at its maximum inspection zoom.
 It also writes `context-workspace.png`,
 `context-panels.png`, `context-keyframes.png`, and `context-redesign.png` with the same candidates

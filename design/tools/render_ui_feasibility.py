@@ -121,6 +121,7 @@ from mojive.ui.viewport_widgets import (
     RECORDING_OPTIONS_STROKE_SCALE,
     TOOL_GLYPH_SCALE,
     ToolHint,
+    _viewport_control_colors,
     capsule_points,
     default_tool_hints,
     draw_mouse_hint_glyph,
@@ -459,7 +460,7 @@ class ProbeState:
     visual_flags: list[bool] = field(default_factory=lambda: [True] * 27)
     overlay_icon_radius: int = int(OVERLAY_GEOMETRY.icon_radius)
     overlay_radial_step: int = int(OVERLAY_GEOMETRY.radial_step)
-    capsule_radial_alignment: float = 1.0
+    capsule_radial_alignment: float = 0.0
     overlay_center_step: int = int(OVERLAY_GEOMETRY.center_step)
     tool_group_gap: int = int(OVERLAY_GEOMETRY.tool_group_gap)
     divider_width: int = int(OVERLAY_GEOMETRY.divider_width)
@@ -616,6 +617,7 @@ def _circular_icon_button(
     icon_scale: float = 1.0,
     show_icon_bound: bool = False,
     show_state_circle: bool = False,
+    forced_interaction: str | None = None,
     scale: float = 1.0,
 ) -> bool:
     diameter = cell_size * scale
@@ -623,23 +625,31 @@ def _circular_icon_button(
     clicked = imgui.invisible_button(item_id, imgui.ImVec2(diameter, diameter))
     hovered = imgui.is_item_hovered()
     active = imgui.is_item_active()
+    if forced_interaction is not None:
+        hovered = forced_interaction == "hover"
+        active = forced_interaction == "press"
+        selected = selected or forced_interaction == "selected"
     theme = CONCEPT_THEME
-    background = theme.bg_frame_active if selected or active else theme.bg_frame_hovered
-    foreground = theme.primary_bright if selected or hovered or active else theme.text
+    background, foreground = _viewport_control_colors(
+        theme,
+        selected=selected,
+        hovered=hovered,
+        active=active,
+        enabled=True,
+    )
     center = (position[0] + diameter * 0.5, position[1] + diameter * 0.5)
     if show_state_circle:
-        draw.circle_filled(center, state_radius * scale, background)
+        guide_background = background if background[3] > 0.0 else theme.viewport.hover_background
+        draw.circle_filled(center, state_radius * scale, guide_background)
         draw.circle(
             center,
             state_radius * scale,
             (*CONCEPT_THEME.primary_dim[:3], 0.95),
             1.0 * scale,
         )
-    elif selected or hovered or active:
+    elif background[3] > 0.0:
         draw.circle_filled(center, state_radius * scale, background)
-    icon_surface = (
-        background if show_state_circle or selected or hovered or active else theme.bg_popup
-    )
+    icon_surface = background if background[3] > 0.0 else theme.viewport.surface
     icon(draw, center, foreground, icon_scale, icon_surface)
     if show_icon_bound:
         draw.circle(
@@ -3686,7 +3696,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         )
         imgui.set_item_tooltip(
             "0 = visible-box center; 1 = minimum enclosing-circle center. "
-            "Capsule icons default to 1 so the hover circle and glyph share a center."
+            "Capsule icons default to the visible-box center."
         )
         _property_label("Center step")
         state.overlay_center_step = _even_slider(
@@ -3818,7 +3828,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             setattr(state, name, ProbeState.__dataclass_fields__[name].default)
         state.overlay_icon_radius = int(OVERLAY_GEOMETRY.icon_radius)
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
-        state.capsule_radial_alignment = 1.0
+        state.capsule_radial_alignment = 0.0
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
         state.tool_group_gap = int(OVERLAY_GEOMETRY.tool_group_gap)
         state.divider_width = int(OVERLAY_GEOMETRY.divider_width)
@@ -4408,7 +4418,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (x0, y0 + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Amber = icon slot · green = hover/selected circle · glyph and circle share the same center",
+        "Amber = icon slot · green = state circle · default placement centers the visible box",
     )
     draw.text(
         (x0, y0 + 58.0 * scale),
@@ -4457,6 +4467,18 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     _draw_playback(draw, (playback_x, playback_2x_y), scale * 2.0, preview_state(playing=True))
     imgui.pop_id()
 
+    recording_y = playback_2x_y + 140.0 * scale
+    draw.text(
+        (playback_x, recording_y - 28.0 * scale),
+        CONCEPT_THEME.text,
+        "Playback · 1× · recording",
+    )
+    recording_state = preview_state(playing=True)
+    recording_state.redesign.recording = "video"
+    imgui.push_id("icon-library-capsule-playback-recording")
+    _draw_playback(draw, (playback_x, recording_y), scale, recording_state)
+    imgui.pop_id()
+
     metrics_x = x0 + 820.0 * scale
     draw.text((metrics_x, playback_y - 28.0 * scale), CONCEPT_THEME.text, "State-circle centering")
     draw.text(
@@ -4486,7 +4508,59 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
             ),
         )
 
-    tools_y = y0 + 520.0 * scale
+    semantic_y = playback_y + 252.0 * scale
+    draw.text((metrics_x, semantic_y), CONCEPT_THEME.text, "Applied semantic states")
+    semantic_specs = (
+        ("Default", "transport-play", "off", False),
+        ("Hover", "transport-play", "hover", False),
+        ("Press", "transport-next", "press", False),
+        ("Selected", "transport-pause", "selected", False),
+        ("Record", "transport-record", "off", True),
+        ("Stop", "transport-stop", "selected", True),
+    )
+    for index, (label, name, interaction, danger) in enumerate(semantic_specs):
+        position = (metrics_x + index * 92.0 * scale, semantic_y + 28.0 * scale)
+
+        def semantic_icon(
+            target,
+            center,
+            color,
+            icon_scale,
+            _surface,
+            *,
+            name=name,
+            danger=danger,
+        ):
+            draw_concept_icon(
+                target,
+                center,
+                20.0 * icon_scale,
+                name,
+                THEME.viewport.record if danger else color,
+                radial_alignment=state.capsule_radial_alignment,
+            )
+
+        _circular_icon_button(
+            draw,
+            f"##capsule-semantic-{index}",
+            position,
+            semantic_icon,
+            selected=interaction == "selected",
+            cell_size=42.0,
+            state_radius=18.0,
+            icon_radius=10.0,
+            icon_scale=scale,
+            forced_interaction=interaction,
+            scale=scale,
+        )
+        draw.centered_label(
+            label,
+            (position[0] + 21.0 * scale, semantic_y + 80.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            82.0 * scale,
+        )
+
+    tools_y = y0 + 590.0 * scale
     draw.text((playback_x, tools_y), CONCEPT_THEME.text, "Viewport tools · actual vertical capsule")
     draw.text(
         (playback_x, tools_y + 24.0 * scale),
@@ -4509,17 +4583,22 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, tools_y),
         CONCEPT_THEME.text,
-        "Placement rule",
+        "Application rules",
     )
     draw.text(
         (metrics_x, tools_y + 28.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Capsule cell center = state-circle center = radial-envelope center.",
+        "Default uses Text; hover, press, and selected use Primary Bright.",
     )
     draw.text(
         (metrics_x, tools_y + 54.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "The green circle is forced visible here, matching the geometry exposed on hover.",
+        "Record and Stop keep the Danger red foreground in every interaction state.",
+    )
+    draw.text(
+        (metrics_x, tools_y + 80.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Capsule cell and state-circle centers coincide; radial centering remains optional.",
     )
 
 

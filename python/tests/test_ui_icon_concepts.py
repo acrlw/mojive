@@ -27,6 +27,7 @@ class _RecordingDraw:
         self.circles: list[tuple] = []
         self.filled_circles: list[tuple] = []
         self.indexed_fills: list[tuple] = []
+        self.indexed_fringe_widths: list[float] = []
         self.polylines: list[tuple] = []
         self.filled_paths: list[tuple] = []
         self.fills = 0
@@ -99,6 +100,7 @@ class _RecordingDraw:
         points = tuple(points)
         record = (points, tuple(indices), tuple(outline), tuple(hole))
         self.indexed_fills.append(record)
+        self.indexed_fringe_widths.append(float(_kwargs.get("fringe_width", 1.0)))
         self.fills += 1
         self._add(record[2] or points)
 
@@ -261,7 +263,21 @@ def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
     reset = _render("transport-reset", ICON_GRID)
 
     assert rotate.fills >= 3
+    assert len(rotate.indexed_fills) == rotate.fills
+    assert not rotate.circles
+    assert len(set(rotate.indexed_fringe_widths)) == 1
     assert reset.fills == 1
+
+
+def test_rotate_antialias_fringe_scales_until_crossing_gaps_can_hold_one_pixel() -> None:
+    widths = []
+    for size in (14.0, 24.0, 56.0, 112.0):
+        draw = _render("tool-rotate", size)
+        assert len(set(draw.indexed_fringe_widths)) == 1
+        widths.append(draw.indexed_fringe_widths[0])
+
+    assert widths[0] < widths[1] < widths[2] < widths[3]
+    assert widths[3] == pytest.approx(1.0)
 
 
 def test_scale_uses_three_integrated_box_handles() -> None:
