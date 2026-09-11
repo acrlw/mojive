@@ -3925,7 +3925,7 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange = 24-unit placement bound · anchor = bounding circle, optical ink, semantic hub, or box",
+        "Orange = 24-unit placement bound · anchor = bounding circle, optical ink, semantic center, or box",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(

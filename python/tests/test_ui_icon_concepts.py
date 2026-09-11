@@ -9,6 +9,7 @@ from design.tools.ui_icon_concepts import (
     ICON_GRID,
     ICON_MIN_CLEARANCE,
     draw_concept_icon,
+    icon_alignment_anchor,
     icon_metrics,
     minimum_enclosing_circle,
 )
@@ -173,7 +174,7 @@ def test_concept_icon_ink_stays_inside_circular_placement_bound(name: str) -> No
         name
         for name in _icons()
         if name not in {"tool-scale", "tool-snap", "helper-camera"}
-        and not name.startswith(("transport-", "panel-"))
+        and not name.startswith(("transport-", "key-", "panel-"))
     ),
 )
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
@@ -204,7 +205,7 @@ def test_symmetric_tool_icons_center_their_ink_mass(name: str) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ("tool-scale", "helper-camera", *(name for name in _icons() if name.startswith("transport-"))),
+    ("tool-scale", "helper-camera"),
 )
 def test_optically_anchored_icons_center_their_ink_mass(name: str) -> None:
     assert icon_metrics(name).ink_center == pytest.approx((0.0, 0.0), abs=0.05)
@@ -245,10 +246,13 @@ def test_snap_uses_production_g3_u_path_with_two_rounded_end_blocks() -> None:
     draw = _render("tool-snap", ICON_GRID)
 
     assert len(draw.polylines) == 1
-    assert len(draw.polylines[0][0]) > 16
+    path = draw.polylines[0][0]
+    assert len(path) > 16
     assert not draw.lines
     assert len(draw.filled_paths) == 2
     assert all(len(path) > 4 for path in draw.filled_paths)
+    assert icon_alignment_anchor("tool-snap") == "arc"
+    assert max(x for x, _y in path) == pytest.approx(max(y for _x, y in path), abs=1e-6)
 
 
 def test_search_uses_one_hollow_g3_lens_and_handle_mesh() -> None:
@@ -262,30 +266,55 @@ def test_search_uses_one_hollow_g3_lens_and_handle_mesh() -> None:
     assert len(indices) > 300
     assert len(outline) > 100
     assert len(hole) == 96
+    edge_lengths = tuple(
+        math.dist(current, following)
+        for current, following in zip(outline, (*outline[1:], outline[0]), strict=True)
+    )
+    assert min(edge_lengths) > 0.02
 
 
-def test_sort_arrow_tip_and_tail_align_with_bar_centerlines() -> None:
+def test_sort_arrow_tail_and_tip_align_with_visible_bar_extents() -> None:
     draw = _render("panel-sort", ICON_GRID)
 
     assert len(draw.lines) == 3
     assert len(draw.arrows) == 1
     stroke_top = min(a[1] for a, _b, _width in draw.lines)
-    stroke_bottom = max(a[1] for a, _b, _width in draw.lines)
+    bottom_line = max(draw.lines, key=lambda line: line[0][1])
+    stroke_bottom = bottom_line[0][1]
     arrow_start, arrow_end, _arrow_width, round_tail = draw.arrows[0]
     assert arrow_start[1] == pytest.approx(stroke_top, abs=0.01)
-    assert arrow_end[1] == pytest.approx(stroke_bottom, abs=0.01)
+    assert arrow_end[1] == pytest.approx(stroke_bottom + bottom_line[2] * 0.5, abs=0.01)
     assert round_tail
 
 
 @pytest.mark.parametrize(
     "name",
-    ("tool-snap", *(name for name in _icons() if name.startswith("panel-"))),
+    (
+        *(name for name in _icons() if name.startswith("key-")),
+        *(
+            name
+            for name in _icons()
+            if name.startswith("panel-") and name not in {"panel-right", "panel-down"}
+        ),
+    ),
 )
 def test_bounding_circle_anchored_icons_center_their_sphere(name: str) -> None:
     metrics = icon_metrics(name)
 
     assert metrics.bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
     assert metrics.bounding_radius <= ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE + 1e-6
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "panel-right",
+        "panel-down",
+        *(name for name in _icons() if name.startswith("transport-")),
+    ),
+)
+def test_envelope_anchored_directional_icons_center_their_box(name: str) -> None:
+    assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.05)
 
 
 @pytest.mark.parametrize(

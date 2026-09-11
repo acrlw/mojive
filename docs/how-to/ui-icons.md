@@ -52,17 +52,19 @@ axis-aligned box does not prove that the icon looks centered. Declare one alignm
 construction and show it in the detail row:
 
 - use the stroked box center for symmetric frames and neutral silhouettes;
-- use the minimum enclosing circle center for Panel marks and Snap, whose asymmetric contours make
-  an axis-aligned box look centered while their radial envelope is displaced;
-- use approximate ink mass for directional transport marks and optically unbalanced helpers;
-- use a semantic hub when interaction revolves around a specific point, as Scale does.
+- use the minimum enclosing circle center for Keyframe compounds and nondirectional Panel marks
+  whose radial envelope is displaced despite a centered axis-aligned box;
+- use the stroked box for Transport and disclosure marks, where area-centroid or circumcircle
+  centering visibly pushes a triangle or chevron toward its point;
+- use approximate ink mass for optically unbalanced helpers;
+- use a semantic hub or arc center when interaction revolves around that point, as Scale and Snap do.
 
 The concept library translates the declared anchor onto the orange-circle center, then uniformly
 reduces the whole master if the translated contour would violate the radial safe area. `box`,
 `sphere`, and `ink` remain visible diagnostics. A nonzero box is expected for a circle-centered
-Search or Snap contour and for an optically centered Play triangle; a nonzero ink value is expected
-for a mark aligned by a different declared anchor. This layout policy is concept-only; reviewed
-production painters remain their source of truth.
+Search contour, while nonzero sphere and ink values are expected for envelope-centered Transport
+marks. Snap places the center of its authored lower G3 arc at the placement origin. This layout
+policy is concept-only; reviewed production painters remain their source of truth.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
@@ -176,16 +178,19 @@ edge of the frame is about 4.58 grid units on each side.
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
 | Scale's hub looks displaced although its envelope is centered | A three-axis silhouette has different box, hub, and ink centers | Anchor Scale by its center dot, report the asymmetric box, and judge the 112-point specimen |
-| Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks only moderately wider than the shaft and compare their area with the hub at 112 points |
+| Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks close to the hub diameter and compare their area with the hub at 112 points |
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
-| Transport marks look left or right despite a centered box | Directional silhouettes have asymmetric ink mass | Align the declared optical ink anchor, retain the box diagnostic, and compare mirrored pairs |
+| Transport marks move toward their point although ink mass is centered | Area-centroid alignment overcorrected directional silhouettes | Center their stroked envelope box and compare mirrored pairs at 112 points |
 | Snap looks like a generic U or loses its endpoint blocks | Its stems and semicircle were authored as unrelated primitives, or the probe copied only the centerline | Reuse the production G3 snap path with `CAPSULE_SMOOTHING` and retain both G3 endpoint blocks |
-| Snap or a Panel icon looks displaced inside the orange circle despite `box +0.00` | The axis-aligned box and radial envelope have different centers | Center the sampled contour's minimum enclosing circle and report `sphere +0.00,+0.00u` |
+| Snap sits low after its enclosing circle is centered | Its open U silhouette makes the minimum enclosing circle a misleading anchor | Place the authored lower-arc center at the orange-circle center and report `anchor arc` |
+| A disclosure triangle moves toward its point | Circumcircle centering was applied to a directional triangle | Center its stroked envelope box; reserve sphere centering for nondirectional radial compounds |
+| A compound Keyframe icon looks low or right despite `box +0.00` | Its camera housing or terminal bar displaces the radial envelope | Center the sampled contour's minimum enclosing circle and compare the 112-point specimen |
 | Search handle cuts into the lens or exposes a cap | Lens and handle were submitted as separate strokes | Build one hollow G3 union mesh with a continuous outer neck and retained circular hole |
-| Sort arrow tip sits below its last bar | The full stroke envelopes were aligned instead of the semantic endpoints | Align the arrow tail and tip with the first and last bar centerlines |
+| Search lens grows small spikes at large size | Nearly duplicate tessellation columns create unstable antialias-fringe normals | Sample the implicit outer contour on one uniform monotonic parameter without landmark duplicates |
+| Sort arrow tip does not meet the visible bottom of its last bar | The arrow endpoint was aligned to the bar centerline | Align the head tip with the lower stroked edge while keeping the round tail on the top centerline |
 | Sort arrow has a flat exposed tail | The shared arrow mesh kept its default butt tail | Enable its G3 round-tail contour while retaining the integrated head and shaft |
 | Camera looks low despite `box +0.00,+0.00u` | The body and lens place more ink below the box center | Use its declared optical ink anchor and retain the box offset as a diagnostic |
 | Cube spokes protrude through the shell | Independently capped lines terminate on top of the outer stroke | Inset the spokes, join their center, and paint the G3 outer contour last |
