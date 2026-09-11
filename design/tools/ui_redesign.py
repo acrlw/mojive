@@ -40,10 +40,20 @@ from mojive.ui.viewport_widgets import reset_glyph_path as reset_glyph_path
 
 if __package__:
     from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
-    from .ui_icon_concepts import ICON_DEFAULT_PADDING, ICON_STROKE, draw_concept_icon
+    from .ui_icon_concepts import (
+        ICON_DEFAULT_PADDING,
+        ICON_STROKE,
+        ICON_TUNING_DEFAULTS,
+        draw_concept_icon,
+    )
 else:
     from ui_capsule_geometry import capsule_layout, draw_capsule_shell
-    from ui_icon_concepts import ICON_DEFAULT_PADDING, ICON_STROKE, draw_concept_icon
+    from ui_icon_concepts import (
+        ICON_DEFAULT_PADDING,
+        ICON_STROKE,
+        ICON_TUNING_DEFAULTS,
+        draw_concept_icon,
+    )
 
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)
@@ -345,6 +355,11 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                         "rotate_ring_cap",
                         OVERLAY_GEOMETRY.rotate_ring_cap,
                     ),
+                    tuning=(
+                        geometry.icon_tuning()
+                        if hasattr(geometry, "icon_tuning")
+                        else ICON_TUNING_DEFAULTS
+                    ),
                 )
             elif vertical:
                 draw_tool_glyph(
@@ -509,15 +524,34 @@ def _viewport(state, scale, geometry, circular_button):
         )
     cx, cy = x + width * 0.56, y + height * 0.55
     if state.selected:
-        draw_tool_glyph(
-            draw,
-            (cx, cy),
-            THEME.primary,
-            3.0 * scale,
-            state.tool,
-            state.space,
-            smoothing=geometry.tool_smoothing,
-        )
+        if getattr(geometry, "preview_icon_library", False):
+            concept_name = {
+                "move": "tool-move",
+                "rotate": "tool-rotate",
+                "dimensions": "tool-scale",
+            }[state.tool]
+            draw_concept_icon(
+                draw,
+                (cx, cy),
+                2.0 * OVERLAY_GEOMETRY.icon_radius * 3.0 * scale * TOOL_GLYPH_SCALE,
+                concept_name,
+                THEME.primary,
+                padding=geometry.icon_padding_for_glyph(concept_name),
+                stroke_width=geometry.icon_stroke_for_glyph(concept_name),
+                rotate_ring_gap_ratio=geometry.rotate_ring_gap_ratio,
+                rotate_ring_cap=geometry.rotate_ring_cap,
+                tuning=geometry.icon_tuning(),
+            )
+        else:
+            draw_tool_glyph(
+                draw,
+                (cx, cy),
+                THEME.primary,
+                3.0 * scale,
+                state.tool,
+                state.space,
+                smoothing=geometry.tool_smoothing,
+            )
     draw.text(
         (x + 16 * scale, y + height - 31 * scale),
         THEME.text_disabled,

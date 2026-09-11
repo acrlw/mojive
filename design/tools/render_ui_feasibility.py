@@ -41,9 +41,11 @@ if __package__:
         ICON_MIN_CLEARANCE,
         ICON_MIN_STROKE,
         ICON_STROKE,
+        ICON_TUNING_DEFAULTS,
         REVIEW_LOCKED_ICONS,
         STATUS_MOUSE_DEFAULT_WIDTH,
         STROKE_SCALE_LOCKED_ICONS,
+        IconTuning,
         draw_concept_icon,
         icon_alignment_anchor,
         icon_alignment_center,
@@ -87,9 +89,11 @@ else:
         ICON_MIN_CLEARANCE,
         ICON_MIN_STROKE,
         ICON_STROKE,
+        ICON_TUNING_DEFAULTS,
         REVIEW_LOCKED_ICONS,
         STATUS_MOUSE_DEFAULT_WIDTH,
         STROKE_SCALE_LOCKED_ICONS,
+        IconTuning,
         draw_concept_icon,
         icon_alignment_anchor,
         icon_alignment_center,
@@ -507,6 +511,9 @@ class ProbeState:
     tool_stroke_width: float = OVERLAY_GEOMETRY.tool_stroke
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap
+    move_head_scale: float = ICON_TUNING_DEFAULTS.move_head_scale
+    scale_handle_scale: float = ICON_TUNING_DEFAULTS.scale_handle_scale
+    key_fit_arm_length: float = ICON_TUNING_DEFAULTS.key_fit_arm_length
     hint_control_height: int = int(OVERLAY_GEOMETRY.hint_control_height)
     hint_padding_x: int = int(OVERLAY_GEOMETRY.hint_padding_x)
     hint_padding_y: int = int(OVERLAY_GEOMETRY.hint_padding_y)
@@ -551,6 +558,13 @@ class ProbeState:
 
     def set_icon_stroke_for_glyph(self, name: str, stroke_width: float) -> None:
         self.icon_stroke_by_glyph[name] = float(stroke_width)
+
+    def icon_tuning(self) -> IconTuning:
+        return IconTuning(
+            move_head_scale=self.move_head_scale,
+            scale_handle_scale=self.scale_handle_scale,
+            key_fit_arm_length=self.key_fit_arm_length,
+        )
 
     def concept_mouse_width(self) -> float:
         """Return the master width that preserves the chosen status aspect ratio."""
@@ -611,6 +625,7 @@ def _draw_concept_control_icon(
         color,
         padding=padding,
         stroke_width=stroke_width,
+        tuning=state.icon_tuning() if state is not None else ICON_TUNING_DEFAULTS,
     )
 
 
@@ -637,6 +652,7 @@ def _draw_concept_projection_icon(
         color,
         padding=padding,
         stroke_width=stroke_width,
+        tuning=state.icon_tuning() if state is not None else ICON_TUNING_DEFAULTS,
     )
 
 
@@ -707,14 +723,32 @@ def _draw_icon_library_command_icon(
         stroke_width = state.icon_stroke_for_glyph(name)
     else:
         stroke_width = ICON_STROKE
+    tuning = state.icon_tuning() if state is not None else ICON_TUNING_DEFAULTS
+    icon_size = 16.0 * float(scale)
+    if kind in {"view", "key"} and scale >= context_scale * 0.9:
+        # Labelled command buttons are rectangular text layouts. Center the
+        # glyph's visible box on the text ink center while keeping the Icon
+        # Library's minimum-circle anchor unchanged in circular controls.
+        metrics = icon_metrics(
+            name,
+            padding=padding,
+            stroke_width=stroke_width,
+            tuning=tuning,
+        )
+        box_x, box_y = metrics.center_offset
+        center = (
+            float(center[0]) - box_x * icon_size / ICON_GRID,
+            float(center[1]) - box_y * icon_size / ICON_GRID,
+        )
     draw_concept_icon(
         draw,
         center,
-        16.0 * float(scale),
+        icon_size,
         name,
         color,
         padding=padding,
         stroke_width=stroke_width,
+        tuning=tuning,
     )
 
 
@@ -1471,6 +1505,7 @@ def _draw_scene_helper(
             color,
             padding=state.icon_padding_for_glyph(name),
             stroke_width=state.icon_stroke_for_glyph(name),
+            tuning=state.icon_tuning(),
         )
     elif kind == "camera":
         _draw_camera_icon(draw, center, color, scale)
@@ -2829,6 +2864,7 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                             CONCEPT_THEME.text,
                             padding=state.icon_padding_for_glyph(concept_name),
                             stroke_width=state.icon_stroke_for_glyph(concept_name),
+                            tuning=state.icon_tuning(),
                         )
                     else:
                         row_draw.fringed_concave_fill(
@@ -2895,6 +2931,7 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                         color,
                         padding=state.icon_padding_for_glyph(concept_name),
                         stroke_width=state.icon_stroke_for_glyph(concept_name),
+                        tuning=state.icon_tuning(),
                     )
                 elif state.hierarchy_visibility[index]:
                     top = tuple(
@@ -3591,6 +3628,9 @@ def _geometry_values_text(state: ProbeState) -> str:
         ("tool_stroke", state.tool_stroke_width),
         ("rotate_ring_gap_ratio", state.rotate_ring_gap_ratio),
         ("rotate_ring_cap", repr(state.rotate_ring_cap)),
+        ("icon_tool_move_head_scale", state.move_head_scale),
+        ("icon_tool_scale_handle_scale", state.scale_handle_scale),
+        ("icon_key_fit_arm_length", state.key_fit_arm_length),
         ("hint_control_height", state.hint_control_height),
         ("hint_padding_x", state.hint_padding_x),
         ("hint_padding_y", state.hint_padding_y),
@@ -3630,6 +3670,42 @@ def _geometry_values_text(state: ProbeState) -> str:
         for name, value in sorted(state.icon_stroke_by_glyph.items())
     )
     values += tuple((name, getattr(state, name)) for _, name in CORNER_CONTROLS)
+    return "\n".join(f"{name}={value}," for name, value in values)
+
+
+def _icon_values_text(state: ProbeState) -> str:
+    """Return the complete editable Icon Library state in a pasteable form."""
+
+    values = [
+        ("rotate_ring_gap_ratio", state.rotate_ring_gap_ratio),
+        ("rotate_ring_cap", repr(state.rotate_ring_cap)),
+        ("icon_tool_move_head_scale", state.move_head_scale),
+        ("icon_tool_scale_handle_scale", state.scale_handle_scale),
+        ("icon_key_fit_arm_length", state.key_fit_arm_length),
+        ("icon_status_mouse_width", state.hint_mouse_width),
+    ]
+    values.extend(
+        (
+            "icon_padding_" + group.casefold().replace(" ", "_").replace("&", "and"),
+            state.icon_padding_for(group),
+        )
+        for group in ICON_GROUP_LAYOUT_DEFAULTS
+    )
+    values.extend(
+        (
+            "icon_stroke_" + group.casefold().replace(" ", "_").replace("&", "and"),
+            state.icon_stroke_for(group),
+        )
+        for group in ICON_GROUP_STROKE_DEFAULTS
+    )
+    values.extend(
+        (f"icon_padding_{name.replace('-', '_')}", value)
+        for name, value in sorted(state.icon_padding_by_glyph.items())
+    )
+    values.extend(
+        (f"icon_stroke_{name.replace('-', '_')}", value)
+        for name, value in sorted(state.icon_stroke_by_glyph.items())
+    )
     return "\n".join(f"{name}={value}," for name, value in values)
 
 
@@ -3736,6 +3812,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         CONCEPT_THEME.text,
                         padding=state.icon_padding_for_glyph(concept_name),
                         stroke_width=state.icon_stroke_for_glyph(concept_name),
+                        tuning=state.icon_tuning(),
                     )
                 else:
                     draw_playback_glyph(
@@ -3761,6 +3838,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                         stroke_width=state.icon_stroke_for_glyph(concept_name),
                         rotate_ring_gap_ratio=state.rotate_ring_gap_ratio,
                         rotate_ring_cap=state.rotate_ring_cap,
+                        tuning=state.icon_tuning(),
                     )
                 else:
                     draw_tool_glyph(
@@ -4105,6 +4183,9 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.tool_stroke_width = OVERLAY_GEOMETRY.tool_stroke
         state.rotate_ring_gap_ratio = OVERLAY_GEOMETRY.rotate_ring_gap_ratio
         state.rotate_ring_cap = OVERLAY_GEOMETRY.rotate_ring_cap
+        state.move_head_scale = ICON_TUNING_DEFAULTS.move_head_scale
+        state.scale_handle_scale = ICON_TUNING_DEFAULTS.scale_handle_scale
+        state.key_fit_arm_length = ICON_TUNING_DEFAULTS.key_fit_arm_length
         state.hint_control_height = int(OVERLAY_GEOMETRY.hint_control_height)
         state.hint_padding_x = int(OVERLAY_GEOMETRY.hint_padding_x)
         state.hint_padding_y = int(OVERLAY_GEOMETRY.hint_padding_y)
@@ -4299,6 +4380,7 @@ def _draw_concept_icon_specimen(
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> None:
     """Draw one candidate inside the shared circular placement boundary."""
 
@@ -4330,6 +4412,7 @@ def _draw_concept_icon_specimen(
             stroke_width=stroke_width,
             rotate_ring_gap_ratio=rotate_ring_gap_ratio,
             rotate_ring_cap=rotate_ring_cap,
+            tuning=tuning,
         )
     # Draw both placement guides last so a circular collision and a displaced
     # axis-aligned bounding box remain visible instead of hiding below the
@@ -4356,6 +4439,7 @@ def _icon_review_metrics(
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
     rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> tuple[float, float, float, float, float]:
     """Return circle clearance plus enclosing-circle and box centers."""
 
@@ -4387,6 +4471,7 @@ def _icon_review_metrics(
         stroke_width=stroke_width,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
+        tuning=tuning,
     )
     box_x, box_y = metrics.center_offset
     return (
@@ -4453,6 +4538,7 @@ def _draw_icon_library_overview(
                 state.icon_stroke_for_glyph(name),
                 state.rotate_ring_gap_ratio,
                 state.rotate_ring_cap,
+                state.icon_tuning(),
             )
             draw.centered_label(
                 label,
@@ -4476,6 +4562,7 @@ def _draw_context_row(
     stroke_width: float = ICON_STROKE,
     *,
     production_kind: str | None = None,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> None:
     """Place one candidate in current Mojive row metrics with text guides."""
 
@@ -4524,6 +4611,7 @@ def _draw_context_row(
             CONCEPT_THEME.text,
             padding=padding,
             stroke_width=stroke_width,
+            tuning=tuning,
         )
     else:
         _draw_command_icon(draw, icon_center, production_kind, CONCEPT_THEME.text, scale)
@@ -4597,6 +4685,7 @@ def _draw_icon_context_page(
             CONCEPT_THEME.text,
             padding=state.icon_padding_for_glyph(name),
             stroke_width=state.icon_stroke_for_glyph(name),
+            tuning=state.icon_tuning(),
         )
         draw.circle(
             center,
@@ -4634,6 +4723,7 @@ def _draw_icon_context_page(
         state.icon_padding_for_glyph("key-keyframe"),
         state.icon_stroke_for_glyph("key-keyframe"),
         production_kind="key",
+        tuning=state.icon_tuning(),
     )
     _draw_context_row(
         draw,
@@ -4647,6 +4737,7 @@ def _draw_icon_context_page(
         scale,
         state.icon_padding_for_glyph("key-snapshot"),
         state.icon_stroke_for_glyph("key-snapshot"),
+        tuning=state.icon_tuning(),
     )
     _draw_context_row(
         draw,
@@ -4660,6 +4751,7 @@ def _draw_icon_context_page(
         scale,
         state.icon_padding_for_glyph("helper-camera"),
         state.icon_stroke_for_glyph("helper-camera"),
+        tuning=state.icon_tuning(),
     )
     _draw_context_row(
         draw,
@@ -4673,6 +4765,7 @@ def _draw_icon_context_page(
         scale,
         state.icon_padding_for_glyph("helper-light"),
         state.icon_stroke_for_glyph("helper-light"),
+        tuning=state.icon_tuning(),
     )
 
     note_y = second_y + 270.0 * scale
@@ -4796,26 +4889,75 @@ def _draw_icon_family_detail(
         if changed and not stroke_locked:
             state.set_icon_stroke_for_glyph(name, stroke_width)
 
+        shape_control = None
         if name == "tool-rotate":
-            draw.text(
-                (origin[0] + 10.0 * scale, center_y + 48.0 * scale),
-                CONCEPT_THEME.text_disabled,
+            shape_control = (
                 "Gap",
-            )
-            imgui.set_cursor_screen_pos(
-                imgui.ImVec2(float(control_x), float(center_y + 41.0 * scale))
-            )
-            imgui.set_next_item_width(control_width)
-            changed, gap_ratio = _stepped_slider(
                 "##rotate-gap-ratio",
                 state.rotate_ring_gap_ratio,
                 0.25,
                 1.0,
                 "%.2f × stroke",
-                step=0.05,
+                0.05,
+            )
+        elif name == "tool-move":
+            shape_control = (
+                "Head",
+                "##move-head-scale",
+                state.move_head_scale,
+                0.65,
+                1.35,
+                "%.2f × original",
+                0.05,
+            )
+        elif name == "tool-scale":
+            shape_control = (
+                "Blocks",
+                "##scale-handle-scale",
+                state.scale_handle_scale,
+                0.65,
+                1.35,
+                "%.2f × original",
+                0.05,
+            )
+        elif name == "key-fit":
+            shape_control = (
+                "Arms",
+                "##key-fit-arm-length",
+                state.key_fit_arm_length,
+                2.5,
+                5.5,
+                "%.2f u",
+                0.10,
+            )
+        if shape_control is not None:
+            label, item_id, value, minimum, maximum, display_format, step = shape_control
+            draw.text(
+                (origin[0] + 10.0 * scale, center_y + 48.0 * scale),
+                CONCEPT_THEME.text_disabled,
+                label,
+            )
+            imgui.set_cursor_screen_pos(
+                imgui.ImVec2(float(control_x), float(center_y + 41.0 * scale))
+            )
+            imgui.set_next_item_width(control_width)
+            changed, value = _stepped_slider(
+                item_id,
+                value,
+                minimum,
+                maximum,
+                display_format,
+                step=step,
             )
             if changed:
-                state.rotate_ring_gap_ratio = gap_ratio
+                if name == "tool-rotate":
+                    state.rotate_ring_gap_ratio = value
+                elif name == "tool-move":
+                    state.move_head_scale = value
+                elif name == "tool-scale":
+                    state.scale_handle_scale = value
+                else:
+                    state.key_fit_arm_length = value
         imgui.set_cursor_screen_pos(
             imgui.ImVec2(float(origin[0] + 216.0 * scale), float(center_y + 7.0 * scale))
         )
@@ -4824,6 +4966,12 @@ def _draw_icon_family_detail(
             state.icon_stroke_by_glyph.pop(name, None)
             if name == "tool-rotate":
                 state.rotate_ring_gap_ratio = OVERLAY_GEOMETRY.rotate_ring_gap_ratio
+            elif name == "tool-move":
+                state.move_head_scale = ICON_TUNING_DEFAULTS.move_head_scale
+            elif name == "tool-scale":
+                state.scale_handle_scale = ICON_TUNING_DEFAULTS.scale_handle_scale
+            elif name == "key-fit":
+                state.key_fit_arm_length = ICON_TUNING_DEFAULTS.key_fit_arm_length
             padding = state.icon_padding_for_glyph(name)
             stroke_width = state.icon_stroke_for_glyph(name)
         imgui.pop_id()
@@ -4840,6 +4988,7 @@ def _draw_icon_family_detail(
                 stroke_width,
                 state.rotate_ring_gap_ratio,
                 state.rotate_ring_cap,
+                state.icon_tuning(),
             )
 
         meta_x = origin[0] + 1160.0 * scale
@@ -4850,6 +4999,7 @@ def _draw_icon_family_detail(
             stroke_width,
             state.rotate_ring_gap_ratio,
             state.rotate_ring_cap,
+            state.icon_tuning(),
         )
         anchor = icon_alignment_anchor(name)
         anchor_x, anchor_y = icon_alignment_center(
@@ -4859,6 +5009,7 @@ def _draw_icon_family_detail(
             stroke_width,
             state.rotate_ring_gap_ratio,
             state.rotate_ring_cap,
+            state.icon_tuning(),
         )
         diagnostic_label, diagnostic_x, diagnostic_y = (
             ("box", box_x, box_y) if anchor == "circle" else ("circle", circle_x, circle_y)
@@ -4993,6 +5144,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
                 THEME.viewport.record if danger else color,
                 padding=state.icon_padding_for_glyph(name),
                 stroke_width=state.icon_stroke_for_glyph(name),
+                tuning=state.icon_tuning(),
             )
 
         _circular_icon_button(
@@ -5068,6 +5220,12 @@ def _draw_icon_library_page(
         (x0 + 42.0 * scale, y0 + 25.0 * scale),
         CONCEPT_THEME.text_disabled,
         "Candidate vectors · 24-unit circular placement bound",
+    )
+    imgui.set_cursor_screen_pos(imgui.ImVec2(float(x0 + 258.0 * scale), float(y0 + 8.0 * scale)))
+    if imgui.button("Copy icon parameters", imgui.ImVec2(178.0 * scale, 0.0)):
+        imgui.set_clipboard_text(_icon_values_text(state))
+    imgui.set_item_tooltip(
+        "Copy group defaults, per-glyph overrides, and authored shape controls for review."
     )
     controls_x = x0 + max(450.0 * scale, available_width - 940.0 * scale)
     draw.text(
@@ -5760,6 +5918,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     CONCEPT_THEME.text,
                     padding=state.icon_padding_for_glyph("helper-camera"),
                     stroke_width=state.icon_stroke_for_glyph("helper-camera"),
+                    tuning=state.icon_tuning(),
                 )
                 draw_concept_icon(
                     draw,
@@ -5769,6 +5928,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                     CONCEPT_THEME.text,
                     padding=state.icon_padding_for_glyph("helper-light"),
                     stroke_width=state.icon_stroke_for_glyph("helper-light"),
+                    tuning=state.icon_tuning(),
                 )
             else:
                 _draw_camera_icon(draw, center, CONCEPT_THEME.text, scale * icon_scale)
@@ -6015,7 +6175,11 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                     setattr(state, attribute, not value)
             imgui.end_menu()
         clicked, _ = imgui.menu_item(
-            "Icon Library preview",
+            (
+                "Icons preview ON###icon-library-preview"
+                if state.preview_icon_library
+                else "Icons preview OFF###icon-library-preview"
+            ),
             "",
             state.preview_icon_library,
         )

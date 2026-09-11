@@ -18,6 +18,7 @@ from design.tools.ui_icon_concepts import (
     ICON_MIN_CLEARANCE,
     ICON_MIN_STROKE,
     ICON_STROKE,
+    ICON_TUNING_DEFAULTS,
     MORE_ARM_RATIO,
     RESET_RING_CENTER,
     REVIEW_LOCKED_PADDING,
@@ -25,6 +26,7 @@ from design.tools.ui_icon_concepts import (
     ROTATE_FRAME_STROKE_OVERSHOOT,
     STATUS_MOUSE_DEFAULT_WIDTH,
     STROKE_SCALE_LOCKED_ICONS,
+    IconTuning,
     draw_concept_icon,
     icon_alignment_anchor,
     icon_alignment_center,
@@ -187,6 +189,7 @@ def _render(
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
     rotate_ring_gap_ratio: float = 0.5,
+    tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> _RecordingDraw:
     draw = _RecordingDraw()
     draw_concept_icon(
@@ -199,6 +202,7 @@ def _render(
         mouse_width=mouse_width,
         stroke_width=stroke_width,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
+        tuning=tuning,
     )
     return draw
 
@@ -279,8 +283,6 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
         "transport-next",
         "transport-last",
         "transport-more",
-        "panel-right",
-        "panel-down",
     } == BOX_CENTERED_ICONS
     assert {"playback-reset", "transport-reset"} == RING_CENTERED_ICONS
     assert all(
@@ -572,6 +574,49 @@ def test_filled_triangles_use_rounded_g3_contours(name: str) -> None:
 
     assert draw.filled_paths
     assert all(len(path) > 3 for path in draw.filled_paths)
+
+
+@pytest.mark.parametrize("name", ("panel-right", "panel-down"))
+def test_panel_disclosures_use_equilateral_triangles_and_circle_anchors(name: str) -> None:
+    metrics = icon_metrics(name)
+    source = icon_concepts._triangle_source(1.0)
+    side_lengths = tuple(math.dist(source[index], source[(index + 1) % 3]) for index in range(3))
+
+    assert icon_alignment_anchor(name) == "circle"
+    assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
+    assert side_lengths == pytest.approx((side_lengths[0],) * 3, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("name", "baseline", "adjusted"),
+    (
+        (
+            "tool-move",
+            ICON_TUNING_DEFAULTS,
+            IconTuning(move_head_scale=1.3),
+        ),
+        (
+            "tool-scale",
+            ICON_TUNING_DEFAULTS,
+            IconTuning(scale_handle_scale=1.3),
+        ),
+        (
+            "key-fit",
+            ICON_TUNING_DEFAULTS,
+            IconTuning(key_fit_arm_length=5.0),
+        ),
+    ),
+)
+def test_authored_shape_controls_change_geometry_without_breaking_circle_fit(
+    name: str, baseline: IconTuning, adjusted: IconTuning
+) -> None:
+    original = _render(name, ICON_GRID, tuning=baseline)
+    changed = _render(name, ICON_GRID, tuning=adjusted)
+
+    assert changed.filled_paths != original.filled_paths
+    assert icon_metrics(name, tuning=adjusted).circular_clearance == pytest.approx(
+        ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)], abs=1e-5
+    )
 
 
 def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:

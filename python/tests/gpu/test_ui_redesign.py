@@ -331,6 +331,33 @@ def test_existing_capsule_ink_matches_geometry_and_reset_stays_in_bound(rig, mon
             assert clearance == pytest.approx(1.2)
 
 
+def test_icon_library_preview_substitutes_capsule_and_selected_tool(rig):
+    rig.probe.active_tool = rig.state.tool = "rotate"
+    rig.probe.preview_icon_library = False
+    rig.frame()
+    production = rig.pixels[::-1].copy()
+    viewport = rig.state.rects["viewport"]
+    cx = viewport[0] + (viewport[2] - viewport[0]) * 0.56
+    cy = viewport[1] + (viewport[3] - viewport[1]) * 0.55
+
+    rig.probe.preview_icon_library = True
+    rig.frame()
+    preview = rig.pixels[::-1]
+    pixel_scale = preview.shape[1] / imgui.get_io().display_size.x
+    tool_region = np.s_[
+        round((cy - 36) * pixel_scale) : round((cy + 36) * pixel_scale),
+        round((cx - 36) * pixel_scale) : round((cx + 36) * pixel_scale),
+    ]
+    x0, y0, x1, y1 = rig.state.rects["tools"]
+    capsule_region = np.s_[
+        round(y0 * pixel_scale) : round(y1 * pixel_scale),
+        round(x0 * pixel_scale) : round(x1 * pixel_scale),
+    ]
+
+    assert not np.array_equal(production[tool_region], preview[tool_region])
+    assert not np.array_equal(production[capsule_region], preview[capsule_region])
+
+
 def test_geometry_g3_highlight_and_optical_spacing_toggles(monkeypatch):
     rig = Rig(monkeypatch, 1920, 1000)
     try:
