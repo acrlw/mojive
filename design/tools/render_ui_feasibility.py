@@ -38,6 +38,8 @@ if __package__:
         ICON_MIN_CLEARANCE,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
+        icon_alignment_anchor,
+        icon_alignment_center,
         icon_component_group,
         icon_family,
         icon_metrics,
@@ -75,6 +77,8 @@ else:
         ICON_MIN_CLEARANCE,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
+        icon_alignment_anchor,
+        icon_alignment_center,
         icon_component_group,
         icon_family,
         icon_metrics,
@@ -796,23 +800,6 @@ def _draw_inline_text(
     return width
 
 
-def _concept_mouse_icon_size(
-    height: float,
-    button: str,
-    padding: float,
-    mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
-) -> float:
-    """Convert the Status mouse height to the concept icon's circular size argument."""
-
-    metrics = icon_metrics(
-        f"status-mouse-{button}",
-        padding=padding,
-        mouse_width=mouse_width,
-    )
-    master_height = metrics.bounds[3] - metrics.bounds[1]
-    return float(height) * ICON_GRID / master_height
-
-
 def _draw_mouse_input(
     draw: ImguiDraw2D,
     x: float,
@@ -826,43 +813,6 @@ def _draw_mouse_input(
     state: ProbeState,
     muted: bool = False,
 ) -> float:
-    if state.preview_icon_library:
-        name = f"status-mouse-{button}"
-        padding = state.icon_padding_for("Status & input")
-        mouse_width = state.concept_mouse_width()
-        icon_size = (
-            _concept_mouse_icon_size(
-                height,
-                button,
-                padding,
-                mouse_width,
-            )
-            * scale
-        )
-        shell_color = CONCEPT_THEME.text_disabled if muted else CONCEPT_THEME.text
-        control_color = CONCEPT_THEME.bg_frame_active
-        suffix_color = CONCEPT_THEME.text_disabled if muted else CONCEPT_THEME.primary_bright
-        draw_concept_icon(
-            draw,
-            (x + width * scale * 0.5, center_y),
-            icon_size,
-            name,
-            shell_color,
-            padding=padding,
-            accent_color=control_color,
-            mouse_width=mouse_width,
-        )
-        used = width * scale
-        if suffix:
-            used += 5.0 * scale
-            used += _draw_inline_text(
-                draw,
-                x + used,
-                center_y,
-                suffix,
-                suffix_color,
-            )
-        return used
     return draw_mouse_hint_glyph(
         draw,
         x,
@@ -3678,28 +3628,16 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                     )
         elif field_name == "mouse_smoothing":
             for i, button in enumerate(("left", "right", "wheel")):
-                if state.preview_icon_library:
-                    draw_concept_icon(
-                        item_draw,
-                        (cx + (i - 1) * 98 * scale, cy),
-                        46.0 * scale,
-                        f"status-mouse-{button}",
-                        CONCEPT_THEME.text,
-                        padding=state.icon_padding_for("Status & input"),
-                        accent_color=CONCEPT_THEME.bg_frame_active,
-                        mouse_width=state.concept_mouse_width(),
-                    )
-                else:
-                    draw_mouse_hint_glyph(
-                        item_draw,
-                        cx + (i - 1) * 98 * scale - 24 * scale,
-                        cy,
-                        button,
-                        "",
-                        CONCEPT_THEME,
-                        3.2 * scale,
-                        smoothing=q,
-                    )
+                draw_mouse_hint_glyph(
+                    item_draw,
+                    cx + (i - 1) * 98 * scale - 24 * scale,
+                    cy,
+                    button,
+                    "",
+                    CONCEPT_THEME,
+                    3.2 * scale,
+                    smoothing=q,
+                )
         elif field_name == "transform_smoothing":
             for i, mode in enumerate(("translate", "dimensions")):
                 _draw_transform_gizmo(
@@ -4226,9 +4164,7 @@ def _draw_concept_icon_specimen(
             name,
             _concept_icon_color(name),
             padding=padding,
-            accent_color=(
-                CONCEPT_THEME.bg_frame_active if name.startswith("status-mouse-") else None
-            ),
+            accent_color=(CONCEPT_THEME.primary if name.startswith("status-mouse-") else None),
             mouse_width=mouse_width,
         )
     # Draw both placement guides last so a circular collision and a displaced
@@ -4563,12 +4499,12 @@ def _draw_icon_context_page(
     draw.text(
         (x0, note_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "First align the slot center to the H cap-height center and text baseline, then center the glyph's minimum enclosing circle.",
+        "First align the slot center to the H cap-height center and text baseline, then apply the glyph's declared geometric anchor.",
     )
     draw.text(
         (x0, note_y + 48.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Every Icon Library glyph uses the same minimum enclosing-circle placement rule.",
+        "Directional edge marks use their box; Reset uses its ring; remaining candidates use their minimum circle.",
     )
 
 
@@ -4587,7 +4523,7 @@ def _draw_icon_family_detail(
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange circle and gray square share one center · minimum enclosing-circle placement",
+        "Orange circle and gray square share one center · each glyph reports its declared anchor",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(
@@ -4629,10 +4565,15 @@ def _draw_icon_family_detail(
         clearance, circle_x, circle_y, box_x, box_y = _icon_review_metrics(
             name, padding, mouse_width
         )
+        anchor = icon_alignment_anchor(name)
+        anchor_x, anchor_y = icon_alignment_center(name, padding, mouse_width)
+        diagnostic_label, diagnostic_x, diagnostic_y = (
+            ("box", box_x, box_y) if anchor == "circle" else ("circle", circle_x, circle_y)
+        )
         for line, line_y in (
             (f"{name} · pad {clearance:.2f}u", -20.0),
-            (f"circle  {circle_x:+.2f},{circle_y:+.2f}u", 0.0),
-            (f"box  {box_x:+.2f},{box_y:+.2f}u", 20.0),
+            (f"{anchor}  {anchor_x:+.2f},{anchor_y:+.2f}u", 0.0),
+            (f"{diagnostic_label}  {diagnostic_x:+.2f},{diagnostic_y:+.2f}u", 20.0),
         ):
             draw.text(
                 (meta_x, center_y + line_y * scale),
@@ -4697,7 +4638,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, playback_y - 4.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Minimum enclosing-circle center after placement; every value must be 0.00, 0.00",
+        "Declared anchor center after placement; every value must be 0.00, 0.00",
     )
     playback_padding = state.icon_padding_for("Viewport playback")
     for index, name in enumerate(
@@ -4712,14 +4653,12 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
             "playback-more",
         )
     ):
-        metrics = icon_metrics(name, playback_padding)
+        anchor = icon_alignment_anchor(name)
+        anchor_center = icon_alignment_center(name, playback_padding)
         draw.text(
             (metrics_x, playback_y + (30.0 + index * 25.0) * scale),
             CONCEPT_THEME.text_disabled,
-            (
-                f"{name:<20} circle {metrics.enclosing_center[0]:+0.2f}, "
-                f"{metrics.enclosing_center[1]:+0.2f}u"
-            ),
+            (f"{name:<20} {anchor:<6} {anchor_center[0]:+0.2f}, {anchor_center[1]:+0.2f}u"),
         )
 
     semantic_y = playback_y + 252.0 * scale
@@ -4812,7 +4751,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, tools_y + 80.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Capsule cell, state circle, and glyph minimum-circle centers coincide.",
+        "Capsule cell, state circle, and each glyph's declared anchor coincide.",
     )
 
 

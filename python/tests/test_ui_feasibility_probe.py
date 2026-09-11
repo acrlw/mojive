@@ -133,28 +133,19 @@ def test_icon_layout_controls_are_stored_per_actual_component_group() -> None:
     assert state.icon_padding_for("Viewport playback") == probe.ICON_DEFAULT_PADDING
 
 
-@pytest.mark.parametrize("button", ("left", "right", "wheel"))
-def test_status_mouse_adapter_preserves_the_original_control_height(button):
-    height = float(probe.OVERLAY_GEOMETRY.hint_control_height)
-    padding = probe.ICON_DEFAULT_PADDING
-    state = probe.ProbeState()
-    mouse_width = state.concept_mouse_width()
-    size = probe._concept_mouse_icon_size(height, button, padding, mouse_width=mouse_width)
-    metrics = probe.icon_metrics(f"status-mouse-{button}", padding=padding, mouse_width=mouse_width)
-    rendered_height = (metrics.bounds[3] - metrics.bounds[1]) * size / probe.ICON_GRID
-
-    assert rendered_height == pytest.approx(height)
-    assert size > probe.OVERLAY_GEOMETRY.hint_mouse_width
-
-
 @pytest.mark.parametrize("muted", (False, True))
-def test_status_mouse_preview_uses_neutral_status_colors(monkeypatch, muted):
+def test_status_mouse_preview_keeps_the_original_production_painter(monkeypatch, muted):
     calls = []
     state = probe.ProbeState(preview_icon_library=True)
+
+    def draw_mouse(*args, **kwargs):
+        calls.append((args, kwargs))
+        return probe.OVERLAY_GEOMETRY.hint_mouse_width
+
     monkeypatch.setattr(
         probe,
-        "draw_concept_icon",
-        lambda *args, **kwargs: calls.append((args, kwargs)),
+        "draw_mouse_hint_glyph",
+        draw_mouse,
     )
 
     used = probe._draw_mouse_input(
@@ -171,10 +162,12 @@ def test_status_mouse_preview_uses_neutral_status_colors(monkeypatch, muted):
     )
 
     assert used == pytest.approx(probe.OVERLAY_GEOMETRY.hint_mouse_width)
-    assert calls[0][0][4] == (
-        probe.CONCEPT_THEME.text_disabled if muted else probe.CONCEPT_THEME.text
+    assert calls[0][0][3:7] == ("left", "", probe.CONCEPT_THEME, 1.0)
+    assert calls[0][1]["size"] == (
+        probe.OVERLAY_GEOMETRY.hint_mouse_width,
+        probe.OVERLAY_GEOMETRY.hint_control_height,
     )
-    assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.bg_frame_active
+    assert calls[0][1]["muted"] is muted
 
 
 def test_status_mouse_width_control_changes_candidate_aspect_ratio() -> None:
@@ -186,7 +179,7 @@ def test_status_mouse_width_control_changes_candidate_aspect_ratio() -> None:
     assert state.concept_mouse_width() > original
 
 
-def test_status_mouse_family_specimen_uses_neutral_button_gray(monkeypatch) -> None:
+def test_status_mouse_family_specimen_uses_original_control_color(monkeypatch) -> None:
     calls = []
 
     class Draw:
@@ -211,7 +204,7 @@ def test_status_mouse_family_specimen_uses_neutral_button_gray(monkeypatch) -> N
     )
 
     assert calls[0][0][4] == probe.CONCEPT_THEME.text
-    assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.bg_frame_active
+    assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.primary
 
 
 def test_icon_specimen_square_matches_orange_circle_diameter(monkeypatch) -> None:

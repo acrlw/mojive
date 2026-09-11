@@ -40,14 +40,16 @@ and Status & input candidates on one
 boundary, matching Diagnostics. The header keeps an independent `Glyph padding` value for each
 actual component group; the Status group also exposes mouse width. Family sheets,
 capsule specimens, and the whole-UI preview resolve the values for the component they show. Each
-detail row reports circular padding, minimum enclosing-circle center, and bounding-box offset. Every
-candidate uses its sampled minimum enclosing circle as the placement center. Rotate stays
-frame-aligned, and
+detail row reports circular padding, its declared placement anchor, and one secondary diagnostic.
+Previous, Next, More, Keyframe Transport First/Last, and Tool Snap use their complete visible box;
+Playback and Keyframe Transport Reset use the center of their circular ring; remaining candidates
+use their sampled minimum enclosing circle. Rotate stays frame-aligned, and
 the reviewed Output Info, Warning, and Error icons stay on their production painter and ignore the
 padding control. Playback Play remains equilateral; Previous and Next use their original 90-degree
-chevrons, and Pause keeps its original twin bars. Playback and Keyframe Transport Record are both
-slightly smaller than Stop. First and Last use bars exactly as tall as their rounded triangles. A
-neutral square with the orange circle's diameter makes the shared circle center visible at every
+chevrons, Pause keeps its original twin bars, and both More controls share one contour. Playback and
+Keyframe Transport Record are both slightly smaller than Stop. First and Last use bars exactly as
+tall as their rounded triangles. Status mouse hints continue to use the original production painter.
+A neutral square with the orange circle's diameter makes the shared slot center visible at every
 review size.
 
 Use the always-visible `Icon Library preview` menu-bar switch, or `Probe > Preview Icon Library`,
