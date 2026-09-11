@@ -20,6 +20,7 @@ from . import theme as theme_mod
 
 if TYPE_CHECKING:
     from ..types import ViewportImage
+    from .theme import Theme
 
 log = get_logger("window")
 
@@ -349,6 +350,13 @@ class Window:
 
     def make_current(self) -> None:
         glfw.make_context_current(self._window)
+
+    def apply_theme(self, theme: Theme) -> None:
+        """Apply one viewer-owned theme to this window's ImGui context."""
+
+        self.make_current()
+        imgui.set_current_context(self._imgui_context)
+        theme_mod.apply_colors(imgui, theme)
 
     @property
     def gl_version(self) -> str:

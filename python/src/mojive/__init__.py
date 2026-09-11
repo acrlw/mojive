@@ -94,6 +94,7 @@ if TYPE_CHECKING:
         ShadingModel,
     )
     from .ui.input_bindings import InputAction
+    from .ui.theme import THEME, Theme, ViewportChromeColors, rgb8
 
 
 _EXPORT_MODULES = {
@@ -184,6 +185,7 @@ _EXPORT_MODULES = {
         "ShadingModel",
     ),
     ".ui.input_bindings": ("InputAction",),
+    ".ui.theme": ("THEME", "Theme", "ViewportChromeColors", "rgb8"),
     ".adapters.mujoco_adapter": ("MuJoCoAdapter",),
     ".renderer": ("Renderer",),
     ".mujoco_audit": ("audit_model", "schema_coverage", "visual_coverage"),
@@ -207,6 +209,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "THEME",
     "ActuatorInfo",
     "ActuatorVisualType",
     "AdapterCaps",
@@ -283,10 +286,12 @@ __all__ = [
     "SharedImage",
     "SnapshotPublisher",
     "SnapshotWriter",
+    "Theme",
     "ToyPhysicsAdapter",
     "VideoRecorder",
     "Viewer",
     "ViewerConfig",
+    "ViewportChromeColors",
     "ViewportLayers",
     "ViewportOverlayConfig",
     "VisualGroupInfo",
@@ -301,6 +306,7 @@ __all__ = [
     "make_adapter",
     "read_snapshots",
     "register_adapter",
+    "rgb8",
     "schema_coverage",
     "unregister_adapter",
     "visual_coverage",
