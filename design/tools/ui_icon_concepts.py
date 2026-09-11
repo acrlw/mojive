@@ -42,9 +42,13 @@ ICON_MIN_CLEARANCE = 0.5
 ICON_DEFAULT_PADDING = 0.75
 ICON_MAX_PADDING = 4.0
 ROTATE_FRAME_PADDING = 0.0
+ROTATE_FRAME_STROKE_OVERSHOOT = ICON_STROKE * 0.5
 MORE_ARM_RATIO = 0.94
 STATUS_MOUSE_DEFAULT_WIDTH = OVERLAY_GEOMETRY.hint_mouse_width
 REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
+STROKE_SCALE_LOCKED_ICONS = REVIEW_LOCKED_ICONS | frozenset(
+    ("status-mouse-left", "status-mouse-right", "status-mouse-wheel")
+)
 BOX_CENTERED_ICONS = frozenset(
     (
         "tool-snap",
@@ -62,21 +66,6 @@ BOX_CENTERED_ICONS = frozenset(
 )
 RING_CENTERED_ICONS = frozenset(("playback-reset", "transport-reset"))
 RESET_RING_CENTER = (0.0, 0.47)
-# ``_dimensions_glyph_geometry`` narrows a source stroke to compensate for the
-# DrawList fringe. This concept-only source value makes Scale's fitted shaft
-# match Rotate's fitted ring at the shared 24-unit slot. Preserve the reviewed
-# center clearance and handle size while changing that one visible weight.
-_SCALE_CONCEPT_SOURCE_STROKE = 2.287
-SCALE_CONCEPT_GEOMETRY = replace(
-    OVERLAY_GEOMETRY,
-    tool_stroke=_SCALE_CONCEPT_SOURCE_STROKE,
-    frame_center_gap_ratio=(
-        OVERLAY_GEOMETRY.tool_stroke
-        * OVERLAY_GEOMETRY.frame_center_gap_ratio
-        / _SCALE_CONCEPT_SOURCE_STROKE
-    ),
-)
-
 ICON_FAMILIES = (
     (
         "Viewport tools",
@@ -334,12 +323,21 @@ def minimum_enclosing_circle(points) -> tuple[tuple[float, float], float]:
 
 
 class _Painter:
-    def __init__(self, draw, center, size: float, color) -> None:
+    def __init__(
+        self,
+        draw,
+        center,
+        size: float,
+        color,
+        *,
+        stroke_compensation: float = 1.0,
+    ) -> None:
         self.draw = draw
         self.cx, self.cy = (float(center[0]), float(center[1]))
         self.scale = float(size) / ICON_GRID
+        self.stroke_compensation = float(stroke_compensation)
         self.color = color
-        self.stroke = ICON_STROKE * self.scale
+        self.stroke = ICON_STROKE * self.stroke_compensation * self.scale
 
     def point(self, x: float, y: float) -> tuple[float, float]:
         return self.cx + x * self.scale, self.cy + y * self.scale
@@ -352,7 +350,7 @@ class _Painter:
             self.point(*a),
             self.point(*b),
             self.color,
-            width * self.scale,
+            width * self.stroke_compensation * self.scale,
             cap="round",
         )
 
@@ -373,7 +371,7 @@ class _Painter:
             self.point(*a),
             self.point(*b),
             self.color,
-            width * self.scale,
+            width * self.stroke_compensation * self.scale,
             head_length=head_length * self.scale,
             head_width=head_width * self.scale,
             corner_radius=corner_radius * self.scale,
@@ -393,7 +391,7 @@ class _Painter:
         self.draw.polyline(
             path,
             self.color,
-            width * self.scale,
+            width * self.stroke_compensation * self.scale,
             closed=closed,
             cap=cap or ("butt" if closed else "round"),
         )
@@ -504,7 +502,7 @@ class _Painter:
             self.point(x, y),
             radius * self.scale,
             self.color,
-            width * self.scale,
+            width * self.stroke_compensation * self.scale,
             segments=max(24, round(radius * self.scale * 4.0)),
         )
 
@@ -531,7 +529,7 @@ class _Painter:
             self.point(x0, y0),
             self.point(x1, y1),
             self.color,
-            width * self.scale,
+            width * self.stroke_compensation * self.scale,
             rounding=rounding * self.scale,
             smoothing=smoothing,
         )
@@ -613,8 +611,13 @@ def _rounded_polyline(
 ) -> None:
     """Fill one open centerline as a joined G3 contour."""
 
-    _left, _right, outline = polyline_ribbon(tuple(points), width)
-    p.smooth_polygon(outline, radius, convex_only=False)
+    compensated_width = width * p.stroke_compensation
+    _left, _right, outline = polyline_ribbon(tuple(points), compensated_width)
+    p.smooth_polygon(
+        outline,
+        radius * p.stroke_compensation,
+        convex_only=False,
+    )
 
 
 def _g3_rect(p: _Painter, x0: float, y0: float, x1: float, y1: float, radius: float) -> None:
@@ -639,8 +642,8 @@ def _chevron(p: _Painter, direction: float, x: float, *, scale: float = 1.0) -> 
     _rounded_polyline(
         p,
         _chevron_centerline(direction, x, scale),
-        width=ICON_STROKE * scale,
-        radius=0.68 * scale,
+        width=ICON_STROKE,
+        radius=0.68,
     )
 
 
@@ -670,7 +673,7 @@ def _arc_arrow(
         math.radians(start_degrees + (end_degrees - start_degrees) * index / count)
         for index in range(count + 1)
     )
-    half_width = stroke * 0.5
+    half_width = stroke * p.stroke_compensation * 0.5
     outer = tuple(
         (
             center[0] + (radius + half_width) * math.cos(angle),
@@ -722,7 +725,8 @@ def _draw_tool(p: _Painter, name: str) -> None:
     if name == "tool-move":
         # Keep the accepted Icon Library candidate as one connected G3 outline;
         # the wider central cross remains legible at the 14-point specimen.
-        tip, base, wing, shaft = 8.7, 5.6, 2.65, 0.82
+        tip, base, wing = 8.7, 5.6, 2.65
+        shaft = ICON_STROKE * p.stroke_compensation * 0.5
         p.smooth_polygon(
             (
                 (0.0, -tip),
@@ -750,7 +754,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
                 (-shaft, -base),
                 (-wing, -base),
             ),
-            0.42,
+            0.42 * p.stroke_compensation,
             convex_only=False,
         )
     elif name == "tool-rotate":
@@ -760,10 +764,9 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # makes these narrow curves visibly stair-step at the 14-point size.
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
-        ring_width = OVERLAY_GEOMETRY.tool_stroke * production_scale
-        p.circle(0.0, 0.0, 10.0 * glyph_scale, width=ring_width)
+        p.circle(0.0, 0.0, 10.0 * glyph_scale)
         for ring in _rotate_visible_ring_polygons(
-            OVERLAY_GEOMETRY.tool_stroke,
+            ICON_STROKE * p.stroke_compensation / production_scale,
             OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
             OVERLAY_GEOMETRY.rotate_ring_cap,
             CAPSULE_SMOOTHING,
@@ -774,10 +777,25 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # Keep the accepted viewport Scale glyph as the source of truth. It
         # supplies the original reach, center clearance, joined G3 shafts and
         # endpoint blocks instead of maintaining a second approximation here.
+        # Its DrawList contour narrows the supplied source stroke by one unit;
+        # choose that source from the shared final weight and retain the
+        # production transparent center-shell distance.
+        source_core_width = ICON_STROKE * p.stroke_compensation
+        source_tool_stroke = source_core_width + 1.0
+        scale_geometry = replace(
+            OVERLAY_GEOMETRY,
+            tool_stroke=source_tool_stroke,
+            frame_center_gap_ratio=(
+                OVERLAY_GEOMETRY.tool_stroke
+                * OVERLAY_GEOMETRY.frame_center_gap_ratio
+                * p.stroke_compensation
+                / source_tool_stroke
+            ),
+        )
         paths, dot_radius = _dimensions_glyph_geometry(
             (0.0, 0.0),
             1.0,
-            SCALE_CONCEPT_GEOMETRY,
+            scale_geometry,
             smoothing=CAPSULE_SMOOTHING,
         )
         for path in paths:
@@ -786,11 +804,12 @@ def _draw_tool(p: _Painter, name: str) -> None:
     elif name == "tool-world":
         # Sparse stroked symbols need a larger authored envelope than solid
         # tools to carry comparable visual weight in the same 24-unit slot.
-        p.circle(0.0, 0.0, 8.75, width=1.45)
+        source_width = ICON_STROKE * p.stroke_compensation
+        p.circle(0.0, 0.0, 8.75)
         # Centerline endpoints account for both strokes. The round caps meet
         # the globe's inner edge instead of painting through the outer ring.
-        inner_reach = 8.75 - 1.45 * 0.5 - 1.35 * 0.5
-        p.line((-inner_reach, 0.0), (inner_reach, 0.0), width=1.35)
+        inner_reach = 8.75 - source_width
+        p.line((-inner_reach, 0.0), (inner_reach, 0.0))
         ellipse = tuple(
             (
                 3.53 * math.cos(index * math.tau / 32),
@@ -798,7 +817,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
             )
             for index in range(32)
         )
-        p.polyline(ellipse, closed=True, width=1.35)
+        p.polyline(ellipse, closed=True)
     elif name == "tool-body":
         top = (0.0, -8.62)
         left = (-7.50, -4.31)
@@ -818,12 +837,12 @@ def _draw_tool(p: _Painter, name: str) -> None:
                 endpoint[0] * (length - inset) / length,
                 endpoint[1] * (length - inset) / length,
             )
-            p.line(junction, end, width=1.4)
-        p.circle_filled(*junction, 0.7)
+            p.line(junction, end)
+        p.circle_filled(*junction, ICON_STROKE * p.stroke_compensation * 0.5)
         p.smooth_outline(
             (top, right, lower_right, bottom, lower_left, left),
             0.5,
-            width=1.45,
+            width=ICON_STROKE,
         )
     else:
         # Snap is the production Tool Column contour. Its U-turn is generated
@@ -834,7 +853,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
             production_scale * TOOL_GLYPH_SCALE,
             CAPSULE_SMOOTHING,
         )
-        p.polyline(path, width=OVERLAY_GEOMETRY.tool_stroke * production_scale)
+        p.polyline(path)
         for x, y in (path[0], path[-1]):
             p.smooth_polygon(
                 (
@@ -877,8 +896,8 @@ def _draw_transport(p: _Painter, name: str) -> None:
         _rounded_polyline(
             p,
             _more_centerline(1.18),
-            width=ICON_STROKE * 1.18,
-            radius=0.68 * 1.18,
+            width=ICON_STROKE,
+            radius=0.68,
         )
     else:
         raise ValueError(f"unknown transport icon: {name!r}")
@@ -904,11 +923,11 @@ def _draw_keyframe(p: _Painter, name: str) -> None:
     elif kind == "keyframe":
         _diamond(p, radius=5.0, filled=True)
     elif kind == "add":
-        p.line((-6.6, 0.0), (6.6, 0.0), width=1.65)
-        p.line((0.0, -6.6), (0.0, 6.6), width=1.65)
+        p.line((-6.6, 0.0), (6.6, 0.0))
+        p.line((0.0, -6.6), (0.0, 6.6))
     elif kind == "clear":
-        p.line((-5.8, -5.8), (5.8, 5.8), width=1.65)
-        p.line((5.8, -5.8), (-5.8, 5.8), width=1.65)
+        p.line((-5.8, -5.8), (5.8, 5.8))
+        p.line((5.8, -5.8), (-5.8, 5.8))
     elif kind in {"previous", "next"}:
         direction = -1.0 if kind == "previous" else 1.0
         _chevron(p, direction, direction * 4.4, scale=0.68)
@@ -943,17 +962,17 @@ def _eye_points() -> tuple[tuple[float, float], ...]:
     return (*top, *bottom[1:-1])
 
 
-@lru_cache(maxsize=1)
-def _search_icon_mesh():
+@lru_cache(maxsize=32)
+def _search_icon_mesh(stroke: float = ICON_STROKE):
     """Return one hollow lens and handle joined by a G3 smooth union."""
 
     outer_radius = 5.55
-    inner_radius = 4.05
-    handle_half_width = 0.825
+    inner_radius = outer_radius - stroke
+    handle_half_width = stroke * 0.5
     handle_start = 3.65
     handle_end = 10.775
     handle_tip = handle_end + handle_half_width
-    blend = 1.05
+    blend = stroke * 0.7
 
     def field(x: float, y: float) -> float:
         circle = math.hypot(x, y) - outer_radius
@@ -1037,26 +1056,26 @@ def _search_icon_mesh():
 def _draw_panel(p: _Painter, name: str) -> None:
     kind = name.removeprefix("panel-")
     if kind == "search":
-        vertices, indices, outline, hole = _search_icon_mesh()
+        vertices, indices, outline, hole = _search_icon_mesh(ICON_STROKE * p.stroke_compensation)
         p.indexed_fill(vertices, indices, outline=outline, hole=hole)
     elif kind == "sort":
         for y, end in ((-5.09, 2.24), (0.11, 0.04), (5.31, -2.16)):
-            p.line((-6.76, y), (end, y), width=1.45)
+            p.line((-6.76, y), (end, y))
         # The round tail aligns with the top bar centerline; the head tip aligns
         # with the visible lower edge of the bottom bar.
         p.arrow(
             (5.54, -5.09),
-            (5.54, 5.31 + 1.45 * 0.5),
-            width=1.4,
+            (5.54, 5.31 + ICON_STROKE * p.stroke_compensation * 0.5),
+            width=ICON_STROKE,
             head_length=3.0,
             head_width=4.6,
             round_tail=True,
         )
     elif kind == "clear":
-        p.line((-5.8, -5.8), (5.8, 5.8), width=1.65)
-        p.line((5.8, -5.8), (-5.8, 5.8), width=1.65)
+        p.line((-5.8, -5.8), (5.8, 5.8))
+        p.line((5.8, -5.8), (-5.8, 5.8))
     elif kind == "visible":
-        p.polyline(_eye_points(), closed=True, width=1.45)
+        p.polyline(_eye_points(), closed=True)
         p.circle_filled(0.0, 0.0, 2.05)
     elif kind == "hidden":
         # Match Mojive's hierarchy toggle: a closed curved lid with three
@@ -1071,7 +1090,7 @@ def _draw_panel(p: _Painter, name: str) -> None:
             )
             for index in range(9)
         )
-        p.polyline(lid, width=1.45)
+        p.polyline(lid)
         for offset in (-0.52, 0.0, 0.52):
             lash_x = radius_x * offset
             lash_y = offset_y + lid_height * math.sqrt(max(0.0, 1.0 - offset**2))
@@ -1243,10 +1262,17 @@ def _draw_concept_icon_raw(
     *,
     accent_color=None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+    stroke_compensation: float = 1.0,
 ) -> None:
     """Draw authored geometry before shared placement is applied."""
 
-    painter = _Painter(draw, center, size, color)
+    painter = _Painter(
+        draw,
+        center,
+        size,
+        color,
+        stroke_compensation=stroke_compensation,
+    )
     if name.startswith("tool-"):
         _draw_tool(painter, name)
     elif name.startswith(("transport-", "playback-")):
@@ -1386,6 +1412,7 @@ def _measure_raw_icon(
     size: float = ICON_GRID,
     *,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
+    stroke_compensation: float = 1.0,
 ) -> IconMetrics:
     draw = _MetricsDraw()
     _draw_concept_icon_raw(
@@ -1395,6 +1422,7 @@ def _measure_raw_icon(
         name,
         (1.0, 1.0, 1.0, 1.0),
         mouse_width=mouse_width,
+        stroke_compensation=stroke_compensation,
     )
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
@@ -1415,24 +1443,22 @@ def _icon_layout(
     name: str,
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
-) -> tuple[float, tuple[float, float]]:
+) -> tuple[float, tuple[float, float], float]:
     """Center the declared anchor and fit every visible point to the requested padding."""
 
-    raw = _measure_raw_icon(name, mouse_width=mouse_width)
     default_padding = ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
     if padding is None:
         padding = default_padding
     if name in REVIEW_LOCKED_ICONS:
         padding = ICON_DEFAULT_PADDING
-    anchor_center = _alignment_center(name, raw)
-    offset = (-anchor_center[0], -anchor_center[1])
     padding = float(padding)
     if not ICON_MIN_CLEARANCE <= padding <= ICON_MAX_PADDING:
         raise ValueError(
             f"icon padding must be between {ICON_MIN_CLEARANCE:g} and {ICON_MAX_PADDING:g}"
         )
-    # Rotate's outer screen ring is itself the slot frame. Keep its visible
-    # outside diameter on the orange guide while scaling all inner rings with it.
+    # Rotate's outer screen-ring centerline is itself the slot frame. Its stroke
+    # straddles the orange guide exactly as the production Tool Column painter
+    # does, so the visible edge extends by half of the canonical stroke.
     reference_name = ICON_LAYOUT_REFERENCES.get(name, name)
     target_padding = (
         ROTATE_FRAME_PADDING
@@ -1440,15 +1466,52 @@ def _icon_layout(
         else padding + ICON_PADDING_BIAS.get(reference_name, 0.0)
     )
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
-    reference_raw = _measure_raw_icon(reference_name, mouse_width=mouse_width)
-    reference_center = _alignment_center(reference_name, reference_raw)
-    reference_shifted = _measure_raw_icon(
-        reference_name,
-        (-reference_center[0], -reference_center[1]),
+    if name == "tool-rotate":
+        safe_radius += ROTATE_FRAME_STROKE_OVERSHOOT
+
+    normalize_stroke = reference_name not in STROKE_SCALE_LOCKED_ICONS
+
+    def fitted_scale(layout_scale: float) -> float:
+        compensation = 1.0 / layout_scale if normalize_stroke else 1.0
+        reference_raw = _measure_raw_icon(
+            reference_name,
+            mouse_width=mouse_width,
+            stroke_compensation=compensation,
+        )
+        reference_center = _alignment_center(reference_name, reference_raw)
+        reference_shifted = _measure_raw_icon(
+            reference_name,
+            (-reference_center[0], -reference_center[1]),
+            mouse_width=mouse_width,
+            stroke_compensation=compensation,
+        )
+        return safe_radius / reference_shifted.origin_extent
+
+    # Fitting each complete icon used to scale its stroke together with its
+    # reach, which made nominally identical 1.5-unit strokes land anywhere from
+    # thin to very heavy. Counter-scale the construction stroke and solve only
+    # for the envelope. A short fixed-point solve also handles the implicit
+    # search mesh and filled G3 ribbons whose visible bounds depend on width.
+    layout_scale = 1.0
+    for _ in range(16):
+        updated_scale = fitted_scale(layout_scale)
+        if math.isclose(updated_scale, layout_scale, rel_tol=0.0, abs_tol=1e-10):
+            layout_scale = updated_scale
+            break
+        layout_scale = updated_scale
+    stroke_compensation = 1.0 / layout_scale if normalize_stroke else 1.0
+    raw = _measure_raw_icon(
+        name,
         mouse_width=mouse_width,
+        stroke_compensation=stroke_compensation,
     )
-    layout_scale = safe_radius / reference_shifted.origin_extent
-    return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
+    anchor_center = _alignment_center(name, raw)
+    offset = (-anchor_center[0], -anchor_center[1])
+    return (
+        layout_scale,
+        (offset[0] * layout_scale, offset[1] * layout_scale),
+        stroke_compensation,
+    )
 
 
 def icon_alignment_anchor(name: str) -> str:
@@ -1469,9 +1532,13 @@ def icon_alignment_center(
 ) -> tuple[float, float]:
     """Return the declared anchor center after candidate placement."""
 
-    raw = _measure_raw_icon(name, mouse_width=mouse_width)
+    layout_scale, offset, stroke_compensation = _icon_layout(name, padding, mouse_width)
+    raw = _measure_raw_icon(
+        name,
+        mouse_width=mouse_width,
+        stroke_compensation=stroke_compensation,
+    )
     source_center = _alignment_center(name, raw)
-    layout_scale, offset = _icon_layout(name, padding, mouse_width)
     return (
         source_center[0] * layout_scale + offset[0],
         source_center[1] * layout_scale + offset[1],
@@ -1491,7 +1558,7 @@ def draw_concept_icon(
 ) -> None:
     """Draw one declared-anchor candidate fitted to a padded circular slot."""
 
-    layout_scale, offset = _icon_layout(name, padding, mouse_width)
+    layout_scale, offset, stroke_compensation = _icon_layout(name, padding, mouse_width)
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
         float(center[0]) + offset[0] * unit_scale,
@@ -1505,6 +1572,7 @@ def draw_concept_icon(
         color,
         accent_color=accent_color,
         mouse_width=mouse_width,
+        stroke_compensation=stroke_compensation,
     )
 
 

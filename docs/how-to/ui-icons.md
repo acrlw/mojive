@@ -52,8 +52,8 @@ consumer keeps an independent value: Viewport tools, Viewport playback, Keyframe
 transport, Keyframes actions, Panels, Scene helpers, and Status & input. Family sheets, capsule
 specimens, and the whole-UI preview resolve the value for the component they are showing. Viewport
 tools default to padding 0.50; the other groups keep their own defaults. Rotate is frame-aligned:
-its outer screen ring reaches the orange placement circle, while the three inner rings follow the
-same complete-master scale.
+its outer screen-ring centerline coincides with the orange placement circle, while half of its
+stroke sits on each side and the three inner rings keep the same visible 1.50-unit width.
 Output's mature Info, Warning, and Error painters are also locked; the review control does not
 change their geometry, size, or placement. Detail rows report `pad`, the declared anchor at
 `0.00, 0.00`, and either the axis-aligned box or minimum enclosing circle as a secondary diagnostic.
@@ -78,13 +78,15 @@ declared geometric feature per silhouette:
 - all remaining candidates center their sampled minimum enclosing circle.
 
 The concept library samples the full visible boundary, including half of each outline stroke,
-translates the declared center onto the orange-circle center, and uniformly scales the complete
-master until every visible point reaches no further than the requested padding. Stroke, gaps, dots,
-corner profiles, and antialias-gap limits therefore keep their authored ratios. Align the icon slot
-to the current font's baseline and cap-height guides, inspect the real row height at 1x and 2x, and
-compare related or mirrored icons. If a glyph still looks displaced, correct its authored geometry
-or its documented anchor, then rerun every target size. Keep the before and after capture in the
-review output.
+translates the declared center onto the orange-circle center, and solves the scale that reaches the
+requested padding. It counter-scales ordinary construction strokes during that fit, so every main
+stroke resolves to 1.50 units on the 24-unit grid; padding changes the glyph's reach without also
+making its lines heavier. Solid masses, gaps, dots, and head dimensions continue to follow the
+glyph envelope. The reviewed Output severity and original mouse painters retain their established
+weights. Align the icon slot to the current font's baseline and cap-height guides, inspect the real
+row height at 1x and 2x, and compare related or mirrored icons. If a glyph still looks displaced,
+correct its authored geometry or its documented anchor, then rerun every target size. Keep the
+before and after capture in the review output.
 
 Apply interaction color at the control boundary rather than baking it into the icon master. Capsule
 controls use `viewport.off_foreground` at rest, `hover_foreground` on hover,
@@ -213,6 +215,7 @@ edge of the frame is about 4.58 grid units on each side.
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
+| Icons with the same authored stroke look heavier after fitting | The per-icon envelope scale was also applied to its stroke | Counter-scale ordinary construction strokes by the inverse fit so the final main weight remains 1.50 grid units |
 | Scale remains displaced after it is enlarged | Its source origin was preserved instead of its declared minimum-circle center | Center the sampled minimum enclosing circle before fitting the complete master |
 | Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks close to the hub diameter and compare their area with the hub at 112 points |
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
