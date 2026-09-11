@@ -37,13 +37,14 @@ The `Icon library` tab is a concept-only review surface. Its Overview and family
 Viewport tools, Viewport playback, Keyframe transport, Keyframes actions, Panels, Scene helpers,
 and Status & input candidates on one
 24-unit grid at 14, 24, 56, and 112 pt. The orange circle is the complete 24-unit circular placement
-boundary, matching Diagnostics. The header keeps independent `Radial center` and `Glyph padding`
-values for each actual component group; the Status group also exposes mouse width. Family sheets,
+boundary, matching Diagnostics. The header keeps an independent `Glyph padding` value for each
+actual component group; the Status group also exposes mouse width. Family sheets,
 capsule specimens, and the whole-UI preview resolve the values for the component they show. Each
-detail row reports radial padding and bounding-box center offset. Rotate stays frame-aligned, and
-the reviewed Output Info, Warning, and Error icons stay on their production painter and ignore both
-controls. Playback Play stays on its authored origin; selected playback controls and every
-Keyframe transport mark are locked to their complete stroked bounding-box center. A neutral square
+detail row reports circular padding and bounding-box center offset. Rotate stays frame-aligned, and
+the reviewed Output Info, Warning, and Error icons stay on their production painter and ignore the
+padding control. Playback Play uses an equilateral authored contour with the same 60-degree tip as
+Previous and Next; every playback and Keyframe transport mark uses its complete stroked
+bounding-box center. A neutral square
 with the orange circle's diameter makes that box alignment visible at every review size.
 
 Use the always-visible `Icon Library preview` menu-bar switch, or `Probe > Preview Icon Library`,
