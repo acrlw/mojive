@@ -461,15 +461,11 @@ def test_severity_glyph_marks_stay_separated_and_inside_their_frames():
             ring_bounds = bounds(ring[0])
             width = ring_bounds[2] - ring_bounds[0]
             height = ring_bounds[3] - ring_bounds[1]
-            # Every frame carries the same stroke weight, so all three fill one box. The
-            # triangle rounds its corners, so its span lands one fringe wider at 12 px.
-            assert width == pytest.approx(size * 0.94, abs=0.16)
-            if kind == "warning":
-                # A warning sign reads as a triangle only while its sides stay equal,
-                # which puts its height near sqrt(3)/2 of its width.
-                assert height / width == pytest.approx(0.953, abs=0.02)
-            else:
-                assert height == pytest.approx(size * 0.94, abs=0.06)
+            outer = np.asarray(ring[0])
+            # Every expanded frame fits the same circular guide and box.
+            assert np.linalg.norm(outer, axis=1).max() == pytest.approx(size * 0.47, abs=0.06)
+            assert width == pytest.approx(size * 0.94, abs=0.06)
+            assert height == pytest.approx(size * 0.94, abs=0.06)
             dot_bounds, bar_bounds = bounds(dot[0]), bounds(bar[0])
             if kind == "error":
                 # The cross spans both stems evenly and keeps a real margin to the ring.
@@ -487,20 +483,46 @@ def test_severity_glyph_marks_stay_separated_and_inside_their_frames():
             # Both marks keep a visible dot, gap and stem at every size.
             assert vertical_gap(dot_bounds, bar_bounds) > 0.0
             assert dot_bounds[2] - dot_bounds[0] >= 0.8
-            # The isolated dot compensates its larger antialiased edge-to-area ratio.
+            # The dot has a small optical overshoot so it survives antialiasing.
             assert (dot_bounds[2] - dot_bounds[0]) / (
                 bar_bounds[2] - bar_bounds[0]
-            ) == pytest.approx(1.12)
+            ) == pytest.approx(1.18)
             assert bar_bounds[3] - bar_bounds[1] >= 1.0
-            if kind == "warning":
-                # The slanted sides taper, so the mark stays inside the triangle interior.
-                assert dot_bounds[1] > ring_bounds[1]
-                assert bar_bounds[3] < ring_bounds[3]
-                assert dot_bounds[2] - dot_bounds[0] < size * 0.5
+            mark_height = max(dot_bounds[3], bar_bounds[3]) - min(dot_bounds[1], bar_bounds[1])
+            assert mark_height >= size * 0.44
 
 
-def test_info_and_warning_keep_opposite_mark_orientation_and_matching_proportions():
-    """Info uses i and warning uses !, each centered in its own frame's interior."""
+def test_severity_glyphs_scale_every_dimension_from_one_design_grid():
+    """Small icons preserve the same stroke, spacing, and safe-area proportions."""
+
+    def normalized_bounds(size, kind):
+        result = []
+        for vertices, *_ in severity_meshes(size, kind):
+            points = np.asarray(vertices)
+            result.append(
+                np.asarray(
+                    (
+                        points[:, 0].min(),
+                        points[:, 1].min(),
+                        points[:, 0].max(),
+                        points[:, 1].max(),
+                    )
+                )
+                / size
+            )
+        return result
+
+    for kind in ("info", "warning", "error"):
+        reference = normalized_bounds(24.0, kind)
+        for size in (12.0, 14.0, 20.0, 32.0, 56.0):
+            for actual, expected in zip(normalized_bounds(size, kind), reference, strict=True):
+                # Circle tessellation adds more vertices at large sizes; its
+                # offset approximation may move an extremum by a tiny fraction.
+                np.testing.assert_allclose(actual, expected, atol=5e-4)
+
+
+def test_info_and_warning_keep_opposite_orientation_and_visible_warning_dot():
+    """Info uses i and warning uses ! inside the same circular frame."""
 
     def bounds(points):
         xs = [point[0] for point in points]
@@ -526,11 +548,11 @@ def test_info_and_warning_keep_opposite_mark_orientation_and_matching_proportion
             # The mark is centered horizontally in either frame.
             assert marks[kind][3] == pytest.approx(0.0, abs=1e-6)
             assert marks[kind][4] == pytest.approx(0.0, abs=1e-6)
-        # A small triangle scales the complete mark to clear its thicker inner boundary.
-        ratios = [marks["warning"][index] / marks["info"][index] for index in range(3)]
-        assert 0.85 <= ratios[0] <= 1.0
-        assert ratios == pytest.approx([ratios[0]] * 3)
-        assert marks["warning"][2] > marks["warning"][0] * 0.6
+            assert marks[kind][3] == pytest.approx(marks[kind][4], abs=1e-6)
+        # Warning is the exact vertical reflection of info.
+        assert marks["warning"] == pytest.approx(marks["info"])
+        assert marks["warning"][1] > 0.0
+        assert marks["warning"][2] > marks["warning"][0]
 
 
 @pytest.mark.parametrize("size", (12, 14, 20, 32, 56, 140))
@@ -550,23 +572,10 @@ def test_severity_ink_is_centered_inside_the_stroked_frame(size, kind):
         / np.linalg.norm(edges, axis=1)
     )
     assert distances.min() >= 0.6 - 1e-6
-    if kind == "warning":
-        sides = np.argsort(np.linalg.norm(edges, axis=1))[-3:]
-        clearance = distances[:, sides].min(axis=0)
-        np.testing.assert_allclose(clearance, [clearance[0]] * 3, atol=1e-6)
-    else:
-        # Integrate the rendered triangles rather than treating dot and stem as
-        # equal-sized boxes: their unequal ink areas otherwise shift the visual center.
-        area_sum = 0.0
-        moment = np.zeros(2)
-        for vertices, indices, *_ in meshes[1:]:
-            triangles = np.asarray(vertices)[np.asarray(indices).reshape(-1, 3)]
-            a = triangles[:, 1] - triangles[:, 0]
-            b = triangles[:, 2] - triangles[:, 0]
-            areas = abs(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0])
-            moment += (triangles.mean(axis=1) * areas[:, None]).sum(axis=0)
-            area_sum += areas.sum()
-        np.testing.assert_allclose(moment / area_sum, center, atol=1e-6)
+    # Center the visible silhouette itself. Area centering shifts i/! toward the
+    # long stem and leaves their overall bounds visibly off-center.
+    bounds_center = (ink.min(axis=0) + ink.max(axis=0)) * 0.5
+    np.testing.assert_allclose(bounds_center, center, atol=1e-6)
 
 
 def test_default_workspace_panels_do_not_expose_accidental_close_buttons(panels: PanelSet):

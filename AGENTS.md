@@ -65,6 +65,9 @@ Use these names consistently:
   and reviewed golden fixtures use their existing tracked locations when their update is in scope.
 - Reuse or extend a Make target for visual acceptance of visible behavior; add a target when no
   existing one demonstrates the change.
+- Follow the [UI icon design guide](docs/how-to/ui-icons.md) for custom glyphs. Author each family
+  on one canonical grid, scale every visible dimension together, and verify production geometry at
+  every target size; do not add an isolated pixel floor to one stroke, dot, gap, or inset.
 - Follow [implementation and collaboration standards](docs/guides/development.md#implementation-principles)
   for ownership, command transactions, capability boundaries, reusable controls, and handoffs.
 - Basic editor interactions must work without physics capabilities. Gate backend writes at their

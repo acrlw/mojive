@@ -69,6 +69,7 @@ help:
 		'  make outline           selection and antialiased outline' \
 		'  make inspector         compact Inspector transform reference image' \
 		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
+		'  make ui-icon-concepts  concept-only icon family review captures' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
@@ -339,6 +340,16 @@ gallery:
 ui-diagnostics:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png $(ARGS)
 
+.PHONY: ui-icon-concepts
+ui-icon-concepts:
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group transport -o output/ui-icon-concepts/transport.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group status-and-input -o output/ui-icon-concepts/status-input.png
+
 ui-feasibility:
 	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)
 
@@ -380,6 +391,7 @@ ui-gallery:
 	$(PY) design/tools/render_ui_feasibility.py --page workspace -o output/ui-workspace.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/ui-geometry-playback.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools -o output/ui-geometry-tools.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab hints -o output/ui-geometry-hints.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab gizmos -o output/ui-geometry-transform-gizmos.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers.png

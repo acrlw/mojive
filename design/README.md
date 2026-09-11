@@ -25,13 +25,24 @@ Use the `Probe` menu to switch between:
   Control/Joints/Camera dock, Inspector, and the persistent status bar.
 - `Panels`: responsive specimens for Control, Joints, Camera, Inspector, Hierarchy, Assets, Stats,
   and Sensors.
-- `Geometry`: focused construction and state studies for playback, tools, hints, transform gizmos,
-  joint gizmos, helpers, status, settings, panels, and lower workspaces.
+- `Geometry`: focused construction and state studies for playback, tools, icon concepts, hints,
+  transform gizmos, joint gizmos, helpers, status, settings, panels, and lower workspaces.
 
 The Playback, Tools, and Hints tabs include a `Live component experiment` panel. Changes update the
 specimen immediately. `Copy current values` copies the relevant `OverlayGeometry` fields for review;
 `Reset production defaults` restores values from `python/src/mojive/ui/viewport_widgets.py`. Probe changes
 remain local until they are deliberately implemented in production.
+
+The `Icon library` tab is a concept-only review surface. Its Overview and family tabs compare
+Viewport tools, Transport, Keyframes, Panels, Scene helpers, and Status & input candidates on one
+24-unit grid at 14, 20, 32, and 56 pt. The orange circle is the complete 24-unit circular placement
+boundary, matching Diagnostics. Each detail row reports radial padding and bounding-box center
+offset. The candidate painters do not replace production icons; reviewed Output severity icons are
+shown through their production painter. Generate the whole review set with:
+
+```bash
+make ui-icon-concepts
+```
 
 The default Workspace follows production behavior: regular tool hints live in the status bar,
 Type-value appears only in the delayed handle-hover state, and joint limit labels are hidden until
@@ -90,6 +101,7 @@ Individual captures are useful while iterating:
 .venv/bin/python design/tools/render_ui_feasibility.py --page panels -o output/ui-panels.png
 .venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/ui-playback.png
 .venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools -o output/ui-tools.png
+.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
 .venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab hints -o output/ui-hints.png
 .venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab gizmos -o output/ui-gizmos.png
 .venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab helpers -o output/ui-helpers.png

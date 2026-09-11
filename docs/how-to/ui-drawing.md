@@ -4,6 +4,8 @@ Start with the drawing surface and its state owner. UI widgets receive a `Draw2D
 diagnostics use a debug `Layer`. Both consume the shared geometry without importing each other.
 For example commands and the pixel-coordinate debug API, see [Debug drawing](debug-draw.md).
 For radius, smoothing, and native installation, see [G3 UI corners](ui-corners.md).
+For canonical grids, optical sizing, family consistency, and multi-size acceptance, see
+[Design and verify UI icons](ui-icons.md).
 
 ## Choose the entry point
 
@@ -195,6 +197,7 @@ Transform and joint gizmos use this same implementation.
 | Submission, AA, winding, or vertex offsets | `python/tests/test_draw2d.py` |
 | Gizmo appearance and interaction | `python/tests/test_gizmo.py`, `python/tests/gpu/test_gizmo.py`, `make gizmo-gallery` |
 | Radius/smoothing controls | `python/tests/gpu/test_ui_corner_controls.py`, `make ui-corners-gallery` |
+| Compact UI icon geometry | family-focused CPU tests, `make ui-diagnostics`, and the [icon design guide](ui-icons.md) |
 | Retained primitives and bridge | `python/tests/test_debugdraw.py`, `python/tests/gpu/test_debugdraw.py`, `examples/debug_draw.py` |
 | Dependency boundaries | `python/tests/test_layering.py` |
 

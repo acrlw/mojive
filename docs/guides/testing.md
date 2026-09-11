@@ -46,6 +46,7 @@ Pure prose, link, and metadata edits use their own rows instead of the CPU or GP
 | MuJoCo model loading | one XML path with the model-suite module | `make mujoco-model-suite` |
 | Rendering behavior, render pass, or shader | one GPU test file | `make gpu`, `make gpu-wgpu`, and relevant visual output |
 | Visual interaction or settings layout | focused UI GPU test | relevant scripted gallery or interactive Make target with captured evidence |
+| Custom UI icon geometry | family-focused CPU test and production multi-size gallery | `make check`, focused UI GPU test, and inspected capture following the [icon design guide](../how-to/ui-icons.md#verify-geometry-and-raster-output) |
 | Native renderer probe or its shader | `make native-test`, `make native-probe` | `make check`, relevant `make native-gallery` or `make native-benchmark` evidence; Python rendering changes also use the rendering row above |
 | Native binding boundary | `make native-bindings-test`; `make cpp-python-test` and `make cpp-python-gpu` for the private runtime | `make check`; relevant `make native-bindings-benchmark` evidence for performance claims |
 | Registered regression invariant | its focused regression test | `make reverse` |

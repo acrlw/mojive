@@ -25,6 +25,16 @@ if __package__:
         end_padding,
         spacing_metrics,
     )
+    from .ui_icon_concepts import (
+        ICON_BOUND_DIAMETER,
+        ICON_FAMILIES,
+        ICON_GRID,
+        ICON_GROUP_BY_SLUG,
+        ICON_LIBRARY_TABS,
+        draw_concept_icon,
+        icon_family,
+        icon_metrics,
+    )
     from .ui_redesign import (
         RECORD_GLYPH_RADIUS,
         RESET_GLYPH_SCALE,
@@ -43,6 +53,16 @@ else:
         draw_capsule_shell,
         end_padding,
         spacing_metrics,
+    )
+    from ui_icon_concepts import (
+        ICON_BOUND_DIAMETER,
+        ICON_FAMILIES,
+        ICON_GRID,
+        ICON_GROUP_BY_SLUG,
+        ICON_LIBRARY_TABS,
+        draw_concept_icon,
+        icon_family,
+        icon_metrics,
     )
     from ui_redesign import (
         RECORD_GLYPH_RADIUS,
@@ -75,7 +95,7 @@ from mojive.ui.panels import (
     search_input,
     searchable_ordered_list_header,
 )
-from mojive.ui.panels.filters import filter_pills, severity_color, severity_icon
+from mojive.ui.panels.filters import filter_pills, severity_color, severity_icon, severity_meshes
 from mojive.ui.panels.hierarchy import disclosure_triangle
 from mojive.ui.panels.keyframes import KeyframesPanel, _command_button, _draw_command_icon
 from mojive.ui.panels.output import OutputPanel
@@ -85,7 +105,6 @@ from mojive.ui.perturb import OUTLINE_CORNER_RADIUS_PT
 from mojive.ui.theme import THEME, rgb8
 from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING
 from mojive.ui.viewport_widgets import (
-    CAPSULE_SURFACE_ALPHA,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
     OVERLAY_GEOMETRY,
     PLAYBACK_HALF_HEIGHT_PT,
@@ -115,6 +134,7 @@ GEOMETRY_TABS = (
     "Corners",
     "Playback",
     "Tools",
+    "Icon library",
     "Hints & input",
     "Transform gizmos",
     "Joint & helpers",
@@ -352,6 +372,7 @@ class ProbeState:
 
     geometry_tab: str = "Playback"
     geometry_tab_initialized: bool = False
+    icon_library_tab: str = "Overview"
     show_playback: bool = True
     show_tool_column: bool = True
     show_joint_gizmos: bool = True
@@ -875,7 +896,7 @@ def _draw_label_button(
         if active
         else CONCEPT_THEME.bg_frame_hovered
         if hovered
-        else (*CONCEPT_THEME.bg_popup[:3], CAPSULE_SURFACE_ALPHA)
+        else CONCEPT_THEME.viewport.surface
     )
     foreground = CONCEPT_THEME.primary_bright if hovered else CONCEPT_THEME.text
     x, y = position
@@ -3626,9 +3647,11 @@ def _draw_diagnostic_gallery(state, scale):
     """Inspect the production severity paths and control rows at several sizes."""
     ctx = PanelContext(None, None, theme=CONCEPT_THEME, style_scale=scale)
     draw = ImguiDraw2D()
+    reference = rgb8(255, 126, 48, 0.92)
     imgui.text("Output severity · production geometry")
+    imgui.text_disabled("Info: circle + i   |   Warning: circle + !   |   Error: circle + cross")
     imgui.text_disabled(
-        "Info: circle + i   |   Warning: smooth triangle + !   |   Error: circle + cross"
+        "Orange guide: nominal diameter · labels: size · frame diameter / mark height"
     )
     imgui.spacing()
     origin = imgui.get_cursor_screen_pos()
@@ -3638,11 +3661,21 @@ def _draw_diagnostic_gallery(state, scale):
         for column, size in enumerate((14, 20, 32, 56)):
             center = (x + (170 + 128 * column) * scale, y + 32 * scale)
             severity_icon(draw, center, size * scale, level, severity_color(ctx.theme, level))
+            draw.circle(center, size * scale * 0.5, reference, 0.65 * scale, segments=64)
+            meshes = severity_meshes(size * scale, level)
+            frame = np.asarray(meshes[0][0], np.float64)
+            extent = np.linalg.norm(frame, axis=1).max() / (size * scale * 0.5)
+            mark = np.concatenate([np.asarray(mesh[0], np.float64) for mesh in meshes[1:]])
+            mark_height = np.ptp(mark[:, 1]) / (size * scale)
+            label = f"{size} · {extent:.0%}/{mark_height:.0%}"
+            label_width, _ = draw.text_size(label)
             draw.text(
-                (center[0] - 10 * scale, y + 67 * scale), CONCEPT_THEME.text_disabled, str(size)
+                (center[0] - label_width * 0.5, y + 67 * scale),
+                CONCEPT_THEME.text_disabled,
+                label,
             )
     imgui.dummy(imgui.ImVec2(720 * scale, 300 * scale))
-    imgui.text("Palette: #8AB7C0 / #C9A15C / #D06744 · warning smoothing 0.618")
+    imgui.text("Palette: #8AB7C0 / #C9A15C / #D06744 · mark smoothing 0.618")
     imgui.text("Click a capsule to toggle it; log text keeps the same neutral color.")
     clicked = filter_pills(
         ctx,
@@ -3732,6 +3765,206 @@ def _draw_diagnostic_gallery(state, scale):
             )
             state.slide_ctrl = edit.value
         imgui.end_child()
+
+
+_ICON_REVIEW_SIZES = (14.0, 20.0, 32.0, 56.0)
+
+
+def _concept_icon_color(name: str):
+    if name == "status-info":
+        return CONCEPT_THEME.info
+    if name == "status-warning":
+        return CONCEPT_THEME.warning
+    if name == "status-error":
+        return CONCEPT_THEME.danger
+    return CONCEPT_THEME.text
+
+
+def _draw_concept_icon_specimen(draw, center, size: float, name: str, scale: float) -> None:
+    """Draw one candidate inside the shared circular placement boundary."""
+
+    guide_radius = size * ICON_BOUND_DIAMETER / ICON_GRID * 0.5
+    if name.startswith("status-") and name.removeprefix("status-") in {
+        "info",
+        "warning",
+        "error",
+    }:
+        # Output already has a reviewed production family. Show that exact
+        # painter here so the concept library cannot silently drift from it.
+        severity_icon(
+            draw,
+            center,
+            size,
+            name.removeprefix("status-"),
+            _concept_icon_color(name),
+        )
+    else:
+        draw_concept_icon(draw, center, size, name, _concept_icon_color(name))
+    # Draw the boundary last so any collision remains visible instead of being
+    # hidden below opaque icon ink.
+    draw.circle(
+        center,
+        guide_radius,
+        (*CONCEPT_THEME.warning[:3], 0.72),
+        max(0.75, 0.9 * scale),
+        segments=max(32, round(guide_radius * 4.0)),
+    )
+
+
+def _icon_review_metrics(name: str) -> tuple[float, float, float]:
+    """Return radial clearance and bounding-box center offset on the 24-unit grid."""
+
+    if name.startswith("status-") and name.removeprefix("status-") in {
+        "info",
+        "warning",
+        "error",
+    }:
+        meshes = severity_meshes(ICON_GRID, name.removeprefix("status-"))
+        points = np.concatenate([np.asarray(mesh[0], np.float64) for mesh in meshes])
+        bounds = (
+            float(points[:, 0].min()),
+            float(points[:, 1].min()),
+            float(points[:, 0].max()),
+            float(points[:, 1].max()),
+        )
+        radial_extent = float(np.linalg.norm(points, axis=1).max())
+        return (
+            ICON_BOUND_DIAMETER * 0.5 - radial_extent,
+            (bounds[0] + bounds[2]) * 0.5,
+            (bounds[1] + bounds[3]) * 0.5,
+        )
+    metrics = icon_metrics(name)
+    offset_x, offset_y = metrics.center_offset
+    return metrics.radial_clearance, offset_x, offset_y
+
+
+def _draw_icon_library_overview(draw, origin, scale: float) -> None:
+    card_width = 468.0 * scale
+    card_height = 244.0 * scale
+    gap_x = 20.0 * scale
+    gap_y = 18.0 * scale
+    for family_index, (family, icons) in enumerate(ICON_FAMILIES):
+        column = family_index % 3
+        row = family_index // 3
+        x0 = origin[0] + column * (card_width + gap_x)
+        y0 = origin[1] + row * (card_height + gap_y)
+        x1, y1 = x0 + card_width, y0 + card_height
+        draw.rect_filled((x0, y0), (x1, y1), CONCEPT_THEME.bg_child, rounding=8.0 * scale)
+        draw.rect(
+            (x0, y0),
+            (x1, y1),
+            CONCEPT_THEME.border,
+            max(0.75, scale),
+            rounding=8.0 * scale,
+        )
+        draw.text((x0 + 16.0 * scale, y0 + 12.0 * scale), CONCEPT_THEME.text, family)
+        draw.text(
+            (x0 + 16.0 * scale, y0 + 34.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            f"{len(icons)} candidates · 20 pt",
+        )
+
+        columns = min(5, len(icons))
+        cell_width = (card_width - 28.0 * scale) / columns
+        for icon_index, (label, name) in enumerate(icons):
+            icon_column = icon_index % columns
+            icon_row = icon_index // columns
+            center = (
+                x0 + 14.0 * scale + cell_width * (icon_column + 0.5),
+                y0 + (86.0 + icon_row * 76.0) * scale,
+            )
+            _draw_concept_icon_specimen(draw, center, 20.0 * scale, name, scale)
+            draw.centered_label(
+                label,
+                (center[0], center[1] + 29.0 * scale),
+                CONCEPT_THEME.text_disabled,
+                cell_width - 8.0 * scale,
+            )
+
+
+def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
+    icons = icon_family(family)
+    label_width = 230.0 * scale
+    centers = tuple(origin[0] + offset * scale for offset in (330.0, 535.0, 765.0, 1085.0))
+    header_y = origin[1] + 10.0 * scale
+    draw.text((origin[0], header_y), CONCEPT_THEME.text, family)
+    draw.text(
+        (origin[0], header_y + 24.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Orange = 24-unit placement bound · every glyph keeps measurable inner padding",
+    )
+    for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
+        draw.centered_label(
+            f"{int(size)} pt",
+            (center_x, header_y + 62.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            90.0 * scale,
+        )
+
+    rows_y = header_y + 98.0 * scale
+    # Ten-row Transport must remain fully visible above the horizontal
+    # scrollbar in the standard 1600x1000 review capture.
+    row_height = 66.0 * scale
+    right = origin[0] + 1370.0 * scale
+    for row, (label, name) in enumerate(icons):
+        center_y = rows_y + row_height * row + row_height * 0.5
+        if row % 2 == 0:
+            draw.rect_filled(
+                (origin[0] - 10.0 * scale, center_y - row_height * 0.5),
+                (right, center_y + row_height * 0.5),
+                (*CONCEPT_THEME.bg_frame[:3], 0.55),
+                rounding=5.0 * scale,
+            )
+        draw.text(
+            (origin[0] + 10.0 * scale, center_y - imgui.get_text_line_height() * 0.5),
+            CONCEPT_THEME.text,
+            label,
+        )
+        for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
+            _draw_concept_icon_specimen(draw, (center_x, center_y), size * scale, name, scale)
+
+        meta_x = origin[0] + label_width + 1000.0 * scale
+        clearance, offset_x, offset_y = _icon_review_metrics(name)
+        draw.text(
+            (meta_x, center_y - 13.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            name,
+        )
+        draw.text(
+            (meta_x, center_y + 7.0 * scale),
+            CONCEPT_THEME.text_disabled,
+            f"pad {clearance:.2f}u · center {offset_x:+.2f},{offset_y:+.2f}u",
+        )
+
+
+def _draw_icon_library_page(
+    draw, origin, available_width: float, scale: float, state: ProbeState
+) -> None:
+    """Render concept-only icon families without changing production painters."""
+
+    x0, y0 = float(origin[0]), float(origin[1])
+    draw.text((x0 + 42.0 * scale, y0 + 2.0 * scale), CONCEPT_THEME.text, "Mojive icon library")
+    draw.text(
+        (x0 + 42.0 * scale, y0 + 25.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Concept candidates · circular placement bound · reviewed production icons reused",
+    )
+    imgui.set_cursor_screen_pos(imgui.ImVec2(x0 + 42.0 * scale, y0 + 54.0 * scale))
+    state.icon_library_tab = _wrapped_tabs(
+        tuple(
+            (label, "icon-library", label.casefold().replace(" ", "-").replace("&", "and"))
+            for label in ICON_LIBRARY_TABS
+        ),
+        state.icon_library_tab,
+        max(1.0, available_width - 84.0 * scale),
+        gap=4.0 * scale,
+    )
+    content_y = float(imgui.get_cursor_screen_pos().y) + 14.0 * scale
+    content_origin = (x0 + 42.0 * scale, content_y)
+    if state.icon_library_tab == "Overview":
+        _draw_icon_library_overview(draw, content_origin, scale)
+    else:
+        _draw_icon_family_detail(draw, content_origin, state.icon_library_tab, scale)
 
 
 def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
@@ -4113,6 +4346,9 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 note_color,
                 label,
             )
+
+    elif active_tab == "Icon library":
+        _draw_icon_library_page(draw, (x0, content_y), size.x, scale, state)
 
     elif active_tab == "Hints & input":
         hint_label_x = x0 + 54.0 * scale
@@ -4609,6 +4845,7 @@ def render(
     interactive: bool,
     initial_page: str,
     initial_geometry_tab: str,
+    initial_icon_group: str,
     initial_rotate_cap: str,
     ui_scale: float,
     interactive_fps: float,
@@ -4639,6 +4876,7 @@ def render(
         state = ProbeState(
             page=initial_page,
             geometry_tab=initial_geometry_tab,
+            icon_library_tab=initial_icon_group,
             rotate_ring_cap=initial_rotate_cap,
             capsule_outline=capsule_outline,
         )
@@ -4723,6 +4961,7 @@ def main() -> None:
             "corners",
             "playback",
             "tools",
+            "icons",
             "hints",
             "gizmos",
             "helpers",
@@ -4734,6 +4973,12 @@ def main() -> None:
         ),
         default="playback",
         help="Initial non-closeable tab on the geometry page",
+    )
+    parser.add_argument(
+        "--icon-group",
+        choices=tuple(ICON_GROUP_BY_SLUG),
+        default="overview",
+        help="Initial family on the concept-only Icon library geometry tab",
     )
     parser.add_argument(
         "--rotate-cap",
@@ -4784,6 +5029,7 @@ def main() -> None:
             "corners": "Corners",
             "playback": "Playback",
             "tools": "Tools",
+            "icons": "Icon library",
             "hints": "Hints & input",
             "gizmos": "Transform gizmos",
             "helpers": "Joint & helpers",
@@ -4793,6 +5039,7 @@ def main() -> None:
             "panels": "Panels",
             "workspaces": "Workspaces",
         }[args.geometry_tab],
+        initial_icon_group=ICON_GROUP_BY_SLUG[args.icon_group],
         initial_rotate_cap=args.rotate_cap,
         ui_scale=args.ui_scale,
         interactive_fps=args.fps,
