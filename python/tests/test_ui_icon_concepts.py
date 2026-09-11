@@ -170,7 +170,7 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
 
 @pytest.mark.parametrize(
     "name",
-    tuple(name for name in _icons() if name not in {"tool-scale", "tool-snap"}),
+    tuple(name for name in _icons() if icon_alignment_anchor(name) == "box"),
 )
 def test_concept_icon_bounds_are_centered_in_placement_circle(name: str) -> None:
     draw = _render(name, ICON_GRID)
@@ -187,6 +187,32 @@ def test_body_cube_has_three_interior_edges() -> None:
     assert len(draw.lines) == 3
     assert any(
         options.get("closed") and len(points) > 6 for points, _width, options in draw.polylines
+    )
+
+
+def test_body_internal_strokes_stop_below_outer_shell_inner_edge() -> None:
+    draw = _render("tool-body", ICON_GRID)
+    shell, shell_width, _options = draw.polylines[0]
+    shell_inner_edge = min(math.hypot(*point) for point in shell) - shell_width * 0.5
+
+    assert all(
+        math.hypot(*end) + width * 0.5 <= shell_inner_edge + 1e-6
+        for _start, end, width in draw.lines
+    )
+
+
+def test_world_internal_strokes_stop_at_outer_ring_inner_edge() -> None:
+    draw = _render("tool-world", ICON_GRID)
+    _center, outer_radius, outer_width = draw.circles[0]
+    inner_edge = outer_radius - outer_width * 0.5
+
+    assert all(
+        max(math.hypot(*point) for point in (start, end)) + width * 0.5 <= inner_edge + 1e-6
+        for start, end, width in draw.lines
+    )
+    assert all(
+        max(math.hypot(*point) for point in points) + width * 0.5 <= inner_edge + 1e-6
+        for points, width, _options in draw.polylines
     )
 
 
@@ -313,10 +339,24 @@ def test_minimum_bounding_circle_is_only_a_containment_diagnostic(name: str) -> 
 
 @pytest.mark.parametrize(
     "name",
-    (*(name for name in _icons() if name not in {"tool-scale", "tool-snap"}),),
+    tuple(name for name in _icons() if icon_alignment_anchor(name) == "box"),
 )
 def test_box_anchored_icons_center_their_visible_bounds(name: str) -> None:
     assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.05)
+
+
+@pytest.mark.parametrize("name", tuple(name for name in _icons() if name.startswith("transport-")))
+def test_transport_icons_center_their_radial_envelope_in_capsule_cells(name: str) -> None:
+    assert icon_alignment_anchor(name) == "radial"
+    assert icon_metrics(name).bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
+
+
+def test_capsule_radial_control_blends_from_box_to_enclosing_circle_center() -> None:
+    box = icon_metrics("transport-play", 0.0)
+    radial = icon_metrics("transport-play", 1.0)
+
+    assert box.center_offset == pytest.approx((0.0, 0.0), abs=0.01)
+    assert radial.bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
 
 
 @pytest.mark.parametrize(

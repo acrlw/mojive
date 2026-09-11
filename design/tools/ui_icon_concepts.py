@@ -112,7 +112,12 @@ ICON_FAMILIES = (
     ),
 )
 
-ICON_LIBRARY_TABS = ("Overview", "UI context", *(label for label, _icons in ICON_FAMILIES))
+ICON_LIBRARY_TABS = (
+    "Overview",
+    "UI context",
+    "Capsules",
+    *(label for label, _icons in ICON_FAMILIES),
+)
 ICON_GROUP_BY_SLUG = {
     label.casefold().replace(" ", "-").replace("&", "and"): label for label in ICON_LIBRARY_TABS
 }
@@ -570,9 +575,15 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # Sparse stroked symbols need a larger authored envelope than solid
         # tools to carry comparable visual weight in the same 24-unit slot.
         p.circle(0.0, 0.0, 8.75, width=1.45)
-        p.line((-8.58, 0.0), (8.58, 0.0), width=1.35)
+        # Centerline endpoints account for both strokes. The round caps meet
+        # the globe's inner edge instead of painting through the outer ring.
+        inner_reach = 8.75 - 1.45 * 0.5 - 1.35 * 0.5
+        p.line((-inner_reach, 0.0), (inner_reach, 0.0), width=1.35)
         ellipse = tuple(
-            (3.53 * math.cos(index * math.tau / 32), 8.58 * math.sin(index * math.tau / 32))
+            (
+                3.53 * math.cos(index * math.tau / 32),
+                inner_reach * math.sin(index * math.tau / 32),
+            )
             for index in range(32)
         )
         p.polyline(ellipse, closed=True, width=1.35)
@@ -588,7 +599,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
         # a fourth face. Inset the spoke ends below the outer stroke and paint
         # the G3 shell last so no round cap protrudes through a cube vertex.
         junction = (0.0, 0.0)
-        inset = 0.72
+        inset = 1.62
         for endpoint in (left, right, bottom):
             length = math.hypot(endpoint[0], endpoint[1])
             end = (
@@ -1159,17 +1170,26 @@ def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> 
     )
 
 
-@lru_cache(maxsize=64)
-def _icon_layout(name: str) -> tuple[float, tuple[float, float]]:
+@lru_cache(maxsize=256)
+def _icon_layout(
+    name: str, radial_alignment: float | None = None
+) -> tuple[float, tuple[float, float]]:
     """Return the declared placement anchor and scale inside the shared bound."""
 
     raw = _measure_raw_icon(name)
     anchor = icon_alignment_anchor(name)
     if anchor in {"hub", "arc"}:
         # Scale's hub and Snap's lower-arc center are authored at the origin.
-        offset = (0.0, 0.0)
+        base_offset = (0.0, 0.0)
     else:
-        offset = (-raw.center_offset[0], -raw.center_offset[1])
+        base_offset = (-raw.center_offset[0], -raw.center_offset[1])
+    radial_offset = (-raw.bounding_center[0], -raw.bounding_center[1])
+    amount = (1.0 if anchor == "radial" else 0.0) if radial_alignment is None else radial_alignment
+    amount = min(1.0, max(0.0, float(amount)))
+    offset = (
+        base_offset[0] + (radial_offset[0] - base_offset[0]) * amount,
+        base_offset[1] + (radial_offset[1] - base_offset[1]) * amount,
+    )
     shifted = _measure_raw_icon(name, offset)
     safe_radius = ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE
     layout_scale = min(1.0, safe_radius / shifted.radial_extent)
@@ -1183,13 +1203,23 @@ def icon_alignment_anchor(name: str) -> str:
         return "hub"
     if name == "tool-snap":
         return "arc"
+    if name.startswith("transport-"):
+        return "radial"
     return "box"
 
 
-def draw_concept_icon(draw, center, size: float, name: str, color) -> None:
+def draw_concept_icon(
+    draw,
+    center,
+    size: float,
+    name: str,
+    color,
+    *,
+    radial_alignment: float | None = None,
+) -> None:
     """Draw one anchor-centered candidate from a proportional 24-unit master."""
 
-    layout_scale, offset = _icon_layout(name)
+    layout_scale, offset = _icon_layout(name, radial_alignment)
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
         float(center[0]) + offset[0] * unit_scale,
@@ -1198,12 +1228,19 @@ def draw_concept_icon(draw, center, size: float, name: str, color) -> None:
     _draw_concept_icon_raw(draw, adjusted_center, size * layout_scale, name, color)
 
 
-@lru_cache(maxsize=64)
-def icon_metrics(name: str) -> IconMetrics:
+@lru_cache(maxsize=256)
+def icon_metrics(name: str, radial_alignment: float | None = None) -> IconMetrics:
     """Return placement and optical measurements for one 24-unit candidate."""
 
     draw = _MetricsDraw()
-    draw_concept_icon(draw, (0.0, 0.0), ICON_GRID, name, (1.0, 1.0, 1.0, 1.0))
+    draw_concept_icon(
+        draw,
+        (0.0, 0.0),
+        ICON_GRID,
+        name,
+        (1.0, 1.0, 1.0, 1.0),
+        radial_alignment=radial_alignment,
+    )
     area_centroid = (
         draw.area_moment[0] / draw.filled_area,
         draw.area_moment[1] / draw.filled_area,

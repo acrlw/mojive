@@ -309,7 +309,16 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                 nominal_diameter = 2.0 * OVERLAY_GEOMETRY.icon_radius * icon_scale
                 if vertical:
                     nominal_diameter *= TOOL_GLYPH_SCALE
-                draw_concept_icon(target, center, nominal_diameter, concept_name, color)
+                draw_concept_icon(
+                    target,
+                    center,
+                    nominal_diameter,
+                    concept_name,
+                    color,
+                    radial_alignment=(
+                        getattr(geometry, "capsule_radial_alignment", 1.0) if not vertical else None
+                    ),
+                )
             elif vertical:
                 draw_tool_glyph(
                     target,

@@ -20,6 +20,7 @@ if __package__:
     from .ui_capsule_geometry import (
         CAPSULE_OUTLINE_LABELS,
         CAPSULE_SMOOTHING,
+        capsule_layout,
         capsule_outline_color,
         draw_capsule_shell,
         end_padding,
@@ -51,6 +52,7 @@ else:
     from ui_capsule_geometry import (
         CAPSULE_OUTLINE_LABELS,
         CAPSULE_SMOOTHING,
+        capsule_layout,
         capsule_outline_color,
         draw_capsule_shell,
         end_padding,
@@ -457,6 +459,7 @@ class ProbeState:
     visual_flags: list[bool] = field(default_factory=lambda: [True] * 27)
     overlay_icon_radius: int = int(OVERLAY_GEOMETRY.icon_radius)
     overlay_radial_step: int = int(OVERLAY_GEOMETRY.radial_step)
+    capsule_radial_alignment: float = 1.0
     overlay_center_step: int = int(OVERLAY_GEOMETRY.center_step)
     tool_group_gap: int = int(OVERLAY_GEOMETRY.tool_group_gap)
     divider_width: int = int(OVERLAY_GEOMETRY.divider_width)
@@ -3673,6 +3676,18 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.overlay_radial_step = _even_slider(
             "##geometry-radial-step", state.overlay_radial_step, 2, 12
         )
+        _property_label("Glyph radial center")
+        _, state.capsule_radial_alignment = imgui.slider_float(
+            "##geometry-glyph-radial-center",
+            state.capsule_radial_alignment,
+            0.0,
+            1.0,
+            "%.2f",
+        )
+        imgui.set_item_tooltip(
+            "0 = visible-box center; 1 = minimum enclosing-circle center. "
+            "Capsule icons default to 1 so the hover circle and glyph share a center."
+        )
         _property_label("Center step")
         state.overlay_center_step = _even_slider(
             "##geometry-center-step", state.overlay_center_step, 24, 52
@@ -3803,6 +3818,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
             setattr(state, name, ProbeState.__dataclass_fields__[name].default)
         state.overlay_icon_radius = int(OVERLAY_GEOMETRY.icon_radius)
         state.overlay_radial_step = int(OVERLAY_GEOMETRY.radial_step)
+        state.capsule_radial_alignment = 1.0
         state.overlay_center_step = int(OVERLAY_GEOMETRY.center_step)
         state.tool_group_gap = int(OVERLAY_GEOMETRY.tool_group_gap)
         state.divider_width = int(OVERLAY_GEOMETRY.divider_width)
@@ -3960,9 +3976,28 @@ _ICON_REVIEW_SIZES = (14.0, 24.0, 56.0, 112.0)
 def _icon_library_canvas_size(family: str) -> tuple[float, float]:
     if family in {"Overview", "UI context"}:
         return GEOMETRY_CANVAS_SIZE
+    if family == "Capsules":
+        return GEOMETRY_CANVAS_SIZE[0], 1260.0
     rows = len(icon_family(family))
     required_height = 260.0 + (max(_ICON_REVIEW_SIZES) + 20.0) * rows
     return GEOMETRY_CANVAS_SIZE[0], max(GEOMETRY_CANVAS_SIZE[1], required_height)
+
+
+def _geometry_canvas_size(active_tab: str, state: ProbeState) -> tuple[float, float]:
+    """Reserve the logical extent required by zoomed geometry specimens."""
+
+    width, height = GEOMETRY_CANVAS_SIZE
+    if active_tab == "Playback":
+        shell_radius = state.overlay_icon_radius + 2.0 * state.overlay_radial_step
+        inspection = state.construction_playback_scale
+        _centers, length = capsule_layout(6, (3, 4), state)
+        width = max(width, 54.0 + length * inspection + 54.0 + 360.0 + 24.0)
+        construction_bottom = 80.0 + 4.0 * shell_radius * inspection + 62.0
+        height = max(height, construction_bottom + 1010.0)
+    elif active_tab == "Tools":
+        _centers, length = capsule_layout(5, (3,), state)
+        height = max(height, 120.0 + length * state.construction_tool_scale)
+    return width, height
 
 
 def _concept_icon_color(name: str):
@@ -4365,6 +4400,129 @@ def _draw_icon_family_detail(draw, origin, family: str, scale: float) -> None:
             )
 
 
+def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) -> None:
+    """Show Icon Library candidates in their actual capsule cells and state circles."""
+
+    x0, y0 = origin
+    draw.text((x0, y0), CONCEPT_THEME.text, "Actual capsule placement")
+    draw.text(
+        (x0, y0 + 24.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Amber = icon slot · green = hover/selected circle · glyph and circle share the same center",
+    )
+    draw.text(
+        (x0, y0 + 58.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Glyph radial center",
+    )
+    imgui.set_cursor_screen_pos(imgui.ImVec2(float(x0 + 190.0 * scale), float(y0 + 50.0 * scale)))
+    imgui.set_next_item_width(300.0 * scale)
+    _, state.capsule_radial_alignment = imgui.slider_float(
+        "##icon-library-capsule-radial-center",
+        state.capsule_radial_alignment,
+        0.0,
+        1.0,
+        "%.2f",
+    )
+    imgui.set_item_tooltip(
+        "0 = visible-box center; 1 = minimum enclosing-circle center. "
+        "At 1, radial X/Y below must be zero."
+    )
+
+    def preview_state(**changes):
+        return replace(
+            state,
+            redesign=replace(state.redesign),
+            preview_icon_library=True,
+            show_icon_bounds=True,
+            show_state_circles=True,
+            show_construction_notes=False,
+            **changes,
+        )
+
+    playback_x = x0 + 24.0 * scale
+    playback_y = y0 + 118.0 * scale
+    draw.text((playback_x, playback_y - 28.0 * scale), CONCEPT_THEME.text, "Playback · 1×")
+    imgui.push_id("icon-library-capsule-playback-1x")
+    _draw_playback(draw, (playback_x, playback_y), scale, preview_state(playing=False))
+    imgui.pop_id()
+
+    playback_2x_y = playback_y + 116.0 * scale
+    draw.text(
+        (playback_x, playback_2x_y - 28.0 * scale),
+        CONCEPT_THEME.text,
+        "Playback · 2× · playing",
+    )
+    imgui.push_id("icon-library-capsule-playback-2x")
+    _draw_playback(draw, (playback_x, playback_2x_y), scale * 2.0, preview_state(playing=True))
+    imgui.pop_id()
+
+    metrics_x = x0 + 820.0 * scale
+    draw.text((metrics_x, playback_y - 28.0 * scale), CONCEPT_THEME.text, "State-circle centering")
+    draw.text(
+        (metrics_x, playback_y - 4.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Minimum enclosing-circle center after placement",
+    )
+    for index, name in enumerate(
+        (
+            "transport-previous",
+            "transport-play",
+            "transport-pause",
+            "transport-next",
+            "transport-reset",
+            "transport-record",
+            "transport-stop",
+            "transport-more",
+        )
+    ):
+        metrics = icon_metrics(name, state.capsule_radial_alignment)
+        draw.text(
+            (metrics_x, playback_y + (30.0 + index * 25.0) * scale),
+            CONCEPT_THEME.text_disabled,
+            (
+                f"{name:<20} radial "
+                f"{metrics.bounding_center[0]:+0.2f}, {metrics.bounding_center[1]:+0.2f}u"
+            ),
+        )
+
+    tools_y = y0 + 520.0 * scale
+    draw.text((playback_x, tools_y), CONCEPT_THEME.text, "Viewport tools · actual vertical capsule")
+    draw.text(
+        (playback_x, tools_y + 24.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "World and Body use the same cell center; their internal strokes stop at the shell's inner edge.",
+    )
+    for index, (space, label) in enumerate((("world", "World"), ("body", "Body"))):
+        tool_x = playback_x + index * 250.0 * scale
+        tool_y = tools_y + 72.0 * scale
+        draw.text((tool_x, tool_y - 26.0 * scale), CONCEPT_THEME.text_disabled, label)
+        imgui.push_id(f"icon-library-capsule-tools-{space}")
+        _draw_tool_column(
+            draw,
+            (tool_x, tool_y),
+            scale * 1.5,
+            preview_state(gizmo_space=space),
+        )
+        imgui.pop_id()
+
+    draw.text(
+        (metrics_x, tools_y),
+        CONCEPT_THEME.text,
+        "Placement rule",
+    )
+    draw.text(
+        (metrics_x, tools_y + 28.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "Capsule cell center = state-circle center = radial-envelope center.",
+    )
+    draw.text(
+        (metrics_x, tools_y + 54.0 * scale),
+        CONCEPT_THEME.text_disabled,
+        "The green circle is forced visible here, matching the geometry exposed on hover.",
+    )
+
+
 def _draw_icon_library_page(
     draw, origin, available_width: float, scale: float, state: ProbeState
 ) -> None:
@@ -4393,6 +4551,8 @@ def _draw_icon_library_page(
         _draw_icon_library_overview(draw, content_origin, scale)
     elif state.icon_library_tab == "UI context":
         _draw_icon_context_page(draw, content_origin, scale)
+    elif state.icon_library_tab == "Capsules":
+        _draw_capsule_context_page(draw, content_origin, scale, state)
     else:
         _draw_icon_family_detail(draw, content_origin, state.icon_library_tab, scale)
 
@@ -4438,7 +4598,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
         scale,
         _icon_library_canvas_size(state.icon_library_tab)
         if active_tab == "Icon library"
-        else GEOMETRY_CANVAS_SIZE,
+        else _geometry_canvas_size(active_tab, state),
     )
     size = imgui.ImVec2(canvas_width, canvas_height)
     x0, y0 = float(canvas_origin.x), float(canvas_origin.y)
@@ -4465,67 +4625,58 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
     if active_tab == "Corners":
         _draw_corner_page(draw, (x0, content_y), scale, state)
     elif active_tab == "Playback":
-        playback_scale = scale * state.construction_playback_scale
-        play_origin = (x0 + 54.0 * scale, content_y + 74.0 * scale)
-        pause_origin = (
-            play_origin[0],
-            play_origin[1] + (shell_radius * 2.0 + 26.0) * playback_scale,
-        )
+        inspection = state.construction_playback_scale
+        playback_scale = scale * inspection
+        left = x0 + 54.0 * scale
+        construction_height = shell_radius * 2.0 * playback_scale
         draw.text(
-            (x0 + 54.0 * scale, content_y + 4.0 * scale),
+            (left, content_y + 4.0 * scale),
             title_color,
             "Playback construction · Play and Pause",
         )
         draw.text(
-            (x0 + 54.0 * scale, content_y + 28.0 * scale),
+            (left, content_y + 28.0 * scale),
             note_color,
-            "Amber = icon bound · green = state circle · outer line = capsule",
+            "Each section begins below the scaled bounds of the section above.",
         )
-        draw.text(
-            (play_origin[0], play_origin[1] - 22.0 * scale),
-            note_color,
-            f"Play geometry · {state.construction_playback_scale:.1f}×",
+
+        play_y = content_y + 80.0 * scale
+        play_origin = (left, play_y)
+        draw.text((left, play_y - 24.0 * scale), note_color, f"Play geometry · {inspection:.1f}×")
+        construction_state = replace(
+            state,
+            show_icon_bounds=True,
+            show_state_circles=True,
+            show_construction_notes=True,
         )
         imgui.push_id("geometry-playback-play")
         _draw_playback(
             draw,
             play_origin,
             playback_scale,
-            replace(
-                state,
-                show_icon_bounds=True,
-                show_state_circles=True,
-                show_construction_notes=True,
-                playing=False,
-            ),
+            replace(construction_state, redesign=replace(state.redesign), playing=False),
         )
         imgui.pop_id()
-        draw.text(
-            (pause_origin[0], pause_origin[1] - 22.0 * scale),
-            note_color,
-            f"Pause geometry · {state.construction_playback_scale:.1f}×",
-        )
+
+        pause_y = play_y + construction_height + 62.0 * scale
+        pause_origin = (left, pause_y)
+        draw.text((left, pause_y - 24.0 * scale), note_color, f"Pause geometry · {inspection:.1f}×")
         imgui.push_id("geometry-playback-pause")
         _draw_playback(
             draw,
             pause_origin,
             playback_scale,
-            replace(
-                state,
-                show_icon_bounds=True,
-                show_state_circles=True,
-                show_construction_notes=True,
-                playing=True,
-            ),
+            replace(construction_state, redesign=replace(state.redesign), playing=True),
         )
         imgui.pop_id()
-        pb_center_y = play_origin[1] + shell_radius * playback_scale
+
+        construction_bottom = pause_y + construction_height
         pb_first_x = play_origin[0] + end_padding(state) * playback_scale
         pb_last_x = pb_first_x + center_step * 3.0 * playback_scale
         _dimension_line(
             draw,
-            (pb_first_x, pb_center_y + (shell_radius + 13.0) * playback_scale),
-            (pb_last_x, pb_center_y + (shell_radius + 13.0) * playback_scale),
+            (pb_first_x, construction_bottom + 22.0 * scale),
+            (pb_last_x, construction_bottom + 22.0 * scale),
             f"3 × CENTER {state.overlay_center_step}",
             scale,
         )
@@ -4541,58 +4692,53 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             vertical=True,
         )
         draw.text(
-            (x0 + 54.0 * scale, content_y + 530.0 * scale),
+            (left, construction_bottom + 54.0 * scale),
             note_color,
             (
-                f"Bounds  icon {int(icon_radius * 2.0)} · state {int(state_radius * 2.0)} · "
+                f"Bounds icon {int(icon_radius * 2.0)} · state {int(state_radius * 2.0)} · "
                 f"shell {int(shell_radius * 2.0)} · centers {state.overlay_center_step} · "
-                f"radial {state.overlay_radial_step} · divider "
-                f"{overlay_divider_length(state.divider_width, playback=True):.1f}"
+                f"radial step {state.overlay_radial_step} · glyph radial center "
+                f"{state.capsule_radial_alignment:.2f}"
             ),
         )
 
-        comparison_x = x0 + max(650.0 * scale, size.x * 0.43)
-        draw.text(
-            (comparison_x, content_y + 4.0 * scale),
-            title_color,
-            "Playback states · 2×",
-        )
         product_state = replace(
             state,
+            redesign=replace(state.redesign),
             show_icon_bounds=False,
             show_state_circles=False,
             show_construction_notes=False,
         )
-        paused_state = replace(product_state, playing=False)
-        playing_state = replace(product_state, playing=True)
+        section_y = construction_bottom + 112.0 * scale
+        draw.text((left, section_y), title_color, "Playback states · 2×")
+        paused_y = section_y + 38.0 * scale
         imgui.push_id("product-playback-paused")
-        _draw_playback(
-            draw,
-            (comparison_x, content_y + 58.0 * scale),
-            scale * 2.0,
-            paused_state,
-        )
+        _draw_playback(draw, (left, paused_y), scale * 2.0, replace(product_state, playing=False))
         imgui.pop_id()
-        playing_x = comparison_x
-        playing_y = content_y + 198.0 * scale
+        product_height = shell_radius * 4.0 * scale
+        draw.text((left, paused_y + product_height + 12.0 * scale), note_color, "Paused · Play")
+
+        playing_y = paused_y + product_height + 58.0 * scale
         imgui.push_id("product-playback-playing")
-        _draw_playback(draw, (playing_x, playing_y), scale * 2.0, playing_state)
+        _draw_playback(draw, (left, playing_y), scale * 2.0, replace(product_state, playing=True))
         imgui.pop_id()
-        draw.text((comparison_x, content_y + 158.0 * scale), note_color, "Paused · Play")
-        draw.text((playing_x, playing_y + 100.0 * scale), note_color, "Playing · Pause")
         draw.text(
-            (comparison_x, playing_y + 128.0 * scale),
+            (left, playing_y + product_height + 12.0 * scale),
             note_color,
-            "Play is neutral · Pause stays selected while playing.",
+            "Playing · Pause remains selected",
         )
+
+        recording_heading_y = playing_y + product_height + 72.0 * scale
         draw.text(
-            (comparison_x, content_y + 400.0 * scale),
+            (left, recording_heading_y),
             title_color,
             "Reset / Record / Stop / Recording options · 2×",
         )
         glyph_ratio = icon_radius / OVERLAY_ICON_RADIUS
         stop_side = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE * glyph_ratio
-        specimen_step = min(190.0 * scale, (controls_x - comparison_x - 16.0 * scale) / 4)
+        main_width = controls_x - left - 30.0 * scale
+        specimen_step = main_width / 4.0
+        specimen_y = recording_heading_y + 42.0 * scale
         for index, (label, measurement, icon) in enumerate(
             (
                 (
@@ -4616,14 +4762,17 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 ),
                 (
                     "Recording options",
-                    f"G3 · stroke {state.tool_stroke_width * RECORDING_OPTIONS_STROKE_SCALE * RECORDING_OPTIONS_GLYPH_SCALE * glyph_ratio:.2f}",
+                    (
+                        "G3 · stroke "
+                        f"{state.tool_stroke_width * RECORDING_OPTIONS_STROKE_SCALE * RECORDING_OPTIONS_GLYPH_SCALE * glyph_ratio:.2f}"
+                    ),
                     lambda target, center, color, icon_scale, surface: draw_recording_options_glyph(
                         target, center, color, icon_scale, stroke=state.tool_stroke_width
                     ),
                 ),
             )
         ):
-            position = (comparison_x + index * specimen_step, content_y + 438.0 * scale)
+            position = (left + index * specimen_step, specimen_y)
             _circular_icon_button(
                 draw.with_corner_smoothing(state.playback_smoothing),
                 f"##geometry-recording-{index}",
@@ -4639,22 +4788,26 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             )
             draw.text((position[0], position[1] + 96.0 * scale), note_color, label)
             draw.text((position[0], position[1] + 116.0 * scale), note_color, measurement)
-        draw.text(
-            (comparison_x, content_y + 586.0 * scale),
-            note_color,
-            "Record / Stop: equal nominal area · dimensions in logical px",
-        )
-        for label, comparison_origin_x, optical in (
-            ("Original end spacing", x0 + 54.0 * scale, False),
-            ("Optical end spacing", comparison_x, True),
+
+        spacing_heading_y = specimen_y + 168.0 * scale
+        draw.text((left, spacing_heading_y), title_color, "End-spacing comparison · 2×")
+        first_spacing_y = spacing_heading_y + 38.0 * scale
+        for index, (label, optical) in enumerate(
+            (("Original end spacing", False), ("Optical end spacing", True))
         ):
-            draw.text((comparison_origin_x, content_y + 630.0 * scale), title_color, label)
+            sample_y = first_spacing_y + index * (product_height + 62.0 * scale)
+            draw.text((left, sample_y - 22.0 * scale), note_color, label)
             imgui.push_id(label)
             _draw_playback(
                 draw,
-                (comparison_origin_x, content_y + 660.0 * scale),
+                (left, sample_y),
                 scale * 2.0,
-                replace(product_state, optical_capsule_spacing=optical, playing=True),
+                replace(
+                    product_state,
+                    redesign=replace(state.redesign),
+                    optical_capsule_spacing=optical,
+                    playing=True,
+                ),
             )
             imgui.pop_id()
 
@@ -5318,6 +5471,8 @@ def render(
     initial_imgui_radius: float | None = None,
     initial_tool_stroke: float | None = None,
     initial_rotate_gap_ratio: float | None = None,
+    initial_playback_zoom: float | None = None,
+    initial_capsule_radial_alignment: float | None = None,
     redesign_language: str = "en",
     redesign_section: str = "Overview",
     capsule_outline: str = "Soft white",
@@ -5360,6 +5515,10 @@ def render(
             state.tool_stroke_width = initial_tool_stroke
         if initial_rotate_gap_ratio is not None:
             state.rotate_ring_gap_ratio = initial_rotate_gap_ratio
+        if initial_playback_zoom is not None:
+            state.construction_playback_scale = initial_playback_zoom
+        if initial_capsule_radial_alignment is not None:
+            state.capsule_radial_alignment = initial_capsule_radial_alignment
         if interactive:
             window.show()
             frame_period = 1.0 / interactive_fps
@@ -5472,6 +5631,18 @@ def main() -> None:
         help=("Initial Rotate crossing gap as a stroke ratio, from 0.25 to 1.00"),
     )
     parser.add_argument(
+        "--playback-zoom",
+        type=float,
+        default=None,
+        help="Initial Playback construction zoom, from 1.5 to 4.0",
+    )
+    parser.add_argument(
+        "--capsule-radial-alignment",
+        type=float,
+        default=None,
+        help="Initial capsule glyph alignment, 0 for box center and 1 for radial center",
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Open a real ImGui window and run until it is closed",
@@ -5508,6 +5679,13 @@ def main() -> None:
         parser.error("--tool-stroke must be between 1.0 and 2.2")
     if args.rotate_gap_ratio is not None and not 0.25 <= args.rotate_gap_ratio <= 1.0:
         parser.error("--rotate-gap-ratio must be between 0.25 and 1.00")
+    if args.playback_zoom is not None and not 1.5 <= args.playback_zoom <= 4.0:
+        parser.error("--playback-zoom must be between 1.5 and 4.0")
+    if (
+        args.capsule_radial_alignment is not None
+        and not 0.0 <= args.capsule_radial_alignment <= 1.0
+    ):
+        parser.error("--capsule-radial-alignment must be between 0 and 1")
     if not 0.75 <= args.ui_scale <= 4.0:
         parser.error("--ui-scale must be between 0.75 and 4.0")
     if not 15.0 <= args.fps <= 240.0:
@@ -5541,6 +5719,8 @@ def main() -> None:
         initial_imgui_radius=args.imgui_radius,
         initial_tool_stroke=args.tool_stroke,
         initial_rotate_gap_ratio=args.rotate_gap_ratio,
+        initial_playback_zoom=args.playback_zoom,
+        initial_capsule_radial_alignment=args.capsule_radial_alignment,
         redesign_language=args.redesign_language,
         redesign_section=args.redesign_section.title(),
         capsule_outline=args.capsule_outline.replace("-", " ").capitalize(),
