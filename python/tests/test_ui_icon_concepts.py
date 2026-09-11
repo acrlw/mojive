@@ -15,11 +15,13 @@ from design.tools.ui_icon_concepts import (
     ICON_MAX_PADDING,
     ICON_MIN_CLEARANCE,
     ICON_PADDING_BIAS,
+    ICON_STROKE,
     MORE_ARM_RATIO,
     RESET_RING_CENTER,
     RING_CENTERED_ICONS,
-    ROTATE_FRAME_PADDING,
+    ROTATE_FRAME_STROKE_OVERSHOOT,
     STATUS_MOUSE_DEFAULT_WIDTH,
+    STROKE_SCALE_LOCKED_ICONS,
     draw_concept_icon,
     icon_alignment_anchor,
     icon_alignment_center,
@@ -209,8 +211,9 @@ def test_concept_icons_stay_inside_the_shared_canvas(name: str) -> None:
 
     assert draw.bounds[0] < draw.bounds[2]
     assert draw.bounds[1] < draw.bounds[3]
-    assert min(draw.bounds) >= -size * 0.5 - 1e-6
-    assert max(draw.bounds) <= size * 0.5 + 1e-6
+    overshoot = size / ICON_GRID * (ROTATE_FRAME_STROKE_OVERSHOOT if name == "tool-rotate" else 0.0)
+    assert min(draw.bounds) >= -size * 0.5 - overshoot - 1e-6
+    assert max(draw.bounds) <= size * 0.5 + overshoot + 1e-6
 
 
 @pytest.mark.parametrize("name", _icons())
@@ -219,8 +222,12 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
     draw = _render(name, size)
     guide_radius = ICON_BOUND_DIAMETER * 0.5
 
-    required_clearance = ROTATE_FRAME_PADDING if name == "tool-rotate" else ICON_MIN_CLEARANCE
-    assert draw.circular_extent <= guide_radius - required_clearance + 1e-3
+    allowed_extent = (
+        guide_radius + ROTATE_FRAME_STROKE_OVERSHOOT
+        if name == "tool-rotate"
+        else guide_radius - ICON_MIN_CLEARANCE
+    )
+    assert draw.circular_extent <= allowed_extent + 1e-3
 
 
 @pytest.mark.parametrize("name", _icons())
@@ -233,7 +240,7 @@ def test_default_layout_fits_candidates_to_the_reference_family_padding(name: st
         return
     group = icon_component_group(name)
     expected = (
-        ROTATE_FRAME_PADDING
+        -ROTATE_FRAME_STROKE_OVERSHOOT
         if name == "tool-rotate"
         else ICON_GROUP_LAYOUT_DEFAULTS[group] + ICON_PADDING_BIAS.get(name, 0.0)
     )
@@ -277,9 +284,13 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
 
 def test_rotate_outer_frame_matches_the_placement_circle() -> None:
     metrics = icon_metrics("tool-rotate")
+    draw = _render("tool-rotate", ICON_GRID)
+    _center, ring_radius, ring_width = draw.circles[0]
 
     assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=1e-6)
-    assert metrics.circular_clearance == pytest.approx(ROTATE_FRAME_PADDING, abs=1e-5)
+    assert ring_radius == pytest.approx(ICON_BOUND_DIAMETER * 0.5, abs=1e-6)
+    assert ring_width == pytest.approx(ICON_STROKE, abs=1e-6)
+    assert metrics.circular_clearance == pytest.approx(-ROTATE_FRAME_STROKE_OVERSHOOT, abs=1e-5)
 
 
 def test_rotate_frame_ignores_candidate_padding_control() -> None:
@@ -302,6 +313,42 @@ def test_reviewed_severity_geometry_ignores_candidate_layout_controls(name: str)
     adjusted = _render(name, ICON_GRID, padding=ICON_MAX_PADDING)
 
     assert adjusted.__dict__ == baseline.__dict__
+
+
+@pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE, ICON_DEFAULT_PADDING, ICON_MAX_PADDING))
+def test_layout_keeps_the_canonical_stroke_independent_of_icon_fit(padding: float) -> None:
+    for name in _icons():
+        layout_scale, _offset, stroke_compensation = icon_concepts._icon_layout(name, padding)
+        if name in STROKE_SCALE_LOCKED_ICONS:
+            assert stroke_compensation == 1.0
+        else:
+            assert layout_scale * stroke_compensation == pytest.approx(1.0, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "tool-rotate",
+        "tool-world",
+        "tool-body",
+        "tool-snap",
+        "key-add",
+        "key-clear",
+        "key-follow",
+        "key-view",
+        "panel-sort",
+        "panel-clear",
+        "panel-visible",
+        "panel-perspective",
+        "panel-orthographic",
+        "helper-camera",
+    ),
+)
+def test_main_stroked_candidates_share_the_canonical_visible_weight(name: str) -> None:
+    draw = _render(name, ICON_GRID)
+
+    assert any(width == pytest.approx(ICON_STROKE, abs=1e-6) for width in draw.widths)
+    assert max(draw.widths) == pytest.approx(ICON_STROKE, abs=1e-6)
 
 
 @pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE - 0.01, ICON_MAX_PADDING + 0.01))

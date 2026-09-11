@@ -36,6 +36,7 @@ if __package__:
         ICON_LIBRARY_TABS,
         ICON_MAX_PADDING,
         ICON_MIN_CLEARANCE,
+        ROTATE_FRAME_PADDING,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
         icon_alignment_anchor,
@@ -75,6 +76,7 @@ else:
         ICON_LIBRARY_TABS,
         ICON_MAX_PADDING,
         ICON_MIN_CLEARANCE,
+        ROTATE_FRAME_PADDING,
         STATUS_MOUSE_DEFAULT_WIDTH,
         draw_concept_icon,
         icon_alignment_anchor,
@@ -4570,8 +4572,11 @@ def _draw_icon_family_detail(
         diagnostic_label, diagnostic_x, diagnostic_y = (
             ("box", box_x, box_y) if anchor == "circle" else ("circle", circle_x, circle_y)
         )
+        placement_label, placement_value = (
+            ("frame", ROTATE_FRAME_PADDING) if name == "tool-rotate" else ("pad", clearance)
+        )
         for line, line_y in (
-            (f"{name} · pad {clearance:.2f}u", -20.0),
+            (f"{name} · {placement_label} {placement_value:.2f}u", -20.0),
             (f"{anchor}  {anchor_x:+.2f},{anchor_y:+.2f}u", 0.0),
             (f"{diagnostic_label}  {diagnostic_x:+.2f},{diagnostic_y:+.2f}u", 20.0),
         ):

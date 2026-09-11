@@ -43,9 +43,13 @@ capsule specimens, and the whole-UI preview resolve the values for the component
 detail row reports circular padding, its declared placement anchor, and one secondary diagnostic.
 Previous, Next, More, Keyframe Transport First/Last, Panel Right/Down, and Tool Snap use their
 complete visible box; Playback and Keyframe Transport Reset use the center of their circular ring;
-remaining candidates use their sampled minimum enclosing circle. Rotate stays frame-aligned, and
-the reviewed Output Info, Warning, and Error icons stay on their production painter and ignore the
-padding control. Playback Play remains equilateral; Previous and Next use their original 90-degree
+remaining candidates use their sampled minimum enclosing circle. Rotate stays frame-aligned: its
+outer-ring centerline coincides with the orange placement circle, matching the production Tool
+Column construction instead of shrinking the complete stroke inside the guide. Candidate main
+strokes resolve to one 1.50-unit weight after fitting, so a group's padding changes reach without
+making its lines heavier. The reviewed status severity and mouse painters keep their established
+weights. Output Info, Warning, and Error stay on their production painter and ignore the padding
+control. Playback Play remains equilateral; Previous and Next use their original 90-degree
 chevrons, Pause keeps its original twin bars, and each More is a 90-degree counterclockwise rotation
 of a slightly shorter Previous at the same fitted scale. Playback and Keyframe Transport Record are
 both two percent smaller than Stop. First and Last use bars exactly as tall as their rounded
