@@ -118,11 +118,11 @@ half of the rendered knockout gap, with the normal one-pixel fringe as its upper
 opposing ramps therefore cannot overlap and erase the gap when the glyph is small. Color or a small
 positional change does not separate two icons that share the same silhouette.
 
-The Icon Library owns its Move, Rotate, and Scale candidate contours. Keep this experimental drawing
-inside `design/tools/ui_icon_concepts.py`; do not change `viewport_widgets.py` while tuning a concept
-sheet. A candidate may repeat the reviewed production construction grammar, such as Rotate's three
-cyclic half-rings, without sharing the production painter. The feasibility-only `gap / stroke`
-control keeps its full 0.25 to 1.00 review range and must not clamp production geometry.
+The production icon module owns the reviewed contours, while the Icon Library imports that same
+module for tuning and comparison. Keep temporary controls in the feasibility workbench, then commit
+accepted defaults to `mojive.ui.icons`; runtime consumers and review sheets must resolve the same
+geometry. The `gap / stroke` control keeps its full 0.25 to 1.00 review range and must not clamp
+production geometry.
 
 Use the shared G3 curve builders for rounded heads, boxes, and structural corners. In particular,
 `arrow_points`, `box_handle_points`, and `smooth_polygon_corners` preserve continuous curvature at
@@ -241,6 +241,7 @@ edge of the frame is about 4.58 grid units on each side.
 | Reset's ring drifts behind its arrowhead | The complete arrow silhouette was centered instead of the circular body | Place the authored ring center on the slot and let the arrowhead extend naturally |
 | A compound icon looks low or right despite a zero diagnostic | The wrong geometric feature was declared as its anchor | Choose the visible box, authored ring, or minimum enclosing circle from the actual silhouette |
 | Search handle cuts into the lens or exposes a cap | Lens and handle were submitted as separate strokes | Build one hollow G3 union mesh with a continuous outer neck and retained circular hole |
+| A translucent compound icon has dark seams at its joins | Intersecting parts were submitted separately and accumulated alpha | Build one non-overlapping silhouette and submit its fill and external antialias fringe once |
 | Search lens grows spikes or leaks white flecks into its hollow center | Near-duplicate outer columns or independently sampled fill and hole-fringe boundaries destabilize antialiasing | Use one monotonic x-grid, replace its nearest samples at the hole endpoints, and derive the hole fringe from the strip's exact inner vertices |
 | Sort arrow tip does not meet the visible bottom of its last bar | The arrow endpoint was aligned to the bar centerline | Align the head tip with the lower stroked edge while keeping the round tail on the top centerline |
 | Sort arrow has a flat exposed tail | The shared arrow mesh kept its default butt tail | Enable its G3 round-tail contour while retaining the integrated head and shaft |
