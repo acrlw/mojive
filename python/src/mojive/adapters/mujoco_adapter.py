@@ -6908,7 +6908,12 @@ class MuJoCoAdapter(SceneAdapterBase):
         value = str(name).strip()
         source_spec = self._spec_for_model(model_id)
         values = self._capture_model_keyframe_values(model_id)
-        if source_spec is None or values is None or not value or source_spec.key(value) is not None:
+        if (
+            source_spec is None
+            or values is None
+            or not value
+            or any(key.name == value for key in source_spec.keys)
+        ):
             return -1
         working = source_spec.copy()
         working.add_key(
@@ -6922,6 +6927,19 @@ class MuJoCoAdapter(SceneAdapterBase):
             mquat=values[5],
         )
         if not self._replace_model_spec(model_id, working):
+            return -1
+        if self._model_edit_batch_depth:
+            # The batch installs its compiled model on context exit. Resolve the
+            # stable declaration order here instead of querying the previous model.
+            target = int(model_id)
+            keyframe_id = 0
+            specs = ((0, self._root_spec),) if self._root_spec is not None else ()
+            specs += tuple((item.model_id, item.spec) for item in self._attached_models)
+            for owner, spec in specs:
+                for key in spec.keys:
+                    if int(owner) == target and key.name == value:
+                        return keyframe_id
+                    keyframe_id += 1
             return -1
         return mujoco.mj_name2id(
             self._m,
