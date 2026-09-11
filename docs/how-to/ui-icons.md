@@ -40,20 +40,37 @@ width back into the icon's frame, mark, or spacing dimensions.
 The Icon library uses a circular 24-unit placement boundary, drawn in orange after the glyph so a
 collision cannot hide beneath opaque ink. The circle describes the slot used by layout; it is not a
 target that every silhouette should fill. Candidate ink, including half of every outline stroke,
-keeps at least 1.5 grid units of radial clearance. Its axis-aligned bounding box is centered within
-0.05 grid units on each axis. Detail rows report both measurements as `pad` and `center`. A reviewed
-production icon can retain its existing optical envelope: Output's circular severity frame has 0.72
-units of radial clearance and conforms to the circular placement boundary without crossing it.
+keeps at least 1.5 grid units of radial clearance. Detail rows report radial `pad`, the
+axis-aligned `box` center, and the approximate `ink` mass center. A reviewed production icon can
+retain its existing optical envelope: Output's circular severity frame has 0.72 units of radial
+clearance and conforms to the circular placement boundary without crossing it.
 
 Use radial containment in addition to rectangular canvas containment. A camera body can fit inside
-a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a mathematically
-centered origin does not prove that an asymmetric glyph's visible bounds are centered. Test the
-actual primitive contours and stroke extents.
+a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
+axis-aligned box does not prove that the icon looks centered. Point-symmetric and rotationally
+symmetric symbols should place their approximate ink center within 0.05 grid units of the placement
+origin. Directional symbols keep a centered alignment box and receive a visual check at every
+target size; their ink centroid is diagnostic, not a target to force to zero.
+
+The Scale symbol demonstrates why both measurements are required. Its three equal axes are 120
+degrees apart, so their shared origin and ink center coincide exactly. The top square makes the
+axis-aligned box extend farther upward than downward. Translating that box to zero would move the
+actual rotation center below the placement origin and recreate the visible imbalance the metric is
+meant to catch.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
 also form one intentional contour. A camera integrates its top housing into the body boundary, and
 a bulb connects its dome, shoulder, and base before adding interior detail or separated rays.
+Rotation and reset also need distinct structures. Mojive's transform rotation mark reuses the
+runtime Tool Column geometry: three cyclically occluded half-rings inside a screen ring. Reset uses
+one nearly complete circular arrow. Color or a small positional change does not separate two icons
+that share the same silhouette.
+
+Use the shared G3 curve builders for rounded heads, boxes, and structural corners. In particular,
+`arrow_points`, `box_handle_points`, and `smooth_polygon_corners` preserve continuous curvature at
+the visible joins. Drawing a square on top of a shaft or letting round-capped cube spokes terminate
+on the outer stroke produces protrusions and seams at compact sizes.
 
 ## Keep a family visibly related
 
@@ -130,6 +147,9 @@ edge of the frame is about 4.58 grid units on each side.
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
+| Scale looks low although its bounding box is centered | Unequal axis lengths or box-only centering displaced the shared origin | Use equal 120-degree axes and verify the ink center at the placement origin |
+| Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
+| Cube spokes protrude through the shell | Independently capped lines terminate on top of the outer stroke | Inset the spokes, join their center, and paint the G3 outer contour last |
 | One preview looks good but production does not | A copied demo or resized screenshot bypasses production geometry and density | Render the production painter at every target logical size and framebuffer scale |
 
 The severity bug that motivated these rules combined two failures. Absolute stroke floors made the
