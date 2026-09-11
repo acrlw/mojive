@@ -38,7 +38,9 @@ Viewport tools, Viewport playback, Keyframe transport, Keyframes actions, Panels
 and Status & input candidates on one
 24-unit grid at 14, 24, 56, and 112 pt. The orange circle is the complete 24-unit circular placement
 boundary, matching Diagnostics. The header keeps an independent `Glyph padding` value for each
-actual component group; the Status group also exposes mouse width. Family sheets,
+actual component group and one shared `Glyph stroke` control. Viewport tools default to `0.5u`
+padding; every other component group defaults to `2.0u`. The Status group also exposes mouse width.
+Family sheets,
 capsule specimens, and the whole-UI preview resolve the values for the component they show. Each
 detail row reports circular padding, its declared placement anchor, and one secondary diagnostic.
 Previous, Next, More, Keyframe Transport First/Last, Panel Right/Down, and Tool Snap use their
@@ -46,10 +48,13 @@ complete visible box; Playback and Keyframe Transport Reset use the center of th
 remaining candidates use their sampled minimum enclosing circle. Rotate stays frame-aligned: its
 outer-ring centerline coincides with the orange placement circle, matching the production Tool
 Column construction instead of shrinking the complete stroke inside the guide. Candidate main
-strokes resolve to one 1.50-unit weight after fitting, so a group's padding changes reach without
-making its lines heavier. The reviewed status severity and mouse painters keep their established
-weights. Output Info, Warning, and Error stay on their production painter and ignore the padding
-control. Playback Play remains equilateral; Previous and Next use their original 90-degree
+strokes default to one 1.75-unit weight after fitting, so a group's padding changes reach without
+making its lines heavier. Chevron ribbons and Reset arcs follow the same control. The reviewed
+Pause and First/Last bars keep their established dimensions; status severity and mouse painters
+keep their established shapes and stroke weights. Output Info, Warning, and Error stay on their
+production painter and ignore the candidate controls.
+Playback Play remains equilateral; Previous and Next use
+their original 90-degree
 chevrons, Pause keeps its original twin bars, and each More is a 90-degree counterclockwise rotation
 of a slightly shorter Previous at the same fitted scale. Playback and Keyframe Transport Record are
 both two percent smaller than Stop. First and Last use bars exactly as tall as their rounded

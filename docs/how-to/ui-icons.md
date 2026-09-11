@@ -43,17 +43,15 @@ sizes.
 
 The Icon library uses a circular 24-unit placement boundary, drawn in orange after the glyph so a
 collision cannot hide beneath the visible mark. The circle describes the slot used by layout and
-provides one adjustable size envelope for the candidate set. Candidate geometry, including half
-of every outline stroke, defaults to 0.75 grid units of circular clearance. This closely matches
-Output's reviewed circular severity frame, which measures about 0.72 units, while keeping every
-candidate inside the placement circle. The Icon Library header exposes a component-group selector
+provides one adjustable size envelope for the candidate set. Candidate geometry includes half of
+every outline stroke. The Icon Library header exposes a component-group selector
 with `Glyph padding`, which adjusts candidate clearance from 0.50 to 4.00 units. Each actual
 consumer keeps an independent value: Viewport tools, Viewport playback, Keyframe
 transport, Keyframes actions, Panels, Scene helpers, and Status & input. Family sheets, capsule
 specimens, and the whole-UI preview resolve the value for the component they are showing. Viewport
-tools default to padding 0.50; the other groups keep their own defaults. Rotate is frame-aligned:
+tools default to padding 0.50; every other group defaults to 2.00. Rotate is frame-aligned:
 its outer screen-ring centerline coincides with the orange placement circle, while half of its
-stroke sits on each side and the three inner rings keep the same visible 1.50-unit width.
+stroke sits on each side and the three inner rings keep the same visible width.
 Output's mature Info, Warning, and Error painters are also locked; the review control does not
 change their geometry, size, or placement. Detail rows report `pad`, the declared anchor at
 `0.00, 0.00`, and either the axis-aligned box or minimum enclosing circle as a secondary diagnostic.
@@ -61,7 +59,10 @@ change their geometry, size, or placement. Detail rows report `pad`, the declare
 Viewport Playback Play is an equilateral G3 triangle. Previous and Next retain their original
 90-degree chevrons, while Pause retains its original twin bars. Both More names call one contour:
 rotate Previous counterclockwise by 90 degrees, shorten its arms to 94 percent, and keep the source
-stroke plus each component's Previous layout scale. Each specimen also draws a neutral square whose
+stroke plus each component's Previous layout scale. The adjacent `Glyph stroke` control sets one
+1.00-to-2.50-unit final visual weight, defaulting to 1.75 units. It applies equally to explicit
+outlines, chevron ribbons, Reset arcs, and tool shafts. Reviewed Pause and First/Last bars keep their
+authored widths. Each specimen also draws a neutral square whose
 width and height equal the orange circle's diameter, exposing the shared slot center at 14, 24, 56,
 and 112 points. Playback and Keyframe Transport Record have a measured visible width of 98 percent
 of the corresponding Stop width. Keyframe Transport First and Last make their bar exactly as tall
@@ -80,7 +81,7 @@ declared geometric feature per silhouette:
 The concept library samples the full visible boundary, including half of each outline stroke,
 translates the declared center onto the orange-circle center, and solves the scale that reaches the
 requested padding. It counter-scales ordinary construction strokes during that fit, so every main
-stroke resolves to 1.50 units on the 24-unit grid; padding changes the glyph's reach without also
+stroke resolves to the selected `Glyph stroke` value on the 24-unit grid; padding changes the glyph's reach without also
 making its lines heavier. Solid masses, gaps, dots, and head dimensions continue to follow the
 glyph envelope. The reviewed Output severity and original mouse painters retain their established
 weights. Align the icon slot to the current font's baseline and cap-height guides, inspect the real
@@ -215,7 +216,8 @@ edge of the frame is about 4.58 grid units on each side.
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
-| Icons with the same authored stroke look heavier after fitting | The per-icon envelope scale was also applied to its stroke | Counter-scale ordinary construction strokes by the inverse fit so the final main weight remains 1.50 grid units |
+| Icons with the same authored stroke look heavier after fitting | The per-icon envelope scale was also applied to its stroke | Counter-scale ordinary construction strokes by the inverse fit so the final main weight remains the selected `Glyph stroke` value |
+| Reset disagrees with a neighboring chevron | Its filled arc was treated as a solid shape instead of a stroke | Derive its transverse thickness from the shared final visual weight before fitting |
 | Scale remains displaced after it is enlarged | Its source origin was preserved instead of its declared minimum-circle center | Center the sampled minimum enclosing circle before fitting the complete master |
 | Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks close to the hub diameter and compare their area with the hub at 112 points |
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
@@ -287,8 +289,9 @@ checks that the Geometry page sections remain disjoint at its maximum inspection
 It also writes `context-workspace.png`,
 `context-panels.png`, `context-hints.png`, `context-hints-hidpi.png`, `context-keyframes.png`, and
 `context-redesign.png` with the same candidates placed in real feasibility controls. Pass
-`--icon-padding` after `--icon-group` for deterministic non-default captures of that group. In
-interactive mode, use the Icon Library's group selector and `Glyph padding` to compare placement and
+`--icon-padding` after `--icon-group` for deterministic non-default captures of that group, and use
+`--icon-stroke` for a deterministic shared weight. In interactive mode, use the Icon Library's group
+selector, `Glyph padding`, and `Glyph stroke` to compare placement and
 0.50–4.00 grid-unit clearances. Status `Mouse W` adjusts the original mouse-hint aspect ratio. Use
 the always-visible `Icon Library preview` menu-bar switch,
 or the matching item under `Probe`, to apply or remove that substitution across every feasibility
