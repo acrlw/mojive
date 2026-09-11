@@ -117,7 +117,50 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
-    assert state.capsule_radial_alignment == 0.0
+    assert state.icon_radial_alignment == 0.0
+    assert state.icon_padding == probe.ICON_DEFAULT_PADDING
+
+
+@pytest.mark.parametrize("button", ("left", "right", "wheel"))
+def test_status_mouse_adapter_preserves_the_original_control_height(button):
+    height = float(probe.OVERLAY_GEOMETRY.hint_control_height)
+    padding = probe.ICON_DEFAULT_PADDING
+    size = probe._concept_mouse_icon_size(height, button, padding)
+    metrics = probe.icon_metrics(f"status-mouse-{button}", padding=padding)
+    rendered_height = (metrics.bounds[3] - metrics.bounds[1]) * size / probe.ICON_GRID
+
+    assert rendered_height == pytest.approx(height)
+    assert size > probe.OVERLAY_GEOMETRY.hint_mouse_width
+
+
+@pytest.mark.parametrize("muted", (False, True))
+def test_status_mouse_preview_inherits_the_production_mouse_colors(monkeypatch, muted):
+    calls = []
+    state = probe.ProbeState(preview_icon_library=True)
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    used = probe._draw_mouse_input(
+        None,
+        10.0,
+        30.0,
+        1.0,
+        width=float(probe.OVERLAY_GEOMETRY.hint_mouse_width),
+        height=float(probe.OVERLAY_GEOMETRY.hint_control_height),
+        button="left",
+        suffix="",
+        state=state,
+        muted=muted,
+    )
+
+    shell, control, _suffix = probe.mouse_hint_colors(probe.CONCEPT_THEME, muted=muted)
+    assert used == pytest.approx(probe.OVERLAY_GEOMETRY.hint_mouse_width)
+    assert calls[0][0][4] == shell
+    assert calls[0][1]["accent_color"] == control
+    assert calls[0][1]["radial_alignment"] == 0.0
 
 
 def test_capsule_record_and_stop_share_the_viewport_danger_color():
@@ -142,11 +185,17 @@ def test_capsule_record_and_stop_share_the_viewport_danger_color():
 )
 def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind, scale, expected):
     calls = []
-    monkeypatch.setattr(probe, "draw_concept_icon", lambda *args: calls.append(args))
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
 
     probe._draw_icon_library_command_icon(None, (10.0, 20.0), kind, (1, 1, 1, 1), scale)
 
-    assert calls[0][3] == expected
+    assert calls[0][0][3] == expected
+    assert calls[0][1]["radial_alignment"] == 0.0
+    assert calls[0][1]["padding"] == probe.ICON_DEFAULT_PADDING
 
 
 def test_icon_library_reuses_production_output_severity_painter(monkeypatch):
@@ -180,6 +229,13 @@ def test_production_severity_stays_centered_inside_icon_library_boundary(name):
     assert center_y == pytest.approx(0.0, abs=1e-6)
     assert sphere_x == pytest.approx(0.0, abs=1e-6)
     assert sphere_y == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
+def test_production_severity_metrics_ignore_candidate_layout_controls(name):
+    assert probe._icon_review_metrics(name, 1.0, probe.ICON_MAX_PADDING) == pytest.approx(
+        probe._icon_review_metrics(name, 0.0, probe.ICON_MIN_CLEARANCE)
+    )
 
 
 def test_production_information_and_warning_ink_are_mirrored():

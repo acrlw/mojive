@@ -31,7 +31,7 @@ from ..gizmo import ARROW_CORNER_RADIUS_PT, DIMENSION_CORNER_RADIUS_RATIO, _roun
 from .draw2d import Draw2D, fit_text, text_line_y
 from .input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from .pointer_bindings import PointerAction
-from .theme import Theme
+from .theme import RGBA, Theme
 
 CAPSULE_SMOOTHING = 0.382
 
@@ -1705,6 +1705,16 @@ def mouse_wheel_geometry(
     )
 
 
+def mouse_hint_colors(theme: Theme, *, muted: bool = False) -> tuple[RGBA, RGBA, RGBA]:
+    """Resolve the shared shell, control, and suffix colors for mouse hints."""
+
+    return (
+        theme.text_disabled if muted else theme.text,
+        theme.bg_frame_active if muted else theme.primary,
+        theme.text_disabled if muted else theme.primary_bright,
+    )
+
+
 def draw_mouse_hint_glyph(
     draw: Draw2D,
     x: float,
@@ -1741,9 +1751,7 @@ def draw_mouse_hint_glyph(
         geometry=geometry,
         smoothing=smoothing,
     )
-    shell_color = theme.text_disabled if muted else theme.text
-    fill_color = theme.bg_frame_active if muted else theme.primary
-    suffix_color = theme.text_disabled if muted else theme.primary_bright
+    shell_color, fill_color, suffix_color = mouse_hint_colors(theme, muted=muted)
     if button_geometry is None:
         draw.rect(
             (x, y),

@@ -35,10 +35,11 @@ remain local until they are deliberately implemented in production.
 
 The `Icon library` tab is a concept-only review surface. Its Overview and family tabs compare
 Viewport tools, Transport, Keyframes, Panels, Scene helpers, and Status & input candidates on one
-24-unit grid at 14, 20, 32, and 56 pt. The orange circle is the complete 24-unit circular placement
-boundary, matching Diagnostics. Each detail row reports radial padding and bounding-box center
-offset. The candidate painters do not alter Mojive's production UI; reviewed Output severity icons
-are shown through their production painter.
+24-unit grid at 14, 24, 56, and 112 pt. The orange circle is the complete 24-unit circular placement
+boundary, matching Diagnostics. The header's `Radial center` and `Glyph padding` controls update
+family sheets, capsule specimens, and the whole-UI preview together. Each detail row reports radial
+padding and bounding-box center offset. Rotate stays frame-aligned, and the reviewed Output Info,
+Warning, and Error icons stay on their production painter and ignore both controls.
 
 Use the always-visible `Icon Library preview` menu-bar switch, or `Probe > Preview Icon Library`,
 to substitute the candidates into the current Workspace, Panels, Geometry, and Redesign layouts.

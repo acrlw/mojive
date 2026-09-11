@@ -51,6 +51,7 @@ from mojive.ui.viewport_widgets import (
     format_simulation_time,
     hint_size,
     mouse_button_geometry,
+    mouse_hint_colors,
     mouse_wheel_geometry,
     normalized_overlay_position,
     overlay_border_hit,
@@ -1016,6 +1017,17 @@ def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
         assert max(fill_xs) - min(fill_xs) == pytest.approx(button_width)
         assert shell_points[0] == pytest.approx((min(fill_xs) - shell_gap, mouse_y))
         assert shell_points[-1] == pytest.approx((x + mouse_width, button_bottom + shell_gap))
+
+
+def test_mouse_hint_colors_resolve_active_and_muted_semantics() -> None:
+    from mojive.ui.theme import THEME
+
+    assert mouse_hint_colors(THEME) == (THEME.text, THEME.primary, THEME.primary_bright)
+    assert mouse_hint_colors(THEME, muted=True) == (
+        THEME.text_disabled,
+        THEME.bg_frame_active,
+        THEME.text_disabled,
+    )
 
 
 @pytest.mark.parametrize(
