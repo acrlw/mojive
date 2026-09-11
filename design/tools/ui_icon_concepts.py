@@ -46,6 +46,8 @@ ROTATE_FRAME_PADDING = 0.0
 ROTATE_FRAME_STROKE_OVERSHOOT = ICON_STROKE * 0.5
 ROTATE_FRINGE_MAX = 1.0
 ROTATE_FRINGE_GAP_FRACTION = 0.5
+ICON_ROTATE_RING_GAP_RATIO = 0.8
+ICON_ROTATE_RING_CAP = "round"
 MORE_ARM_RATIO = 0.94
 STATUS_MOUSE_DEFAULT_WIDTH = OVERLAY_GEOMETRY.hint_mouse_width
 REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
@@ -67,6 +69,9 @@ BOX_CENTERED_ICONS = frozenset(
     )
 )
 RING_CENTERED_ICONS = frozenset(("playback-reset", "transport-reset"))
+ICON_ALIGNMENT_CHOICES = ("circle", "box")
+ICON_ALIGNMENT_EDITABLE_ICONS = frozenset(("key-snapshot", "helper-camera", "helper-light"))
+ICON_GLYPH_ALIGNMENT_DEFAULTS = dict.fromkeys(ICON_ALIGNMENT_EDITABLE_ICONS, "circle")
 RESET_RING_CENTER = (0.0, 0.47)
 ICON_FAMILIES = (
     (
@@ -172,8 +177,48 @@ ICON_GLYPH_PADDING_DEFAULTS = {
     "playback-previous": 4.0,
     "playback-next": 4.0,
     "playback-more": 4.0,
+    "transport-first": 4.0,
+    "transport-previous": 4.0,
+    "transport-play": 3.0,
+    "transport-next": 4.0,
+    "transport-more": 4.0,
+    "key-keyframe": 4.0,
+    "key-add": 4.0,
+    "key-clear": 4.0,
+    "key-previous": 4.0,
+    "key-next": 4.0,
 }
 ICON_GROUP_STROKE_DEFAULTS = dict.fromkeys(ICON_GROUP_LAYOUT_DEFAULTS, ICON_STROKE)
+ICON_GLYPH_STROKE_DEFAULTS = {
+    "tool-move": 1.2,
+    "tool-rotate": 1.2,
+    "tool-scale": 1.2,
+    "tool-world": 1.25,
+    "tool-body": 1.25,
+    "tool-snap": 1.0,
+    "playback-previous": 2.0,
+    "playback-next": 2.0,
+    "playback-reset": 1.25,
+    "playback-more": 2.0,
+    "transport-previous": 2.0,
+    "transport-next": 2.0,
+    "transport-reset": 1.25,
+    "transport-more": 2.0,
+    "key-snapshot": 1.25,
+    "key-keyframe": 1.75,
+    "key-previous": 1.5,
+    "key-next": 1.5,
+    "key-fit": 1.25,
+    "key-follow": 1.25,
+    "key-view": 1.25,
+    "panel-search": 1.25,
+    "panel-sort": 1.25,
+    "panel-clear": 1.5,
+    "panel-visible": 1.25,
+    "panel-hidden": 1.25,
+    "helper-camera": 1.25,
+    "helper-light": 1.25,
+}
 
 
 @dataclass(frozen=True)
@@ -182,7 +227,7 @@ class IconTuning:
 
     move_head_scale: float = 1.0
     scale_handle_scale: float = 1.0
-    key_fit_arm_length: float = 3.0
+    key_fit_arm_length: float = 4.0
 
 
 ICON_TUNING_DEFAULTS = IconTuning()
@@ -364,8 +409,8 @@ class _Painter:
         *,
         stroke_width: float = ICON_STROKE,
         stroke_compensation: float = 1.0,
-        rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-        rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+        rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+        rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
         tuning: IconTuning = ICON_TUNING_DEFAULTS,
     ) -> None:
         self.draw = draw
@@ -1342,8 +1387,8 @@ def _draw_concept_icon_raw(
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
     stroke_compensation: float = 1.0,
-    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+    rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
 ) -> None:
     """Draw authored geometry before shared placement is applied."""
@@ -1503,9 +1548,10 @@ def _measure_raw_icon(
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
     stroke_compensation: float = 1.0,
-    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+    rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
+    alignment: str | None = None,
 ) -> IconMetrics:
     draw = _MetricsDraw()
     _draw_concept_icon_raw(
@@ -1523,7 +1569,7 @@ def _measure_raw_icon(
     )
     bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
-    anchor_center = _alignment_center_values(name, bounds, enclosing_center)
+    anchor_center = _alignment_center_values(name, bounds, enclosing_center, alignment)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
     anchor_extent = max(
         math.hypot(x - anchor_center[0], y - anchor_center[1]) for x, y in draw.boundary_points
@@ -1535,8 +1581,9 @@ def _alignment_center_values(
     name: str,
     bounds: tuple[float, float, float, float],
     enclosing_center: tuple[float, float],
+    alignment: str | None = None,
 ) -> tuple[float, float]:
-    anchor = icon_alignment_anchor(name)
+    anchor = icon_alignment_anchor(name, alignment)
     if anchor == "box":
         x0, y0, x1, y1 = bounds
         return (x0 + x1) * 0.5, (y0 + y1) * 0.5
@@ -1545,8 +1592,10 @@ def _alignment_center_values(
     return enclosing_center
 
 
-def _alignment_center(name: str, metrics: IconMetrics) -> tuple[float, float]:
-    return _alignment_center_values(name, metrics.bounds, metrics.enclosing_center)
+def _alignment_center(
+    name: str, metrics: IconMetrics, alignment: str | None = None
+) -> tuple[float, float]:
+    return _alignment_center_values(name, metrics.bounds, metrics.enclosing_center, alignment)
 
 
 @lru_cache(maxsize=256)
@@ -1555,9 +1604,10 @@ def _icon_layout(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
-    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+    rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
+    alignment: str | None = None,
 ) -> tuple[float, tuple[float, float], float]:
     """Center the declared anchor and fit every visible point to the requested padding."""
 
@@ -1598,6 +1648,7 @@ def _icon_layout(
             rotate_ring_gap_ratio=rotate_ring_gap_ratio,
             rotate_ring_cap=rotate_ring_cap,
             tuning=tuning,
+            alignment=alignment,
         )
         return safe_radius / reference_raw.anchor_extent
 
@@ -1629,8 +1680,9 @@ def _icon_layout(
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
         tuning=tuning,
+        alignment=alignment,
     )
-    anchor_center = _alignment_center(name, raw)
+    anchor_center = _alignment_center(name, raw, alignment)
     offset = (-anchor_center[0], -anchor_center[1])
     return (
         layout_scale,
@@ -1639,10 +1691,14 @@ def _icon_layout(
     )
 
 
-def icon_alignment_anchor(name: str) -> str:
+def icon_alignment_anchor(name: str, alignment: str | None = None) -> str:
     """Return the explicit geometric placement anchor for one concept icon."""
 
     icon_component_group(name)
+    if alignment is not None:
+        if alignment not in ICON_ALIGNMENT_CHOICES:
+            raise ValueError(f"icon alignment must be one of {ICON_ALIGNMENT_CHOICES!r}")
+        return alignment
     if name in BOX_CENTERED_ICONS:
         return "box"
     if name in RING_CENTERED_ICONS:
@@ -1656,9 +1712,10 @@ def icon_alignment_center(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
-    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+    rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
+    alignment: str | None = None,
 ) -> tuple[float, float]:
     """Return the declared anchor center after candidate placement."""
 
@@ -1670,6 +1727,7 @@ def icon_alignment_center(
         rotate_ring_gap_ratio,
         rotate_ring_cap,
         tuning,
+        alignment,
     )
     raw = _measure_raw_icon(
         name,
@@ -1679,8 +1737,9 @@ def icon_alignment_center(
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
         tuning=tuning,
+        alignment=alignment,
     )
-    source_center = _alignment_center(name, raw)
+    source_center = _alignment_center(name, raw, alignment)
     return (
         source_center[0] * layout_scale + offset[0],
         source_center[1] * layout_scale + offset[1],
@@ -1698,9 +1757,10 @@ def draw_concept_icon(
     accent_color=None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
-    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+    rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
+    alignment: str | None = None,
 ) -> None:
     """Draw one declared-anchor candidate fitted to a padded circular slot."""
 
@@ -1712,6 +1772,7 @@ def draw_concept_icon(
         rotate_ring_gap_ratio,
         rotate_ring_cap,
         tuning,
+        alignment,
     )
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
@@ -1740,9 +1801,10 @@ def icon_metrics(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
-    rotate_ring_gap_ratio: float = OVERLAY_GEOMETRY.rotate_ring_gap_ratio,
-    rotate_ring_cap: str = OVERLAY_GEOMETRY.rotate_ring_cap,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
+    rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
+    alignment: str | None = None,
 ) -> IconMetrics:
     """Return placement and geometry measurements for one 24-unit candidate."""
 
@@ -1759,10 +1821,11 @@ def icon_metrics(
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
         tuning=tuning,
+        alignment=alignment,
     )
     bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
-    anchor_center = _alignment_center_values(name, bounds, enclosing_center)
+    anchor_center = _alignment_center_values(name, bounds, enclosing_center, alignment)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
     anchor_extent = max(
         math.hypot(x - anchor_center[0], y - anchor_center[1]) for x, y in draw.boundary_points

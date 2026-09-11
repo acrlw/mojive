@@ -51,7 +51,9 @@ tools, Viewport playback, Keyframe transport, Keyframes actions, Panels, Scene h
 family row provides live per-glyph padding and stroke overrides plus a reset button; family sheets,
 capsule specimens, and the whole-UI preview resolve the same overrides. Viewport tools default to
 padding 0.50; every other group defaults to 2.00. Playback Previous, Next, and More use 4.00 so the
-directional marks remain smaller than Play. Rotate defaults to frame-aligned: its outer screen-ring
+directional marks remain smaller than Play. Keyframe Add, Clear, Keyframe, Previous, and Next plus
+Transport First, Previous, Next, and More also use 4.00; Transport Play uses 3.00. Rotate defaults
+to a 0.80-stroke crossing gap with round caps and remains frame-aligned: its outer screen-ring
 centerline coincides with the orange placement circle, while its row can adjust frame padding and
 the inner-ring gap/stroke ratio. Half of the outer stroke sits on each side of its centerline.
 Output's mature Info, Warning, and Error painters are also locked; the review control does not
@@ -78,6 +80,7 @@ declared geometric feature per silhouette:
 - Previous, Next, More, Keyframe Transport First/Last, and Tool Snap center their complete visible
   axis-aligned box;
 - Playback and Keyframe Transport Reset place the center of the authored circular ring on the slot;
+- Snapshot, Camera, and Light expose a per-glyph Box/Circle selector for direct comparison;
 - all remaining candidates center their sampled minimum enclosing circle.
 
 The concept library samples the full visible boundary, including half of each outline stroke,
@@ -231,7 +234,7 @@ edge of the frame is about 4.58 grid units on each side.
 | A concept experiment changes an established Tool Column icon | Candidate geometry was placed in the production painter | Keep Move, Rotate, and Scale candidate contours in the Icon Library and leave `viewport_widgets.py` untouched |
 | A triangle looks rounded only in the thumbnail | The preview hid a raw three-point polygon or an undersized corner profile | Inspect the native 112-point contour and require more than three authored boundary points |
 | Playback and Transport More do not match | Separate painters or size adjustments have drifted | Rotate the shared Previous construction and reuse the corresponding Previous layout scale |
-| Directional edge marks drift toward their open side | A minimum enclosing circle was used for a silhouette whose opposing terminals define the layout | Center the completed visible box for Previous, Next, More, First, Last, Panel Right, and Panel Down |
+| Directional edge marks drift toward their open side | A minimum enclosing circle was used for a silhouette whose opposing terminals define the layout | Center the completed visible box for Previous, Next, More, First, and Last; center equilateral Panel Right and Panel Down on their enclosing circles |
 | Mouse Wheel has a smaller shell than Left and Right | Each state was independently fitted even though production uses one shell size | Fit all three states from the Left outer-shell master and preserve the adjustable source width |
 | Snap looks like a generic U or loses its endpoint blocks | Its stems and semicircle were authored as unrelated primitives, or the probe copied only the centerline | Reuse the production G3 snap path with `CAPSULE_SMOOTHING` and retain both G3 endpoint blocks |
 | Snap sits low despite symmetric endpoints | Its open U was centered by a circle unrelated to its visible terminals | Center the complete visible box while preserving the production G3 contour |

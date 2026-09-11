@@ -6,10 +6,14 @@ import pytest
 from design.tools import ui_icon_concepts as icon_concepts
 from design.tools.ui_icon_concepts import (
     BOX_CENTERED_ICONS,
+    ICON_ALIGNMENT_CHOICES,
+    ICON_ALIGNMENT_EDITABLE_ICONS,
     ICON_BOUND_DIAMETER,
     ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
+    ICON_GLYPH_ALIGNMENT_DEFAULTS,
     ICON_GLYPH_PADDING_DEFAULTS,
+    ICON_GLYPH_STROKE_DEFAULTS,
     ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_LAYOUT_REFERENCES,
@@ -17,6 +21,7 @@ from design.tools.ui_icon_concepts import (
     ICON_MAX_STROKE,
     ICON_MIN_CLEARANCE,
     ICON_MIN_STROKE,
+    ICON_ROTATE_RING_GAP_RATIO,
     ICON_STROKE,
     ICON_TUNING_DEFAULTS,
     MORE_ARM_RATIO,
@@ -190,8 +195,9 @@ def _render(
     padding: float | None = None,
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH,
     stroke_width: float = ICON_STROKE,
-    rotate_ring_gap_ratio: float = 0.5,
+    rotate_ring_gap_ratio: float = ICON_ROTATE_RING_GAP_RATIO,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
+    alignment: str | None = None,
 ) -> _RecordingDraw:
     draw = _RecordingDraw()
     draw_concept_icon(
@@ -205,6 +211,7 @@ def _render(
         stroke_width=stroke_width,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         tuning=tuning,
+        alignment=alignment,
     )
     return draw
 
@@ -272,6 +279,56 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
         for group, padding in ICON_GROUP_LAYOUT_DEFAULTS.items()
         if group != "Viewport tools"
     )
+
+
+def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> None:
+    assert ICON_ROTATE_RING_GAP_RATIO == 0.8
+    assert ICON_GLYPH_PADDING_DEFAULTS == {
+        "tool-rotate": 0.0,
+        "playback-previous": 4.0,
+        "playback-next": 4.0,
+        "playback-more": 4.0,
+        "transport-first": 4.0,
+        "transport-previous": 4.0,
+        "transport-play": 3.0,
+        "transport-next": 4.0,
+        "transport-more": 4.0,
+        "key-keyframe": 4.0,
+        "key-add": 4.0,
+        "key-clear": 4.0,
+        "key-previous": 4.0,
+        "key-next": 4.0,
+    }
+    assert ICON_GLYPH_STROKE_DEFAULTS == {
+        "tool-move": 1.2,
+        "tool-rotate": 1.2,
+        "tool-scale": 1.2,
+        "tool-world": 1.25,
+        "tool-body": 1.25,
+        "tool-snap": 1.0,
+        "playback-previous": 2.0,
+        "playback-next": 2.0,
+        "playback-reset": 1.25,
+        "playback-more": 2.0,
+        "transport-previous": 2.0,
+        "transport-next": 2.0,
+        "transport-reset": 1.25,
+        "transport-more": 2.0,
+        "key-snapshot": 1.25,
+        "key-keyframe": 1.75,
+        "key-previous": 1.5,
+        "key-next": 1.5,
+        "key-fit": 1.25,
+        "key-follow": 1.25,
+        "key-view": 1.25,
+        "panel-search": 1.25,
+        "panel-sort": 1.25,
+        "panel-clear": 1.5,
+        "panel-visible": 1.25,
+        "panel-hidden": 1.25,
+        "helper-camera": 1.25,
+        "helper-light": 1.25,
+    }
 
 
 def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
@@ -518,6 +575,21 @@ def test_camera_candidates_share_one_master_and_circle_anchor() -> None:
     assert icon_alignment_anchor("helper-camera") == "circle"
 
 
+@pytest.mark.parametrize("name", tuple(sorted(ICON_ALIGNMENT_EDITABLE_ICONS)))
+@pytest.mark.parametrize("alignment", ICON_ALIGNMENT_CHOICES)
+def test_reviewable_camera_and_light_anchors_center_the_selected_geometry(
+    name: str, alignment: str
+) -> None:
+    metrics = icon_metrics(name, alignment=alignment)
+
+    assert ICON_GLYPH_ALIGNMENT_DEFAULTS[name] == "circle"
+    assert icon_alignment_anchor(name, alignment) == alignment
+    if alignment == "box":
+        assert metrics.center_offset == pytest.approx((0.0, 0.0), abs=0.01)
+    else:
+        assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=0.01)
+
+
 @pytest.mark.parametrize("name", ("status-mouse-left", "status-mouse-right", "status-mouse-wheel"))
 def test_mouse_candidates_apply_the_control_accent(name: str) -> None:
     draw = _RecordingDraw()
@@ -635,7 +707,7 @@ def test_rotate_scales_inner_ring_antialiasing_with_the_rendered_gap() -> None:
     normalized_paths = None
     for size in (14.0, 24.0, 56.0, 112.0):
         draw = _render("tool-rotate", size)
-        rendered_gap = ICON_STROKE * size / ICON_GRID * 0.5
+        rendered_gap = ICON_STROKE * size / ICON_GRID * ICON_ROTATE_RING_GAP_RATIO
         expected_fringe = min(
             ROTATE_FRINGE_MAX,
             rendered_gap * ROTATE_FRINGE_GAP_FRACTION,
@@ -831,7 +903,7 @@ def test_keyframe_transport_directions_keep_the_component_padding() -> None:
         for kind in ("previous", "play", "pause", "next")
     )
 
-    assert clearances == pytest.approx((ICON_DEFAULT_PADDING,) * 4, abs=1e-5)
+    assert clearances == pytest.approx((4.0, 3.0, ICON_DEFAULT_PADDING, 4.0), abs=1e-5)
 
 
 @pytest.mark.parametrize("prefix", ("playback", "transport"))
