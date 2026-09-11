@@ -44,6 +44,8 @@ ICON_DEFAULT_PADDING = 2.0
 ICON_MAX_PADDING = 4.0
 ROTATE_FRAME_PADDING = 0.0
 ROTATE_FRAME_STROKE_OVERSHOOT = ICON_STROKE * 0.5
+ROTATE_FRINGE_MAX = 1.0
+ROTATE_FRINGE_GAP_FRACTION = 0.5
 MORE_ARM_RATIO = 0.94
 STATUS_MOUSE_DEFAULT_WIDTH = OVERLAY_GEOMETRY.hint_mouse_width
 REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
@@ -816,19 +818,27 @@ def _draw_tool(p: _Painter, name: str) -> None:
         )
     elif name == "tool-rotate":
         # Repeat the established production construction: the screen ring uses
-        # ImGui's antialiased circle stroke, while the three local half-rings use
-        # the normal one-pixel filled-contour fringe. A reduced subpixel fringe
-        # makes these narrow curves visibly stair-step at the 14-point size.
+        # ImGui's antialiased circle stroke. The three local half-rings use a
+        # gap-limited fringe: two opposing AA ramps may meet at the center of a
+        # knockout but must never overlap and fill it at compact sizes.
         production_scale = 0.82
         glyph_scale = production_scale * TOOL_GLYPH_SCALE
         p.circle(0.0, 0.0, 10.0 * glyph_scale)
+        rendered_gap = p.stroke * p.rotate_ring_gap_ratio
+        fringe_width = min(
+            ROTATE_FRINGE_MAX,
+            rendered_gap * ROTATE_FRINGE_GAP_FRACTION,
+        )
         for ring in _concept_rotate_ring_polygons(
             p.stroke_width * p.stroke_compensation / production_scale,
             p.rotate_ring_gap_ratio,
             p.rotate_ring_cap,
         ):
             for local in ring:
-                p.polygon(tuple((x * glyph_scale, y * glyph_scale) for x, y in local))
+                p.polygon(
+                    tuple((x * glyph_scale, y * glyph_scale) for x, y in local),
+                    fringe_width=fringe_width,
+                )
     elif name == "tool-scale":
         # Keep the accepted viewport Scale glyph as the source of truth. It
         # supplies the original reach, center clearance, joined G3 shafts and

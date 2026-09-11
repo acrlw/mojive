@@ -24,6 +24,8 @@ from design.tools.ui_icon_concepts import (
     REVIEW_LOCKED_PADDING,
     RING_CENTERED_ICONS,
     ROTATE_FRAME_STROKE_OVERSHOOT,
+    ROTATE_FRINGE_GAP_FRACTION,
+    ROTATE_FRINGE_MAX,
     STATUS_MOUSE_DEFAULT_WIDTH,
     STROKE_SCALE_LOCKED_ICONS,
     IconTuning,
@@ -325,7 +327,7 @@ def test_rotate_gap_ratio_changes_only_the_inner_ring_construction() -> None:
     open_gap = _render("tool-rotate", ICON_GRID, rotate_ring_gap_ratio=1.0)
 
     assert compact.circles == open_gap.circles
-    assert compact.filled_paths != open_gap.filled_paths
+    assert compact.indexed_fills != open_gap.indexed_fills
 
 
 @pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE, ICON_DEFAULT_PADDING, ICON_MAX_PADDING))
@@ -625,17 +627,36 @@ def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
 
     assert rotate.fills >= 3
     assert len(rotate.circles) == 1
-    assert rotate.filled_paths
-    assert not rotate.indexed_fills
+    assert rotate.indexed_fills
     assert reset.fills == 1
 
 
-def test_rotate_uses_native_circle_and_standard_filled_contour_antialiasing() -> None:
+def test_rotate_scales_inner_ring_antialiasing_with_the_rendered_gap() -> None:
+    normalized_paths = None
     for size in (14.0, 24.0, 56.0, 112.0):
         draw = _render("tool-rotate", size)
+        rendered_gap = ICON_STROKE * size / ICON_GRID * 0.5
+        expected_fringe = min(
+            ROTATE_FRINGE_MAX,
+            rendered_gap * ROTATE_FRINGE_GAP_FRACTION,
+        )
+
         assert len(draw.circles) == 1
-        assert draw.filled_paths
-        assert not draw.indexed_fringe_widths
+        assert draw.indexed_fringe_widths
+        assert draw.indexed_fringe_widths == pytest.approx(
+            [expected_fringe] * len(draw.indexed_fringe_widths), abs=1e-9
+        )
+        current_paths = tuple(
+            tuple((x / size, y / size) for x, y in points)
+            for points, _indices, _outline, _hole in draw.indexed_fills
+        )
+        if normalized_paths is None:
+            normalized_paths = current_paths
+        else:
+            for current, expected in zip(current_paths, normalized_paths, strict=True):
+                assert tuple(value for point in current for value in point) == pytest.approx(
+                    tuple(value for point in expected for value in point), abs=1e-9
+                )
 
 
 def test_scale_uses_three_integrated_box_handles() -> None:
