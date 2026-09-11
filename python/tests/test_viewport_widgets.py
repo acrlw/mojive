@@ -5,6 +5,8 @@ from itertools import pairwise
 import numpy as np
 import pytest
 
+from mojive.ui import icons as production_icons
+from mojive.ui import viewport_widgets
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
 from mojive.ui.theme import Theme, ViewportChromeColors
 from mojive.ui.viewport_widgets import (
@@ -62,6 +64,38 @@ from mojive.ui.viewport_widgets import (
     viewport_chrome_scale,
 )
 from tests.curve_assertions import assert_paths_close
+
+
+def test_viewport_callbacks_route_reviewed_icons_with_component_sizes(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        production_icons,
+        "draw_icon",
+        lambda draw, center, size, name, color, **kwargs: calls.append(
+            (draw, center, size, name, color, kwargs)
+        ),
+    )
+    draw = object()
+    center = (20.0, 30.0)
+    color = (0.8, 0.8, 0.8, 1.0)
+    accent = (0.9, 0.2, 0.1, 1.0)
+
+    viewport_widgets._play_icon(draw, center, color, 1.5, None)
+    viewport_widgets._previous_icon(draw, center, color, 1.5, None)
+    viewport_widgets._tool_icon(draw, center, color, 1.5, (None, ("frame", "body")))
+    viewport_widgets._record_icon(draw, center, color, 1.5, (None, (False, accent, "stop")))
+    viewport_widgets._recording_options_icon(draw, center, color, 1.5, None)
+
+    assert [call[3] for call in calls] == [
+        "playback-play",
+        "playback-previous",
+        "tool-body",
+        "playback-record",
+        "playback-more",
+    ]
+    assert calls[0][2] == pytest.approx(30.0)
+    assert calls[2][2] == pytest.approx(30.0 * TOOL_GLYPH_SCALE)
+    assert calls[3][4] == accent
 
 
 def test_normalized_overlay_position_clamps_and_round_trips() -> None:

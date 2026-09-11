@@ -20,6 +20,14 @@ from .theme import THEME, Theme
 from .viewport_widgets import draw_projection_label
 
 
+def _production_control_icon(draw, center, size: float, kind: str, color) -> None:
+    # Import lazily because the icon library reuses viewport's low-level rotate,
+    # snap, and mouse geometry while controls are imported by viewport panels.
+    from .icons import draw_control_icon
+
+    draw_control_icon(draw, center, size, kind, color)
+
+
 def action_menu_popup(str_id, items, *, on_item=None):
     """Draw equally sized action buttons in one popup; None separates action groups."""
     if not imgui.is_popup_open(str_id):
@@ -72,6 +80,7 @@ def search_input(
 ) -> tuple[bool, str]:
     """Draw a live filter with a leading search glyph and a trailing clear button."""
 
+    icon_drawer = icon_drawer or _production_control_icon
     style = imgui.get_style()
     width, height = float(imgui.calc_item_width()), float(imgui.get_frame_height())
     start = imgui.get_cursor_screen_pos()
@@ -124,24 +133,11 @@ def search_input(
 
     draw = ImguiDraw2D()
     color = imgui.get_style_color_vec4(imgui.Col_.text_disabled)
-    radius = height * 0.16
-    stroke = max(1.0, height * 0.055)
     identifier = str_id.partition("##")[2] or str_id
     center_y = (lo[1] + hi[1]) * 0.5
     search_x = lo[0] + padding + slot_width * 0.5
     focus_requested = False
-    if icon_drawer is None:
-        center = (search_x - radius * 0.275, center_y - radius * 0.275)
-        draw.circle(center, radius, color, stroke)
-        draw.line(
-            (center[0] + radius * 0.70, center[1] + radius * 0.70),
-            (center[0] + radius * 1.55, center[1] + radius * 1.55),
-            color,
-            stroke,
-            cap="round",
-        )
-    else:
-        icon_drawer(draw, (search_x, center_y), height * 0.72, "search", color)
+    icon_drawer(draw, (search_x, center_y), height * 0.72, "search", color)
     if imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
         lo, (lo[0] + slot_width + padding, hi[1])
     ):
@@ -217,6 +213,7 @@ def sort_order_button(
 ) -> tuple[bool, bool]:
     """Draw a compact state/name order toggle beside a search field."""
 
+    icon_drawer = icon_drawer or _production_control_icon
     size = imgui.get_frame_height()
     left_clicked = imgui.button(f"##sort_order_{str_id}", imgui.ImVec2(size, 0.0))
     hovered = imgui.is_item_hovered()
@@ -228,18 +225,13 @@ def sort_order_button(
     color_value = imgui.get_style_color_vec4(imgui.Col_.check_mark if by_name else imgui.Col_.text)
     color = color_value
     draw = ImguiDraw2D()
-    if icon_drawer is None:
-        thickness = max(1.0, size * 0.045)
-        for start, end in sort_order_glyph((lo.x, lo.y, hi.x, hi.y)):
-            draw.line(start, end, color, thickness, cap="round")
-    else:
-        icon_drawer(
-            draw,
-            ((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5),
-            size * 0.72,
-            "sort",
-            color,
-        )
+    icon_drawer(
+        draw,
+        ((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5),
+        size * 0.72,
+        "sort",
+        color,
+    )
     imgui.set_item_tooltip(sort_order_tooltip(by_name, state_order, translate))
     changed = bool(left_clicked or alternate)
     return changed, (not by_name if changed else by_name)
@@ -535,6 +527,7 @@ def clear_button(
     icon_drawer=None,
 ) -> bool:
     """Draw a keyboard-accessible, round-stroke clear action without a frame."""
+    icon_drawer = icon_drawer or _production_control_icon
     clicked = imgui.invisible_button(str_id, size, imgui.ButtonFlags_.enable_nav)
     lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
     hovered = imgui.is_item_hovered()
@@ -542,12 +535,7 @@ def clear_button(
     color = (color.x, color.y, color.z, color.w * imgui.get_style().alpha)
     x, y = (lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5
     draw = ImguiDraw2D()
-    if icon_drawer is None:
-        arm, stroke = size[1] * 0.1408, max(1.0, size[1] * 0.055)
-        draw.line((x - arm, y - arm), (x + arm, y + arm), color, stroke, cap="round")
-        draw.line((x + arm, y - arm), (x - arm, y + arm), color, stroke, cap="round")
-    else:
-        icon_drawer(draw, (x, y), size[1] * 0.72, "clear", color)
+    icon_drawer(draw, (x, y), size[1] * 0.72, "clear", color)
     if hovered:
         imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
         if tooltip:

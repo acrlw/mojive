@@ -69,7 +69,7 @@ help:
 		'  make outline           selection and antialiased outline' \
 		'  make inspector         compact Inspector transform reference image' \
 		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
-		'  make ui-icon-concepts  concept-only icon family review captures' \
+		'  make ui-icon-concepts  production icon family review captures' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \

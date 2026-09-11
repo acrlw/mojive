@@ -12,20 +12,16 @@ from imgui_bundle import imgui
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, KeyframeInfo, KeyframeProperties
-from ...curves2d import CORNER_SMOOTHING, capped_polyline_points
+from ...curves2d import CORNER_SMOOTHING
 from ...gizmo import _rounded_polygon_corners
 from ...input import InputClaim
 from ..draw2d import ImguiDraw2D, fit_text, text_line_y
+from ..icons import ICON_GRID, draw_icon, production_icon_metrics
 from ..input_bindings import DEFAULT_INPUT_BINDINGS
 from ..pointer_bindings import PointerAction
 from ..theme import with_alpha
 from ..viewport_widgets import (
-    PLAYBACK_HALF_HEIGHT_PT,
-    PLAYBACK_RESET_SCALE,
     ToolHint,
-    draw_expand_glyph,
-    draw_playback_glyph,
-    draw_reset_glyph,
     pointer_tool_hint,
 )
 from . import Panel, PanelContext, button_row_layout, button_width, segmented_control
@@ -35,12 +31,27 @@ _COMMAND_HEIGHT_PT = 28.0
 _COMMAND_ICON_PT = 16.0
 _MARKER_SPACING_FACTOR = 1.5
 _LOOP_COLOR = (0.98, 0.52, 0.18, 1.0)
-_COMMAND_PLAYBACK_KINDS = {
-    "previous": "previous",
-    "next": "step",
-    "play": "play",
-    "pause": "pause",
-    "stop": "stop",
+_COMMAND_ICON_NAMES = {
+    "first": "transport-first",
+    "last": "transport-last",
+    "previous": "transport-previous",
+    "next": "transport-next",
+    "play": "transport-play",
+    "pause": "transport-pause",
+    "stop": "transport-stop",
+    "loop": "transport-reset",
+    "reset": "transport-reset",
+    "options": "transport-more",
+    "record": "transport-record",
+    "add": "key-add",
+    "clear": "key-clear",
+    "key-previous": "key-previous",
+    "key-next": "key-next",
+    "fit": "key-fit",
+    "follow": "key-follow",
+    "view": "key-view",
+    "key": "key-snapshot",
+    "key-keyframe": "key-keyframe",
 }
 
 
@@ -57,32 +68,6 @@ def _rounded_command_icon_path(
                 points, radius, tuple(range(len(points))), smoothing=smoothing
             ),
         )
-    )
-
-
-@lru_cache(maxsize=64)
-def _fit_corner_path(scale: float, sx: int, sy: int, smoothing: float):
-    return capped_polyline_points(
-        (
-            (sx * 2.75 * scale, sy * 6 * scale),
-            (sx * 6 * scale, sy * 6 * scale),
-            (sx * 6 * scale, sy * 2.75 * scale),
-        ),
-        1.5 * scale,
-        round_start=True,
-        round_end=True,
-        smoothing=smoothing,
-    )
-
-
-@lru_cache(maxsize=128)
-def _command_stroke(points, width, scale, smoothing):
-    return capped_polyline_points(
-        tuple((x * scale, y * scale) for x, y in points),
-        width * scale,
-        round_start=True,
-        round_end=True,
-        smoothing=smoothing,
     )
 
 
@@ -280,92 +265,25 @@ def decimated_marker_ids(
 def _draw_command_icon(
     draw, center, kind: str, color, scale: float, *, smoothing: float = CORNER_SMOOTHING
 ) -> None:
-    """Draw one 16 pt transport or keyframe glyph."""
+    """Draw one production transport or keyframe glyph in its 16 pt slot."""
 
-    x, y = (float(center[0]), float(center[1]))
-    s = float(scale)
+    del smoothing
+    try:
+        name = _COMMAND_ICON_NAMES[kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown keyframe command icon: {kind!r}") from exc
+    draw_icon(draw, center, _COMMAND_ICON_PT * float(scale), name, color)
 
-    def rounded_fill(points, *, radius: float = 0.75) -> None:
-        draw.fringed_concave_fill(
-            _rounded_command_icon_path(
-                tuple((px * s, py * s) for px, py in points), radius * s, smoothing
-            ),
-            color,
-            origin=(x, y),
-        )
 
-    def stroke(points, width):
-        draw.fringed_concave_fill(
-            _command_stroke(points, width, s, smoothing), color, origin=(x, y)
-        )
+def _command_icon_visible_width(kind: str, scale: float) -> float:
+    """Return the rendered glyph width used to center icon-label pairs."""
 
-    if kind in ("first", "last"):
-        direction = -1.0 if kind == "first" else 1.0
-        for offset in (-2.0, 2.5):
-            rounded_fill(
-                tuple(
-                    (direction * (px + offset), py)
-                    for px, py in ((-2.5, -4.5), (2.0, 0.0), (-2.5, 4.5))
-                ),
-                radius=0.45,
-            )
-        stroke(((direction * 6, -4.5), (direction * 6, 4.5)), 1.4)
-    elif kind in _COMMAND_PLAYBACK_KINDS:
-        draw_playback_glyph(
-            draw, center, color, s * 0.85, _COMMAND_PLAYBACK_KINDS[kind], smoothing=smoothing
-        )
-    elif kind in ("loop", "reset"):
-        draw_reset_glyph(draw, center, color, s * 0.72)
-    elif kind == "options":
-        draw_expand_glyph(draw, center, color, s)
-    elif kind == "record":
-        draw.circle_filled((x, y), 4.5 * s, color)
-    elif kind == "add":
-        stroke(((-5, 0), (5, 0)), 1.6)
-        stroke(((0, -5), (0, 5)), 1.6)
-    elif kind == "clear":
-        stroke(((-5, -5), (5, 5)), 1.8)
-        stroke(((5, -5), (-5, 5)), 1.8)
-    elif kind in ("key-previous", "key-next"):
-        direction = -1.0 if kind == "key-previous" else 1.0
-        diamond_x = -direction * 2.5
-        rounded_fill(
-            (
-                (diamond_x, -4.5),
-                (diamond_x + 4.5, 0.0),
-                (diamond_x, 4.5),
-                (diamond_x - 4.5, 0.0),
-            ),
-            radius=0.55,
-        )
-        rounded_fill(
-            (
-                (direction * 7.0, 0.0),
-                (direction * 3.5, -3.5),
-                (direction * 3.5, 3.5),
-            )
-        )
-    elif kind == "fit":
-        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-            draw.fringed_concave_fill(_fit_corner_path(s, sx, sy, smoothing), color, origin=(x, y))
-    elif kind == "follow":
-        stroke(((-6, 0), (2, 0)), 1.5)
-        rounded_fill(((0, -3), (4, 0), (0, 3)), radius=0.4)
-        stroke(((6, -5), (6, 5)), 1.5)
-    elif kind == "view":
-        draw.rect(
-            (x - 7.0 * s, y - 5.0 * s),
-            (x + 7.0 * s, y + 5.0 * s),
-            color,
-            1.5 * s,
-            rounding=1.5 * s,
-            smoothing=smoothing,
-        )
-        draw.circle_filled((x, y), 2.0 * s, color)
-    else:
-        rounded_fill(
-            ((0.0, -6.0), (6.0, 0.0), (0.0, 6.0), (-6.0, 0.0)),
-        )
+    try:
+        name = _COMMAND_ICON_NAMES[kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown keyframe command icon: {kind!r}") from exc
+    x0, _y0, x1, _y1 = production_icon_metrics(name).bounds
+    return (x1 - x0) * _COMMAND_ICON_PT * float(scale) / ICON_GRID
 
 
 def _command_button(
@@ -420,12 +338,7 @@ def _command_button(
         key = (imgui.get_font(), imgui.get_font_size(), kind, label, width, scale)
         cached = layouts.get(item_id) if layouts is not None else None
         if cached is None or cached[0] != key:
-            icon_width = {
-                "record": 9.0,
-                "stop": 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE * 0.85,
-                "view": 15.5,
-                "key": 12.0,
-            }.get(kind, _COMMAND_ICON_PT) * scale
+            icon_width = _command_icon_visible_width(kind, scale)
             gap = 7.0 * scale
             label = fit_text(draw, label, max(1.0, width - 16 * scale - icon_width - gap))
             ink = draw.text_ink_bounds(label) or (0.0, 0.0, *draw.text_size(label))
@@ -1265,7 +1178,7 @@ class KeyframesPanel(Panel):
             _draw_command_icon(
                 overlay,
                 (x, snapshot_y),
-                "key",
+                "key-keyframe",
                 ctx.theme.info if snapshot_id != self._selected_snapshot else ctx.theme.primary,
                 radius / 6,
             )

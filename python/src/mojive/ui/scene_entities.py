@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 
 from .. import math3d
 from ..adapters.base import NodeType, SceneNode
 from ..gizmo import (
-    camera_icon_paths,
     project,
     screen_constant_world_sizes,
     world_scale,
@@ -18,6 +18,7 @@ from ..math3d import camera_rotation as camera_rotation
 from ..math3d import direction_basis
 from ..render.debugdraw import Occlusion
 from ..types import CameraView, Light, LightType
+from .icons import production_helper_strokes
 from .theme import THEME
 
 HELPER_LAYER = "ui.scene_entities"
@@ -31,6 +32,56 @@ LIGHT_HELPER_SCALE_PT = 1.2
 _CIRCLE_SEGMENTS = 48
 _SPOT_HELPER_LENGTH_PT = 180.0
 _SPOT_HELPER_RADIUS_PT = 120.0
+
+
+@lru_cache(maxsize=2)
+def _helper_path_data(
+    name: str,
+) -> tuple[np.ndarray, tuple[tuple[int, int, float, bool], ...]]:
+    """Flatten stable helper paths once so each frame performs one transform."""
+
+    points = []
+    spans = []
+    for stroke in production_helper_strokes(name):
+        start = len(points)
+        points.extend(stroke.points)
+        spans.append((start, len(points), stroke.width, stroke.closed))
+    values = np.asarray(points, np.float64)
+    values.setflags(write=False)
+    return values, tuple(spans)
+
+
+def _production_helper_geometry(
+    name: str,
+    positions: np.ndarray,
+    editor_camera: CameraView,
+    viewport_height: float,
+    ui_scale: float,
+) -> tuple[tuple[np.ndarray, float, bool], ...]:
+    """Project cached, box-centered UI helper paths into the scene."""
+
+    positions = np.asarray(positions, np.float64).reshape(-1, 3)
+    if not len(positions):
+        return ()
+    pixel_world = screen_constant_world_sizes(
+        editor_camera,
+        positions,
+        viewport_height,
+        float(ui_scale),
+        visible_only=True,
+    )
+    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
+    right, up = view_rotation[0], view_rotation[1]
+    points, spans = _helper_path_data(name)
+    offsets = (
+        points[None, :, 0, None] * right[None, None, :]
+        - points[None, :, 1, None] * up[None, None, :]
+    )
+    world = (positions[:, None, :] + pixel_world[:, None, None] * offsets).astype(np.float32)
+    return tuple(
+        (world[:, start:end], width * float(ui_scale), closed)
+        for start, end, width, closed in spans
+    )
 
 
 @dataclass
@@ -137,30 +188,24 @@ class SceneEntityHelpers:
     ) -> None:
         if not helpers:
             return
-        views = [view for _, view, _ in helpers]
-        outlines, lenses = camera_icon_paths(
-            views,
+        eyes = np.asarray([view.eye for _, view, _ in helpers], np.float32)
+        paths = _production_helper_geometry(
+            "helper-camera",
+            eyes,
             editor_camera,
             viewport_height,
-            CAMERA_HELPER_SIZE_PT * ui_scale,
-            visible_only=True,
+            ui_scale,
         )
         for index, (object_id, _view, selected) in enumerate(helpers):
             color = SELECTED_COLOR if selected else HELPER_COLOR
-            icon_layer.polyline(
-                f"camera:{object_id}:outline",
-                outlines[index],
-                color,
-                1.6 * ui_scale,
-                closed=True,
-            )
-            icon_layer.polyline(
-                f"camera:{object_id}:lens",
-                lenses[index],
-                color,
-                1.6 * ui_scale,
-                closed=True,
-            )
+            for part, (points, width, closed) in zip(("outline", "lens"), paths, strict=True):
+                icon_layer.polyline(
+                    f"camera:{object_id}:{part}",
+                    points[index],
+                    color,
+                    width,
+                    closed=closed,
+                )
         if self.show_influence:
             for object_id, view, selected in helpers:
                 if selected:
@@ -189,27 +234,40 @@ class SceneEntityHelpers:
             [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
             np.float32,
         )
-        rings, detail_starts, detail_ends = _light_icon_geometry(
+        paths = _production_helper_geometry(
+            "helper-light",
             positions,
             editor_camera,
             viewport_height,
             ui_scale,
         )
+        closed_paths = tuple(path for path in paths if path[2])
+        open_paths = tuple(path for path in paths if not path[2])
+        detail_widths = {width for _points, width, _closed in open_paths}
+        if len(detail_widths) != 1 or any(
+            points.shape[1] != 2 for points, _width, _closed in open_paths
+        ):
+            raise RuntimeError("helper-light detail paths must share one two-point stroke")
+        detail_width = detail_widths.pop()
         for index, (object_id, _light, _selected) in enumerate(helpers):
-            icon_layer.polyline(
-                f"light:{object_id}:ring",
-                rings[index],
-                colors[index],
-                1.4 * ui_scale,
-                closed=True,
-            )
-            icon_layer.lines(
-                f"light:{object_id}:details",
-                detail_starts[index],
-                detail_ends[index],
-                colors[index],
-                1.4 * ui_scale,
-            )
+            for path_index, (points, width, closed) in enumerate(closed_paths):
+                icon_layer.polyline(
+                    f"light:{object_id}:ring"
+                    if len(closed_paths) == 1
+                    else f"light:{object_id}:ring:{path_index}",
+                    points[index],
+                    colors[index],
+                    width,
+                    closed=closed,
+                )
+            if open_paths:
+                icon_layer.lines(
+                    f"light:{object_id}:details",
+                    np.asarray([points[index, 0] for points, _width, _closed in open_paths]),
+                    np.asarray([points[index, 1] for points, _width, _closed in open_paths]),
+                    colors[index],
+                    detail_width,
+                )
 
         directed = np.asarray(
             [selected and light.type is not LightType.POINT for _, light, selected in helpers],

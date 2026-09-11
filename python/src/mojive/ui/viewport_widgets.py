@@ -1055,23 +1055,33 @@ def _rounded_playback_triangle(
 
 
 def _play_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    draw_playback_glyph(draw, center, color, scale, "play")
+    from .icons import draw_icon
+
+    draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-play", color)
 
 
 def _pause_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    draw_playback_glyph(draw, center, color, scale, "pause")
+    from .icons import draw_icon
+
+    draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-pause", color)
 
 
 def _step_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    draw_playback_glyph(draw, center, color, scale, "step")
+    from .icons import draw_icon
+
+    draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-next", color)
 
 
 def _previous_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    draw_playback_glyph(draw, center, color, scale, "previous")
+    from .icons import draw_icon
+
+    draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-previous", color)
 
 
 def _reset_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    draw_playback_glyph(draw, center, color, scale, "reset")
+    from .icons import draw_icon
+
+    draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-reset", color)
 
 
 def _viewport_tooltip_padding(scale: float) -> tuple[float, float]:
@@ -1221,8 +1231,13 @@ def draw_projection_glyph(
 def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, label: str) -> None:
     """Center the visible pair horizontally and its shared body line vertically."""
 
-    stroke = max(1.0, _PROJECTION_STROKE_PT * scale)
-    glyph_width = 2.0 * _PROJECTION_HALF_WIDTH_PT * scale + stroke
+    from .icons import ICON_GRID, draw_icon, production_icon_metrics
+
+    icon_name = "panel-perspective" if kind == "persp" else "panel-orthographic"
+    icon_size = 16.0 * scale
+    icon_bounds = production_icon_metrics(icon_name).bounds
+    icon_unit = icon_size / ICON_GRID
+    glyph_width = (icon_bounds[2] - icon_bounds[0]) * icon_unit
     gap = 7.0 * scale
     label_width, line_height = draw.text_size(label)
     ink = draw.text_ink_bounds(label) or (0.0, 0.0, label_width, line_height)
@@ -1232,12 +1247,12 @@ def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, 
     body = draw.text_ink_bounds("x" if label.isascii() else "田")
     center_y = (lo[1] + hi[1]) * 0.5
     text_y = center_y - ((body[1] + body[3]) * 0.5 if body else line_height * 0.5)
-    draw_projection_glyph(
+    draw_icon(
         draw,
-        (content_left + glyph_width * 0.5, center_y),
+        (content_left - icon_bounds[0] * icon_unit, center_y),
+        icon_size,
+        icon_name,
         color,
-        scale,
-        kind,
     )
     draw.text(
         (content_left + glyph_width + gap - ink[0], text_y),
@@ -1250,7 +1265,22 @@ def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, 
 def _tool_icon(draw: Draw2D, center, color, scale: float, packed) -> None:
     _surface, payload = packed
     kind, space = payload
-    draw_tool_glyph(draw, center, color, scale, kind, space)
+    from .icons import draw_icon
+
+    name = {
+        "move": "tool-move",
+        "rotate": "tool-rotate",
+        "dimensions": "tool-scale",
+        "frame": "tool-world" if space == "world" else "tool-body",
+        "snap": "tool-snap",
+    }[kind]
+    draw_icon(
+        draw,
+        center,
+        2.0 * OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE * scale,
+        name,
+        color,
+    )
 
 
 @lru_cache(maxsize=64)
@@ -2656,10 +2686,14 @@ def draw_recording_glyph(draw, center, color, scale, *, recording=False):
 
 def _record_icon(draw, center, color, scale, packed):
     _surface, (recording, accent, action) = packed
+    from .icons import draw_icon
+
+    size = 2.0 * OVERLAY_GEOMETRY.icon_radius * scale
     if recording and action in ("pause", "resume"):
-        draw_playback_glyph(draw, center, accent, scale, "pause" if action == "pause" else "play")
+        name = "playback-pause" if action == "pause" else "playback-play"
     else:
-        draw_recording_glyph(draw, center, accent, scale, recording=recording)
+        name = "playback-stop" if recording else "playback-record"
+    draw_icon(draw, center, size, name, accent)
 
 
 def draw_recording_options_glyph(
@@ -2678,4 +2712,6 @@ def draw_recording_options_glyph(
 
 
 def _recording_options_icon(draw, center, color, scale, _packed):
-    draw_recording_options_glyph(draw, center, color, scale)
+    from .icons import draw_icon
+
+    draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-more", color)

@@ -126,7 +126,7 @@ def test_icon_library_export_contains_group_glyph_and_shape_controls():
     assert "icon_padding_tool_move=0.85," in values
     assert "icon_stroke_key_fit=2.1," in values
     assert "icon_tool_move_head_scale=1.2," in values
-    assert "icon_alignment_key_snapshot='circle'," in values
+    assert "icon_alignment_key_snapshot='box'," in values
 
 
 @pytest.mark.parametrize("alignment", ("circle", "box"))
