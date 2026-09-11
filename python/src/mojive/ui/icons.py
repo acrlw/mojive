@@ -6,12 +6,14 @@ import math
 import random
 from dataclasses import dataclass, replace
 from functools import cache, lru_cache
+from itertools import pairwise
 
 from ..curves2d import (
     CORNER_SMOOTHING,
     arrow_mesh,
     box_handle_points,
     polyline_ribbon,
+    smooth_line_cap,
     smooth_polygon_corners,
     smooth_rect_points,
 )
@@ -1099,6 +1101,99 @@ def _eye_points() -> tuple[tuple[float, float], ...]:
     return (*top, *bottom[1:-1])
 
 
+@lru_cache(maxsize=64)
+def _lashed_lid_outline(width: float) -> tuple[tuple[float, float], ...]:
+    """Return the closed-eye lid and lashes as one non-overdrawn silhouette."""
+
+    radius_x = 8.0
+    lid_height = 3.2
+    offset_y = -2.85
+    lash_offsets = (-0.52, 0.0, 0.52)
+    lash_xs = tuple(radius_x * offset for offset in lash_offsets)
+    xs = tuple(
+        sorted({-radius_x + radius_x * 2.0 * index / 16.0 for index in range(17)} | set(lash_xs))
+    )
+    lid = tuple(
+        (x, offset_y + math.sin(math.pi * (x + radius_x) / (2.0 * radius_x)) * lid_height)
+        for x in xs
+    )
+    lower, upper, _outline = polyline_ribbon(lid, float(width))
+    lower, upper = list(lower), list(upper)
+
+    def normalized(a, b) -> tuple[float, float]:
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(dx, dy)
+        return dx / length, dy / length
+
+    end_direction = normalized(lid[-2], lid[-1])
+    end_cap = smooth_line_cap(
+        lid[-1],
+        end_direction,
+        width,
+        max_inset=0.45 * math.dist(lid[-2], lid[-1]),
+        smoothing=CORNER_SMOOTHING,
+    )
+    lower[-1], upper[-1] = tuple(end_cap[0]), tuple(end_cap[-1])
+    start_direction = normalized(lid[1], lid[0])
+    start_cap = smooth_line_cap(
+        lid[0],
+        start_direction,
+        width,
+        max_inset=0.45 * math.dist(lid[0], lid[1]),
+        smoothing=CORNER_SMOOTHING,
+    )
+    upper[0], lower[0] = tuple(start_cap[0]), tuple(start_cap[-1])
+
+    half_width = float(width) * 0.5
+
+    def lower_at_x(x: float) -> tuple[float, float]:
+        for start, end in pairwise(lower):
+            if start[0] <= x <= end[0]:
+                amount = (x - start[0]) / (end[0] - start[0])
+                return x, start[1] + amount * (end[1] - start[1])
+        raise ValueError("lash root lies outside the lid")
+
+    lashes = []
+    for lash_x, offset in zip(lash_xs, lash_offsets, strict=True):
+        direction = normalized((0.0, 0.0), (offset * 1.95, 2.65))
+        normal = (-direction[1], direction[0])
+        root_half_width = abs(normal[0]) * half_width
+        root_lo, root_hi = lash_x - root_half_width, lash_x + root_half_width
+        start, finish = lower_at_x(root_lo), lower_at_x(root_hi)
+        lid_y = offset_y + math.sin(math.pi * (lash_x + radius_x) / (2.0 * radius_x)) * lid_height
+        tip = (lash_x + offset * 1.95, lid_y + 2.65)
+        cap = tuple(
+            (
+                tip[0]
+                + normal[0] * half_width * math.cos(angle)
+                + direction[0] * half_width * math.sin(angle),
+                tip[1]
+                + normal[1] * half_width * math.cos(angle)
+                + direction[1] * half_width * math.sin(angle),
+            )
+            for angle in (math.pi * step / 8.0 for step in range(9))
+        )
+        lashes.append((root_lo, root_hi, (start, *cap, finish)))
+
+    integrated_lower = []
+    lower_index = 0
+    for root_lo, root_hi, lash in lashes:
+        while lower_index < len(lower) and lower[lower_index][0] < root_lo:
+            integrated_lower.append(lower[lower_index])
+            lower_index += 1
+        integrated_lower.extend(lash)
+        while lower_index < len(lower) and lower[lower_index][0] <= root_hi:
+            lower_index += 1
+    integrated_lower.extend(lower[lower_index:])
+
+    return (
+        *integrated_lower,
+        *map(tuple, end_cap[1:-1]),
+        *reversed(upper),
+        *map(tuple, start_cap[1:-1]),
+    )
+
+
 @lru_cache(maxsize=32)
 def _search_icon_mesh(stroke: float = ICON_STROKE):
     """Return one hollow lens and handle joined by a G3 smooth union."""
@@ -1214,26 +1309,10 @@ def _draw_panel(p: _Painter, name: str) -> None:
         p.polyline(_eye_points(), closed=True)
         p.circle_filled(0.0, 0.0, 2.05)
     elif kind == "hidden":
-        # Match Mojive's hierarchy toggle: a closed curved lid with three
-        # lashes. Its visible bounds are shifted onto the shared icon center.
-        radius_x = 8.0
-        lid_height = 3.2
-        offset_y = -2.85
-        lid = tuple(
-            (
-                -radius_x + radius_x * 2.0 * index / 8.0,
-                offset_y + math.sin(math.pi * index / 8.0) * lid_height,
-            )
-            for index in range(9)
-        )
-        p.polyline(lid)
-        for offset in (-0.52, 0.0, 0.52):
-            lash_x = radius_x * offset
-            lash_y = offset_y + lid_height * math.sqrt(max(0.0, 1.0 - offset**2))
-            p.line(
-                (lash_x, lash_y),
-                (lash_x + offset * 1.95, lash_y + 2.65),
-            )
+        # The lid and lashes intersect, so submit their combined silhouette
+        # once. Separate translucent strokes accumulate alpha at every root.
+        width = p.stroke_width * p.stroke_compensation
+        p.polygon(_lashed_lid_outline(width))
     elif kind in {"perspective", "orthographic"}:
         near = 3.0 if kind == "perspective" else 6.1
         p.smooth_outline(

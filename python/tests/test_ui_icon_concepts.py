@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from itertools import combinations
 
 import pytest
 
@@ -977,12 +978,27 @@ def test_reset_icons_center_their_authored_ring(name: str) -> None:
     assert icon_alignment_center(name) == pytest.approx((0.0, 0.0), abs=1e-6)
 
 
-def test_hidden_eye_uses_three_lashes_instead_of_a_slash() -> None:
+def test_hidden_eye_is_one_lashed_silhouette_without_translucent_overdraw() -> None:
     hidden = _render("panel-hidden", ICON_GRID)
     visible = _render("panel-visible", ICON_GRID)
 
-    assert len(hidden.lines) == 3
+    assert len(hidden.filled_paths) == 1
+    assert not hidden.lines
+    assert not hidden.polylines
     assert not visible.lines
+
+    outline = hidden.filled_paths[0]
+    edges = tuple(zip(outline, (*outline[1:], outline[0]), strict=True))
+
+    def cross(a, b, c) -> float:
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    for (first_index, (a, b)), (second_index, (c, d)) in combinations(enumerate(edges), 2):
+        adjacent = second_index == first_index + 1 or (
+            first_index == 0 and second_index == len(edges) - 1
+        )
+        if not adjacent:
+            assert not (cross(a, b, c) * cross(a, b, d) < 0 and cross(c, d, a) * cross(c, d, b) < 0)
 
 
 def test_key_fit_uses_four_joined_g3_corner_contours() -> None:
