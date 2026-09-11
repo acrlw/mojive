@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 
 import pytest
-from design.tools import ui_icon_concepts as icon_concepts
-from design.tools.ui_icon_concepts import (
+
+from mojive.curves2d import CORNER_SMOOTHING, arrow_mesh, smooth_rect_points
+from mojive.ui import icons as icon_concepts
+from mojive.ui.icons import (
     BOX_CENTERED_ICONS,
     ICON_ALIGNMENT_CHOICES,
     ICON_ALIGNMENT_EDITABLE_ICONS,
@@ -35,13 +37,13 @@ from design.tools.ui_icon_concepts import (
     STROKE_SCALE_LOCKED_ICONS,
     IconTuning,
     draw_concept_icon,
+    draw_icon,
     icon_alignment_anchor,
     icon_alignment_center,
     icon_component_group,
     icon_metrics,
+    production_icon_style,
 )
-
-from mojive.curves2d import CORNER_SMOOTHING, arrow_mesh, smooth_rect_points
 from mojive.ui.viewport_widgets import (
     CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
@@ -285,6 +287,8 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
     assert ICON_ROTATE_RING_GAP_RATIO == 0.8
     assert ICON_GLYPH_PADDING_DEFAULTS == {
         "tool-rotate": 0.0,
+        "helper-camera": 0.5,
+        "helper-light": 0.5,
         "playback-previous": 4.0,
         "playback-next": 4.0,
         "playback-more": 4.0,
@@ -298,6 +302,7 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "key-clear": 4.0,
         "key-previous": 4.0,
         "key-next": 4.0,
+        "key-snapshot": 0.5,
     }
     assert ICON_GLYPH_STROKE_DEFAULTS == {
         "tool-move": 1.2,
@@ -314,21 +319,38 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "transport-next": 2.0,
         "transport-reset": 1.25,
         "transport-more": 2.0,
-        "key-snapshot": 1.25,
+        "key-snapshot": 1.5,
         "key-keyframe": 1.75,
         "key-previous": 1.5,
         "key-next": 1.5,
         "key-fit": 1.25,
-        "key-follow": 1.25,
-        "key-view": 1.25,
+        "key-follow": 1.5,
+        "key-view": 1.5,
         "panel-search": 1.25,
         "panel-sort": 1.25,
         "panel-clear": 1.5,
         "panel-visible": 1.25,
         "panel-hidden": 1.25,
-        "helper-camera": 1.25,
-        "helper-light": 1.25,
+        "helper-camera": 1.5,
+        "helper-light": 1.5,
     }
+
+
+def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> None:
+    style = production_icon_style("helper-camera")
+    assert (style.padding, style.stroke_width, style.alignment) == (0.5, 1.5, "box")
+    assert style.rotate_ring_gap_ratio == 0.8
+    assert style.rotate_ring_cap == "round"
+
+    icon_concepts._production_icon_layout.cache_clear()
+    draw_icon(_RecordingDraw(), (10.0, 20.0), 24.0, "panel-clear", (1.0,) * 4)
+    first = icon_concepts._production_icon_layout.cache_info()
+    draw_icon(_RecordingDraw(), (30.0, 40.0), 24.0, "panel-clear", (0.5,) * 4)
+    second = icon_concepts._production_icon_layout.cache_info()
+
+    assert first.misses == 1
+    assert second.misses == 1
+    assert second.hits == first.hits + 1
 
 
 def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
@@ -348,7 +370,7 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
         icon_alignment_anchor(name)
         == (
             "box"
-            if name in BOX_CENTERED_ICONS
+            if name in BOX_CENTERED_ICONS or ICON_GLYPH_ALIGNMENT_DEFAULTS.get(name) == "box"
             else "ring"
             if name in RING_CENTERED_ICONS
             else "circle"
@@ -566,13 +588,13 @@ def test_sparse_frame_tools_use_the_shared_near_boundary_envelope(name: str) -> 
     )
 
 
-def test_camera_candidates_share_one_master_and_circle_anchor() -> None:
+def test_camera_candidates_share_one_master_and_box_anchor() -> None:
     snapshot = _render("key-snapshot", ICON_GRID)
     helper = _render("helper-camera", ICON_GRID)
 
     assert snapshot.__dict__ == helper.__dict__
-    assert icon_alignment_anchor("key-snapshot") == "circle"
-    assert icon_alignment_anchor("helper-camera") == "circle"
+    assert icon_alignment_anchor("key-snapshot") == "box"
+    assert icon_alignment_anchor("helper-camera") == "box"
 
 
 @pytest.mark.parametrize("name", tuple(sorted(ICON_ALIGNMENT_EDITABLE_ICONS)))
@@ -582,7 +604,7 @@ def test_reviewable_camera_and_light_anchors_center_the_selected_geometry(
 ) -> None:
     metrics = icon_metrics(name, alignment=alignment)
 
-    assert ICON_GLYPH_ALIGNMENT_DEFAULTS[name] == "circle"
+    assert ICON_GLYPH_ALIGNMENT_DEFAULTS[name] == "box"
     assert icon_alignment_anchor(name, alignment) == alignment
     if alignment == "box":
         assert metrics.center_offset == pytest.approx((0.0, 0.0), abs=0.01)

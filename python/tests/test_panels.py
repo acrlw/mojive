@@ -41,6 +41,7 @@ from mojive.ui.panels import (
     state_vector_text,
     validate_panels,
 )
+from mojive.ui.panels import keyframes as keyframes_module
 from mojive.ui.panels.assets import (
     AssetsPanel,
     filter_assets,
@@ -1075,6 +1076,40 @@ def test_sensor_preview_is_bounded_but_preserves_small_vectors():
 def test_keyframe_names_advance_without_exposing_raw_state_arrays():
     assert unique_keyframe_name(set()) == "key1"
     assert unique_keyframe_name({"key1", "key2"}) == "key3"
+
+
+@pytest.mark.parametrize(
+    ("kind", "name"),
+    (
+        ("first", "transport-first"),
+        ("previous", "transport-previous"),
+        ("play", "transport-play"),
+        ("next", "transport-next"),
+        ("last", "transport-last"),
+        ("options", "transport-more"),
+        ("key", "key-snapshot"),
+        ("key-keyframe", "key-keyframe"),
+        ("fit", "key-fit"),
+    ),
+)
+def test_keyframe_commands_route_to_reviewed_production_icons(monkeypatch, kind, name):
+    calls = []
+    monkeypatch.setattr(keyframes_module, "draw_icon", lambda *args: calls.append(args))
+
+    keyframes_module._draw_command_icon(object(), (10.0, 20.0), kind, (1.0,) * 4, 1.5)
+
+    assert calls[0][2] == pytest.approx(24.0)
+    assert calls[0][3] == name
+
+
+@pytest.mark.parametrize("kind", ("record", "stop", "view", "key"))
+def test_labeled_keyframe_commands_measure_the_production_glyph(kind):
+    name = keyframes_module._COMMAND_ICON_NAMES[kind]
+    x0, _y0, x1, _y1 = keyframes_module.production_icon_metrics(name).bounds
+
+    width = keyframes_module._command_icon_visible_width(kind, 1.5)
+
+    assert width == pytest.approx((x1 - x0) * 1.5 * 16.0 / 24.0)
 
 
 def test_keyframe_timeline_fits_isolated_and_distributed_snapshots():

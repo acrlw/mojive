@@ -22,12 +22,13 @@ from mojive.ui.gizmo import (
     _set_light_from_world,
     node_world_pose,
 )
+from mojive.ui.icons import ICON_GRID, production_helper_strokes, production_icon_metrics
 from mojive.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,
     HELPER_ICON_LAYER,
     HELPER_LAYER,
-    LIGHT_HELPER_SCALE_PT,
     SceneEntityHelpers,
+    _production_helper_geometry,
     camera_frustum_segments,
     camera_rotation,
     light_icon_segments,
@@ -229,7 +230,9 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     assert layer.occlusion is Occlusion.GHOST
     assert icon_layer.occlusion is Occlusion.ALWAYS
     assert layer.count_of(PrimitiveType.LINE) == 12
-    assert icon_layer.count_of(PrimitiveType.STROKE) == 24
+    assert icon_layer.count_of(PrimitiveType.STROKE) == sum(
+        len(path.points) for path in production_helper_strokes("helper-camera")
+    )
     assert layer.count_of(PrimitiveType.POINT) == 0
 
     hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
@@ -333,8 +336,11 @@ def test_unselected_light_helpers_use_semantic_icons_without_direction_clutter()
     assert layer.count_of(PrimitiveType.POINT) == 0
     assert layer.count_of(PrimitiveType.ARROW) == 0
     assert layer.count_of(PrimitiveType.LINE) == 0
-    assert icon_layer.count_of(PrimitiveType.LINE) == 30
-    assert icon_layer.count_of(PrimitiveType.STROKE) == 36
+    paths = production_helper_strokes("helper-light")
+    assert icon_layer.count_of(PrimitiveType.LINE) == 3 * sum(not path.closed for path in paths)
+    assert icon_layer.count_of(PrimitiveType.STROKE) == 3 * sum(
+        len(path.points) for path in paths if path.closed
+    )
     assert set(icon_layer._index) == {
         f"light:{object_id}:{part}"
         for object_id in (node.object_id for node in session.nodes if node.type is NodeType.LIGHT)
@@ -420,12 +426,35 @@ def test_scene_entity_icon_geometry_scales_with_its_stroke_width() -> None:
 
 
 def test_camera_and_light_helper_sizes_are_visually_balanced() -> None:
-    assert pytest.approx(24.0) == CAMERA_HELPER_SIZE_PT
-    assert pytest.approx(1.2) == LIGHT_HELPER_SCALE_PT
-    # The light's outer ray diameter is 15.6 authored units. Keep it close to
-    # the camera icon without making two different helper types identical.
-    light_diameter = 15.6 * LIGHT_HELPER_SCALE_PT
-    assert 1.15 < CAMERA_HELPER_SIZE_PT / light_diameter < 1.4
+    camera = production_icon_metrics("helper-camera")
+    light = production_icon_metrics("helper-light")
+    camera_size = max(camera.bounds[2] - camera.bounds[0], camera.bounds[3] - camera.bounds[1])
+    light_size = max(light.bounds[2] - light.bounds[0], light.bounds[3] - light.bounds[1])
+
+    assert camera.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert light.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert 0.9 < camera_size / light_size < 1.1
+    assert max(camera_size, light_size) <= ICON_GRID - 1.0 + 1e-6
+
+
+@pytest.mark.parametrize("name", ("helper-camera", "helper-light"))
+def test_production_scene_helper_visible_box_is_centered_on_entity(name: str) -> None:
+    camera = CameraView(
+        eye=np.array((0.0, -5.0, 2.0), np.float32),
+        target=np.array((0.0, 0.0, 1.0), np.float32),
+        aspect=1.5,
+    )
+    position = np.array(((0.0, 0.0, 1.0),), np.float32)
+    paths = _production_helper_geometry(name, position, camera, 800.0, 1.0)
+    screen = project(
+        camera,
+        np.concatenate(tuple(points[0] for points, _width, _closed in paths)),
+        (0.0, 0.0, 1200.0, 800.0),
+    )
+    anchor = project(camera, position, (0.0, 0.0, 1200.0, 800.0))[0]
+    box_center = (screen[:, :2].min(axis=0) + screen[:, :2].max(axis=0)) * 0.5
+
+    assert box_center == pytest.approx(anchor[:2], abs=0.05)
 
 
 def test_scene_entity_helpers_index_large_hierarchies_once_per_structure() -> None:

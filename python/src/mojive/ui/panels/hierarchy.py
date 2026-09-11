@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import Counter
 from dataclasses import replace
 from functools import lru_cache
@@ -352,9 +351,13 @@ class HierarchyPanel(Panel):
             text_y - self._text_line_offset,
         )
         if not leaf:
-            radius = 4.0 * ctx.style_scale
-            draw.fringed_concave_fill(
-                disclosure_triangle(arrow_center, radius, opened=opened),
+            from ..icons import draw_icon
+
+            draw_icon(
+                draw,
+                arrow_center,
+                10.0 * ctx.style_scale,
+                "panel-down" if opened else "panel-right",
                 ctx.theme.text,
             )
         text_color = ctx.theme.text if node.visible else ctx.theme.text_disabled
@@ -519,8 +522,6 @@ class HierarchyPanel(Panel):
         hovered = imgui.is_item_hovered()
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         center = ((lo.x + hi.x) * 0.5, row_y + row_height * 0.5)
-        radius_x = 6.5 * ctx.style_scale
-        radius_y = 3.6 * ctx.style_scale
         base = (
             ctx.theme.primary_bright
             if hovered
@@ -531,47 +532,15 @@ class HierarchyPanel(Panel):
         alpha = 1.0 if hovered else 0.58
         color = (*base[:3], alpha)
         draw = ImguiDraw2D()
-        top = tuple(
-            (
-                center[0] - radius_x + radius_x * 2.0 * index / 8.0,
-                center[1] - math.sin(math.pi * index / 8.0) * radius_y,
-            )
-            for index in range(9)
+        from ..icons import draw_icon
+
+        draw_icon(
+            draw,
+            center,
+            16.0 * ctx.style_scale,
+            "panel-visible" if node.visible else "panel-hidden",
+            color,
         )
-        bottom = tuple(
-            (
-                center[0] + radius_x - radius_x * 2.0 * index / 8.0,
-                center[1] + math.sin(math.pi * index / 8.0) * radius_y,
-            )
-            for index in range(9)
-        )
-        if node.visible:
-            # Do not submit the shared left/right endpoints twice: overlapping
-            # antialiased strokes made the old almond look as if its arcs crossed.
-            outline = (*top, *bottom[1:-1])
-            draw.polyline(outline, color, 1.35 * ctx.style_scale, closed=True)
-            draw.circle(center, 1.8 * ctx.style_scale, color, 1.2 * ctx.style_scale, segments=16)
-        else:
-            lid = tuple(
-                (
-                    center[0] - radius_x + radius_x * 2.0 * index / 8.0,
-                    center[1] + math.sin(math.pi * index / 8.0) * radius_y * 0.72,
-                )
-                for index in range(9)
-            )
-            draw.polyline(lid, color, 1.45 * ctx.style_scale)
-            for offset in (-0.52, 0.0, 0.52):
-                lash_x = center[0] + radius_x * offset
-                lash_y = center[1] + radius_y * 0.72 * math.sqrt(max(0.0, 1.0 - offset**2))
-                draw.line(
-                    (lash_x, lash_y),
-                    (
-                        lash_x + offset * 1.6 * ctx.style_scale,
-                        lash_y + 2.2 * ctx.style_scale,
-                    ),
-                    color,
-                    1.15 * ctx.style_scale,
-                )
         if pressed:
             if node.type is NodeType.LIGHT and node.light_index >= 0:
                 source = ctx.session.source
