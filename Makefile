@@ -345,7 +345,7 @@ ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1100 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1100 --ui-scale 2 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context-hidpi.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1400 --page geometry --geometry-tab icons --icon-group capsules --capsule-radial-alignment 0 -o output/ui-icon-concepts/capsules.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1400 --page geometry --geometry-tab icons --icon-group capsules --icon-radial-alignment 0 -o output/ui-icon-concepts/capsules.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1800 --page geometry --geometry-tab icons --icon-group transport -o output/ui-icon-concepts/transport.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
@@ -356,6 +356,8 @@ ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --height 1850 --page geometry --geometry-tab playback --preview-icon-library --playback-zoom 4 -o output/ui-icon-concepts/playback-layout-4x.png
 	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page workspace -o output/ui-icon-concepts/context-workspace.png
 	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page panels -o output/ui-icon-concepts/context-panels.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1200 --preview-icon-library --page geometry --geometry-tab hints -o output/ui-icon-concepts/context-hints.png
+	$(PY) design/tools/render_ui_feasibility.py --height 1200 --ui-scale 2 --preview-icon-library --page geometry --geometry-tab hints -o output/ui-icon-concepts/context-hints-hidpi.png
 	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page geometry --geometry-tab workspaces -o output/ui-icon-concepts/context-keyframes.png
 	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
 

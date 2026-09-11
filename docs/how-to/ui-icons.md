@@ -42,31 +42,40 @@ sizes.
 ### Separate placement bounds from geometry diagnostics
 
 The Icon library uses a circular 24-unit placement boundary, drawn in orange after the glyph so a
-collision cannot hide beneath the visible mark. The circle describes the slot used by layout; it is
-not a target that every silhouette should fill. Candidate geometry, including half of every outline
-stroke, keeps at least 1.5 grid units of radial clearance. Detail rows report radial `pad`, the
+collision cannot hide beneath the visible mark. The circle describes the slot used by layout and
+provides one adjustable radial envelope for the candidate set. Candidate geometry, including half
+of every outline stroke, defaults to 0.75 grid units of radial clearance. This closely matches
+Output's reviewed circular severity frame, which measures about 0.72 units, while keeping every
+candidate inside the placement circle. The Icon Library header exposes `Radial center` and
+`Glyph padding` together. Radial center blends the declared placement center toward the minimum
+enclosing-circle center; padding adjusts candidate clearance from 0.50 to 4.00 units. Both controls
+apply to family sheets, capsule specimens, and the whole-UI candidate preview so a review uses one
+set of values everywhere. Rotate is the frame-aligned exception: its outer screen ring reaches the
+orange placement circle, while the three inner rings follow the same complete-master scale.
+Output's mature Info, Warning, and Error painters are also locked; neither review control changes
+their geometry, size, or placement. Detail rows report radial `pad`, the
 axis-aligned `box` center, the minimum enclosing `radial` center of the sampled contour, and the
-approximate filled `area` centroid. The latter two are diagnostics, not placement rules. A reviewed
-production icon can retain its existing optical envelope:
-Output's circular severity frame has 0.72 units of radial clearance and conforms to the circular
-placement boundary without crossing it.
+approximate filled `area` centroid. The latter two are diagnostics, not placement rules. Reviewed
+production painters retain their existing optical envelopes.
 
 Use radial containment in addition to rectangular canvas containment. A camera body can fit inside
 a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
 axis-aligned box does not prove that the icon looks centered. Start from one reproducible placement
 anchor and show it in the detail row:
 
-- use the stroked box center for ordinary silhouettes, including asymmetric compounds and
-  directional marks;
-- use a semantic hub or arc center when interaction revolves around that point, as Scale and Snap do.
+- use the stroked box center for ordinary silhouettes, including asymmetric compounds,
+  directional marks and all Transport controls; keep this default at radial center zero;
+- use the three-axis hub for Scale so its center dot coincides with the icon slot center;
+- use a semantic arc center only for Snap, whose authored lower G3 arc revolves around that point.
 
 The concept library translates the declared anchor onto the orange-circle center, then uniformly
-reduces the whole master if the translated contour would violate the radial safe area. `box`,
-`radial`, and `area` remain visible diagnostics. Do not automatically translate a glyph until its
-radial or area diagnostic reaches zero: asymmetric triangles, magnifiers, cameras, and compound
-keyframe marks can move visibly toward their heavier side. Snap places the center of its authored
-lower G3 arc at the placement origin. This layout policy is concept-only; reviewed production
-painters remain their source of truth.
+scales the complete master up or down until its sampled contour reaches the requested radial
+padding. Stroke, gaps, dots, corner profiles, and antialias-gap limits therefore keep their authored
+ratios. `box`, `radial`, and `area` remain visible diagnostics. Do not automatically translate a
+glyph until its radial or area diagnostic reaches zero: asymmetric triangles, magnifiers, cameras,
+and compound keyframe marks can move visibly toward their heavier side. Snap places the center of
+its authored lower G3 arc at the placement origin. This layout policy is concept-only; reviewed
+production painters remain their source of truth.
 
 [Apple's icon guidance](https://developer.apple.com/design/human-interface-guidelines/icons)
 requires consistency in size, detail, stroke weight, and perspective. It also permits small
@@ -100,6 +109,11 @@ controls use `viewport.off_foreground` at rest, `hover_foreground` on hover,
 three to Primary Bright. Record and Stop are one semantic recording action and always use
 `viewport.record` (Danger red), including selected and pressed states. Disabled alpha attenuates the
 resolved semantic color after this mapping.
+
+Mouse candidates resolve their shell, active button or wheel, and suffix through the same
+`mouse_hint_colors` function as the production mouse painter. This preserves Text/Primary/Primary
+Bright in active hints and the original disabled/background colors in muted hints instead of
+baking feasibility colors into the candidate.
 
 Shaft-and-head arrows use one continuous filled outline. Do not join an independent stroked shaft
 to a filled triangle: antialiasing and cap geometry expose the seam at small sizes. Object outlines
@@ -208,11 +222,12 @@ edge of the frame is about 4.58 grid units on each side.
 | Symptom | Cause | Required correction |
 | --- | --- | --- |
 | Small mark nearly touches its frame while the large mark has ample space | One or more dimensions use an absolute pixel minimum | Return every dimension to the common grid, or define and verify a complete optical master |
+| A glyph becomes larger but remains visibly off-center | The old hub, radial, or source-coordinate anchor was preserved during fitting | Translate the declared visible bounding box to the slot center first, then apply one complete-master scale; keep only reviewed semantic-center exceptions |
 | `i` or `!` looks vertically displaced despite a centered area centroid | Unequal stem and dot areas skew area-centroid alignment | Center the combined visible bounds or use a documented optical alignment box |
 | Warning looks unrelated to information | Stem, gap, or dot was tuned separately | Generate one from the other's reflected geometry |
 | Dot disappears even though its diameter equals the stem width | Circular antialiasing removes more visible area | Apply a small grid-relative dot overshoot and inspect the target raster size |
 | Error looks heavier, then becomes stylistically thin after correction | Cross stroke width was reduced independently | Keep the shared internal stroke and shorten the diagonals |
-| Scale's hub looks displaced although its envelope is centered | A three-axis silhouette has different box, hub, and area centers | Anchor Scale by its center dot, report the asymmetric box, and judge the 112-point specimen |
+| Scale remains displaced after it is enlarged | Its center hub was used as the placement anchor even though the three-axis visible envelope is asymmetric | Center the complete stroked bounding box before applying the one master scale; keep the hub offset visible as part of the authored silhouette |
 | Scale endpoints overpower the center hub | Endpoint blocks were sized independently of the shaft and dot | Keep the G3 blocks close to the hub diameter and compare their area with the hub at 112 points |
 | Scale shafts merge into the center dot | A copied three-axis sketch omitted the established transparent center shell | Start all three concept shafts outside the dot's circular clearance radius and verify the visible gap |
 | Rotate is mistaken for Reset or Refresh | Both use a circular-arrow structure | Use the three-axis Tool Column rotation rings and reserve the single arrow loop for Reset |
@@ -229,6 +244,7 @@ edge of the frame is about 4.58 grid units on each side.
 | Search lens grows spikes or leaks white flecks into its hollow center | Near-duplicate outer columns or independently sampled fill and hole-fringe boundaries destabilize antialiasing | Use one monotonic x-grid, replace its nearest samples at the hole endpoints, and derive the hole fringe from the strip's exact inner vertices |
 | Sort arrow tip does not meet the visible bottom of its last bar | The arrow endpoint was aligned to the bar centerline | Align the head tip with the lower stroked edge while keeping the round tail on the top centerline |
 | Sort arrow has a flat exposed tail | The shared arrow mesh kept its default butt tail | Enable its G3 round-tail contour while retaining the integrated head and shaft |
+| Replacement mouse glyph is much smaller than the original Status hint | The adapter passed the original mouse width as the candidate's complete circular size even though the mouse contour occupies only part of that circle | Measure the candidate master bounds and solve its circular size from the original control height; preserve the original layout width |
 | An `area` or `radial` diagnostic is nonzero | Asymmetric visible geometry shifts the corresponding mathematical center | Do not treat the diagnostic as a failed alignment test; judge the box baseline and add a small explicit optical adjustment only after target-size review |
 | Cube spokes protrude through the shell | Independently capped lines terminate on top of the outer stroke | Inset the spokes, join their center, and paint the G3 outer contour last |
 | One preview looks good but production does not | A copied demo or resized screenshot bypasses production geometry and density | Render the production painter at every target logical size and framebuffer scale |
@@ -271,13 +287,18 @@ uses that expose weak dots, crowded safe areas, and mismatched weights.
 For the full candidate set, `make ui-icon-concepts` writes 14, 24, 56, and 112-point family pages
 under `output/ui-icon-concepts/`, plus `tools-max-gap.png` at the production 1.46-pixel stroke and
 the full `gap / stroke = 1.00` setting. `capsules.png` uses the actual playback and viewport-tool
-capsules with their icon slots and state circles exposed. The `Glyph radial center` control blends
-from visible-box centering at zero to minimum-enclosing-circle centering at one; capsule candidates
-default to zero and keep the latter as an optional diagnostic. `playback-layout-4x.png`
+capsules with their icon slots and state circles exposed. The global `Radial center` control blends
+from the declared center at zero to minimum-enclosing-circle centering at one; candidates default
+to zero and keep the latter as an optional review setting. Scale preserves its original center
+mask and handle footprint while its candidate shaft resolves to the shared Tool stroke after
+DrawList fringe compensation. `playback-layout-4x.png`
 checks that the Geometry page sections remain disjoint at its maximum inspection zoom.
 It also writes `context-workspace.png`,
-`context-panels.png`, `context-keyframes.png`, and `context-redesign.png` with the same candidates
-placed in real feasibility controls. In interactive mode, use the always-visible `Icon Library
-preview` menu-bar switch, or the matching item under `Probe`, to apply or remove that substitution
-across every feasibility page. The Icon Library canvas reserves enough scroll extent for the longest
-family; verify the final row is reachable in the normal 1600-by-1000 interactive window.
+`context-panels.png`, `context-hints.png`, `context-hints-hidpi.png`, `context-keyframes.png`, and
+`context-redesign.png` with the same candidates placed in real feasibility controls. Pass
+`--icon-radial-alignment` and `--icon-padding` for deterministic non-default captures. In
+interactive mode, use the Icon Library's `Radial center` and `Glyph padding` controls to compare
+placement and 0.50–4.00 grid-unit clearances, and use the always-visible `Icon Library preview` menu-bar switch,
+or the matching item under `Probe`, to apply or remove that substitution across every feasibility
+page. The Icon Library canvas reserves enough scroll extent for the longest family; verify the final
+row is reachable in the normal 1600-by-1000 interactive window.

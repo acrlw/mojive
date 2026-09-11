@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from mojive.curves2d import (
@@ -32,10 +32,29 @@ from mojive.ui.viewport_widgets import (
 
 ICON_GRID = 24.0
 ICON_STROKE = 1.5
-# Match the complete circular placement boundary used by Diagnostics. Visible geometry
-# stays inside this guide and keeps its own optical padding within the circle.
+# Match the complete circular placement boundary used by Diagnostics. The reviewed
+# severity family leaves about 0.72 grid units at its outer frame; 0.75 keeps that
+# near-boundary scale while preserving a measurable gap at every size.
 ICON_BOUND_DIAMETER = ICON_GRID
-ICON_MIN_CLEARANCE = 1.5
+ICON_MIN_CLEARANCE = 0.5
+ICON_DEFAULT_PADDING = 0.75
+ICON_MAX_PADDING = 4.0
+ROTATE_FRAME_PADDING = 0.0
+REVIEW_LOCKED_ICONS = frozenset(("status-info", "status-warning", "status-error"))
+# ``_dimensions_glyph_geometry`` narrows a source stroke to compensate for the
+# DrawList fringe. This concept-only source value makes Scale's fitted shaft
+# match Rotate's fitted ring at the shared 24-unit slot. Preserve the reviewed
+# center clearance and handle size while changing that one visible weight.
+_SCALE_CONCEPT_SOURCE_STROKE = 2.32
+SCALE_CONCEPT_GEOMETRY = replace(
+    OVERLAY_GEOMETRY,
+    tool_stroke=_SCALE_CONCEPT_SOURCE_STROKE,
+    frame_center_gap_ratio=(
+        OVERLAY_GEOMETRY.tool_stroke
+        * OVERLAY_GEOMETRY.frame_center_gap_ratio
+        / _SCALE_CONCEPT_SOURCE_STROKE
+    ),
+)
 
 ICON_FAMILIES = (
     (
@@ -694,7 +713,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
         paths, dot_radius = _dimensions_glyph_geometry(
             (0.0, 0.0),
             1.0,
-            OVERLAY_GEOMETRY,
+            SCALE_CONCEPT_GEOMETRY,
             smoothing=CAPSULE_SMOOTHING,
         )
         for path in paths:
@@ -1057,7 +1076,7 @@ def _draw_helper(p: _Painter, name: str) -> None:
         _draw_light(p)
 
 
-def _draw_status(p: _Painter, name: str) -> None:
+def _draw_status(p: _Painter, name: str, accent_color=None) -> None:
     kind = name.removeprefix("status-")
     if kind in {"info", "warning", "error"}:
         p.circle(0.0, 0.0, 9.0, width=1.55)
@@ -1072,17 +1091,30 @@ def _draw_status(p: _Painter, name: str) -> None:
             p.line(stem_a, stem_b, width=1.95)
         return
 
+    accent = (
+        _Painter(p.draw, (p.cx, p.cy), p.scale * ICON_GRID, accent_color)
+        if accent_color is not None
+        else p
+    )
     p.rect(-5.2, -7.8, 5.2, 7.8, rounding=4.4, width=1.45)
     p.line((-4.9, -1.1), (4.9, -1.1), width=1.2)
     if kind == "mouse-left":
-        p.circle_filled(-2.2, -4.2, 1.25)
+        accent.circle_filled(-2.2, -4.2, 1.25)
     elif kind == "mouse-right":
-        p.circle_filled(2.2, -4.2, 1.25)
+        accent.circle_filled(2.2, -4.2, 1.25)
     else:
-        p.rect_filled(-0.9, -5.8, 0.9, -2.5, rounding=0.9)
+        accent.rect_filled(-0.9, -5.8, 0.9, -2.5, rounding=0.9)
 
 
-def _draw_concept_icon_raw(draw, center, size: float, name: str, color) -> None:
+def _draw_concept_icon_raw(
+    draw,
+    center,
+    size: float,
+    name: str,
+    color,
+    *,
+    accent_color=None,
+) -> None:
     """Draw authored geometry before shared optical placement is applied."""
 
     painter = _Painter(draw, center, size, color)
@@ -1097,7 +1129,7 @@ def _draw_concept_icon_raw(draw, center, size: float, name: str, color) -> None:
     elif name.startswith("helper-"):
         _draw_helper(painter, name)
     elif name.startswith("status-"):
-        _draw_status(painter, name)
+        _draw_status(painter, name, accent_color)
     else:
         raise ValueError(f"unknown concept icon: {name!r}")
 
@@ -1301,39 +1333,55 @@ def _measure_raw_icon(name: str, center=(0.0, 0.0), size: float = ICON_GRID) -> 
 
 @lru_cache(maxsize=256)
 def _icon_layout(
-    name: str, radial_alignment: float | None = None
+    name: str,
+    radial_alignment: float | None = None,
+    padding: float = ICON_DEFAULT_PADDING,
 ) -> tuple[float, tuple[float, float]]:
-    """Return the declared placement anchor and scale inside the shared bound."""
+    """Return the declared placement anchor and scale at the requested radial padding."""
 
     raw = _measure_raw_icon(name)
+    if name in REVIEW_LOCKED_ICONS:
+        radial_alignment = 0.0
+        padding = ICON_DEFAULT_PADDING
+    elif name == "tool-rotate":
+        radial_alignment = 0.0
     anchor = icon_alignment_anchor(name)
-    if anchor in {"hub", "arc"}:
-        # Scale's hub and Snap's lower-arc center are authored at the origin.
+    if anchor in {"arc", "hub"}:
+        # Snap's lower-arc center and Scale's three-axis hub are authored at
+        # the origin. Their semantic control center takes priority over a box.
         base_offset = (0.0, 0.0)
     else:
         base_offset = (-raw.center_offset[0], -raw.center_offset[1])
     radial_offset = (-raw.bounding_center[0], -raw.bounding_center[1])
-    amount = (1.0 if anchor == "radial" else 0.0) if radial_alignment is None else radial_alignment
+    amount = 0.0 if radial_alignment is None else radial_alignment
     amount = min(1.0, max(0.0, float(amount)))
     offset = (
         base_offset[0] + (radial_offset[0] - base_offset[0]) * amount,
         base_offset[1] + (radial_offset[1] - base_offset[1]) * amount,
     )
+    # Measure after placement so centering happens before the complete master
+    # is fitted. Scaling first would preserve each source contour's old drift.
     shifted = _measure_raw_icon(name, offset)
-    safe_radius = ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE
-    layout_scale = min(1.0, safe_radius / shifted.radial_extent)
+    padding = float(padding)
+    if not ICON_MIN_CLEARANCE <= padding <= ICON_MAX_PADDING:
+        raise ValueError(
+            f"icon padding must be between {ICON_MIN_CLEARANCE:g} and {ICON_MAX_PADDING:g}"
+        )
+    # Rotate's outer screen ring is itself the slot frame. Keep its visible
+    # outside diameter on the orange guide while scaling all inner rings with it.
+    target_padding = ROTATE_FRAME_PADDING if name == "tool-rotate" else padding
+    safe_radius = ICON_BOUND_DIAMETER * 0.5 - target_padding
+    layout_scale = safe_radius / shifted.radial_extent
     return layout_scale, (offset[0] * layout_scale, offset[1] * layout_scale)
 
 
 def icon_alignment_anchor(name: str) -> str:
     """Return the reviewed placement anchor for one concept icon."""
 
-    if name == "tool-scale":
-        return "hub"
     if name == "tool-snap":
         return "arc"
-    if name.startswith("transport-"):
-        return "radial"
+    if name == "tool-scale":
+        return "hub"
     return "box"
 
 
@@ -1345,20 +1393,33 @@ def draw_concept_icon(
     color,
     *,
     radial_alignment: float | None = None,
+    padding: float = ICON_DEFAULT_PADDING,
+    accent_color=None,
 ) -> None:
-    """Draw one anchor-centered candidate from a proportional 24-unit master."""
+    """Draw one anchor-centered candidate fitted to a padded circular slot."""
 
-    layout_scale, offset = _icon_layout(name, radial_alignment)
+    layout_scale, offset = _icon_layout(name, radial_alignment, padding)
     unit_scale = float(size) / ICON_GRID
     adjusted_center = (
         float(center[0]) + offset[0] * unit_scale,
         float(center[1]) + offset[1] * unit_scale,
     )
-    _draw_concept_icon_raw(draw, adjusted_center, size * layout_scale, name, color)
+    _draw_concept_icon_raw(
+        draw,
+        adjusted_center,
+        size * layout_scale,
+        name,
+        color,
+        accent_color=accent_color,
+    )
 
 
 @lru_cache(maxsize=256)
-def icon_metrics(name: str, radial_alignment: float | None = None) -> IconMetrics:
+def icon_metrics(
+    name: str,
+    radial_alignment: float | None = None,
+    padding: float = ICON_DEFAULT_PADDING,
+) -> IconMetrics:
     """Return placement and optical measurements for one 24-unit candidate."""
 
     draw = _MetricsDraw()
@@ -1369,6 +1430,7 @@ def icon_metrics(name: str, radial_alignment: float | None = None) -> IconMetric
         name,
         (1.0, 1.0, 1.0, 1.0),
         radial_alignment=radial_alignment,
+        padding=padding,
     )
     area_centroid = (
         draw.area_moment[0] / draw.filled_area,

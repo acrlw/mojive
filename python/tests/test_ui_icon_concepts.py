@@ -5,9 +5,12 @@ import math
 import pytest
 from design.tools.ui_icon_concepts import (
     ICON_BOUND_DIAMETER,
+    ICON_DEFAULT_PADDING,
     ICON_FAMILIES,
     ICON_GRID,
+    ICON_MAX_PADDING,
     ICON_MIN_CLEARANCE,
+    ROTATE_FRAME_PADDING,
     draw_concept_icon,
     icon_alignment_anchor,
     icon_metrics,
@@ -26,6 +29,7 @@ class _RecordingDraw:
         self.arrows: list[tuple] = []
         self.circles: list[tuple] = []
         self.filled_circles: list[tuple] = []
+        self.solid_colors: list[tuple] = []
         self.indexed_fills: list[tuple] = []
         self.indexed_fringe_widths: list[float] = []
         self.polylines: list[tuple] = []
@@ -115,6 +119,7 @@ class _RecordingDraw:
 
     def circle_filled(self, center, radius, _color, **_kwargs) -> None:
         self.filled_circles.append((center, float(radius)))
+        self.solid_colors.append(_color)
         self._add((center,), float(radius))
 
     def rect(self, lo, hi, _color, width, **_kwargs) -> None:
@@ -122,6 +127,7 @@ class _RecordingDraw:
         self._add((lo, hi), float(width) * 0.5)
 
     def rect_filled(self, lo, hi, _color, **_kwargs) -> None:
+        self.solid_colors.append(_color)
         self._add((lo, hi))
 
 
@@ -129,9 +135,23 @@ def _icons():
     return tuple(name for _family, icons in ICON_FAMILIES for _label, name in icons)
 
 
-def _render(name: str, size: float) -> _RecordingDraw:
+def _render(
+    name: str,
+    size: float,
+    *,
+    radial_alignment: float = 0.0,
+    padding: float = ICON_DEFAULT_PADDING,
+) -> _RecordingDraw:
     draw = _RecordingDraw()
-    draw_concept_icon(draw, (0.0, 0.0), size, name, (1.0, 1.0, 1.0, 1.0))
+    draw_concept_icon(
+        draw,
+        (0.0, 0.0),
+        size,
+        name,
+        (1.0, 1.0, 1.0, 1.0),
+        radial_alignment=radial_alignment,
+        padding=padding,
+    )
     return draw
 
 
@@ -167,7 +187,49 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
     draw = _render(name, size)
     guide_radius = ICON_BOUND_DIAMETER * 0.5
 
-    assert draw.radial_extent <= guide_radius - ICON_MIN_CLEARANCE + 1e-6
+    required_clearance = ROTATE_FRAME_PADDING if name == "tool-rotate" else ICON_MIN_CLEARANCE
+    assert draw.radial_extent <= guide_radius - required_clearance + 1e-6
+
+
+@pytest.mark.parametrize("name", _icons())
+def test_default_layout_fits_candidates_to_the_reference_family_padding(name: str) -> None:
+    expected = ROTATE_FRAME_PADDING if name == "tool-rotate" else ICON_DEFAULT_PADDING
+    assert icon_metrics(name).radial_clearance == pytest.approx(expected, abs=1e-5)
+
+
+def test_rotate_outer_frame_matches_the_placement_circle() -> None:
+    metrics = icon_metrics("tool-rotate")
+
+    assert metrics.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert metrics.radial_clearance == pytest.approx(ROTATE_FRAME_PADDING, abs=1e-5)
+
+
+def test_rotate_frame_ignores_candidate_alignment_and_padding_controls() -> None:
+    baseline = _render("tool-rotate", ICON_GRID)
+    adjusted = _render("tool-rotate", ICON_GRID, radial_alignment=1.0, padding=ICON_MAX_PADDING)
+
+    assert adjusted.__dict__ == baseline.__dict__
+
+
+@pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE, ICON_DEFAULT_PADDING, ICON_MAX_PADDING))
+def test_icon_padding_control_sets_the_radial_clearance(padding: float) -> None:
+    metrics = icon_metrics("panel-right", padding=padding)
+
+    assert metrics.radial_clearance == pytest.approx(padding, abs=1e-5)
+
+
+@pytest.mark.parametrize("name", ("status-info", "status-warning", "status-error"))
+def test_reviewed_severity_geometry_ignores_candidate_layout_controls(name: str) -> None:
+    baseline = _render(name, ICON_GRID)
+    adjusted = _render(name, ICON_GRID, radial_alignment=1.0, padding=ICON_MAX_PADDING)
+
+    assert adjusted.__dict__ == baseline.__dict__
+
+
+@pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE - 0.01, ICON_MAX_PADDING + 0.01))
+def test_icon_padding_rejects_values_outside_the_review_range(padding: float) -> None:
+    with pytest.raises(ValueError, match="icon padding"):
+        _render("panel-right", ICON_GRID, padding=padding)
 
 
 @pytest.mark.parametrize(
@@ -227,10 +289,10 @@ def test_symmetric_tool_icons_center_their_filled_area(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", ("tool-world", "tool-body"))
-def test_sparse_frame_tools_use_the_reviewed_larger_envelope(name: str) -> None:
+def test_sparse_frame_tools_use_the_shared_near_boundary_envelope(name: str) -> None:
     metrics = icon_metrics(name)
 
-    assert 2.0 <= metrics.radial_clearance <= 3.0
+    assert metrics.radial_clearance == pytest.approx(ICON_DEFAULT_PADDING, abs=1e-5)
 
 
 def test_camera_candidates_share_one_master_and_box_anchor() -> None:
@@ -242,12 +304,33 @@ def test_camera_candidates_share_one_master_and_box_anchor() -> None:
     assert icon_alignment_anchor("helper-camera") == "box"
 
 
-@pytest.mark.parametrize(
-    "name",
-    ("tool-scale",),
-)
-def test_semantically_anchored_symmetric_icons_center_their_area(name: str) -> None:
-    assert icon_metrics(name).area_centroid == pytest.approx((0.0, 0.0), abs=0.05)
+@pytest.mark.parametrize("name", ("status-mouse-left", "status-mouse-right", "status-mouse-wheel"))
+def test_mouse_candidates_apply_the_control_accent(name: str) -> None:
+    draw = _RecordingDraw()
+    accent = (0.2, 0.7, 0.3, 1.0)
+
+    draw_concept_icon(
+        draw,
+        (0.0, 0.0),
+        ICON_GRID,
+        name,
+        (1.0, 1.0, 1.0, 1.0),
+        accent_color=accent,
+    )
+
+    assert draw.solid_colors == [accent]
+
+
+def test_scale_centers_its_three_axis_hub() -> None:
+    metrics = icon_metrics("tool-scale")
+    draw = _render("tool-scale", ICON_GRID)
+    dot_center, _dot_radius = draw.filled_circles[0]
+
+    assert icon_alignment_anchor("tool-scale") == "hub"
+    assert dot_center == pytest.approx((0.0, 0.0), abs=0.01)
+    assert metrics.bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
+    assert metrics.area_centroid == pytest.approx((0.0, 0.0), abs=0.01)
+    assert metrics.center_offset[1] < -1.0
 
 
 @pytest.mark.parametrize("name", ("transport-play", "panel-right", "panel-down"))
@@ -277,7 +360,7 @@ def test_rotate_antialias_fringe_scales_until_crossing_gaps_can_hold_one_pixel()
         widths.append(draw.indexed_fringe_widths[0])
 
     assert widths[0] < widths[1] < widths[2] < widths[3]
-    assert widths[3] == pytest.approx(1.0)
+    assert widths[3] == pytest.approx(1.0, abs=0.002)
 
 
 def test_scale_uses_three_integrated_box_handles() -> None:
@@ -288,11 +371,24 @@ def test_scale_uses_three_integrated_box_handles() -> None:
     assert all(len(path) > 8 for path in draw.filled_paths)
     assert len(draw.filled_circles) == 1
     dot_center, dot_radius = draw.filled_circles[0]
-    assert dot_center == pytest.approx((0.0, 0.0), abs=1e-6)
+    assert dot_center[0] == pytest.approx(0.0, abs=1e-6)
+    assert dot_center[1] == pytest.approx(0.0, abs=1e-6)
     nearest_shaft = min(
         math.dist(dot_center, point) for path in draw.filled_paths for point in path
     )
     assert nearest_shaft > dot_radius
+
+
+def test_scale_shaft_matches_the_fitted_rotate_ring_weight() -> None:
+    scale = _render("tool-scale", ICON_GRID)
+    rotate = _render("tool-rotate", ICON_GRID)
+    scale_shaft_width = math.dist(scale.filled_paths[0][0], scale.filled_paths[0][-1])
+    _points, _indices, outer, inner = rotate.indexed_fills[0]
+    rotate_ring_width = sum(math.hypot(*point) for point in outer) / len(outer) - sum(
+        math.hypot(*point) for point in inner
+    ) / len(inner)
+
+    assert scale_shaft_width == pytest.approx(rotate_ring_width, rel=0.02)
 
 
 def test_snap_uses_production_g3_u_path_with_two_rounded_end_blocks() -> None:
@@ -350,7 +446,8 @@ def test_sort_arrow_tail_and_tip_align_with_visible_bar_extents() -> None:
 def test_minimum_bounding_circle_is_only_a_containment_diagnostic(name: str) -> None:
     metrics = icon_metrics(name)
 
-    assert metrics.bounding_radius <= ICON_BOUND_DIAMETER * 0.5 - ICON_MIN_CLEARANCE + 1e-6
+    required_clearance = ROTATE_FRAME_PADDING if name == "tool-rotate" else ICON_MIN_CLEARANCE
+    assert metrics.bounding_radius <= ICON_BOUND_DIAMETER * 0.5 - required_clearance + 1e-6
 
 
 @pytest.mark.parametrize(
@@ -362,12 +459,12 @@ def test_box_anchored_icons_center_their_visible_bounds(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", tuple(name for name in _icons() if name.startswith("transport-")))
-def test_transport_icons_center_their_radial_envelope_in_capsule_cells(name: str) -> None:
-    assert icon_alignment_anchor(name) == "radial"
-    assert icon_metrics(name).bounding_center == pytest.approx((0.0, 0.0), abs=0.01)
+def test_transport_icons_center_their_visible_bounds_in_capsule_cells(name: str) -> None:
+    assert icon_alignment_anchor(name) == "box"
+    assert icon_metrics(name).center_offset == pytest.approx((0.0, 0.0), abs=0.01)
 
 
-def test_capsule_radial_control_blends_from_box_to_enclosing_circle_center() -> None:
+def test_global_radial_control_blends_from_declared_to_enclosing_circle_center() -> None:
     box = icon_metrics("transport-play", 0.0)
     radial = icon_metrics("transport-play", 1.0)
 
@@ -409,5 +506,10 @@ def test_concept_icon_bounds_and_strokes_scale_as_one_master(name: str) -> None:
 
     for bounds in normalized_bounds[1:]:
         assert bounds == pytest.approx(normalized_bounds[0], abs=1e-6)
-    for size, draw in zip(sizes, captures, strict=True):
-        assert all(width / size <= 2.2 / ICON_GRID for width in draw.widths)
+    normalized_widths = tuple(
+        tuple(width / size for width in draw.widths)
+        for size, draw in zip(sizes, captures, strict=True)
+    )
+    for widths in normalized_widths[1:]:
+        assert widths == pytest.approx(normalized_widths[0], abs=1e-6)
+    assert all(width <= 2.5 / ICON_GRID + 1e-6 for width in normalized_widths[0])

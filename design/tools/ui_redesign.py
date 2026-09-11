@@ -40,10 +40,10 @@ from mojive.ui.viewport_widgets import reset_glyph_path as reset_glyph_path
 
 if __package__:
     from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
-    from .ui_icon_concepts import draw_concept_icon
+    from .ui_icon_concepts import ICON_DEFAULT_PADDING, draw_concept_icon
 else:
     from ui_capsule_geometry import capsule_layout, draw_capsule_shell
-    from ui_icon_concepts import draw_concept_icon
+    from ui_icon_concepts import ICON_DEFAULT_PADDING, draw_concept_icon
 
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)
@@ -325,9 +325,8 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     nominal_diameter,
                     concept_name,
                     color,
-                    radial_alignment=(
-                        getattr(geometry, "capsule_radial_alignment", 0.0) if not vertical else None
-                    ),
+                    radial_alignment=getattr(geometry, "icon_radial_alignment", 0.0),
+                    padding=getattr(geometry, "icon_padding", ICON_DEFAULT_PADDING),
                 )
             elif vertical:
                 draw_tool_glyph(
