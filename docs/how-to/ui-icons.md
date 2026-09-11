@@ -61,6 +61,14 @@ axis-aligned `box` center, the minimum enclosing `radial` center of the sampled 
 approximate filled `area` centroid. The latter two are diagnostics, not placement rules. Reviewed
 production painters retain their existing optical envelopes.
 
+Viewport Playback Play is fixed directly on its authored origin. Previous, Pause, Next, and More
+are fixed by the center of their complete stroked bounding box. Every Keyframe transport mark uses
+the same bounding-box rule. These component contracts ignore the optional radial-center slider;
+other candidate groups can still use it for comparison. Each specimen also draws a neutral square
+whose width and height equal the orange circle's diameter, exposing box displacement at 14, 24, 56,
+and 112 points. Playback Record uses a small optical size correction so its visible diameter stays
+slightly below Playback Stop's visible width.
+
 Use radial containment in addition to rectangular canvas containment. A camera body can fit inside
 a 24-by-24 square while its stroked corner still crosses a 24-unit circle. Likewise, a centered
 axis-aligned box does not prove that the icon looks centered. Start from one reproducible placement

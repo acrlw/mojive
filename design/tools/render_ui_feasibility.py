@@ -4294,8 +4294,15 @@ def _draw_concept_icon_specimen(
             ),
             mouse_width=mouse_width,
         )
-    # Draw the boundary last so any collision remains visible instead of being
-    # hidden below opaque icon geometry.
+    # Draw both placement guides last so a circular collision and a displaced
+    # axis-aligned bounding box remain visible instead of hiding below the
+    # glyph. The square has exactly the orange circle's diameter.
+    draw.rect(
+        (center[0] - guide_radius, center[1] - guide_radius),
+        (center[0] + guide_radius, center[1] + guide_radius),
+        (*CONCEPT_THEME.text_disabled[:3], 0.34),
+        max(0.6, 0.72 * scale),
+    )
     draw.circle(
         center,
         guide_radius,
@@ -4780,11 +4787,11 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     imgui.pop_id()
 
     metrics_x = x0 + 820.0 * scale
-    draw.text((metrics_x, playback_y - 28.0 * scale), CONCEPT_THEME.text, "State-circle centering")
+    draw.text((metrics_x, playback_y - 28.0 * scale), CONCEPT_THEME.text, "Placement diagnostics")
     draw.text(
         (metrics_x, playback_y - 4.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Minimum enclosing-circle center after placement",
+        "Minimum enclosing-circle offset only; fixed marks ignore the Radial control",
     )
     playback_radial, playback_padding = state.icon_layout_for("Viewport playback")
     for index, name in enumerate(
@@ -4904,7 +4911,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, tools_y + 80.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Capsule cell and state-circle centers coincide; radial centering remains optional.",
+        "Capsule cell and state-circle centers coincide; fixed playback marks keep their contract.",
     )
 
 
@@ -4954,7 +4961,8 @@ def _draw_icon_library_page(
         state.set_icon_layout_for(group, radial_alignment=radial_alignment)
     imgui.set_item_tooltip(
         "0 = visible-box or named semantic center; 1 = minimum enclosing-circle center. "
-        "Rotate remains frame-centered, and Info/Warning/Error remain locked."
+        "Playback Play, selected playback controls, Keyframe transport, Rotate, and "
+        "Info/Warning/Error keep their fixed placement rules."
     )
     padding_x = controls_x + 486.0 * scale
     draw.text(

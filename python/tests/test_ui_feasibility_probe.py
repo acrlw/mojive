@@ -197,6 +197,9 @@ def test_status_mouse_family_specimen_uses_neutral_button_gray(monkeypatch) -> N
         def circle(self, *_args, **_kwargs):
             return None
 
+        def rect(self, *_args, **_kwargs):
+            return None
+
     monkeypatch.setattr(
         probe,
         "draw_concept_icon",
@@ -213,6 +216,26 @@ def test_status_mouse_family_specimen_uses_neutral_button_gray(monkeypatch) -> N
 
     assert calls[0][0][4] == probe.CONCEPT_THEME.text
     assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.bg_frame_active
+
+
+def test_icon_specimen_square_matches_orange_circle_diameter(monkeypatch) -> None:
+    rectangles = []
+    circles = []
+
+    class Draw:
+        def rect(self, lo, hi, *_args, **_kwargs):
+            rectangles.append((lo, hi))
+
+        def circle(self, center, radius, *_args, **_kwargs):
+            circles.append((center, radius))
+
+    monkeypatch.setattr(probe, "draw_concept_icon", lambda *_args, **_kwargs: None)
+    probe._draw_concept_icon_specimen(Draw(), (20.0, 30.0), 112.0, "playback-play", 1.0)
+
+    (lo, hi), (center, radius) = rectangles[0], circles[0]
+    assert center == (20.0, 30.0)
+    assert hi[0] - lo[0] == pytest.approx(2.0 * radius)
+    assert hi[1] - lo[1] == pytest.approx(2.0 * radius)
 
 
 def test_capsule_record_and_stop_share_the_viewport_danger_color():
@@ -255,6 +278,9 @@ def test_icon_library_reuses_production_output_severity_painter(monkeypatch):
 
     class Draw:
         def circle(self, *_args, **_kwargs):
+            return None
+
+        def rect(self, *_args, **_kwargs):
             return None
 
     monkeypatch.setattr(probe, "severity_icon", lambda *args: calls.append(args))
