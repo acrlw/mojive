@@ -1372,7 +1372,11 @@ def _draw_light(p: _Painter) -> None:
         0.42,
         convex_only=False,
     )
-    p.line((-2.4, 5.65), (2.4, 5.65))
+    # Scene helpers use a translucent neutral color. Keep the base separator
+    # clear of the shell so their independent strokes never accumulate alpha.
+    source_stroke = p.stroke_width * p.stroke_compensation
+    base_half_width = max(0.35, 2.5 - source_stroke - 0.15)
+    p.line((-base_half_width, 5.65), (base_half_width, 5.65))
     for a, b in (
         ((0.0, -5.6), (0.0, -7.3)),
         ((-5.2, -4.9), (-6.3, -6.0)),
