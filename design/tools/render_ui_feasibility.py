@@ -4283,6 +4283,8 @@ def _draw_icon_library_overview(
     card_height = 244.0 * scale
     gap_x = 20.0 * scale
     gap_y = 18.0 * scale
+    clip_min = imgui.get_window_draw_list().get_clip_rect_min()
+    clip_max = imgui.get_window_draw_list().get_clip_rect_max()
     for family_index, (family, icons) in enumerate(ICON_FAMILIES):
         padding = state.icon_padding_for(family)
         column = family_index % 3
@@ -4290,6 +4292,8 @@ def _draw_icon_library_overview(
         x0 = origin[0] + column * (card_width + gap_x)
         y0 = origin[1] + row * (card_height + gap_y)
         x1, y1 = x0 + card_width, y0 + card_height
+        if y1 < clip_min.y or y0 > clip_max.y:
+            continue
         draw.rect_filled((x0, y0), (x1, y1), CONCEPT_THEME.bg_child, rounding=8.0 * scale)
         draw.rect(
             (x0, y0),
@@ -4590,12 +4594,18 @@ def _draw_icon_family_detail(
     rows_y = header_y + 98.0 * scale
     row_height = (max(_ICON_REVIEW_SIZES) + 20.0) * scale
     right = origin[0] + 1370.0 * scale
+    clip_min = imgui.get_window_draw_list().get_clip_rect_min()
+    clip_max = imgui.get_window_draw_list().get_clip_rect_max()
     for row, (label, name) in enumerate(icons):
         center_y = rows_y + row_height * row + row_height * 0.5
+        row_top = center_y - row_height * 0.5
+        row_bottom = center_y + row_height * 0.5
+        if row_bottom < clip_min.y or row_top > clip_max.y:
+            continue
         if row % 2 == 0:
             draw.rect_filled(
-                (origin[0] - 10.0 * scale, center_y - row_height * 0.5),
-                (right, center_y + row_height * 0.5),
+                (origin[0] - 10.0 * scale, row_top),
+                (right, row_bottom),
                 (*CONCEPT_THEME.bg_frame[:3], 0.55),
                 rounding=5.0 * scale,
             )
