@@ -352,6 +352,10 @@ ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group status-and-input -o output/ui-icon-concepts/status-input.png
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools --tool-stroke 1.46 --rotate-gap-ratio 1.0 -o output/ui-icon-concepts/tools-max-gap.png
+	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page workspace -o output/ui-icon-concepts/context-workspace.png
+	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page panels -o output/ui-icon-concepts/context-panels.png
+	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page geometry --geometry-tab workspaces -o output/ui-icon-concepts/context-keyframes.png
+	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
 
 ui-feasibility:
 	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)

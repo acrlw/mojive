@@ -1358,6 +1358,38 @@ def _snap_glyph_shape(scale: float, smoothing: float = CORNER_SMOOTHING):
     return ((-radius, -6.2 * scale), *map(tuple, cap.tolist()), (radius, -6.2 * scale))
 
 
+def _dimensions_glyph_geometry(
+    center,
+    scale: float,
+    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
+    *,
+    smoothing: float = CAPSULE_SMOOTHING,
+):
+    """Return the original three Scale handles and center-dot radius."""
+
+    x, y = float(center[0]), float(center[1])
+    glyph_scale = float(scale) * TOOL_GLYPH_SCALE
+    stroke = geometry.tool_stroke * float(scale)
+    half = 1.5 * float(scale)
+    reach = math.sqrt((9.0 * glyph_scale) ** 2 - half**2) - half
+    clear_radius = (
+        geometry.frame_center_radius * glyph_scale
+        + geometry.tool_stroke * geometry.frame_center_gap_ratio * float(scale)
+    )
+    paths = tuple(
+        box_handle_points(
+            (x + ux * clear_radius, y + uy * clear_radius),
+            (x + ux * reach, y + uy * reach),
+            max(stroke * 0.45, stroke - 1.0),
+            2.0 * half,
+            corner_radius=2.0 * half * DIMENSION_CORNER_RADIUS_RATIO,
+            smoothing=smoothing,
+        )
+        for ux, uy in _FRAME_AXES
+    )
+    return paths, geometry.frame_center_radius * glyph_scale
+
+
 def draw_tool_glyph(
     draw: Draw2D,
     center,
@@ -1409,26 +1441,15 @@ def draw_tool_glyph(
                 # narrow knockout contours after large screen translations.
                 draw.fringed_concave_fill(path, color, origin=(x, y))
     elif kind == "dimensions":
-        half = 1.5 * scale
-        # The envelope contains the square's far corners, not just its center.
-        reach = math.sqrt((9.0 * glyph_scale) ** 2 - half**2) - half
-        clear_radius = (
-            geometry.frame_center_radius * glyph_scale
-            + geometry.tool_stroke * geometry.frame_center_gap_ratio * scale
+        paths, dot_radius = _dimensions_glyph_geometry(
+            center,
+            scale,
+            geometry,
+            smoothing=smoothing,
         )
-        for ux, uy in _FRAME_AXES:
-            end = (x + ux * reach, y + uy * reach)
-            start = (x + ux * clear_radius, y + uy * clear_radius)
-            path = box_handle_points(
-                start,
-                end,
-                max(stroke * 0.45, stroke - 1.0),
-                2.0 * half,
-                corner_radius=2.0 * half * DIMENSION_CORNER_RADIUS_RATIO,
-                smoothing=smoothing,
-            )
+        for path in paths:
             draw.fringed_concave_fill(path, color)
-        draw.circle_filled(center, geometry.frame_center_radius * glyph_scale, color, segments=16)
+        draw.circle_filled(center, dot_radius, color, segments=16)
     elif kind == "frame":
         clear_radius = (
             geometry.frame_center_radius * glyph_scale

@@ -258,5 +258,9 @@ uses that expose weak dots, crowded safe areas, and mismatched weights.
 
 For the full candidate set, `make ui-icon-concepts` writes 14, 24, 56, and 112-point family pages
 under `output/ui-icon-concepts/`, plus `tools-max-gap.png` at the production 1.46-pixel stroke and
-the full `gap / stroke = 1.00` setting. The Icon Library canvas reserves enough scroll extent for
-the longest family; verify the final row is reachable in the normal 1600-by-1000 interactive window.
+the full `gap / stroke = 1.00` setting. It also writes `context-workspace.png`,
+`context-panels.png`, `context-keyframes.png`, and `context-redesign.png` with the same candidates
+placed in real feasibility controls. In interactive mode, use the always-visible `Icon Library
+preview` menu-bar switch, or the matching item under `Probe`, to apply or remove that substitution
+across every feasibility page. The Icon Library canvas reserves enough scroll extent for the longest
+family; verify the final row is reachable in the normal 1600-by-1000 interactive window.

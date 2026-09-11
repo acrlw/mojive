@@ -68,6 +68,7 @@ def search_input(
     hint: str = "",
     search_tooltip: str = "Search",
     clear_tooltip: str = "Clear search",
+    icon_drawer=None,
 ) -> tuple[bool, str]:
     """Draw a live filter with a leading search glyph and a trailing clear button."""
 
@@ -129,15 +130,18 @@ def search_input(
     center_y = (lo[1] + hi[1]) * 0.5
     search_x = lo[0] + padding + slot_width * 0.5
     focus_requested = False
-    center = (search_x - radius * 0.275, center_y - radius * 0.275)
-    draw.circle(center, radius, color, stroke)
-    draw.line(
-        (center[0] + radius * 0.70, center[1] + radius * 0.70),
-        (center[0] + radius * 1.55, center[1] + radius * 1.55),
-        color,
-        stroke,
-        cap="round",
-    )
+    if icon_drawer is None:
+        center = (search_x - radius * 0.275, center_y - radius * 0.275)
+        draw.circle(center, radius, color, stroke)
+        draw.line(
+            (center[0] + radius * 0.70, center[1] + radius * 0.70),
+            (center[0] + radius * 1.55, center[1] + radius * 1.55),
+            color,
+            stroke,
+            cap="round",
+        )
+    else:
+        icon_drawer(draw, (search_x, center_y), height * 0.72, "search", color)
     if imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
         lo, (lo[0] + slot_width + padding, hi[1])
     ):
@@ -146,7 +150,12 @@ def search_input(
     if value:
         center_x = hi[0] - padding - slot_width * 0.5
         imgui.set_cursor_screen_pos((center_x - slot_width * 0.5, lo[1]))
-        clicked = clear_button(f"##clear_{identifier}", (slot_width, height), clear_tooltip)
+        clicked = clear_button(
+            f"##clear_{identifier}",
+            (slot_width, height),
+            clear_tooltip,
+            icon_drawer=icon_drawer,
+        )
         if clicked:
             value, changed = "", True
             focus_requested = True
@@ -204,6 +213,7 @@ def sort_order_button(
     state_order: str,
     translate=lambda value: value,
     bindings=None,
+    icon_drawer=None,
 ) -> tuple[bool, bool]:
     """Draw a compact state/name order toggle beside a search field."""
 
@@ -217,10 +227,19 @@ def sort_order_button(
     lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
     color_value = imgui.get_style_color_vec4(imgui.Col_.check_mark if by_name else imgui.Col_.text)
     color = color_value
-    thickness = max(1.0, size * 0.045)
     draw = ImguiDraw2D()
-    for start, end in sort_order_glyph((lo.x, lo.y, hi.x, hi.y)):
-        draw.line(start, end, color, thickness, cap="round")
+    if icon_drawer is None:
+        thickness = max(1.0, size * 0.045)
+        for start, end in sort_order_glyph((lo.x, lo.y, hi.x, hi.y)):
+            draw.line(start, end, color, thickness, cap="round")
+    else:
+        icon_drawer(
+            draw,
+            ((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5),
+            size * 0.72,
+            "sort",
+            color,
+        )
     imgui.set_item_tooltip(sort_order_tooltip(by_name, state_order, translate))
     changed = bool(left_clicked or alternate)
     return changed, (not by_name if changed else by_name)
@@ -237,6 +256,7 @@ def searchable_ordered_list_header(
     state_order: str,
     translate=lambda text: text,
     bindings=None,
+    icon_drawer=None,
 ) -> tuple[bool, str, bool, bool]:
     """Draw one responsive search field followed by its list-order button."""
 
@@ -250,6 +270,7 @@ def searchable_ordered_list_header(
         hint=hint,
         search_tooltip=search_tooltip,
         clear_tooltip=clear_tooltip,
+        icon_drawer=icon_drawer,
     )
     imgui.same_line()
     sort_changed, by_name = sort_order_button(
@@ -258,6 +279,7 @@ def searchable_ordered_list_header(
         state_order=state_order,
         translate=translate,
         bindings=bindings,
+        icon_drawer=icon_drawer,
     )
     return search_changed, value, sort_changed, by_name
 
@@ -505,7 +527,13 @@ def button_row_layout(
     return tuple(same_line)
 
 
-def clear_button(str_id: str, size: tuple[float, float], tooltip: str = "") -> bool:
+def clear_button(
+    str_id: str,
+    size: tuple[float, float],
+    tooltip: str = "",
+    *,
+    icon_drawer=None,
+) -> bool:
     """Draw a keyboard-accessible, round-stroke clear action without a frame."""
     clicked = imgui.invisible_button(str_id, size, imgui.ButtonFlags_.enable_nav)
     lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
@@ -513,10 +541,13 @@ def clear_button(str_id: str, size: tuple[float, float], tooltip: str = "") -> b
     color = imgui.get_style_color_vec4(imgui.Col_.text if hovered else imgui.Col_.text_disabled)
     color = (color.x, color.y, color.z, color.w * imgui.get_style().alpha)
     x, y = (lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5
-    arm, stroke = size[1] * 0.1408, max(1.0, size[1] * 0.055)
     draw = ImguiDraw2D()
-    draw.line((x - arm, y - arm), (x + arm, y + arm), color, stroke, cap="round")
-    draw.line((x + arm, y - arm), (x - arm, y + arm), color, stroke, cap="round")
+    if icon_drawer is None:
+        arm, stroke = size[1] * 0.1408, max(1.0, size[1] * 0.055)
+        draw.line((x - arm, y - arm), (x + arm, y + arm), color, stroke, cap="round")
+        draw.line((x + arm, y - arm), (x - arm, y + arm), color, stroke, cap="round")
+    else:
+        icon_drawer(draw, (x, y), size[1] * 0.72, "clear", color)
     if hovered:
         imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
         if tooltip:

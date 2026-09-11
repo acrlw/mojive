@@ -101,6 +101,25 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.tick_scale == probe.gizmo_ui.DEFAULT_ROTATION_TICK_SCALE
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
+    assert not state.preview_icon_library
+
+
+@pytest.mark.parametrize(
+    ("kind", "scale", "expected"),
+    (
+        ("previous", 1.0, "transport-previous"),
+        ("add", 1.0, "key-add"),
+        ("key", 1.0, "key-snapshot"),
+        ("key", 0.2, "key-keyframe"),
+    ),
+)
+def test_keyframe_context_preview_uses_icon_library_candidates(monkeypatch, kind, scale, expected):
+    calls = []
+    monkeypatch.setattr(probe, "draw_concept_icon", lambda *args: calls.append(args))
+
+    probe._draw_icon_library_command_icon(None, (10.0, 20.0), kind, (1, 1, 1, 1), scale)
+
+    assert calls[0][3] == expected
 
 
 def test_icon_library_reuses_production_output_severity_painter(monkeypatch):

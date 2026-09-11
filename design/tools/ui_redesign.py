@@ -40,8 +40,10 @@ from mojive.ui.viewport_widgets import reset_glyph_path as reset_glyph_path
 
 if __package__:
     from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
+    from .ui_icon_concepts import draw_concept_icon
 else:
     from ui_capsule_geometry import capsule_layout, draw_capsule_shell
+    from ui_icon_concepts import draw_concept_icon
 
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)
@@ -285,7 +287,30 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
         def icon(target, center, color, icon_scale, _surface, kind=kind, disabled=disabled):
             if disabled:
                 color = (*color[:3], color[3] * imgui.get_style().disabled_alpha)
-            if vertical:
+            if getattr(geometry, "preview_icon_library", False):
+                concept_name = (
+                    {
+                        "move": "tool-move",
+                        "rotate": "tool-rotate",
+                        "dimensions": "tool-scale",
+                        "frame": "tool-world" if state.space == "world" else "tool-body",
+                        "snap": "tool-snap",
+                    }[kind]
+                    if vertical
+                    else {
+                        "previous": "transport-previous",
+                        "play": "transport-pause" if state.playing else "transport-play",
+                        "step": "transport-next",
+                        "reset": "transport-reset",
+                        "record": "transport-stop" if state.recording else "transport-record",
+                        "menu": "transport-more",
+                    }[kind]
+                )
+                nominal_diameter = 2.0 * OVERLAY_GEOMETRY.icon_radius * icon_scale
+                if vertical:
+                    nominal_diameter *= TOOL_GLYPH_SCALE
+                draw_concept_icon(target, center, nominal_diameter, concept_name, color)
+            elif vertical:
                 draw_tool_glyph(
                     target,
                     center,

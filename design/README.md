@@ -37,8 +37,14 @@ The `Icon library` tab is a concept-only review surface. Its Overview and family
 Viewport tools, Transport, Keyframes, Panels, Scene helpers, and Status & input candidates on one
 24-unit grid at 14, 20, 32, and 56 pt. The orange circle is the complete 24-unit circular placement
 boundary, matching Diagnostics. Each detail row reports radial padding and bounding-box center
-offset. The candidate painters do not replace production icons; reviewed Output severity icons are
-shown through their production painter. Generate the whole review set with:
+offset. The candidate painters do not alter Mojive's production UI; reviewed Output severity icons
+are shown through their production painter.
+
+Use the always-visible `Icon Library preview` menu-bar switch, or `Probe > Preview Icon Library`,
+to substitute the candidates into the current Workspace, Panels, Geometry, and Redesign layouts.
+This keeps the real control sizes, baselines, hover states, and panel spacing, so an icon can be
+judged where it will be used. The command-line equivalent is `--preview-icon-library`. Generate the
+family sheets and representative context captures with:
 
 ```bash
 make ui-icon-concepts
