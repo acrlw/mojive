@@ -199,6 +199,7 @@ class IconMetrics:
     enclosing_center: tuple[float, float]
     enclosing_radius: float
     origin_extent: float
+    anchor_extent: float
 
     @property
     def center_offset(self) -> tuple[float, float]:
@@ -1402,6 +1403,7 @@ class _MetricsDraw:
         self._add(((lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])))
 
 
+@lru_cache(maxsize=2048)
 def _measure_raw_icon(
     name: str,
     center=(0.0, 0.0),
@@ -1422,18 +1424,33 @@ def _measure_raw_icon(
         stroke_width=stroke_width,
         stroke_compensation=stroke_compensation,
     )
+    bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
+    anchor_center = _alignment_center_values(name, bounds, enclosing_center)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
-    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius, origin_extent)
+    anchor_extent = max(
+        math.hypot(x - anchor_center[0], y - anchor_center[1])
+        for x, y in draw.boundary_points
+    )
+    return IconMetrics(bounds, enclosing_center, enclosing_radius, origin_extent, anchor_extent)
+
+
+def _alignment_center_values(
+    name: str,
+    bounds: tuple[float, float, float, float],
+    enclosing_center: tuple[float, float],
+) -> tuple[float, float]:
+    anchor = icon_alignment_anchor(name)
+    if anchor == "box":
+        x0, y0, x1, y1 = bounds
+        return (x0 + x1) * 0.5, (y0 + y1) * 0.5
+    if anchor == "ring":
+        return RESET_RING_CENTER
+    return enclosing_center
 
 
 def _alignment_center(name: str, metrics: IconMetrics) -> tuple[float, float]:
-    anchor = icon_alignment_anchor(name)
-    if anchor == "box":
-        return metrics.center_offset
-    if anchor == "ring":
-        return RESET_RING_CENTER
-    return metrics.enclosing_center
+    return _alignment_center_values(name, metrics.bounds, metrics.enclosing_center)
 
 
 @lru_cache(maxsize=256)
@@ -1479,15 +1496,7 @@ def _icon_layout(
             stroke_width=stroke_width,
             stroke_compensation=compensation,
         )
-        reference_center = _alignment_center(reference_name, reference_raw)
-        reference_shifted = _measure_raw_icon(
-            reference_name,
-            (-reference_center[0], -reference_center[1]),
-            mouse_width=mouse_width,
-            stroke_width=stroke_width,
-            stroke_compensation=compensation,
-        )
-        return safe_radius / reference_shifted.origin_extent
+        return safe_radius / reference_raw.anchor_extent
 
     # Fitting each complete icon used to scale its stroke together with its
     # reach, which made nominally identical shared strokes land anywhere from
@@ -1528,6 +1537,7 @@ def icon_alignment_anchor(name: str) -> str:
     return "circle"
 
 
+@lru_cache(maxsize=256)
 def icon_alignment_center(
     name: str,
     padding: float | None = None,
@@ -1607,9 +1617,15 @@ def icon_metrics(
         mouse_width=mouse_width,
         stroke_width=stroke_width,
     )
+    bounds = tuple(draw.bounds)
     enclosing_center, enclosing_radius = minimum_enclosing_circle(draw.boundary_points)
+    anchor_center = _alignment_center_values(name, bounds, enclosing_center)
     origin_extent = max(math.hypot(x, y) for x, y in draw.boundary_points)
-    return IconMetrics(tuple(draw.bounds), enclosing_center, enclosing_radius, origin_extent)
+    anchor_extent = max(
+        math.hypot(x - anchor_center[0], y - anchor_center[1])
+        for x, y in draw.boundary_points
+    )
+    return IconMetrics(bounds, enclosing_center, enclosing_radius, origin_extent, anchor_extent)
 
 
 def icon_family(label: str):
