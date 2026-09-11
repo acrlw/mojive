@@ -103,6 +103,8 @@ def test_geometry_export_names_production_overlay_fields():
     values = probe._geometry_values_text(probe.ProbeState())
 
     assert "icon_radius=10," in values
+    assert "icon_layout_viewport_tools=(0.0, 0.5)," in values
+    assert "icon_layout_viewport_playback=(0.0, 0.75)," in values
     assert "tool_stroke=" in values
     assert "hint_mouse_wheel_gap_ratio=" in values
 
@@ -117,16 +119,31 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
-    assert state.icon_radial_alignment == 0.0
-    assert state.icon_padding == probe.ICON_DEFAULT_PADDING
+    assert state.icon_layout_for("Viewport tools") == (0.0, 0.5)
+    assert state.icon_layout_for("Viewport playback") == (0.0, probe.ICON_DEFAULT_PADDING)
+    assert state.icon_layout_for("Keyframe transport") == (
+        0.0,
+        probe.ICON_DEFAULT_PADDING,
+    )
+
+
+def test_icon_layout_controls_are_stored_per_actual_component_group() -> None:
+    state = probe.ProbeState()
+
+    state.set_icon_layout_for("Viewport tools", radial_alignment=0.4, padding=1.2)
+
+    assert state.icon_layout_for("Viewport tools") == (0.4, 1.2)
+    assert state.icon_layout_for("Viewport playback") == (0.0, probe.ICON_DEFAULT_PADDING)
 
 
 @pytest.mark.parametrize("button", ("left", "right", "wheel"))
 def test_status_mouse_adapter_preserves_the_original_control_height(button):
     height = float(probe.OVERLAY_GEOMETRY.hint_control_height)
     padding = probe.ICON_DEFAULT_PADDING
-    size = probe._concept_mouse_icon_size(height, button, padding)
-    metrics = probe.icon_metrics(f"status-mouse-{button}", padding=padding)
+    state = probe.ProbeState()
+    mouse_width = state.concept_mouse_width()
+    size = probe._concept_mouse_icon_size(height, button, padding, mouse_width=mouse_width)
+    metrics = probe.icon_metrics(f"status-mouse-{button}", padding=padding, mouse_width=mouse_width)
     rendered_height = (metrics.bounds[3] - metrics.bounds[1]) * size / probe.ICON_GRID
 
     assert rendered_height == pytest.approx(height)
@@ -134,7 +151,7 @@ def test_status_mouse_adapter_preserves_the_original_control_height(button):
 
 
 @pytest.mark.parametrize("muted", (False, True))
-def test_status_mouse_preview_inherits_the_production_mouse_colors(monkeypatch, muted):
+def test_status_mouse_preview_uses_neutral_status_colors(monkeypatch, muted):
     calls = []
     state = probe.ProbeState(preview_icon_library=True)
     monkeypatch.setattr(
@@ -156,11 +173,46 @@ def test_status_mouse_preview_inherits_the_production_mouse_colors(monkeypatch, 
         muted=muted,
     )
 
-    shell, control, _suffix = probe.mouse_hint_colors(probe.CONCEPT_THEME, muted=muted)
     assert used == pytest.approx(probe.OVERLAY_GEOMETRY.hint_mouse_width)
-    assert calls[0][0][4] == shell
-    assert calls[0][1]["accent_color"] == control
+    assert calls[0][0][4] == (
+        probe.CONCEPT_THEME.text_disabled if muted else probe.CONCEPT_THEME.text
+    )
+    assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.bg_frame_active
     assert calls[0][1]["radial_alignment"] == 0.0
+
+
+def test_status_mouse_width_control_changes_candidate_aspect_ratio() -> None:
+    state = probe.ProbeState()
+    original = state.concept_mouse_width()
+
+    state.hint_mouse_width += 4
+
+    assert state.concept_mouse_width() > original
+
+
+def test_status_mouse_family_specimen_uses_neutral_button_gray(monkeypatch) -> None:
+    calls = []
+
+    class Draw:
+        def circle(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        probe,
+        "draw_concept_icon",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    probe._draw_concept_icon_specimen(
+        Draw(),
+        (10.0, 20.0),
+        112.0,
+        "status-mouse-left",
+        1.0,
+    )
+
+    assert calls[0][0][4] == probe.CONCEPT_THEME.text
+    assert calls[0][1]["accent_color"] == probe.CONCEPT_THEME.bg_frame_active
 
 
 def test_capsule_record_and_stop_share_the_viewport_danger_color():

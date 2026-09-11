@@ -308,25 +308,31 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     }[kind]
                     if vertical
                     else {
-                        "previous": "transport-previous",
-                        "play": "transport-pause" if state.playing else "transport-play",
-                        "step": "transport-next",
-                        "reset": "transport-reset",
-                        "record": "transport-stop" if state.recording else "transport-record",
-                        "menu": "transport-more",
+                        "previous": "playback-previous",
+                        "play": "playback-pause" if state.playing else "playback-play",
+                        "step": "playback-next",
+                        "reset": "playback-reset",
+                        "record": "playback-stop" if state.recording else "playback-record",
+                        "menu": "playback-more",
                     }[kind]
                 )
                 nominal_diameter = 2.0 * OVERLAY_GEOMETRY.icon_radius * icon_scale
                 if vertical:
                     nominal_diameter *= TOOL_GLYPH_SCALE
+                group = "Viewport tools" if vertical else "Viewport playback"
+                if hasattr(geometry, "icon_layout_for"):
+                    radial_alignment, padding = geometry.icon_layout_for(group)
+                else:
+                    radial_alignment = getattr(geometry, "icon_radial_alignment", 0.0)
+                    padding = getattr(geometry, "icon_padding", ICON_DEFAULT_PADDING)
                 draw_concept_icon(
                     target,
                     center,
                     nominal_diameter,
                     concept_name,
                     color,
-                    radial_alignment=getattr(geometry, "icon_radial_alignment", 0.0),
-                    padding=getattr(geometry, "icon_padding", ICON_DEFAULT_PADDING),
+                    radial_alignment=radial_alignment,
+                    padding=padding,
                 )
             elif vertical:
                 draw_tool_glyph(
