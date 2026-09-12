@@ -50,6 +50,8 @@ nav:
       - C++ dependencies (中文): plans/cpp-dependencies.zh.md
       - Native renderer acceptance (中文): plans/native-renderer-parity.zh.md
       - Native resources and runtime (中文): plans/native-resource-runtime.zh.md
+      - 自研 Draw2D 架构与 CLI/RPC 方案: plans/draw2d-architecture.md
+      - 自研 Draw2D 实施与 agent 交接: plans/draw2d-implementation.md
       - Native backend decision (中文): plans/native-backend-decision.zh.md
       - Native C++ proposal (中文): plans/native-cpp-bgfx.zh.md
   - API reference:
