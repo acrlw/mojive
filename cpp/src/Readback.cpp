@@ -1,5 +1,5 @@
-#include <mojive/Readback.hpp>
 #include <cstring>
+#include <mojive/Readback.hpp>
 #include <stdexcept>
 namespace mojive {
 ReadbackState Renderer::readInto(FrameToken frame, ImageView destination, Region region) {
@@ -8,7 +8,8 @@ ReadbackState Renderer::readInto(FrameToken frame, ImageView destination, Region
         if (destination.size != result.image.size ||
             destination.pixels.size() != result.image.pixels.size())
             throw std::invalid_argument("Readback destination has the wrong size");
-        std::memcpy(destination.pixels.data(), result.image.pixels.data(), destination.pixels.size());
+        std::memcpy(destination.pixels.data(), result.image.pixels.data(),
+                    destination.pixels.size());
     }
     return result.state;
 }

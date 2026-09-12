@@ -162,14 +162,13 @@ int main(int argc, char **argv) {
             if (n > 30)
                 ImGui::TextUnformatted("动态字形：渲染、物理、异步");
             if (ImGui::BeginTable("metrics", 2, ImGuiTableFlags_SizingStretchProp)) {
-                for (const auto &item :
-                     std::vector<std::pair<const char *, const char *>>{{"Backend",
-                                                                         renderer->capabilities().backend.c_str()},
-                                                                        {"Moving bodies", "1,600"},
-                                                                        {"Instances", "5,101"},
-                                                                        {"Object ID", "uint32"},
-                                                                        {"Depth", "meters"},
-                                                                        {"MSAA", "4x"}}) {
+                for (const auto &item : std::vector<std::pair<const char *, const char *>>{
+                         {"Backend", renderer->capabilities().backend.c_str()},
+                         {"Moving bodies", "1,600"},
+                         {"Instances", "5,101"},
+                         {"Object ID", "uint32"},
+                         {"Depth", "meters"},
+                         {"MSAA", "4x"}}) {
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(item.first);

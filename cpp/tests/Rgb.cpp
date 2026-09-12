@@ -13,8 +13,8 @@ int main() {
                 for (size_t i = 0; i < source.size(); ++i)
                     source[i] = std::byte((i * 37 + 11) % 256);
                 const auto original = source;
-                mojive::detail::copyRgb(destination.data() + alignment,
-                                       source.data() + alignment, count);
+                mojive::detail::copyRgb(destination.data() + alignment, source.data() + alignment,
+                                        count);
                 for (size_t i = 0; i < destination.size(); ++i) {
                     auto expected = std::byte{0xa5};
                     if (i >= alignment && i < alignment + count * 3) {
