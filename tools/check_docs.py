@@ -17,17 +17,20 @@ PUBLIC_MODULES = (
     "python/src/mojive/commands.py",
     "python/src/mojive/adapters/base.py",
     "python/src/mojive/adapters/conformance.py",
-    "python/src/mojive/scene.py",
-    "python/src/mojive/composition.py",
-    "python/src/mojive/session.py",
-    "python/src/mojive/renderer.py",
+    "python/src/mojive/scene/model.py",
+    "python/src/mojive/application/composition.py",
+    "python/src/mojive/session/core.py",
+    "python/src/mojive/application/renderer.py",
     "python/src/mojive/render/backend.py",
     "python/src/mojive/render/debugdraw.py",
-    "python/src/mojive/recording.py",
-    "python/src/mojive/remote.py",
-    "python/src/mojive/control_rpc.py",
-    "python/src/mojive/scene_io.py",
-    "python/src/mojive/workspace_io.py",
+    "python/src/mojive/capture/recording.py",
+    "python/src/mojive/remote/adapter.py",
+    "python/src/mojive/remote/protocol.py",
+    "python/src/mojive/remote/publisher.py",
+    "python/src/mojive/remote/commands.py",
+    "python/src/mojive/control/rpc.py",
+    "python/src/mojive/scene/io.py",
+    "python/src/mojive/scene/workspace.py",
 )
 SNIPPET = re.compile(r'--8<--\s+["\']([^"\']+)["\']')
 ASSET_REFERENCE = re.compile(
@@ -36,9 +39,9 @@ ASSET_REFERENCE = re.compile(
 )
 CURRENT_DOCS = (ROOT / "README.md", ROOT / "examples/README.md")
 CONFIG_ENV_MODULES = (
-    "python/src/mojive/composition.py",
-    "python/src/mojive/renderer.py",
-    "python/src/mojive/ui/app.py",
+    "python/src/mojive/application/composition.py",
+    "python/src/mojive/application/renderer.py",
+    "python/src/mojive/ui/app/core.py",
     "python/src/mojive/ui/fonts.py",
     "python/src/mojive/ui/localization.py",
     "python/src/mojive/ui/window.py",

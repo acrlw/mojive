@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import commands as cmd
-from ..adapters.mujoco_adapter import MuJoCoAdapter
+from ..adapters.mujoco import MuJoCoAdapter
 from ..adapters.workspace import WorkspaceAdapter
 from ..session import Session
 

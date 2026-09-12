@@ -15,10 +15,11 @@ from imageio_ffmpeg import read_frames
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.capture.recording import VideoRecorder
+from mojive.scene.assets import resolve
+
 from .. import CaptureSurface, RecordingConfig, ViewerConfig, build
 from .. import commands as cmd
-from ..assets import resolve
-from ..recording import VideoRecorder
 from .keyframe_timeline import populate_take
 from .ui_runtime import _activate_panel, _click, _item_center, _right_click, _save_window_crop
 

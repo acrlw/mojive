@@ -12,8 +12,8 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 
 from mojive import commands as cmd  # noqa: E402
-from mojive.bridge import DebugClient  # noqa: E402
-from mojive.composition import build_scene  # noqa: E402
+from mojive.application.composition import build_scene  # noqa: E402
+from mojive.application.demos import canvas_scene  # noqa: E402
 from mojive.config import (  # noqa: E402
     CameraInputConfig,
     InteractionConfig,
@@ -23,8 +23,8 @@ from mojive.config import (  # noqa: E402
     ViewerConfig,
     ViewportOverlayConfig,
 )
-from mojive.demos import canvas_scene  # noqa: E402
-from mojive.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
+from mojive.interaction.gizmo import SIZE_PT, GizmoHandle, project, world_scale  # noqa: E402
+from mojive.remote.bridge import DebugClient  # noqa: E402
 from mojive.render.backend import ShadowQuality  # noqa: E402
 from mojive.render.debugdraw import PrimitiveType  # noqa: E402
 from mojive.scene import Scene  # noqa: E402
@@ -755,7 +755,13 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         # projected anchor, while the selected frustum remains depth-aware.
         assert layer.count_of(PrimitiveType.POINT) == 0
         assert layer.count_of(PrimitiveType.LINE) == 12
-        assert icon_layer.count_of(PrimitiveType.STROKE) == 24
+        from mojive.ui.icons import production_helper_strokes
+
+        expected_segments = sum(
+            len(path.points) - int(not path.closed)
+            for path in production_helper_strokes("helper-camera")
+        )
+        assert icon_layer.count_of(PrimitiveType.STROKE) == expected_segments
         store = layer._stores[PrimitiveType.LINE]
         assert store.positions[: store.count] == pytest.approx(frustum_before_preview)
         # The preview intentionally owns pointer input over its rectangle.
@@ -804,7 +810,7 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
 def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monkeypatch, tmp_path):
     from imgui_bundle import imgui
 
-    import mojive.recording as recording
+    import mojive.capture.recording as recording
     from mojive import CaptureSurface, RecordingConfig, RecordingPhase
     from mojive.tools.ui_runtime import _click, _item_center, _open_main_menu
 

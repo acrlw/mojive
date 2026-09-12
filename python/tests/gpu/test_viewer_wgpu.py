@@ -20,8 +20,8 @@ pytest.importorskip("glfw")
 pytest.importorskip("wgpu")
 pytest.importorskip("rendercanvas")
 
-from mojive.composition import build_scene  # noqa: E402
-from mojive.demos import canvas_scene  # noqa: E402
+from mojive.application.composition import build_scene  # noqa: E402
+from mojive.application.demos import canvas_scene  # noqa: E402
 from mojive.render.backend import RenderFlag  # noqa: E402
 from mojive.render.webgpu.backend import WgpuBackend  # noqa: E402
 from mojive.ui.window_wgpu import WgpuWindow  # noqa: E402

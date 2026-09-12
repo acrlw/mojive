@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 import wgpu
 
+from mojive.interaction.gizmo import GizmoFrame
+
 from ...adapters.base import SceneFrame, SceneSource
-from ...gizmo import GizmoFrame
 from ...log import get_logger
 from ...types import CameraView, ShadingModel, ViewportImage
 from ..backend import (

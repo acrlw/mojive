@@ -60,7 +60,7 @@ def _save_segmentation(path: Path, segmentation: np.ndarray) -> None:
 
 
 def _render_opengl(model, data):
-    from ..renderer import Renderer
+    from mojive.application.renderer import Renderer
 
     with Renderer(model, height=480, width=640) as renderer:
         renderer.update_scene(data, camera="acceptance")

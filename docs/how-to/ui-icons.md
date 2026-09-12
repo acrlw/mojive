@@ -8,6 +8,13 @@ This guide applies to panel icons, filter pills, viewport controls, status glyph
 symbols. For drawing ownership and submission APIs, see [Extend UI drawing](ui-drawing.md). For the
 shared corner and cap profiles, see [G3 UI corners](ui-corners.md).
 
+Production placement and visible bounds are generated in `ui/icon_presets.json`.
+After applying reviewed defaults, run `make icon-presets`; `make check` verifies
+every preset against the dynamic painter. The installed package includes these
+presets, so its first frame does not fit strokes or measure enclosing circles.
+Icon Library candidates remain dynamic. If development parameters change before
+regeneration, unmatched presets use dynamic fitting to preserve correct geometry.
+
 ## Author one canonical grid
 
 Choose one square design grid for the family. Use 24 units for new compact UI families unless an
@@ -53,7 +60,7 @@ capsule specimens, and the whole-UI preview resolve the same overrides. Viewport
 padding 0.50; every other group defaults to 2.00. Playback Previous, Next, and More use 4.00 so the
 directional marks remain smaller than Play. Keyframe Add, Clear, Keyframe, Previous, and Next plus
 Transport First, Previous, Next, and More also use 4.00; Transport Play uses 3.00. Rotate defaults
-to a 0.80-stroke crossing gap with round caps and remains frame-aligned: its outer screen-ring
+to a 1.00-stroke crossing gap with round caps and remains frame-aligned: its outer screen-ring
 centerline coincides with the orange placement circle, while its row can adjust frame padding and
 the inner-ring gap/stroke ratio. Half of the outer stroke sits on each side of its centerline.
 Output's mature Info, Warning, and Error painters are also locked; the review control does not
@@ -148,6 +155,18 @@ mesh. Separate circle and line primitives expose a round handle cap inside the l
 one continuous neck.
 
 ## Keep a family visibly related
+
+The production Keyframe follow icons use box-centered 24-unit masters: Off and Page
+share a G3 viewport rim with an isolated dash or integrated arrow. Locked uses that same rim and
+an integrated triangular playhead/stem: it means holding the playhead's relative screen position
+while time scrolls underneath, not preventing edits. The centered symbol is illustrative; the
+actual mode preserves the position at activation. No rim/mark parts overlap. Their default padding is
+0.5 units and stroke is 1.5 units, with independent per-glyph controls and parameter export in
+`Icon library > Keyframe follow`. The toolbar uses square icon-only segments without a Follow
+heading. Each icon is centered in its segment; localized per-item tooltips explain the modes.
+The selected fill, native click targets, and keyboard focus remain shared with captioned
+segmented controls. `make ui-keyframe-follow`
+captures the family and the production toolbar without enabling Icon Library preview.
 
 Members of one family use the same outer bounds, baseline, frame weight, internal stroke class,
 round-cap profile, and semantic color behavior. Derive related symbols instead of tuning them

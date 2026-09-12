@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from mojive.gizmo import screen_path_distance, screen_polygon_distance
+from mojive.interaction.gizmo import screen_path_distance, screen_polygon_distance
 
 
 def reference_distance(point, path, closed):

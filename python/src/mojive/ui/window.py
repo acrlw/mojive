@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from imgui_bundle.python_backends import compute_fb_scale
 
-from ..input import add_physical_mouse_button_event
+from mojive.interaction.input import add_physical_mouse_button_event
+
 from ..log import get_logger
 from . import fonts, native_drop
 from . import theme as theme_mod

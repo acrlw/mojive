@@ -7,7 +7,8 @@ from functools import lru_cache
 
 import numpy as np
 
-from ..curves2d import CORNER_SMOOTHING, smooth_lollipop_points
+from mojive.drawing.curves import CORNER_SMOOTHING, smooth_lollipop_points
+
 from ..types import CameraView
 from .camera import PITCH_LIMIT, OrbitCamera, camera_basis
 from .draw2d import Draw2D

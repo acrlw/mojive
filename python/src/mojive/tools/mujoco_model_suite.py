@@ -228,7 +228,7 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
         import mujoco
 
         if path.suffix.lower() == ".urdf":
-            from ..adapters.mujoco_adapter import _load_editable_spec
+            from ..adapters.mujoco.spec import _load_editable_spec
 
             model = _load_editable_spec(path).compile()
         else:
@@ -256,7 +256,7 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
 
     try:
         from ..adapters.base import FrameNeeds
-        from ..adapters.mujoco_adapter import MuJoCoAdapter
+        from ..adapters.mujoco import MuJoCoAdapter
 
         adapter = MuJoCoAdapter(path)
         try:
@@ -377,7 +377,7 @@ def audit_model(request: ModelAuditRequest) -> ModelAuditResult:
 
     os.environ["MOJIVE_RENDERER"] = request.backend
     try:
-        from ..renderer import Renderer
+        from mojive.application.renderer import Renderer
 
         data = mujoco.MjData(model)
         mujoco.mj_forward(model, data)

@@ -9,10 +9,10 @@ from mojive import Scene
 from mojive import commands as cmd
 from mojive.adapters.base import AdapterCaps
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.command_support import unavailable_reason
-from mojive.control_rpc import ControlService
-from mojive.control_schema import CAPABILITIES_RESULT, Validator
+from mojive.control.rpc import ControlService
+from mojive.control.schema import CAPABILITIES_RESULT, Validator
 from mojive.session import Session
+from mojive.session.command_support import unavailable_reason
 from mojive.ui.app import _model_filters, _scene_filters
 
 
@@ -104,7 +104,7 @@ def test_unsupported_edit_invalidates_the_active_transaction():
 
 def test_control_writeback_is_independent_of_simulation():
     from mojive.adapters.toy import ToyPhysicsAdapter
-    from mojive.operations import OPERATIONS
+    from mojive.control.operations import OPERATIONS
 
     session = Session(ToyPhysicsAdapter())
     try:

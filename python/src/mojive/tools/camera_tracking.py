@@ -12,11 +12,12 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.capture import CaptureSurface
+from mojive.capture.recording import VideoRecorder
+from mojive.scene import Scene
+
 from .. import CameraTrackingConfig, ViewerConfig, ViewportLayers, build_scene
 from .. import commands as cmd
-from ..capture import CaptureSurface
-from ..recording import VideoRecorder
-from ..scene import Scene
 from ..types import CameraView, Light, LightSet, LightType
 from .ui_runtime import _item_center, _item_rect, _save_window_crop
 

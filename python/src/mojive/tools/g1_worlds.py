@@ -75,7 +75,7 @@ class Dance:
     def __init__(self, model: Path, motion: np.ndarray, count: int, spacing: float, seed: int):
         import mujoco
 
-        from mojive.backends import make_adapter
+        from mojive.application.backends import make_adapter
 
         if count < 1 or not np.isfinite(spacing) or spacing < 6.5:
             raise ValueError("World count must be positive and dance spacing at least 6.5 m")

@@ -468,7 +468,7 @@ def test_dynamic_popover_title_elides_the_middle() -> None:
 
 
 def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
-    import mojive.recording as recording
+    import mojive.capture.recording as recording
 
     events = []
 
@@ -744,7 +744,7 @@ def test_overlay_host_is_the_padded_content_intersection_with_the_viewport() -> 
 
 
 def test_recording_countdown_uses_wall_time_and_waits_for_menu_dismissal(monkeypatch, tmp_path):
-    import mojive.ui.app as app_module
+    import mojive.ui.app.capture as app_module
     from mojive import RecordingConfig
 
     now = [10.0]

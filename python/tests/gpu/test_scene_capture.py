@@ -8,7 +8,7 @@ from PIL import Image
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
-from mojive.composition import build_scene
+from mojive.application.composition import build_scene
 from mojive.tools.scene_entities import acceptance_scene
 from mojive.types import CameraView
 
@@ -16,7 +16,7 @@ pytestmark = pytest.mark.gpu
 
 
 def test_scene_capture_and_video_exclude_helpers_and_selection(tmp_path, monkeypatch):
-    from mojive.recording import VideoRecorder
+    from mojive.capture.recording import VideoRecorder
 
     monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))

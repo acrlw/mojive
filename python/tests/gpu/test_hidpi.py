@@ -9,9 +9,9 @@ pytestmark = pytest.mark.gpu
 pytest.importorskip("glfw")
 
 from mojive import commands as cmd  # noqa: E402
-from mojive.assets import resolve  # noqa: E402
-from mojive.composition import build, build_scene  # noqa: E402
+from mojive.application.composition import build, build_scene  # noqa: E402
 from mojive.scene import Scene  # noqa: E402
+from mojive.scene.assets import resolve  # noqa: E402
 from mojive.ui import viewcube  # noqa: E402
 from mojive.ui.viewport_widgets import ToolHint  # noqa: E402
 

@@ -3,13 +3,13 @@
 import numpy as np
 import pytest
 
-from mojive.curves2d import CURVE_TOLERANCE
+from mojive.drawing.curves import CURVE_TOLERANCE
 
 
 def test_implicit_union_matches_three_derivatives_at_its_blend_limits():
     from numpy.polynomial import Polynomial
 
-    from mojive.draglink2d import smooth_union
+    from mojive.drawing.drag_link import smooth_union
 
     x = np.linspace(-1.0, 1.0, 25)
     p = Polynomial.fit(x, smooth_union(x, 0.0, 1.0), 6).convert()
@@ -21,7 +21,7 @@ def test_implicit_union_matches_three_derivatives_at_its_blend_limits():
 @pytest.mark.parametrize("smoothing", (0.0, 0.05, 0.6, 1.0))
 @pytest.mark.parametrize("distance", (0.0, 5.0, 8.0, 20.0, 100.0))
 def test_drag_link_mesh_follows_the_field_and_keeps_the_hole_empty(smoothing, distance):
-    from mojive.draglink2d import drag_link_field, smooth_drag_link_mesh
+    from mojive.drawing.drag_link import drag_link_field, smooth_drag_link_mesh
 
     vertices, indices, outer, hole = smooth_drag_link_mesh(distance, 5.0, 2.0, smoothing)
     for contour in (outer, hole):
@@ -37,7 +37,7 @@ def test_drag_link_mesh_follows_the_field_and_keeps_the_hole_empty(smoothing, di
 
 
 def test_stretching_a_long_drag_link_reuses_the_same_mesh_topology():
-    from mojive.draglink2d import smooth_drag_link_mesh
+    from mojive.drawing.drag_link import smooth_drag_link_mesh
 
     a = smooth_drag_link_mesh(100.0, 5.0, 2.0)
     b = smooth_drag_link_mesh(10000.0, 5.0, 2.0)

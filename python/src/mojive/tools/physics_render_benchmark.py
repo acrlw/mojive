@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mojive.simulation import Snapshot, SnapshotPool
+from mojive.session.simulation import Snapshot, SnapshotPool
 
 MODES = ("serial", "serial_snapshot", "threaded")
 WORKLOADS = ("joint_types", "deformables", "cloth_stress", "humanoids100")
@@ -76,7 +76,7 @@ def summary(values):
 
 
 def _xml(workload, humanoids_model=None):
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     if workload == "humanoids100":
         import mujoco
@@ -117,8 +117,8 @@ def run_case(args):
     from imgui_bundle import imgui
     from PIL import Image
 
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.composition import build_from_adapter
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.application.composition import build_from_adapter
     from mojive.config import LayoutConfig, ViewerConfig
 
     output = args.output
@@ -387,8 +387,8 @@ def run_production_case(args):
     from PIL import Image
 
     from mojive import commands as cmd
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.composition import build_from_adapter
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.application.composition import build_from_adapter
     from mojive.config import LayoutConfig, ViewerConfig
 
     if args.mode == "serial_snapshot":

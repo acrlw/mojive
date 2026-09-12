@@ -2,7 +2,7 @@
 
 import pytest
 
-from mojive.rates import StepRate
+from mojive.session.rates import StepRate
 
 
 def test_physics_rate_uses_counter_deltas_at_display_frequency():

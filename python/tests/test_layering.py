@@ -126,7 +126,7 @@ def test_shared_2d_geometry_is_independent_of_draw_adapters_and_interaction():
     forbidden = (
         "mojive.ui",
         "mojive.render",
-        "mojive.gizmo",
+        "mojive.interaction.gizmo",
         "mojive.adapters",
         "imgui_bundle",
         "glfw",
@@ -134,7 +134,7 @@ def test_shared_2d_geometry_is_independent_of_draw_adapters_and_interaction():
         "wgpu",
     )
     bad = {}
-    for name in ("curves2d.py", "draglink2d.py"):
+    for name in ("drawing/curves.py", "drawing/drag_link.py"):
         hits = {hit for prefix in forbidden for hit in _hits(_imports(SRC / name), prefix)}
         if hits:
             bad[name] = sorted(hits)
@@ -154,9 +154,21 @@ def test_adapters_do_not_import_render_internals():
 
 def test_session_capture_and_rpc_do_not_import_physics_or_compatibility_renderer():
     """Generic control consumes composed contracts, including for MuJoCo scenes."""
-    forbidden = ("mujoco", "newton", "warp", "mojive.renderer", "mojive.adapters.mujoco_adapter")
+    forbidden = (
+        "mujoco",
+        "newton",
+        "warp",
+        "mojive.application.renderer",
+        "mojive.adapters.mujoco_adapter",
+        "mojive.adapters.mujoco",
+    )
     bad = {}
-    for name in ("control.py", "control_rpc.py", "session_capture.py", "scene_renderer.py"):
+    for name in (
+        "control/application.py",
+        "control/rpc.py",
+        "session/capture.py",
+        "render/offscreen.py",
+    ):
         imports = _imports(SRC / name)
         hits = {hit for prefix in forbidden for hit in _hits(imports, prefix)}
         if hits:
@@ -168,16 +180,16 @@ def test_application_operations_do_not_depend_on_ui_or_socket_transport():
     """Application behavior and world queries stay usable without a window or server."""
     bad = {}
     for name in (
-        "control.py",
-        "control_schema.py",
-        "operations.py",
-        "camera_control.py",
-        "scene_queries.py",
+        "control/application.py",
+        "control/schema.py",
+        "control/operations.py",
+        "control/camera.py",
+        "scene/queries.py",
     ):
         imports = _imports(SRC / name)
         hits = {
             hit
-            for prefix in ("mojive.ui", "mojive.control_rpc", "socket", "socketserver")
+            for prefix in ("mojive.ui", "mojive.control.rpc", "socket", "socketserver")
             for hit in _hits(imports, prefix)
         }
         if hits:
@@ -193,7 +205,10 @@ def test_this_scan_needs_no_gpu_and_no_optional_deps():
     assert not external
 
 
-@pytest.mark.parametrize("pkg", ["render", "ui", "adapters"])
+@pytest.mark.parametrize(
+    "pkg",
+    ["render", "ui", "adapters", "application", "control", "drawing", "remote", "scene", "session"],
+)
 def test_every_package_has_docstring(pkg: str):
     """Each architectural package documents its role at module level."""
 

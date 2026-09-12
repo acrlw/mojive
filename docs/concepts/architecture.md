@@ -73,13 +73,13 @@ The full `SceneAdapter` interface adds editor operations; inheriting `SceneAdapt
 defaults for unavailable capabilities. Factory registration and renderer selection live outside
 these contracts.
 
-`operations.py` defines public operations once: schemas, capability requirements, command
-construction, and descriptions. `control_schema.py` provides reusable value contracts and cached
-validation. `ControlApplication` coordinates operations against one Session. `control_rpc.py`
+`control/operations.py` defines public operations once: schemas, capability requirements, command
+construction, and descriptions. `control/schema.py` provides reusable value contracts and cached
+validation. `ControlApplication` coordinates operations against one Session. `control/rpc.py`
 owns protocol envelopes, socket lifetime, deadlines, and viewer-thread queuing. Importing the
 RPC client does not initialize graphics, load UI modules, or import the schema validator.
 Native remote authoring messages share the catalog's validation and typed command construction;
-the UI continues to submit typed Session commands. `scene_queries.py` provides world-pose queries
+the UI continues to submit typed Session commands. `scene/queries.py` provides world-pose queries
 without importing UI controllers.
 
 Capture camera state is independent from the viewport camera recorded by Session. The UI
@@ -117,7 +117,7 @@ Shared contracts live in `types.py`, `commands.py`, `math3d.py`, and `adapters/b
 code imports shared contracts. Adapter integrations own physics-specific code. UI modules depend
 on session state and protocols. `python/tests/test_layering.py` enforces these boundaries.
 
-For overlays, `curves2d.py` owns reusable paths and stroke profiles; `draglink2d.py` owns the
+For overlays, `drawing/curves.py` owns reusable paths and stroke profiles; `drawing/drag_link.py` owns the
 implicit hollow-connector field and mesh. Both remain independent of UI and backend imports.
 `ui/draw2d.py` defines the drawing protocol and adapts it to ImGui. Widgets own placement and
 interaction; retained debug layers own identifiers, lifetime, budgets, and stream packing.

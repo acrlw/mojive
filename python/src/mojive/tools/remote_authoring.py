@@ -10,10 +10,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from mojive.application.composition import build_from_adapter
+from mojive.scene import Scene
+
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds
 from ..adapters.static import StaticSceneAdapter
-from ..composition import build_from_adapter
 from ..remote import (
     RemoteSceneAdapter,
     SnapshotPublisher,
@@ -21,7 +23,6 @@ from ..remote import (
     snapshot_structure,
 )
 from ..render.backend import RenderFlag
-from ..scene import Scene
 from ..session import Session
 from ..types import CameraView, Light, LightType, MeshShape
 

@@ -6,7 +6,8 @@ import argparse
 import statistics
 import time
 
-from ..assets import resolve
+from mojive.scene.assets import resolve
+
 from ._harness import OffscreenHarness
 
 

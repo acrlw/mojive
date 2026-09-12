@@ -202,7 +202,7 @@ def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
 
 
 def test_publisher_does_not_serialize_every_frame_before_a_viewer_connects(monkeypatch):
-    import mojive.remote as remote_module
+    import mojive.remote.publisher as remote_module
 
     source_session = Session(StaticSceneAdapter(Scene()))
     port = _port_pair()

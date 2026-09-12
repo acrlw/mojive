@@ -17,4 +17,4 @@ documented even when an implementation inherits the behavioral contract from `Sc
 
 ## MuJoCo
 
-::: mojive.adapters.mujoco_adapter.MuJoCoAdapter
+::: mojive.adapters.mujoco.MuJoCoAdapter

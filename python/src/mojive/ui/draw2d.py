@@ -16,14 +16,15 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from ..curves2d import (
+from mojive.drawing.curves import (
     CORNER_SMOOTHING,
+    arc_ribbon_mesh,
     arrow_mesh,
     capped_polyline_points,
     smooth_rect_points,
 )
-from ..curves2d import polygon_fringe as _anti_alias_fringe_outer
-from ..draglink2d import smooth_drag_link_mesh
+from mojive.drawing.curves import polygon_fringe as _anti_alias_fringe_outer
+from mojive.drawing.drag_link import smooth_drag_link_mesh
 
 
 @lru_cache(maxsize=512)
@@ -307,12 +308,25 @@ class ImguiDraw2D:
         if cap not in {"butt", "round", "round_start", "round_end"}:
             raise ValueError(f"unknown polyline cap: {cap!r}")
         if not closed and cap != "butt":
+            smoothing = self.corner_smoothing if smoothing is None else smoothing
+            if smoothing == 0.0:
+                vertices, indices = arc_ribbon_mesh(
+                    points,
+                    None,
+                    None,
+                    width,
+                    round_start=cap in {"round", "round_start"},
+                    round_end=cap in {"round", "round_end"},
+                    smoothing=0.0,
+                )
+                self.indexed_fill(vertices, indices, color, outline=vertices)
+                return
             outline = capped_polyline_points(
                 points,
                 width,
                 round_start=cap in {"round", "round_start"},
                 round_end=cap in {"round", "round_end"},
-                smoothing=self.corner_smoothing if smoothing is None else smoothing,
+                smoothing=smoothing,
             )
             if outline:
                 self.fringed_concave_fill(outline, color)

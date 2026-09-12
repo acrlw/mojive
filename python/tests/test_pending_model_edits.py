@@ -8,10 +8,10 @@ import pytest
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
-from mojive.model_edits import ModelEditDraft, model_edit_scope
 from mojive.session import Session
+from mojive.session.model_edits import ModelEditDraft, model_edit_scope
 
 pytestmark = pytest.mark.physics
 
@@ -312,7 +312,7 @@ def test_empty_editor_creates_plane_with_one_undo_and_redo(live):
 
 
 def _geometry_state(session, node):
-    from mojive.bounds import _instance_world_corners
+    from mojive.scene.bounds import _instance_world_corners
 
     source = session.source
     rows = np.flatnonzero(source.geom_node == node.node_id)

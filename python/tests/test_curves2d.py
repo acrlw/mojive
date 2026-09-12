@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from mojive.curves2d import (
+from mojive.drawing.curves import (
     CORNER_SMOOTHING,
     CURVE_TOLERANCE,
     _ellipse_advance,
@@ -89,7 +89,7 @@ def test_short_line_cap_preserves_tip_and_fits_its_available_straight_edge():
 
 
 def test_short_cap_samples_only_the_selected_profile(monkeypatch):
-    from mojive import curves2d
+    from mojive.drawing import curves as curves2d
 
     calls = []
     original = curves2d.smooth_turn_points
@@ -109,7 +109,7 @@ def test_short_cap_samples_only_the_selected_profile(monkeypatch):
 
 @pytest.mark.parametrize("shape", ("capsule", "rectangle"))
 def test_translation_reuses_shape_without_resampling(monkeypatch, shape):
-    from mojive import curves2d
+    from mojive.drawing import curves as curves2d
 
     def path(x, y):
         if shape == "capsule":
@@ -129,7 +129,7 @@ def test_translation_reuses_shape_without_resampling(monkeypatch, shape):
 @pytest.mark.parametrize("q", (0.05, 0.2, 0.6, 1.0))
 @pytest.mark.parametrize("radius", (2.0, 10.0))
 def test_view_gizmo_neck_matches_straight_and_circle_through_g3(q, radius):
-    from mojive.curves2d import _lollipop_bridge
+    from mojive.drawing.curves import _lollipop_bridge
 
     p, angle = _lollipop_bridge(radius, radius * 0.1, radius * 0.6 * q, q)
     derivatives = [p]
@@ -188,7 +188,7 @@ def test_ellipse_tubular_map_has_regular_offsets_and_accurate_arc_lengths():
 
 @pytest.mark.parametrize("smoothing", (0.0, 0.6, 1.0))
 def test_drag_connector_does_not_dent_the_circular_origin_hole(smoothing):
-    from mojive.draglink2d import drag_link_field
+    from mojive.drawing.drag_link import drag_link_field
 
     angles = np.linspace(0.0, 2.0 * np.pi, 200)
     xy = 4.0 * np.column_stack((np.cos(angles), np.sin(angles)))
@@ -201,7 +201,7 @@ def test_drag_connector_does_not_dent_the_circular_origin_hole(smoothing):
 @pytest.mark.parametrize("level", (0.0, 0.75))
 @pytest.mark.parametrize("smoothing", (0.0, 0.05, 0.6, 1.0))
 def test_drag_hole_topology_changes_preserve_the_field_boundary(scale, level, smoothing):
-    from mojive.draglink2d import drag_link_field, smooth_drag_link_mesh
+    from mojive.drawing.drag_link import drag_link_field, smooth_drag_link_mesh
 
     threshold = 1.0 + 2.0 * level + 5.0 * smoothing * 5.0 / 16.0
     for distance in (threshold - 0.001, threshold + 0.001, 4.9, 6.3, 9.7, 30.0):
@@ -237,7 +237,7 @@ def test_drag_hole_topology_changes_preserve_the_field_boundary(scale, level, sm
 @pytest.mark.parametrize("smoothing", (0.0, 0.6, 1.0))
 @pytest.mark.parametrize("radius", (0.0, 0.5, 3.0))
 def test_arrow_fan_has_no_inverted_faces_or_internal_antialiasing(smoothing, radius):
-    from mojive.curves2d import arrow_triangles
+    from mojive.drawing.curves import arrow_triangles
 
     mesh = arrow_triangles(40.0, 4.0, 12.0, 14.0, radius, smoothing, False, True)
     solid = mesh[np.all(mesh[:, :, 2] == 1.0, axis=1), :, :2]
@@ -250,7 +250,7 @@ def test_arrow_fan_has_no_inverted_faces_or_internal_antialiasing(smoothing, rad
 @pytest.mark.parametrize("length", (0.1, 1.0, 2.0))
 @pytest.mark.parametrize("round_tail", (False, True))
 def test_foreshortened_arrow_keeps_an_antialias_contour(length, round_tail):
-    from mojive.curves2d import arrow_points, polygon_fringe
+    from mojive.drawing.curves import arrow_points, polygon_fringe
 
     points = arrow_points((20, 30), (20 + length, 30), round_tail=round_tail)
     fringe = polygon_fringe(points)
@@ -260,7 +260,7 @@ def test_foreshortened_arrow_keeps_an_antialias_contour(length, round_tail):
 
 @pytest.mark.parametrize("round_tail", (False, True))
 def test_zero_length_arrow_head_is_a_plain_shaft(round_tail):
-    from mojive.curves2d import arrow_points, arrow_triangles
+    from mojive.drawing.curves import arrow_points, arrow_triangles
 
     path = arrow_points((0, 0), (20, 0), 2, head_length=0, round_tail=round_tail)
     assert path[:, 1].min() == pytest.approx(-1.0)
@@ -274,14 +274,14 @@ def test_zero_length_arrow_head_is_a_plain_shaft(round_tail):
 )
 @pytest.mark.parametrize("value", (float("nan"), float("inf"), -1.0))
 def test_arrow_rejects_invalid_style_at_the_shared_geometry_boundary(name, value):
-    from mojive.curves2d import arrow_points
+    from mojive.drawing.curves import arrow_points
 
     with pytest.raises(ValueError, match="arrow dimensions"):
         arrow_points((0, 0), (20, 0), **{name: value})
 
 
 def test_arc_translation_reuses_profiles_and_preserves_caller_radials():
-    from mojive.curves2d import _arc_ribbon_shape, arc_ribbon_points
+    from mojive.drawing.curves import _arc_ribbon_shape, arc_ribbon_points
 
     points = np.array(((2, 3), (6, 4), (10, 8)), dtype=float)
     radial = np.array((3.0, 4.0))
@@ -296,7 +296,7 @@ def test_arc_translation_reuses_profiles_and_preserves_caller_radials():
 
 @pytest.mark.parametrize("smoothing", (0.0, 0.6, 1.0))
 def test_arrow_join_radius_is_independent_of_tip_radius(smoothing):
-    from mojive.curves2d import arrow_points
+    from mojive.drawing.curves import arrow_points
 
     options = {
         "width": 4,
@@ -316,7 +316,7 @@ def test_arrow_join_radius_is_independent_of_tip_radius(smoothing):
 
 @pytest.mark.parametrize("smoothing", (0.0, 0.6, 1.0))
 def test_default_arrow_shoulders_are_subtler_than_the_head_corners(smoothing):
-    from mojive.curves2d import arrow_points
+    from mojive.drawing.curves import arrow_points
 
     path = arrow_points(
         (0, 0),
@@ -335,7 +335,7 @@ def test_default_arrow_shoulders_are_subtler_than_the_head_corners(smoothing):
 @pytest.mark.parametrize("smoothing", (0.001, 0.1, 0.6, 1.0))
 @pytest.mark.parametrize("fraction", (0.000001, 0.1, 0.5, 0.9, 0.999999))
 def test_cap_fit_matches_high_precision_bracketing(smoothing, fraction):
-    from mojive.curves2d import _cap_depth_ratio, _fit_cap_smoothing
+    from mojive.drawing.curves import _cap_depth_ratio, _fit_cap_smoothing
 
     target = 0.5 + (_cap_depth_ratio(smoothing) - 0.5) * fraction
     lo, hi = 0.0, smoothing
@@ -353,7 +353,7 @@ def test_cap_fit_matches_high_precision_bracketing(smoothing, fraction):
 
 @pytest.mark.parametrize("smoothing", (0.001, 0.1, 0.6, 0.999))
 def test_cap_depth_derivative_matches_finite_difference(smoothing):
-    from mojive.curves2d import _cap_depth_and_slope, _cap_depth_ratio
+    from mojive.drawing.curves import _cap_depth_and_slope, _cap_depth_ratio
 
     step = 1e-5
     numerical = (_cap_depth_ratio(smoothing + step) - _cap_depth_ratio(smoothing - step)) / (
@@ -365,7 +365,7 @@ def test_cap_depth_derivative_matches_finite_difference(smoothing):
 @pytest.mark.parametrize("length", (1.0, 5.0, 5.1, 7.0, 60.0))
 @pytest.mark.parametrize("width", (2.5, 10.0))
 def test_box_handle_shortening_preserves_valid_bounds(length, width):
-    from mojive.curves2d import box_handle_points
+    from mojive.drawing.curves import box_handle_points
 
     shape = box_handle_points((0, 0), (length, 0), width, 10, corner_radius=1)
     assert np.isfinite(shape).all()
@@ -380,7 +380,7 @@ def test_box_handle_shortening_preserves_valid_bounds(length, width):
 def test_arc_strips_cover_boundary_once_without_internal_fringes(sample_count, caps, sweep):
     from collections import Counter
 
-    from mojive.curves2d import arc_ribbon_mesh
+    from mojive.drawing.curves import arc_ribbon_mesh
 
     theta = np.linspace(0, sweep, sample_count)
     points = np.column_stack((np.cos(theta), np.sin(theta))) * 60
@@ -408,3 +408,51 @@ def test_arc_strips_cover_boundary_once_without_internal_fringes(sample_count, c
     boundary = {tuple(sorted((i, (i + 1) % len(vertices)))) for i in range(len(vertices))}
     assert {edge for edge, count in edges.items() if count == 1} == boundary
     assert all(count in (1, 2) for count in edges.values())
+
+
+@pytest.mark.parametrize("width", (3.5, 5.25))
+@pytest.mark.parametrize("smoothing", (0.0, CORNER_SMOOTHING))
+def test_perspective_arc_offset_folds_keep_the_exterior_without_alpha_overlap(width, smoothing):
+    from mojive.drawing.curves import arc_ribbon_mesh
+
+    theta = np.linspace(0, np.pi, 33)
+    # Rational projection of a nearly edge-on circle: both ends turn back.
+    points = np.column_stack((7 * np.sin(theta), 70 * np.cos(theta)))
+    points /= (1 - 0.3 * np.sin(theta))[:, None]
+    vertices, indices = arc_ribbon_mesh(
+        points, None, None, width, round_caps=True, smoothing=smoothing
+    )
+    triangles = vertices[np.asarray(indices).reshape(-1, 3)]
+    a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+    areas = (a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]) * 0.5
+    boundary_area = (
+        np.sum(
+            vertices[:, 0] * np.roll(vertices[:, 1], -1)
+            - vertices[:, 1] * np.roll(vertices[:, 0], -1)
+        )
+        * 0.5
+    )
+    assert areas.min() >= -1e-9
+    assert areas.sum() == pytest.approx(abs(boundary_area), abs=1e-7)
+    assert distance_to_path(points[12:21], vertices, closed=True) == pytest.approx(
+        width * 0.5, abs=0.03
+    )
+
+
+def test_zero_smoothing_caps_are_semicircles_without_fitting(monkeypatch):
+    from mojive.drawing import curves as curves2d
+
+    def unexpected_fit(*args, **kwargs):
+        pytest.fail("Circular arc caps must not run G3 fitting")
+
+    monkeypatch.setattr(curves2d, "smooth_line_cap", unexpected_fit)
+    points = np.array(((1.0, 2.0), (11.0, 2.0), (21.0, 2.0)))
+    # An oblique radial cut must not distort an ordinary round endpoint.
+    vertices, _ = curves2d.arc_ribbon_mesh(
+        points, (1.0, 1.0), (1.0, 1.0), 3.7, round_caps=True, smoothing=0.0
+    )
+    for center, mask in ((points[0], vertices[:, 0] <= 1.0), (points[-1], vertices[:, 0] >= 21.0)):
+        assert mask.sum() >= 8
+        assert np.linalg.norm(vertices[mask] - center, axis=1) == pytest.approx(1.85)
+    assert vertices[:, 1].min() == pytest.approx(0.15)
+    assert vertices[:, 1].max() == pytest.approx(3.85)

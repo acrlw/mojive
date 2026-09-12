@@ -11,7 +11,7 @@ import tracemalloc
 from pathlib import Path
 
 from ..adapters.base import FrameNeeds
-from ..adapters.mujoco_adapter import MuJoCoAdapter
+from ..adapters.mujoco import MuJoCoAdapter
 from .editor_performance import _model_xml
 
 

@@ -4,6 +4,26 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from mojive.adapters.mujoco.audit import audit_model, schema_coverage, visual_coverage
+    from mojive.application.backends import make_adapter
+    from mojive.application.composition import (
+        Viewer,
+        build,
+        build_editor,
+        build_from_adapter,
+        build_scene,
+        build_workspace,
+    )
+    from mojive.application.passive import PassiveViewer, launch_passive
+    from mojive.application.renderer import Renderer
+    from mojive.capture import CaptureSurface, RecordingInfo, RecordingPhase
+    from mojive.capture.recording import SnapshotWriter, VideoRecorder, read_snapshots
+    from mojive.capture.shared_image import SharedImage
+    from mojive.drawing.canvas import Canvas2D, CanvasLayer2D
+    from mojive.interaction.input import InputClaim, InputContext
+    from mojive.render.offscreen import SceneRenderer
+    from mojive.scene import Scene, SceneLight, SceneObject
+
     from .adapters.base import (
         ActuatorInfo,
         ActuatorVisualType,
@@ -32,20 +52,9 @@ if TYPE_CHECKING:
         VisualGroupInfo,
     )
     from .adapters.conformance import ConformanceCheck, ConformanceReport, check_adapter
-    from .adapters.mujoco_adapter import MuJoCoAdapter
+    from .adapters.mujoco import MuJoCoAdapter
     from .adapters.registry import register_adapter, unregister_adapter
     from .adapters.toy import ToyPhysicsAdapter
-    from .backends import make_adapter
-    from .canvas2d import Canvas2D, CanvasLayer2D
-    from .capture import CaptureSurface, RecordingInfo, RecordingPhase
-    from .composition import (
-        Viewer,
-        build,
-        build_editor,
-        build_from_adapter,
-        build_scene,
-        build_workspace,
-    )
     from .config import (
         CameraInputConfig,
         CameraTrackingConfig,
@@ -59,10 +68,6 @@ if TYPE_CHECKING:
         ViewportLayers,
         ViewportOverlayConfig,
     )
-    from .input import InputClaim, InputContext
-    from .mujoco_audit import audit_model, schema_coverage, visual_coverage
-    from .passive import PassiveViewer, launch_passive
-    from .recording import SnapshotWriter, VideoRecorder, read_snapshots
     from .remote import RemoteSceneAdapter, SnapshotPublisher
     from .render.backend import (
         DebugView,
@@ -74,10 +79,6 @@ if TYPE_CHECKING:
         ShadowQuality,
     )
     from .render.debugdraw import DebugDraw, Layer, Occlusion
-    from .renderer import Renderer
-    from .scene import Scene, SceneLight, SceneObject
-    from .scene_renderer import SceneRenderer
-    from .shared_image import SharedImage
     from .types import (
         Bounds,
         CameraView,
@@ -98,7 +99,7 @@ if TYPE_CHECKING:
 
 
 _EXPORT_MODULES = {
-    ".scene_renderer": ("SceneRenderer",),
+    ".render.offscreen": ("SceneRenderer",),
     ".adapters.registry": ("register_adapter", "unregister_adapter"),
     ".adapters.base": (
         "ActuatorInfo",
@@ -129,10 +130,10 @@ _EXPORT_MODULES = {
     ),
     ".adapters.conformance": ("ConformanceCheck", "ConformanceReport", "check_adapter"),
     ".adapters.toy": ("ToyPhysicsAdapter",),
-    ".backends": ("make_adapter",),
-    ".canvas2d": ("Canvas2D", "CanvasLayer2D"),
+    ".application.backends": ("make_adapter",),
+    ".drawing.canvas": ("Canvas2D", "CanvasLayer2D"),
     ".capture": ("CaptureSurface", "RecordingInfo", "RecordingPhase"),
-    ".composition": (
+    ".application.composition": (
         "Viewer",
         "build",
         "build_editor",
@@ -153,10 +154,10 @@ _EXPORT_MODULES = {
         "ViewportLayers",
         "ViewportOverlayConfig",
     ),
-    ".input": ("InputClaim", "InputContext"),
-    ".passive": ("PassiveViewer", "launch_passive"),
-    ".shared_image": ("SharedImage",),
-    ".recording": ("SnapshotWriter", "VideoRecorder", "read_snapshots"),
+    ".interaction.input": ("InputClaim", "InputContext"),
+    ".application.passive": ("PassiveViewer", "launch_passive"),
+    ".capture.shared_image": ("SharedImage",),
+    ".capture.recording": ("SnapshotWriter", "VideoRecorder", "read_snapshots"),
     ".remote": ("RemoteSceneAdapter", "SnapshotPublisher"),
     ".render.backend": (
         "DebugView",
@@ -186,9 +187,9 @@ _EXPORT_MODULES = {
     ),
     ".ui.input_bindings": ("InputAction",),
     ".ui.theme": ("THEME", "Theme", "ViewportChromeColors", "rgb8"),
-    ".adapters.mujoco_adapter": ("MuJoCoAdapter",),
-    ".renderer": ("Renderer",),
-    ".mujoco_audit": ("audit_model", "schema_coverage", "visual_coverage"),
+    ".adapters.mujoco": ("MuJoCoAdapter",),
+    ".application.renderer": ("Renderer",),
+    ".adapters.mujoco.audit": ("audit_model", "schema_coverage", "visual_coverage"),
 }
 _EXPORTS = {name: module for module, names in _EXPORT_MODULES.items() for name in names}
 

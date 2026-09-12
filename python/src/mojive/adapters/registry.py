@@ -78,7 +78,7 @@ def make_adapter(backend_name: str, asset_path: str | Path | None = None) -> Sce
     if physics in _ADAPTER_FACTORIES:
         adapter: SceneAdapter = _ADAPTER_FACTORIES[physics][0]()
     elif physics == "mujoco":
-        from .mujoco_adapter import MuJoCoAdapter
+        from .mujoco import MuJoCoAdapter
 
         adapter = MuJoCoAdapter()
     elif physics == "toy":
@@ -99,7 +99,7 @@ def make_adapter(backend_name: str, asset_path: str | Path | None = None) -> Sce
 
 def _resolve_asset(asset: str | Path) -> Path:
     try:
-        from ..assets import resolve
+        from mojive.scene.assets import resolve
     except ImportError:
         path = Path(asset)
         if not path.exists():

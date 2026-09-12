@@ -15,7 +15,7 @@ from PIL import Image
 
 from mojive import CameraView, Scene, SharedImage
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.control_rpc import ControlServer, ControlService, RpcClient, RpcError
+from mojive.control.rpc import ControlServer, ControlService, RpcClient, RpcError
 
 
 def inspection_scene() -> Scene:
@@ -189,7 +189,7 @@ def main() -> None:
         socket_path = Path(directory) / "control.sock"
         scene = inspection_scene()
         if args.viewer:
-            from mojive.composition import build_scene
+            from mojive.application.composition import build_scene
 
             with build_scene(
                 scene, width=960, height=720, vsync=False, show_window=False

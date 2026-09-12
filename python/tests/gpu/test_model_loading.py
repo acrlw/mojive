@@ -19,10 +19,10 @@ from mojive.adapters.base import (  # noqa: E402
     ModelAssetInfo,
     NodeType,
 )
-from mojive.assets import resolve  # noqa: E402
+from mojive.application.composition import build, build_editor, build_scene  # noqa: E402
 from mojive.commands import AddModelComponent, SelectNode  # noqa: E402
-from mojive.composition import build, build_editor, build_scene  # noqa: E402
 from mojive.scene import Scene  # noqa: E402
+from mojive.scene.assets import resolve  # noqa: E402
 from mojive.types import CameraView  # noqa: E402
 from mojive.ui.app import (  # noqa: E402
     IMAGE_FILTERS,

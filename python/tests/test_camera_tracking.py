@@ -8,7 +8,7 @@ import pytest
 
 from mojive import CameraTrackingConfig
 from mojive.adapters.base import NodeType, SceneFrame, SceneNode
-from mojive.composition import Viewer
+from mojive.application.composition import Viewer
 from mojive.types import CameraView
 from mojive.ui.app import ViewerApp
 from mojive.ui.camera import OrbitCamera

@@ -6,9 +6,10 @@ from dataclasses import replace
 
 from imgui_bundle import imgui
 
+from mojive.capture import CaptureSurface
+
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
-from ...capture import CaptureSurface
 from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag, ShadowQuality
 from ..gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,

@@ -157,9 +157,11 @@ def test_segment_boundaries_have_no_background_crack_and_focus_stays_inside(monk
                 imgui.end()
                 pixels = window.end_frame(readback=True)[::-1]
             if focused == -1:
-                y = int((rectangles[0][1] + rectangles[0][3]) * 0.5)
+                # Item rectangles use logical points; framebuffer readback uses pixels.
+                framebuffer_scale = imgui.get_io().display_framebuffer_scale
+                y = int((rectangles[0][1] + rectangles[0][3]) * 0.5 * framebuffer_scale.y)
                 for rect in rectangles[:-1]:
-                    x = round(rect[2])
+                    x = round(rect[2] * framebuffer_scale.x)
                     strip = pixels[y, x - 2 : x + 3, :3]
                     floor = np.array(THEME.bg_frame[:3]) * 255 - 2
                     assert np.all(strip >= floor), strip

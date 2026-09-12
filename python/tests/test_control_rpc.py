@@ -14,9 +14,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.cli import main
-from mojive.control_rpc import (
+from mojive.control.rpc import (
     PROTOCOL_VERSION,
     ControlServer,
     ControlService,
@@ -84,8 +84,8 @@ def test_schema_rejection_precedes_control_updates_and_reports_live_availability
 
 
 def test_physics_queries_match_schemas_and_report_session_geometry_edits(rpc):
-    from mojive.control_schema import Validator
-    from mojive.operations import OPERATIONS
+    from mojive.control.operations import OPERATIONS
+    from mojive.control.schema import Validator
 
     client, _, _ = rpc
     for method in (

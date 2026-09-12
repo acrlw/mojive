@@ -12,8 +12,8 @@ pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
-from mojive.assets import resolve  # noqa: E402
-from mojive.composition import build, build_workspace  # noqa: E402
+from mojive.application.composition import build, build_workspace  # noqa: E402
+from mojive.scene.assets import resolve  # noqa: E402
 
 W, H = 1280, 800
 
@@ -246,7 +246,7 @@ def test_selection_status_survives_navigation_and_escape_consumes_release(
     from imgui_bundle import imgui
 
     from mojive import commands as cmd
-    from mojive.ui import app as app_module
+    from mojive.ui.app import status as app_module
     from mojive.ui.gestures import Claim
 
     v = build(resolve("joint_gizmo"), "mujoco", paused=True, vsync=False, width=W, height=H)
@@ -779,7 +779,7 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
     from imgui_bundle import imgui
 
     from mojive.adapters.base import NodeType
-    from mojive.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+    from mojive.interaction.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
 
     v = build(
         resolve("joint_gizmo"),
@@ -2081,7 +2081,7 @@ def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
 
     v = build(
         resolve("joint_types"),
@@ -2256,7 +2256,7 @@ def test_limited_hinge_drag_keeps_feedback_and_claim_until_mouse_release() -> No
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+    from mojive.interaction.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
 
     v = build(
         resolve("joint_types"),
@@ -2375,7 +2375,7 @@ def test_limited_slide_drag_keeps_feedback_and_claim_until_mouse_release() -> No
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
 
     v = build(
         resolve("joint_types"),
@@ -2683,7 +2683,7 @@ def test_dragging_the_gizmo_moves_the_object_not_the_camera(free_body_viewer):
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import SIZE_PT, project, world_scale
+    from mojive.interaction.gizmo import SIZE_PT, project, world_scale
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -2729,7 +2729,7 @@ def test_dimension_gizmo_resizes_authored_geometry_in_the_real_viewer(
 
     import mojive.commands as cmd
     from mojive.adapters.base import NodeType
-    from mojive.gizmo import AXIS_END, SIZE_PT, GizmoHandle, project, world_scale
+    from mojive.interaction.gizmo import AXIS_END, SIZE_PT, GizmoHandle, project, world_scale
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -2805,7 +2805,7 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import SIZE_PT, GizmoHandle, project, world_scale
+    from mojive.interaction.gizmo import SIZE_PT, GizmoHandle, project, world_scale
 
     v = free_body_viewer
     v.sync()
@@ -2968,7 +2968,7 @@ def test_precise_input_error_has_copy_button(free_body_viewer, monkeypatch):
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
 
     v = free_body_viewer
     node = next(n for n in v.session.nodes if n.posable)
@@ -3006,9 +3006,11 @@ def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
 
     import mojive.commands as cmd
     from mojive import math3d
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
 
     v = free_body_viewer
+    # Intervening tests can close another window and clear the current ImGui context.
+    v.sync()
     io = imgui.get_io()
     node = next(n for n in v.session.nodes if n.posable)
     assert v.session.submit(cmd.Select(node.object_id))
@@ -3059,7 +3061,7 @@ def test_precise_rotation_input_switches_to_radians_with_u(free_body_viewer):
 
 def test_precise_input_choice_memory_can_be_disabled(free_body_viewer):
     import mojive.commands as cmd
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
 
     v = free_body_viewer
     node = next(n for n in v.session.nodes if n.posable)
@@ -3116,7 +3118,7 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import SIZE_PT, project, world_scale
+    from mojive.interaction.gizmo import SIZE_PT, project, world_scale
     from mojive.render.debugdraw import PrimitiveType
 
     class Recorder:
@@ -3210,7 +3212,7 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import (
+    from mojive.interaction.gizmo import (
         RING_RADIUS,
         SIZE_PT,
         GizmoHandle,
@@ -3369,7 +3371,7 @@ def test_rotation_gizmo_accepts_a_straight_drag_without_orbiting(free_body_viewe
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
+    from mojive.interaction.gizmo import RING_RADIUS, SIZE_PT, GizmoHandle, project, world_scale
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -3432,7 +3434,7 @@ def test_pressed_screen_rotation_ring_keeps_its_idle_pixel_geometry(
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import SCREEN_RING_RADIUS, SIZE_PT, GizmoHandle, project
+    from mojive.interaction.gizmo import SCREEN_RING_RADIUS, SIZE_PT, GizmoHandle, project
 
     class Recorder:
         def __init__(self, inner):
@@ -3531,7 +3533,7 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
-    from mojive.gizmo import GizmoHandle, project
+    from mojive.interaction.gizmo import GizmoHandle, project
 
     class Recorder:
         def __init__(self, inner):

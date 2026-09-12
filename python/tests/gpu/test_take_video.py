@@ -10,7 +10,7 @@ from imgui_bundle import imgui
 
 from mojive import CaptureSurface, RecordingConfig, RecordingPhase, ViewerConfig, build
 from mojive import commands as cmd
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 from mojive.tools.keyframe_timeline import populate_take, show_timeline
 from mojive.tools.ui_runtime import _activate_panel, _click, _item_center, _item_rect
 
@@ -44,7 +44,7 @@ def tick(viewer, dt=0.08):
 def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     viewer, tmp_path, monkeypatch, surface
 ):
-    from mojive.recording import VideoRecorder
+    from mojive.capture.recording import VideoRecorder
 
     session, app = viewer.session, viewer.app
     path = tmp_path / "full take with spaces.mp4"

@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ..assets import resolve
+from mojive.scene.assets import resolve
+
 from ..render.backend import RenderFlag
 from ._harness import OffscreenHarness
 

@@ -20,9 +20,15 @@ from mojive.adapters.base import (
     SceneSaveOptions,
     SceneSource,
 )
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
-from mojive.gizmo import GizmoHandle
+from mojive.interaction.gizmo import GizmoHandle
+from mojive.scene.workspace import (
+    missing_resource_entries,
+    missing_resources,
+    relocate_workspace_resource,
+    repair_workspace_resources,
+)
 from mojive.session import Session
 from mojive.types import (
     DEFAULT_MATERIAL,
@@ -37,12 +43,6 @@ from mojive.types import (
 from mojive.ui.app import ViewerApp
 from mojive.ui.gizmo import ObjectGizmo
 from mojive.ui.theme import THEME
-from mojive.workspace_io import (
-    missing_resource_entries,
-    missing_resources,
-    relocate_workspace_resource,
-    repair_workspace_resources,
-)
 
 mujoco = pytest.importorskip("mujoco")
 pytestmark = [pytest.mark.integration, pytest.mark.physics]
@@ -3268,7 +3268,7 @@ def test_model_transform_preview_moves_frames_without_recompiling(monkeypatch) -
 
 
 def test_model_placement_stays_preview_only_until_explicit_apply(monkeypatch) -> None:
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
     from mojive.ui.gizmo import ObjectGizmo
 
     document = workspace()
@@ -3337,7 +3337,7 @@ def test_model_placement_stays_preview_only_until_explicit_apply(monkeypatch) ->
 
 
 def test_cancelled_model_placement_discards_preview_without_recompiling(monkeypatch) -> None:
-    from mojive.gizmo import GizmoHandle
+    from mojive.interaction.gizmo import GizmoHandle
     from mojive.ui.gizmo import ObjectGizmo
 
     document = workspace()
@@ -3447,7 +3447,7 @@ def test_attached_skin_names_and_materials_remain_distinct() -> None:
 
 
 def test_component_choices_share_references_and_follow_model_replacement(monkeypatch):
-    import mojive.adapters.mujoco_adapter as adapter_module
+    import mojive.adapters.mujoco.model_editing as adapter_module
 
     document = workspace()
     model_id = document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))

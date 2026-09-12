@@ -9,8 +9,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..curves2d import CORNER_SMOOTHING, arrow_triangles
-from ..gizmo import ARROW_CORNER_RADIUS_PT, AXIS_HEAD_LENGTH_PT, AXIS_SHAFT_HALF_PT
+from mojive.drawing.curves import CORNER_SMOOTHING, arrow_triangles
+from mojive.interaction.gizmo import ARROW_CORNER_RADIUS_PT, AXIS_HEAD_LENGTH_PT, AXIS_SHAFT_HALF_PT
+
 from ..log import get_logger
 from ..types import MeshKey, MeshShape
 

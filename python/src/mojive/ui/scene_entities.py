@@ -7,13 +7,10 @@ from functools import lru_cache
 
 import numpy as np
 
+from mojive.interaction.gizmo import project, screen_constant_world_sizes, world_scale
+
 from .. import math3d
 from ..adapters.base import NodeType, SceneNode
-from ..gizmo import (
-    project,
-    screen_constant_world_sizes,
-    world_scale,
-)
 from ..math3d import camera_rotation as camera_rotation
 from ..math3d import direction_basis
 from ..render.debugdraw import Occlusion

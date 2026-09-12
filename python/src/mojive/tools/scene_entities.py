@@ -8,10 +8,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from mojive.application.composition import build_scene
+from mojive.scene import Scene
+
 from .. import commands as cmd
 from ..adapters.base import NodeType
-from ..composition import build_scene
-from ..scene import Scene
 from ..types import CameraView, Light, LightSet, LightType
 
 

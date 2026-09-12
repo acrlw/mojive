@@ -12,11 +12,19 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.application.composition import build_editor
+from mojive.interaction.gizmo import (
+    SCREEN_RING_RADIUS,
+    SIZE_PT,
+    GizmoHandle,
+    plane_corners,
+    project,
+    world_scale,
+)
+from mojive.session.model_edits import model_edit_scope
+
 from .. import commands as cmd
 from .. import math3d
-from ..composition import build_editor
-from ..gizmo import SCREEN_RING_RADIUS, SIZE_PT, GizmoHandle, plane_corners, project, world_scale
-from ..model_edits import model_edit_scope
 from ..types import MeshShape
 from .keyframe_timeline import drag, timeline_point
 from .ui_runtime import _activate_panel, _click, _item_center, _park_cursor, _settle

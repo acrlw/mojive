@@ -8,9 +8,9 @@ import pytest
 
 from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 from mojive.session import Session
 
 pytestmark = pytest.mark.physics

@@ -20,11 +20,12 @@ from mojive.adapters.base import (
 )
 from mojive.commands import ClearPerturb, Select
 from mojive.log import configure
-from mojive.session import Session, _node_local_bounds, _node_world_bounds
+from mojive.scene.bounds import _node_local_bounds, _node_world_bounds
+from mojive.session import Session
 from mojive.types import CameraView, InstancePoseSource, MeshData, MeshKey, MeshShape
 from mojive.ui import perturb as P
 
-APP_PATH = Path(__file__).resolve().parents[1] / "src" / "mojive" / "ui" / "app.py"
+APP_PATH = Path(__file__).resolve().parents[1] / "src" / "mojive" / "ui" / "app" / "core.py"
 
 
 class FakeAdapter:

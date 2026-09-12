@@ -5,7 +5,7 @@ import pytest
 
 from mojive import MuJoCoAdapter
 from mojive import commands as cmd
-from mojive.control_rpc import ControlService
+from mojive.control.rpc import ControlService
 from mojive.session import Session
 
 pytestmark = pytest.mark.physics

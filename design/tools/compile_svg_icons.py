@@ -36,8 +36,7 @@ def _shape(element: ET.Element) -> tuple[str, tuple[float, ...]]:
             raise ValueError(f"{tag} needs complete point pairs")
     elif tag == "rect":
         values = tuple(
-            float(element.attrib.get(key, "0"))
-            for key in ("x", "y", "width", "height", "rx")
+            float(element.attrib.get(key, "0")) for key in ("x", "y", "width", "height", "rx")
         )
     else:
         raise ValueError(f"unsupported SVG element: {tag}")
@@ -74,7 +73,9 @@ def compile_icons(source: Path) -> dict[str, dict[str, object]]:
         for element, shape in zip(group, shapes, strict=True):
             if _tag(element) not in ALLOWED:
                 raise ValueError(f"{name}: unsupported element {_tag(element)}")
-            stroke = float(element.attrib.get("stroke-width", group.attrib.get("stroke-width", "0")))
+            stroke = float(
+                element.attrib.get("stroke-width", group.attrib.get("stroke-width", "0"))
+            )
             lo_x, lo_y, hi_x, hi_y = _bounds(shape)
             margin = stroke * 0.5
             if min(lo_x, lo_y) - margin < -10.0 or max(hi_x, hi_y) + margin > 10.0:

@@ -8,10 +8,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .. import math3d
-from ..commands import ClearPerturb, Perturb
-from ..curves2d import CORNER_SMOOTHING, smooth_polygon_corners, smooth_turn_points
-from ..gizmo import (
+from mojive.drawing.curves import CORNER_SMOOTHING, smooth_polygon_corners, smooth_turn_points
+from mojive.interaction.gizmo import (
     AXIS_COLORS,
     AXIS_SHAFT_HALF_PT,
     CENTER_COLOR,
@@ -26,6 +24,9 @@ from ..gizmo import (
     masked_axis_start,
     world_scale,
 )
+
+from .. import math3d
+from ..commands import ClearPerturb, Perturb
 from ..log import get_logger
 from ..types import CameraView
 from .camera import camera_basis

@@ -10,13 +10,15 @@ from functools import lru_cache
 
 from imgui_bundle import imgui
 
+from mojive.drawing.curves import CORNER_SMOOTHING
+from mojive.interaction.gizmo import _rounded_polygon_corners
+from mojive.interaction.input import InputClaim
+
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, KeyframeInfo, KeyframeProperties
-from ...curves2d import CORNER_SMOOTHING
-from ...gizmo import _rounded_polygon_corners
-from ...input import InputClaim
+from ..controls import IconLabelDrawer, segmented_control_width
 from ..draw2d import ImguiDraw2D, fit_text, text_line_y
-from ..icons import ICON_GRID, draw_icon, production_icon_metrics
+from ..icons import ICON_GRID, draw_icon, draw_icon_label, production_icon_metrics
 from ..input_bindings import DEFAULT_INPUT_BINDINGS
 from ..pointer_bindings import PointerAction
 from ..theme import with_alpha
@@ -31,6 +33,11 @@ _COMMAND_HEIGHT_PT = 28.0
 _COMMAND_ICON_PT = 16.0
 _MARKER_SPACING_FACTOR = 1.5
 _LOOP_COLOR = (0.98, 0.52, 0.18, 1.0)
+FOLLOW_MODE_TOOLTIPS = (
+    "Follow off: keep the timeline view fixed.",
+    "Follow page: advance the view when the playhead reaches an edge.",
+    "Follow locked: keep the playhead at its current screen position.",
+)
 _COMMAND_ICON_NAMES = {
     "first": "transport-first",
     "last": "transport-last",
@@ -391,8 +398,9 @@ class KeyframesPanel(Panel):
     shortcut = ""
     dock_with = "Output"
 
-    def __init__(self) -> None:
+    def __init__(self, *, follow_mode_icon_drawer: IconLabelDrawer = draw_icon_label) -> None:
         super().__init__()
+        self.follow_mode_icon_drawer = follow_mode_icon_drawer
         self._model_id = -1
         self._command_layouts: dict = {}
         self._selected_id = -1
@@ -507,6 +515,11 @@ class KeyframesPanel(Panel):
         gap = 5 * scale
         width = max(1.0, imgui.get_content_region_avail().x)
         height = _COMMAND_HEIGHT_PT * scale
+        # Measure with the same padding and glyph scale used by the actual controls.
+        imgui.push_style_var(
+            imgui.StyleVar_.frame_padding,
+            (8 * scale, max(0, (height - imgui.get_font_size()) * 0.5)),
+        )
         labels = (
             ctx.tr("Stop Recording" if ctx.session.state_take_recording else "Record Take"),
             ctx.tr("Stop Video" if ctx.take_video_active else "Export Video"),
@@ -528,12 +541,10 @@ class KeyframesPanel(Panel):
         )
         range_widths = (take_width, field_width, field_width, icon_width)
         range_width = sum(range_widths) + 3 * gap
-        follow_labels = (ctx.tr("Off"), ctx.tr("Page"), ctx.tr("Locked"))
-        follow_width = 3 * (
-            max(imgui.calc_text_size(label).x for label in follow_labels) + 16 * scale
-        )
-        follow_label_width = imgui.calc_text_size(ctx.tr("Follow")).x
-        view_width = follow_label_width + gap + follow_width + 2 * (icon_width + gap)
+        follow_labels = tuple(ctx.tr(text) for text in FOLLOW_MODE_TOOLTIPS)
+        follow_icons = ("key-follow-off", "key-follow-page", "key-follow-locked")
+        follow_width = segmented_control_width(follow_labels, icons=follow_icons, show_labels=False)
+        view_width = follow_width + 2 * (icon_width + gap)
         separator_width = 13 * scale
         fixed_width = transport_width + range_width + view_width + 3 * separator_width
         command_minimum = 3 * icon_width + 2 * gap
@@ -573,10 +584,6 @@ class KeyframesPanel(Panel):
             imgui.begin_group()
 
         imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap, 6 * scale))
-        imgui.push_style_var(
-            imgui.StyleVar_.frame_padding,
-            (8 * scale, max(0, (height - imgui.get_font_size()) * 0.5)),
-        )
         group(sum(widths) + 2 * gap)
         recording = ctx.session.state_take_recording
         supported = (
@@ -647,31 +654,26 @@ class KeyframesPanel(Panel):
         imgui.end_group()
         group(view_width)
         follow_inline = button_row_layout(
-            (follow_label_width, follow_width, icon_width, icon_width),
+            (follow_width, icon_width, icon_width),
             imgui.get_content_region_avail().x,
             gap,
         )
-        _toolbar_status(ctx.tr("Follow"), ctx.theme.text_disabled, scale, width=follow_label_width)
-        if follow_inline[1]:
-            imgui.same_line()
         mode = segmented_control(
             "timeline-follow",
             follow_labels,
             ("off", "page", "locked").index(self._follow_mode),
             width=min(follow_width, imgui.get_content_region_avail().x),
             theme=ctx.theme,
+            icons=follow_icons,
+            icon_label_drawer=self.follow_mode_icon_drawer,
+            show_labels=False,
         )
         if ("off", "page", "locked")[mode] != self._follow_mode:
             self._set_follow_mode(("off", "page", "locked")[mode])
-        imgui.set_item_tooltip(
-            ctx.tr(
-                "Page at the edge, or lock the playhead in place. Right-drag turns following off."
-            )
-        )
-        if follow_inline[2]:
+        if follow_inline[1]:
             imgui.same_line()
         self._draw_view_controls(ctx)
-        if follow_inline[3]:
+        if follow_inline[2]:
             imgui.same_line(0, gap)
         if _command_button(
             "##timeline-options", "options", ctx.tr("Timeline settings"), ctx.theme, scale

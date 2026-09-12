@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from mojive.interaction.gizmo import camera_icon_segments, screen_constant_world_sizes
+
 from .. import math3d
 from ..adapters.base import (
     ActuatorVisualType,
@@ -22,7 +24,6 @@ from ..adapters.base import (
     SceneFrame,
     SceneSource,
 )
-from ..gizmo import camera_icon_segments, screen_constant_world_sizes
 from ..types import CameraView, LightType
 from .backend import FrameMode, LabelMode, RenderFlag
 from .debugdraw import DebugDraw, Occlusion

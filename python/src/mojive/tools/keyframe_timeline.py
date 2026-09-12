@@ -10,12 +10,13 @@ from pathlib import Path
 
 from imgui_bundle import imgui
 
+from mojive.capture import CaptureSurface
+from mojive.capture.recording import VideoRecorder
+from mojive.scene.assets import resolve
+
 from .. import ViewerConfig, build
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds
-from ..assets import resolve
-from ..capture import CaptureSurface
-from ..recording import VideoRecorder
 from ..ui.panels.keyframes import timeline_channel_width, timeline_time_to_x
 from .ui_runtime import _activate_panel, _click, _item_center, _item_rect, _save_window_crop
 
@@ -98,8 +99,7 @@ def drag(viewer, start, end, *, button: int = 0, shift: bool = False, cancel: bo
 def choose_follow(viewer, mode: str) -> None:
     """Choose the follow policy directly from the production toolbar."""
     index = ("off", "page", "locked").index(mode)
-    label = viewer.app.localizer.text(("Off", "Page", "Locked")[index])
-    _click(viewer, _item_center(viewer, "button", f"{label}##timeline-follow-{index}"))
+    _click(viewer, _item_center(viewer, "button", f"##timeline-follow-{index}"))
     assert viewer.panels.get("Keyframes")._follow_mode == mode
 
 

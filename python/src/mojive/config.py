@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .capture import CaptureSurface
+from mojive.capture import CaptureSurface
 
 if TYPE_CHECKING:
     from .render.backend import ShadowQuality

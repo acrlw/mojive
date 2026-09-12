@@ -27,13 +27,13 @@ from .base import (
 from .worlds import WorldInstances
 
 if TYPE_CHECKING:
-    from .mujoco_adapter import MuJoCoAdapter
+    from .mujoco import MuJoCoAdapter
     from .workspace import WorkspaceAdapter
 
 
 def __getattr__(name: str):
     if name == "MuJoCoAdapter":
-        from .mujoco_adapter import MuJoCoAdapter
+        from .mujoco import MuJoCoAdapter
 
         value = MuJoCoAdapter
     elif name == "WorkspaceAdapter":

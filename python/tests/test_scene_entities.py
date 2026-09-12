@@ -10,18 +10,14 @@ from mojive import commands as cmd
 from mojive import math3d
 from mojive.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNode, SceneSource
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.gizmo import camera_icon_segments, project
+from mojive.interaction.gizmo import camera_icon_segments, project
 from mojive.render.backend import BackendCaps
 from mojive.render.debugdraw import DebugDraw, Occlusion, PrimitiveType
 from mojive.scene import Scene
+from mojive.scene.queries import node_world_pose
 from mojive.session import Session
 from mojive.types import CameraView, Light, LightSet, LightType
-from mojive.ui.gizmo import (
-    ObjectGizmo,
-    _set_camera_from_world,
-    _set_light_from_world,
-    node_world_pose,
-)
+from mojive.ui.gizmo import ObjectGizmo, _set_camera_from_world, _set_light_from_world
 from mojive.ui.icons import ICON_GRID, production_helper_strokes, production_icon_metrics
 from mojive.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,

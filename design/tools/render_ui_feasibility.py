@@ -12,6 +12,7 @@ import argparse
 import math
 import time
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -127,16 +128,19 @@ else:
 from imgui_bundle import imgui
 from PIL import Image
 
-from mojive import gizmo as gizmo_geometry
-from mojive.curves2d import CORNER_SMOOTHING
+from mojive.drawing.curves import CORNER_SMOOTHING
+from mojive.interaction import gizmo as gizmo_geometry
 from mojive.types import CameraView
 from mojive.ui import gizmo as gizmo_ui
 from mojive.ui import perturb as perturb_ui
 from mojive.ui import theme as theme_mod
 from mojive.ui import viewcube as view_ui
 from mojive.ui.compound_fields import draw_joined_field_frame
+from mojive.ui.controls import segmented_control, segmented_control_width
 from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link, text_line_y
+from mojive.ui.icons import IconStyle, draw_icon_label
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.localization import Language, Localizer
 from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import (
     PanelContext,
@@ -744,6 +748,17 @@ def _draw_icon_library_command_icon(
         tuning=tuning,
         alignment=state.icon_alignment_for_glyph(name) if state is not None else None,
     )
+
+
+def _draw_icon_library_label(draw, lo, hi, color, scale, name, label, *, state: ProbeState):
+    """Use the row's live geometry for both caption measurement and submission."""
+    style = IconStyle(
+        padding=state.icon_padding_for_glyph(name),
+        stroke_width=state.icon_stroke_for_glyph(name),
+        alignment=state.icon_alignment_for_glyph(name),
+        tuning=state.icon_tuning(),
+    )
+    draw_icon_label(draw, lo, hi, color, scale, name, label, style=style)
 
 
 def _draw_play_icon(draw: ImguiDraw2D, center, color, scale: float, _surface=None) -> None:
@@ -1571,32 +1586,7 @@ def _draw_transform_gizmo(
         specimen._rotation_raw_angle = specimen._rotation_angle
         specimen._frame.active_rotation_overlay = True
         specimen._label = "X +55.0 °"
-    # Pin the specimen to the concept palette so it remains a stable reference.
-    active_color = np.asarray(CONCEPT_THEME.primary_bright, np.float32)
-    original_colors = (
-        gizmo_ui.AXIS_COLORS,
-        gizmo_ui.HOVER_COLOR,
-        gizmo_ui.ACTIVE_HANDLE_COLOR,
-        gizmo_ui.ACTIVE_COLOR,
-        gizmo_ui.GUIDE_CORE_COLOR,
-    )
-    try:
-        gizmo_ui.AXIS_COLORS = np.asarray(
-            tuple(CONCEPT_THEME.axis_color(axis) for axis in range(3)), np.float32
-        )
-        gizmo_ui.HOVER_COLOR = active_color
-        gizmo_ui.ACTIVE_HANDLE_COLOR = active_color
-        gizmo_ui.ACTIVE_COLOR = np.asarray(CONCEPT_THEME.primary_dim, np.float32)
-        gizmo_ui.GUIDE_CORE_COLOR = np.asarray((0.98, 0.98, 0.99, 1.0), np.float32)
-        specimen.draw_overlay(camera, rect, draw, style_scale=scale)
-    finally:
-        (
-            gizmo_ui.AXIS_COLORS,
-            gizmo_ui.HOVER_COLOR,
-            gizmo_ui.ACTIVE_HANDLE_COLOR,
-            gizmo_ui.ACTIVE_COLOR,
-            gizmo_ui.GUIDE_CORE_COLOR,
-        ) = original_colors
+    specimen.draw_overlay(camera, rect, draw, style_scale=scale)
     if display_state == "pressed" and mode != "rotate":
         _draw_label_button(
             draw,
@@ -2325,8 +2315,8 @@ def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
     """Exercise the production timeline against a real tiny simulation."""
     from mojive import commands as cmd
     from mojive.adapters.base import FrameNeeds
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     if not imgui.begin_child("Keyframes###ProbeKeyframes", size, imgui.ChildFlags_.borders.value):
@@ -2344,6 +2334,11 @@ def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
     session = state.timeline_session
     session.tick(FrameNeeds.none(), wall_dt=min(0.05, imgui.get_io().delta_time))
     ctx = PanelContext(session, None, theme=CONCEPT_THEME, style_scale=scale)
+    state.timeline_panel.follow_mode_icon_drawer = (
+        partial(_draw_icon_library_label, state=state)
+        if state.preview_icon_library
+        else draw_icon_label
+    )
     original_icon = keyframes_panel_module._draw_command_icon
     if state.preview_icon_library:
         keyframes_panel_module._draw_command_icon = lambda *args, **kwargs: (
@@ -4351,6 +4346,8 @@ def _icon_library_canvas_size(family: str) -> tuple[float, float]:
         return GEOMETRY_CANVAS_SIZE[0], 1260.0
     rows = len(icon_family(family))
     required_height = 260.0 + (max(_ICON_REVIEW_SIZES) + 20.0) * rows
+    if family == "Keyframe follow":
+        required_height += 110.0
     return GEOMETRY_CANVAS_SIZE[0], max(GEOMETRY_CANVAS_SIZE[1], required_height)
 
 
@@ -5273,6 +5270,40 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     )
 
 
+def _draw_follow_mode_preview(origin, scale: float, state: ProbeState) -> None:
+    """Review compact production segments with both localized tooltip sets."""
+    modes = ("off", "page", "locked")
+    icons = tuple(name for _label, name in icon_family("Keyframe follow"))
+    imgui.push_style_var(
+        imgui.StyleVar_.frame_padding,
+        (8 * scale, max(0, (28 * scale - imgui.get_font_size()) * 0.5)),
+    )
+    for column, (heading, language) in enumerate(
+        (("English", Language.ENGLISH), ("简体中文", Language.SIMPLIFIED_CHINESE))
+    ):
+        localizer = Localizer(language)
+        labels = tuple(localizer.text(text) for text in keyframes_panel_module.FOLLOW_MODE_TOOLTIPS)
+        imgui.set_cursor_screen_pos((origin[0] + column * 660 * scale, origin[1]))
+        imgui.begin_group()
+        imgui.text_disabled(heading)
+        selected = segmented_control(
+            f"follow-icon-preview-{column}",
+            labels,
+            modes.index(state.timeline_panel._follow_mode),
+            width=segmented_control_width(labels, icons=icons, show_labels=False),
+            theme=CONCEPT_THEME,
+            icons=icons,
+            icon_label_drawer=partial(_draw_icon_library_label, state=state),
+            show_labels=False,
+        )
+        if modes[selected] != state.timeline_panel._follow_mode:
+            state.timeline_panel._set_follow_mode(modes[selected])
+        imgui.end_group()
+    imgui.pop_style_var()
+    imgui.set_cursor_screen_pos((origin[0], origin[1] + 64 * scale))
+    imgui.text_disabled("Off: keep view  |  Page: jump at edge  |  Locked: hold playhead position")
+
+
 def _draw_icon_library_page(
     draw, origin, available_width: float, scale: float, state: ProbeState
 ) -> None:
@@ -5372,6 +5403,8 @@ def _draw_icon_library_page(
     )
     if state.icon_library_tab in ICON_GROUP_LAYOUT_DEFAULTS:
         state.icon_adjustment_group = state.icon_library_tab
+    elif state.icon_library_tab == "Keyframe follow":
+        state.icon_adjustment_group = "Keyframes"
     content_y = float(imgui.get_cursor_screen_pos().y) + 14.0 * scale
     content_origin = (x0 + 42.0 * scale, content_y)
     if state.icon_library_tab == "Overview":
@@ -5381,6 +5414,9 @@ def _draw_icon_library_page(
     elif state.icon_library_tab == "Capsules":
         _draw_capsule_context_page(draw, content_origin, scale, state)
     else:
+        if state.icon_library_tab == "Keyframe follow":
+            _draw_follow_mode_preview(content_origin, scale, state)
+            content_origin = (content_origin[0], content_origin[1] + 110.0 * scale)
         _draw_icon_family_detail(
             draw,
             content_origin,
@@ -6370,6 +6406,7 @@ def render(
             else {
                 "Capsules": "Viewport playback",
                 "UI context": "Keyframes",
+                "Keyframe follow": "Keyframes",
             }.get(initial_icon_group, state.icon_adjustment_group)
         )
         state.icon_adjustment_group = initial_adjustment_group

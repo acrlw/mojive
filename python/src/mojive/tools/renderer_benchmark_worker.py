@@ -250,7 +250,7 @@ def _make_renderer(name: str, model, width: int, height: int):
         import mujoco
 
         return mujoco.Renderer(model, width=width, height=height)
-    from ..renderer import Renderer
+    from mojive.application.renderer import Renderer
 
     return Renderer(model, width=width, height=height)
 

@@ -64,7 +64,8 @@ def schedule_lights(lights: LightSet) -> LightSchedule:
 
 
 if TYPE_CHECKING:
-    from ....gizmo import GizmoFrame
+    from mojive.interaction.gizmo import GizmoFrame
+
     from ....types import CameraView
     from ...debugdraw import DebugDraw
     from ..instances import GpuMesh, InstanceStore

@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 from imgui_bundle import imgui
 
-from mojive.curves2d import (
+from mojive.drawing.curves import (
     arc_ribbon_mesh,
     arc_ribbon_points,
     arrow_points,
@@ -27,8 +27,8 @@ from mojive.curves2d import (
     smooth_line_cap,
     smooth_rect_points,
 )
-from mojive.draglink2d import smooth_drag_link_mesh
-from mojive.gizmo import GizmoMode
+from mojive.drawing.drag_link import smooth_drag_link_mesh
+from mojive.interaction.gizmo import GizmoMode
 from mojive.render.debugdraw import DebugDraw, Occlusion
 from mojive.types import CameraView
 from mojive.ui.draw2d import ImguiDraw2D, draw_drag_link

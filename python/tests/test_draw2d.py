@@ -12,8 +12,8 @@ import pytest
 
 from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.curves2d import capped_polyline_points
-from mojive.gizmo import AXIS_COLORS, paint_order, plane_direction
+from mojive.drawing.curves import capped_polyline_points
+from mojive.interaction.gizmo import AXIS_COLORS, paint_order, plane_direction
 from mojive.render.backend import BackendCaps
 from mojive.scene import Scene
 from mojive.session import Session
@@ -92,8 +92,8 @@ class NoGraphics(importlib.abc.MetaPathFinder):
             raise AssertionError('Unexpected graphics import: ' + fullname)
 
 sys.meta_path.insert(0, NoGraphics())
-from mojive.curves2d import arrow_points
-from mojive.draglink2d import smooth_drag_link_mesh
+from mojive.drawing.curves import arrow_points
+from mojive.drawing.drag_link import smooth_drag_link_mesh
 from mojive.ui.draw2d import Draw2D, ImguiDraw2D
 assert len(arrow_points((0, 0), (20, 0))) > 3
 assert len(smooth_drag_link_mesh(20, 5, 2)[1]) > 0
@@ -143,7 +143,7 @@ def test_native_line_and_polyline_share_exact_vertices(native_draw, cap):
 def test_cached_arrow_preserves_reference_boundary_fringe_and_fill(
     native_draw, smoothing, round_tail, direction
 ):
-    from mojive.curves2d import arrow_points
+    from mojive.drawing.curves import arrow_points
 
     draw = native_draw
     start = np.array((100.25, 120.75))
@@ -176,7 +176,7 @@ def test_cached_arrow_preserves_reference_boundary_fringe_and_fill(
 
 
 def test_arrow_motion_reuses_local_mesh_and_antialias_preparation(native_draw):
-    from mojive.curves2d import arrow_mesh
+    from mojive.drawing.curves import arrow_mesh
     from mojive.ui.draw2d import _cached_fringe_points
 
     arrow_mesh.cache_clear()
@@ -239,7 +239,7 @@ def test_indexed_fill_accepts_numpy_contours(native_draw):
 
 @pytest.mark.parametrize("direction", ((1.0, 0.0), (0.6, 0.8), (-0.8, -0.6)))
 def test_local_mesh_placement_preserves_vertices_and_reuses_fringe(native_draw, direction):
-    from mojive.draglink2d import smooth_drag_link_mesh
+    from mojive.drawing.drag_link import smooth_drag_link_mesh
     from mojive.ui.draw2d import _cached_fringe_points
 
     points, indices, outline, hole = smooth_drag_link_mesh(8.0, 5.0, 2.0)
@@ -322,7 +322,7 @@ def test_failed_concave_submission_restores_draw_flags(native_draw):
 
 
 def test_indexed_hollow_fill_matches_native_and_fallback(native_draw):
-    from mojive.draglink2d import smooth_drag_link_mesh
+    from mojive.drawing.drag_link import smooth_drag_link_mesh
 
     draw = native_draw
     if not hasattr(draw._dl, "add_indexed_fill"):
@@ -361,7 +361,7 @@ def test_indexed_hollow_fill_matches_native_and_fallback(native_draw):
 @pytest.mark.parametrize("aa", (False, True))
 @pytest.mark.parametrize("color", (0xFFFFFFFF, 0x7F80AA33))
 def test_native_fringe_matches_fallback_mesh(native_draw, aa, color):
-    from mojive.curves2d import smooth_rect_points
+    from mojive.drawing.curves import smooth_rect_points
 
     draw = native_draw
     if not hasattr(draw._dl, "add_poly_fringe"):

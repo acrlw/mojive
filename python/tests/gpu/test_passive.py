@@ -8,7 +8,7 @@ import pytest
 
 from mojive import CameraTrackingConfig, CameraView, SharedImage, build, launch_passive
 from mojive import commands as cmd
-from mojive.control_rpc import RpcClient, RpcError
+from mojive.control.rpc import RpcClient, RpcError
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 mujoco = pytest.importorskip("mujoco")

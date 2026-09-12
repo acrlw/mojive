@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 
 from mojive import commands as cmd
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.render.backend import RenderFlag
-from mojive.scene_state import (
+from mojive.scene.state import (
     CAMERA_BOOKMARK_FORMAT,
     FORMAT_VERSION,
     SCENE_SNAPSHOT_FORMAT,

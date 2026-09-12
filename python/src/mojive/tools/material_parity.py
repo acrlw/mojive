@@ -9,8 +9,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from mojive.scene.assets import resolve
+
 from ..adapters.base import FrameNeeds
-from ..assets import resolve
 from ..render.backend import RenderFlag
 from ._harness import OffscreenHarness
 from .golden import compare, side_by_side

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..scene import Scene
+from mojive.scene import Scene
+
 from ..types import InstancePoseSource, LightSet, Material, MeshKey, MeshShape
 from .base import (
     CAMERA_OBJECT_BASE,
@@ -104,7 +105,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._resource_roots = tuple(dict.fromkeys(Path(path).resolve() for path in paths))
 
     def open_scene(self, path: Path) -> None:
-        from ..workspace_io import load_workspace
+        from mojive.scene.workspace import load_workspace
 
         load_workspace(self, path)
         self._path = Path(path).expanduser().resolve()
@@ -116,7 +117,7 @@ class WorkspaceAdapter(SceneAdapterBase):
             self.primary.export_mjcf(target, self.scene.source, self.scene.frame, options)
             self._path = target
             return
-        from ..workspace_io import save_workspace
+        from mojive.scene.workspace import save_workspace
 
         self._path = save_workspace(self, target)
 

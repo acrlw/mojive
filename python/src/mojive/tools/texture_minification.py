@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ..composition import build_workspace, render_backend_name
+from mojive.application.composition import build_workspace, render_backend_name
+
 from ..types import CameraView
 
 

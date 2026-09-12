@@ -7,9 +7,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..composition import build_scene
-from ..demos import canvas_scene
-from ..scene import Scene
+from mojive.application.composition import build_scene
+from mojive.application.demos import canvas_scene
+from mojive.scene import Scene
 
 
 def main(argv: list[str] | None = None) -> int:

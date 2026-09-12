@@ -6,7 +6,8 @@ import argparse
 import json
 from pathlib import Path
 
-from ..assets import resolve
+from mojive.scene.assets import resolve
+
 from ..render.backend import RenderFlag
 from ..render.opengl.passes.base import schedule_lights
 from ._harness import OffscreenHarness

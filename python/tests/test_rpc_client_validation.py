@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mojive.control_rpc import RpcClient, RpcError
+from mojive.control.rpc import RpcClient, RpcError
 
 
 class _Peer:

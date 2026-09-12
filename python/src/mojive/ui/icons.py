@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import math
 import random
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from functools import cache, lru_cache
 from itertools import pairwise
+from pathlib import Path
 from typing import ClassVar
 
-from ..curves2d import (
+from mojive.drawing.curves import (
     CORNER_SMOOTHING,
     arrow_mesh,
     box_handle_points,
@@ -18,8 +20,11 @@ from ..curves2d import (
     smooth_polygon_corners,
     smooth_rect_points,
 )
-from ..draglink2d import smooth_union
-from ..gizmo import DIMENSION_CORNER_RADIUS_RATIO
+from mojive.drawing.drag_link import smooth_union
+from mojive.drawing.polygons import signed_polygon_area as _signed_polygon_area
+from mojive.drawing.polygons import simple_polygon_indices as _simple_polygon_indices
+from mojive.interaction.gizmo import DIMENSION_CORNER_RADIUS_RATIO
+
 from .viewport_widgets import (
     CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
@@ -44,7 +49,7 @@ ROTATE_FRAME_PADDING = 0.0
 ROTATE_FRAME_STROKE_OVERSHOOT = ICON_STROKE * 0.5
 ROTATE_FRINGE_MAX = 1.0
 ROTATE_FRINGE_GAP_FRACTION = 0.5
-ICON_ROTATE_RING_GAP_RATIO = 0.8
+ICON_ROTATE_RING_GAP_RATIO = 1.0
 ICON_ROTATE_RING_CAP = "round"
 MORE_ARM_RATIO = 0.94
 STATUS_MOUSE_DEFAULT_WIDTH = OVERLAY_GEOMETRY.hint_mouse_width
@@ -56,6 +61,9 @@ STROKE_SCALE_LOCKED_ICONS = REVIEW_LOCKED_ICONS | frozenset(
 BOX_CENTERED_ICONS = frozenset(
     (
         "tool-snap",
+        "key-follow-off",
+        "key-follow-page",
+        "key-follow-locked",
         "playback-previous",
         "playback-next",
         "playback-more",
@@ -122,6 +130,9 @@ ICON_FAMILIES = (
             ("Next key", "key-next"),
             ("Fit", "key-fit"),
             ("Follow", "key-follow"),
+            ("Follow off", "key-follow-off"),
+            ("Follow page", "key-follow-page"),
+            ("Follow locked", "key-follow-locked"),
             ("View", "key-view"),
         ),
     ),
@@ -186,6 +197,12 @@ ICON_GLYPH_PADDING_DEFAULTS = {
     "key-previous": 4.0,
     "key-next": 4.0,
     "key-snapshot": 0.5,
+    "key-fit": 0.5,
+    "key-follow": 0.5,
+    "key-follow-off": 0.5,
+    "key-follow-page": 0.5,
+    "key-follow-locked": 0.5,
+    "key-view": 0.5,
     "panel-search": 4.0,
     "panel-sort": 4.0,
     "panel-clear": 4.0,
@@ -200,12 +217,12 @@ ICON_GLYPH_PADDING_DEFAULTS = {
 }
 ICON_GROUP_STROKE_DEFAULTS = dict.fromkeys(ICON_GROUP_LAYOUT_DEFAULTS, ICON_STROKE)
 ICON_GLYPH_STROKE_DEFAULTS = {
-    "tool-move": 1.1,
-    "tool-rotate": 1.1,
-    "tool-scale": 1.1,
-    "tool-world": 1.1,
-    "tool-body": 1.1,
-    "tool-snap": 1.1,
+    "tool-move": 1.0,
+    "tool-rotate": 1.0,
+    "tool-scale": 1.0,
+    "tool-world": 1.0,
+    "tool-body": 1.0,
+    "tool-snap": 1.0,
     "playback-previous": 2.0,
     "playback-next": 2.0,
     "playback-reset": 1.25,
@@ -222,6 +239,9 @@ ICON_GLYPH_STROKE_DEFAULTS = {
     "key-next": 1.5,
     "key-fit": 1.25,
     "key-follow": 1.5,
+    "key-follow-off": 1.5,
+    "key-follow-page": 1.5,
+    "key-follow-locked": 1.5,
     "key-view": 1.5,
     "panel-search": 1.0,
     "panel-sort": 1.0,
@@ -279,6 +299,7 @@ ICON_LIBRARY_TABS = (
     "Overview",
     "UI context",
     "Capsules",
+    "Keyframe follow",
     *(label for label, _icons in ICON_FAMILIES),
 )
 ICON_GROUP_BY_SLUG = {
@@ -302,58 +323,6 @@ class IconMetrics:
     @property
     def circular_clearance(self) -> float:
         return ICON_BOUND_DIAMETER * 0.5 - self.origin_extent
-
-
-def _signed_polygon_area(points: tuple[tuple[float, float], ...]) -> float:
-    return 0.5 * sum(
-        a[0] * b[1] - a[1] * b[0] for a, b in zip(points, points[1:] + points[:1], strict=True)
-    )
-
-
-def _triangle_cross(a, b, c) -> float:
-    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-
-
-def _inside_counterclockwise_triangle(point, a, b, c, epsilon: float) -> bool:
-    return (
-        _triangle_cross(a, b, point) >= -epsilon
-        and _triangle_cross(b, c, point) >= -epsilon
-        and _triangle_cross(c, a, point) >= -epsilon
-    )
-
-
-@lru_cache(maxsize=128)
-def _simple_polygon_indices(points: tuple[tuple[float, float], ...]) -> tuple[int, ...]:
-    """Triangulate one simple screen-clockwise contour without an ImGui context."""
-
-    if len(points) < 3:
-        return ()
-    vertices = list(range(len(points)))
-    if _signed_polygon_area(points) < 0.0:
-        vertices.reverse()
-    scale = max(max(abs(value) for point in points for value in point), 1.0)
-    epsilon = scale * scale * 1e-10
-    indices: list[int] = []
-    while len(vertices) > 3:
-        for offset, current in enumerate(vertices):
-            previous = vertices[offset - 1]
-            following = vertices[(offset + 1) % len(vertices)]
-            a, b, c = points[previous], points[current], points[following]
-            if _triangle_cross(a, b, c) <= epsilon:
-                continue
-            if any(
-                candidate not in (previous, current, following)
-                and _inside_counterclockwise_triangle(points[candidate], a, b, c, epsilon)
-                for candidate in vertices
-            ):
-                continue
-            indices.extend((previous, current, following))
-            del vertices[offset]
-            break
-        else:
-            raise RuntimeError("icon contour could not be triangulated")
-    indices.extend(vertices)
-    return tuple(indices)
 
 
 def minimum_enclosing_circle(points) -> tuple[tuple[float, float], float]:
@@ -1135,6 +1104,35 @@ def _draw_keyframe(p: _Painter, name: str) -> None:
     kind = name.removeprefix("key-")
     if kind == "snapshot":
         _draw_camera(p)
+    elif kind in {"follow-off", "follow-page", "follow-locked"}:
+        p.rect(-8.0, -6.0, 8.0, 6.0, rounding=1.6)
+        if kind == "follow-off":
+            p.line((-3.2, 0.0), (3.2, 0.0))
+        elif kind == "follow-page":
+            p.arrow(
+                (-4.0, 0.0),
+                (4.0, 0.0),
+                head_length=2.8,
+                head_width=4.6,
+                round_tail=True,
+            )
+        else:
+            # Locked holds the playhead's screen position, not edit permissions.
+            # Join its triangular head and stem into one G3 silhouette.
+            half = p.stroke_width * p.stroke_compensation * 0.5
+            neck_y = 0.8 - half / 2.8 * 4.0
+            p.smooth_polygon(
+                (
+                    (-2.8, -3.2),
+                    (2.8, -3.2),
+                    (half, neck_y),
+                    (half, 3.3),
+                    (-half, 3.3),
+                    (-half, neck_y),
+                ),
+                0.35,
+                convex_only=False,
+            )
     elif kind == "keyframe":
         _diamond(p, radius=5.0, filled=True)
     elif kind == "add":
@@ -1964,12 +1962,31 @@ def production_icon_style(name: str) -> IconStyle:
 
 
 @cache
+def _production_icon_presets():
+    return json.loads(Path(__file__).with_name("icon_presets.json").read_text())
+
+
+@cache
+def _production_icon_preset(name: str):
+    preset = _production_icon_presets().get(name)
+    # Developer changes and custom styles remain correct before regeneration;
+    # the preset conformance test requires the shipped defaults to be current.
+    if preset is not None and preset["style"] == asdict(production_icon_style(name)):
+        return preset
+    return None
+
+
+@cache
 def _production_icon_layout(
     name: str,
 ) -> tuple[IconStyle, tuple[float, tuple[float, float], float]]:
     """Cache all measurement and centering work for the frozen runtime style."""
 
     style = production_icon_style(name)
+    preset = _production_icon_preset(name)
+    if preset is not None:
+        scale, offset, compensation = preset["layout"]
+        return style, (scale, tuple(offset), compensation)
     layout = _icon_layout(
         name,
         style.padding,
@@ -2073,6 +2090,50 @@ def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None)
     """Submit cached production geometry with the current interaction colors."""
 
     _draw_cached_icon(draw, center, size, name, color, accent_color, None)
+
+
+def draw_icon_label(
+    draw, lo, hi, color, scale: float, name: str, label: str, *, style: IconStyle | None = None
+) -> None:
+    """Center an icon alone, or a measured pair on the Latin or CJK body line."""
+    size = 16.0 * scale
+    if not label:
+        center = ((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5)
+        _draw_cached_icon(draw, center, size, name, color, None, style)
+        return
+    if style is None:
+        bounds = production_icon_metrics(name).bounds
+    else:
+        bounds = icon_metrics(
+            name,
+            style.padding,
+            style.mouse_width,
+            style.stroke_width,
+            style.rotate_ring_gap_ratio,
+            style.rotate_ring_cap,
+            style.tuning,
+            style.alignment,
+        ).bounds
+    unit = size / ICON_GRID
+    glyph_width = (bounds[2] - bounds[0]) * unit
+    gap = 7.0 * scale
+    label_width, line_height = draw.text_size(label)
+    ink = draw.text_ink_bounds(label) or (0.0, 0.0, label_width, line_height)
+    left = (lo[0] + hi[0] - glyph_width - gap - (ink[2] - ink[0])) * 0.5
+    # Use one body line for related words, independent of ascenders/descenders.
+    body = draw.text_ink_bounds("x" if label.isascii() else "田")
+    center_y = (lo[1] + hi[1]) * 0.5
+    text_y = center_y - ((body[1] + body[3]) * 0.5 if body else line_height * 0.5)
+    _draw_cached_icon(
+        draw,
+        (left - bounds[0] * unit, center_y),
+        size,
+        name,
+        color,
+        None,
+        style,
+    )
+    draw.text((left + glyph_width + gap - ink[0], text_y), color, label, pixel_snap=False)
 
 
 def _draw_cached_icon(draw, center, size, name, color, accent_color, style):
@@ -2230,6 +2291,10 @@ def icon_metrics(
 def production_icon_metrics(name: str) -> IconMetrics:
     """Return cached visible metrics for one frozen production icon."""
 
+    preset = _production_icon_preset(name)
+    if preset is not None:
+        bounds, center, radius, origin_extent, anchor_extent = preset["metrics"]
+        return IconMetrics(tuple(bounds), tuple(center), radius, origin_extent, anchor_extent)
     style = production_icon_style(name)
     return icon_metrics(
         name,
@@ -2246,6 +2311,8 @@ def production_icon_metrics(name: str) -> IconMetrics:
 def icon_family(label: str):
     """Return one family by its user-facing label."""
 
+    if label == "Keyframe follow":
+        return tuple((mode.title(), f"key-follow-{mode}") for mode in ("off", "page", "locked"))
     return next(icons for family, icons in ICON_FAMILIES if family == label)
 
 

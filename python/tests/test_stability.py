@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.tools.stability import run_stability
 
 pytest.importorskip("mujoco")

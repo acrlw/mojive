@@ -10,8 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from imgui_bundle import imgui
 
-from ...adapters.base import FrameNeeds, NodeType
-from ...scene_state import (
+from mojive.scene.state import (
     apply_camera_bookmark,
     camera_bookmark,
     delete_named_snapshot,
@@ -20,6 +19,8 @@ from ...scene_state import (
     next_available_snapshot_name,
     save_named_snapshot,
 )
+
+from ...adapters.base import FrameNeeds, NodeType
 from ...types import CameraView
 from ..camera import DEFAULT_PITCH, DEFAULT_YAW
 from ..camera_tracking import can_track_node

@@ -64,7 +64,8 @@ class OffscreenHarness:
             glfw.make_context_current(self.window)
             glfw.swap_interval(0)
 
-        from ..backends import make_adapter
+        from mojive.application.backends import make_adapter
+
         from ..render.builder import SceneSourceBuilder
 
         self.adapter = make_adapter(backend, asset)

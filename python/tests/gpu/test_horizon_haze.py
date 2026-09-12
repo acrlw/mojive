@@ -143,7 +143,7 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
     from imgui_bundle import imgui
     from PIL import Image
 
-    from mojive.composition import build
+    from mojive.application.composition import build
 
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     monkeypatch.setenv("MOJIVE_IMGUI_INI", str(tmp_path / "layout.ini"))

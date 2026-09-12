@@ -138,6 +138,59 @@ def rig(monkeypatch):
         value.close()
 
 
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+def test_keyframe_follow_icons_keep_native_selection_in_production_and_preview(monkeypatch, scale):
+    width, height = probe._probe_window_size(1600, 1000, scale)
+    rig = Rig(monkeypatch, width=width, height=height, scale=scale)
+    original_button = imgui.button
+    original_tooltip = imgui.set_item_tooltip
+    hovered_tooltips = []
+    style = imgui.get_style()
+    style.hover_delay_normal = style.hover_delay_short = style.hover_stationary_delay = 0.0
+
+    def record_button(label, *args, **kwargs):
+        result = original_button(label, *args, **kwargs)
+        item_id = label.partition("##")[2]
+        if item_id.startswith("timeline-follow-"):
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            rig.state.rects[item_id] = (lo.x, lo.y, hi.x, hi.y)
+        return result
+
+    def record_tooltip(label):
+        if label in probe.keyframes_panel_module.FOLLOW_MODE_TOOLTIPS and imgui.is_item_hovered():
+            hovered_tooltips.append(label)
+        original_tooltip(label)
+
+    monkeypatch.setattr(imgui, "button", record_button)
+    monkeypatch.setattr(imgui, "set_item_tooltip", record_tooltip)
+    try:
+        rig.probe.page = "Geometry"
+        rig.probe.geometry_tab = "Workspaces"
+        for preview in (False, True):
+            rig.probe.preview_icon_library = preview
+            for _ in range(4):
+                rig.frame()
+            bounds = [rig.state.rects[f"timeline-follow-{i}"] for i in range(3)]
+            assert len({box[1] for box in bounds}) == 1
+            assert all(x1 - x0 == pytest.approx(y1 - y0) for x0, y0, x1, y1 in bounds)
+            for index in (0, 2, 1):
+                rig.click(f"timeline-follow-{index}")
+                assert rig.probe.timeline_panel._follow_mode == ("off", "page", "locked")[index]
+                assert (
+                    hovered_tooltips[-1] == probe.keyframes_panel_module.FOLLOW_MODE_TOOLTIPS[index]
+                )
+                assert any(
+                    window.active and window.flags & imgui.WindowFlags_.tooltip.value
+                    for window in imgui.get_current_context().windows
+                )
+        rig.probe.preview_icon_library = False
+        rig.frame()
+        assert rig.probe.timeline_panel.follow_mode_icon_drawer is probe.draw_icon_label
+        assert rig.probe.timeline_panel._follow_mode == "page"
+    finally:
+        rig.close()
+
+
 def test_transport_recording_and_tools_keep_independent_state(rig):
     rig.click("step")
     assert rig.state.frame == 25

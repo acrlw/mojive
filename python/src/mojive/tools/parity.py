@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from PIL import Image
 
-    from ..assets import resolve
+    from mojive.scene.assets import resolve
 
     scene = resolve(args.scene)
     out_dir = Path(args.out) / scene.stem

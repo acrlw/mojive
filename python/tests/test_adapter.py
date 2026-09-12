@@ -22,7 +22,7 @@ pytestmark = pytest.mark.physics
 
 mujoco = pytest.importorskip("mujoco", reason="MuJoCo is required")
 
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
+from mojive.adapters.mujoco import MuJoCoAdapter  # noqa: E402
 
 FIXTURE_XML = """
 <mujoco model="adapter_fixture">
@@ -262,7 +262,7 @@ def test_square_cube_texture_repeats_one_image_on_every_face(tmp_path):
 def test_flex_uv_indices_can_reference_texture_coordinates_beyond_vertex_count():
     from types import SimpleNamespace
 
-    from mojive.adapters.mujoco_deformables import _SurfaceFlex
+    from mojive.adapters.mujoco.deformables import _SurfaceFlex
 
     surface = object.__new__(_SurfaceFlex)
     surface._corner_ids = np.array([0, 1, 2, 0, 2, 1], np.int32)
@@ -866,7 +866,7 @@ def test_pose_capability_requires_a_runtime_target_or_named_source_element(tmp_p
 
 
 def test_mocap_bodies_use_the_shared_pose_editing_contract():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("mocap_equality"))
     try:
@@ -885,7 +885,7 @@ def test_mocap_bodies_use_the_shared_pose_editing_contract():
 
 def test_equality_constraints_are_listed_and_switchable():
     from mojive import commands as cmd
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     adapter = MuJoCoAdapter(resolve("mocap_equality"))
@@ -1124,7 +1124,7 @@ def test_mjspec_model_composition_preserves_matching_state(tmp_path):
 
 def test_session_loads_mjcf_and_urdf_without_losing_the_current_model_on_failure(tmp_path):
     from mojive import commands as cmd
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     session = Session(MuJoCoAdapter(resolve("empty")), resolve("empty"))
@@ -1201,7 +1201,7 @@ def test_urdf_loader_normalizes_repeated_compiler_mesh_directory(tmp_path: Path)
 
 
 def test_urdf_loader_preserves_an_explicit_repeated_mesh_directory(tmp_path: Path) -> None:
-    from mojive.adapters.mujoco_adapter import _normalized_urdf_source
+    from mojive.adapters.mujoco.spec import _normalized_urdf_source
 
     meshes = tmp_path / "meshes" / "meshes"
     meshes.mkdir(parents=True)
@@ -1276,7 +1276,7 @@ f 2 3 4
 
 
 def test_urdf_loader_does_not_guess_between_ambiguous_meshes(tmp_path: Path) -> None:
-    from mojive.adapters.mujoco_adapter import _normalized_urdf_source
+    from mojive.adapters.mujoco.spec import _normalized_urdf_source
 
     for directory in (tmp_path / "first", tmp_path / "second"):
         directory.mkdir()
@@ -1296,7 +1296,7 @@ def test_urdf_loader_does_not_guess_between_ambiguous_meshes(tmp_path: Path) -> 
 def test_urdf_loader_scales_only_tiny_positive_definite_inertia(tmp_path: Path) -> None:
     import xml.etree.ElementTree as ET
 
-    from mojive.adapters.mujoco_adapter import _normalized_urdf_source
+    from mojive.adapters.mujoco.spec import _normalized_urdf_source
 
     path = tmp_path / "tiny-inertia.urdf"
     path.write_text(
@@ -1339,7 +1339,7 @@ def test_camera_hint_frames_the_scene(adapter):
 
 def test_session_indexes_selected_body_joints_and_requires_pause() -> None:
     from mojive import commands as cmd
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
@@ -1355,7 +1355,7 @@ def test_session_indexes_selected_body_joints_and_requires_pause() -> None:
 
 def test_qpos_batch_validates_atomically_and_forwards_once(monkeypatch) -> None:
     from mojive import commands as cmd
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
@@ -1386,9 +1386,9 @@ def test_qpos_batch_validates_atomically_and_forwards_once(monkeypatch) -> None:
 
 
 def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
-    from mojive.assets import resolve
-    from mojive.mujoco_audit import audit_model
+    from mojive.adapters.mujoco.audit import audit_model
     from mojive.render.builder import SceneSourceBuilder
+    from mojive.scene.assets import resolve
     from mojive.types import CameraView, InstancePoseSource, MeshShape
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
@@ -1432,7 +1432,7 @@ def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
 
 
 def test_collision_mesh_exposes_mujoco_compiled_convex_hull():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.types import MeshShape
 
     adapter = MuJoCoAdapter(resolve("convex_hull"))
@@ -1451,8 +1451,8 @@ def test_collision_mesh_exposes_mujoco_compiled_convex_hull():
 
 
 def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
-    from mojive.assets import resolve
-    from mojive.mujoco_audit import audit_model
+    from mojive.adapters.mujoco.audit import audit_model
+    from mojive.scene.assets import resolve
 
     a = MuJoCoAdapter(resolve("actuator_visuals"))
     try:
@@ -1497,7 +1497,7 @@ def test_actuator_visual_metadata_and_controls_follow_mujoco_addresses():
 
 
 def test_slider_crank_visuals_match_mujoco_linkage_geometry():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     a = MuJoCoAdapter(resolve("slider_crank"))
     try:
@@ -1521,7 +1521,7 @@ def test_slider_crank_visuals_match_mujoco_linkage_geometry():
 
 
 def test_contact_force_components_and_autoconnect_segments_match_mujoco():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     contacts = MuJoCoAdapter(resolve("mujoco_visuals"))
     chain = MuJoCoAdapter(resolve("joint_types"))
@@ -1552,7 +1552,7 @@ def test_contact_force_components_and_autoconnect_segments_match_mujoco():
 
 
 def test_island_colors_match_mujocos_visualizer():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
@@ -1615,7 +1615,7 @@ def test_island_colors_match_mujocos_visualizer():
     ),
 )
 def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_inactive):
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve(asset))
     try:
@@ -1665,7 +1665,7 @@ def test_bvh_boxes_match_mujocos_visualizer(asset, flag, bvh_type, depth, show_i
 
 
 def test_bvh_metadata_is_materialized_only_when_a_frame_requests_it():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     adapter = MuJoCoAdapter(resolve("dense_mesh"))
@@ -1771,9 +1771,9 @@ def test_tendon_material_matches_mujocos_final_color_and_scalars(tmp_path):
 
 def test_deformables_match_mujocos_abstract_visualization():
 
-    from mojive.assets import resolve
-    from mojive.mujoco_audit import audit_model
+    from mojive.adapters.mujoco.audit import audit_model
     from mojive.render.builder import SceneSourceBuilder
+    from mojive.scene.assets import resolve
     from mojive.types import InstancePoseSource, InstanceVisual, MeshKey, MeshShape
 
     a = MuJoCoAdapter(resolve("deformables"))
@@ -1917,7 +1917,7 @@ def test_deformables_match_mujocos_abstract_visualization():
 
 
 def test_deformables_contribute_to_session_bounds():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
     from mojive.session import Session
 
     session = Session(MuJoCoAdapter(resolve("deformables")))
@@ -1933,7 +1933,7 @@ def test_deformables_contribute_to_session_bounds():
 
 
 def test_mujoco_model_cameras_follow_forward_kinematics():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
@@ -1965,7 +1965,7 @@ def test_mujoco_model_cameras_follow_forward_kinematics():
 
 
 def test_mujoco_camera_intrinsics_preserve_principal_point(tmp_path):
-    from mojive.mujoco_audit import audit_model
+    from mojive.adapters.mujoco.audit import audit_model
 
     path = tmp_path / "intrinsic_camera.xml"
     path.write_text(
@@ -2023,8 +2023,8 @@ def test_mujoco_camera_switch_to_fov_clears_persisted_intrinsics(tmp_path):
 
 
 def test_many_lights_audit_matches_the_renderer_capacity():
-    from mojive.assets import resolve
-    from mojive.mujoco_audit import audit_model
+    from mojive.adapters.mujoco.audit import audit_model
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("many_lights"))
     try:
@@ -2035,7 +2035,7 @@ def test_many_lights_audit_matches_the_renderer_capacity():
 
 
 def test_site_and_camera_rangefinders_publish_generic_diagnostics():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     a = MuJoCoAdapter(resolve("rangefinder"))
     try:
@@ -2067,7 +2067,7 @@ def test_site_and_camera_rangefinders_publish_generic_diagnostics():
 
 
 def test_connect_and_weld_constraints_publish_mujoco_endpoint_markers():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     a = MuJoCoAdapter(resolve("constraints"))
     try:
@@ -2098,7 +2098,7 @@ def test_connect_and_weld_constraints_publish_mujoco_endpoint_markers():
 
 
 def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
-    from mojive.assets import resolve
+    from mojive.scene.assets import resolve
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
@@ -2129,3 +2129,11 @@ def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
         assert not a.set_visual_group("unknown", 0, True)
     finally:
         a.release()
+
+
+def test_mujoco_adapter_compatibility_import_keeps_class_identity():
+    from mojive.adapters import MuJoCoAdapter as exported
+    from mojive.adapters.mujoco import MuJoCoAdapter as packaged
+    from mojive.adapters.mujoco_adapter import MuJoCoAdapter as legacy
+
+    assert exported is packaged is legacy

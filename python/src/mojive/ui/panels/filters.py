@@ -8,11 +8,8 @@ from functools import lru_cache
 import numpy as np
 from imgui_bundle import imgui
 
-from ...curves2d import (
-    CORNER_SMOOTHING,
-    capped_polyline_points,
-    offset_closed_path,
-)
+from mojive.drawing.curves import CORNER_SMOOTHING, capped_polyline_points, offset_closed_path
+
 from ..draw2d import ImguiDraw2D, text_line_y
 from . import PanelContext, button_row_layout
 

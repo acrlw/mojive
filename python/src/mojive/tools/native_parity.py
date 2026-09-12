@@ -21,7 +21,7 @@ from mojive import (
     SceneRenderer,
     ShadingModel,
 )
-from mojive.gizmo import GizmoFrame, GizmoMode
+from mojive.interaction.gizmo import GizmoFrame, GizmoMode
 from mojive.render.debugdraw import Occlusion
 from mojive.types import LightType, TextureData, TextureType
 

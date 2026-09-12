@@ -235,6 +235,13 @@ fmt:
 	$(RUFF) check --fix python tools examples
 	$(RUFF) format python tools examples
 
+.PHONY: icon-presets fmt-cpp
+icon-presets:
+	$(PY) tools/generate_icon_presets.py $(ARGS)
+
+fmt-cpp:
+	rg --files cpp -g '*.cpp' -g '*.hpp' | xargs clang-format -i
+
 docs:
 	uv run --extra docs mkdocs build --strict --site-dir output/site
 
@@ -340,9 +347,16 @@ gallery:
 ui-diagnostics:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png $(ARGS)
 
+.PHONY: ui-keyframe-follow
+ui-keyframe-follow:
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group keyframe-follow -o output/ui-keyframe-follow/family.png
+	$(PY) design/tools/render_ui_feasibility.py --ui-scale 2 --page geometry --geometry-tab icons --icon-group keyframe-follow -o output/ui-keyframe-follow/family-hidpi.png
+	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-keyframe-follow/keyframes.png
+
 .PHONY: ui-icon-concepts
 ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
+	$(MAKE) ui-keyframe-follow
 	$(PY) design/tools/render_ui_feasibility.py --height 1100 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1100 --page geometry --geometry-tab icons --icon-group ui-context --icon-alignment box -o output/ui-icon-concepts/ui-context-box.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1100 --ui-scale 2 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context-hidpi.png
@@ -350,8 +364,8 @@ ui-icon-concepts:
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-playback -o output/ui-icon-concepts/viewport-playback.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1800 --page geometry --geometry-tab icons --icon-group keyframe-transport -o output/ui-icon-concepts/keyframe-transport.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group keyframes --icon-alignment box -o output/ui-icon-concepts/keyframes-box.png
+	$(PY) design/tools/render_ui_feasibility.py --height 2050 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
+	$(PY) design/tools/render_ui_feasibility.py --height 2050 --page geometry --geometry-tab icons --icon-group keyframes --icon-alignment box -o output/ui-icon-concepts/keyframes-box.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
 	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers --icon-alignment box -o output/ui-icon-concepts/scene-helpers-box.png
@@ -397,6 +411,11 @@ tool-icons:
 ## Export production mouse hint geometry with black and transparent shells.
 mouse-icons:
 	$(PY) -m mojive.tools.mouse_hint_icons $(ARGS)
+
+## Measure fresh-process startup and first presentation across render backends.
+.PHONY: startup-profile
+startup-profile:
+	$(PY) -m mojive.tools.startup_profile $(ARGS)
 
 ## Profile production viewport chrome and enforce its incremental frame budget.
 ui-frame-profile:

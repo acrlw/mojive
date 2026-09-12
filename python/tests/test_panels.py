@@ -20,8 +20,8 @@ from mojive.adapters.base import (
     SceneNode,
 )
 from mojive.config import PanelConfig
-from mojive.geometry import geometry_dimensions, geometry_size_from_dimensions
 from mojive.render.backend import RenderFlag, ShadowQuality
+from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimensions
 from mojive.types import MeshShape
 from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language

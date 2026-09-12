@@ -13,15 +13,16 @@ For canonical grids, optical sizing, family consistency, and multi-size acceptan
 | --- | --- | --- |
 | Draw a widget, icon, or viewport overlay | `mojive.ui.draw2d.Draw2D` | Place shapes, choose colors and drawing order |
 | Implement ImGui submission | `ImguiDraw2D` in the same module | Native bindings, AA, vertex buffers, font access |
-| Add reusable corners, arrows, or stroke caps | `mojive.curves2d` | Pure geometry, sampling, local shape caches |
-| Change hollow-origin connectors | `mojive.draglink2d` | Shared implicit field and indexed CPU mesh |
+| Add reusable corners, arrows, or stroke caps | `mojive.drawing.curves` | Pure geometry, sampling, local shape caches |
+| Change hollow-origin connectors | `mojive.drawing.drag_link` | Shared implicit field and indexed CPU mesh |
 | Publish retained diagnostics | `mojive.render.debugdraw.Layer` | IDs, lifetime, primitive budgets and packing |
 | Implement a new GPU primitive | `render/opengl/passes/debug.py` and `render/webgpu/passes/debug.py` | Matching packed layout and shaders |
 | Change gizmo interaction or hit regions | `mojive.ui.gizmo` and `mojive.gizmo` | Interaction state and projected handles |
 | Change native ImGui colors, radii, or spacing | `mojive.ui.theme` | Standard ImGui style settings |
 | Maintain bulk drawing bindings or slider/focus fixes | `tools/build_imgui.py` | Minimal source patch and platform wheel build |
 
-`curves2d` and `draglink2d` import neither ImGui nor a render backend, UI controller, or physics
+The published `mojive.curves2d` and `mojive.draglink2d` paths remain compatibility exports.
+`drawing.curves` and `drawing.drag_link` import neither ImGui nor a render backend, UI controller, or physics
 adapter. Layering tests enforce that boundary. `Draw2D` implementations submit geometry; reusable
 geometry belongs in the shared modules. A widget does not need to implement triangle packing or
 hold backend objects. Add a specialized helper only when the existing primitive cannot express
@@ -33,7 +34,7 @@ Define placement against the protocol. Construct `ImguiDraw2D` only in an active
 at the panel or viewport drawing boundary, and pass it to the helper.
 
 ```python
-from mojive.curves2d import smooth_capsule_points
+from mojive.drawing.curves import smooth_capsule_points
 from mojive.ui.draw2d import Draw2D
 
 

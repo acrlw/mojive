@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw
 
 from mojive import CameraView, RenderProduct, SceneRenderer, ShadingModel
 from mojive.adapters.base import FrameNeeds
-from mojive.assets import resolve
-from mojive.backends import make_adapter
+from mojive.application.backends import make_adapter
+from mojive.scene.assets import resolve
 
 
 def camera_views(near):
