@@ -1,5 +1,6 @@
 #include "../Rgb.hpp"
 #include "Environment.hpp"
+#include "InstanceStream.hpp"
 #include "Lighting.hpp"
 #include "Reflections.hpp"
 #include "Shadows.hpp"
@@ -181,62 +182,9 @@ class BgfxRenderer final : public Renderer {
             mPassOrder[mPassCount++] = view;
         }
     }
-    struct InstanceUpload {
-        bgfx::DynamicVertexBufferHandle handle = BGFX_INVALID_HANDLE;
-        bgfx::VertexLayout layout;
-        uint32_t cursor = 0, capacity = 0;
-        std::vector<std::byte> bytes;
-    };
-    std::unordered_map<uint16_t, InstanceUpload> mInstanceUploads;
-    std::vector<std::byte> mInstanceBytes;
-    std::byte *instanceMemory(uint32_t count, uint16_t stride) {
-        if (uint64_t(count) * stride > UINT32_MAX)
-            throw std::length_error("Instance stream is too large");
-        mInstanceBytes.resize(size_t(count) * stride);
-        return mInstanceBytes.data();
-    }
-    void uploadInstances(const InstanceUpload &upload) {
-        if (upload.cursor)
-            bgfx::update(
-                upload.handle, 0,
-                bgfx::copy(upload.bytes.data(), upload.cursor * upload.layout.getStride()));
-    }
-    void bindInstances(uint32_t count, uint16_t stride) {
-        auto &upload = mInstanceUploads[stride];
-        if (!bgfx::isValid(upload.handle)) {
-            upload.layout.begin();
-            for (int i = 0; i < stride / 16; ++i)
-                upload.layout.add(bgfx::Attrib::Enum(bgfx::Attrib::TexCoord0 + i), 4,
-                                  bgfx::AttribType::Float);
-            upload.layout.end();
-        }
-        // bgfx's automatic resize checks payload size, not startVertex + count.
-        // Grow explicitly and retain earlier draw bindings through deferred destruction.
-        if (count > upload.capacity - upload.cursor) {
-            uint32_t capacity = std::min<uint64_t>(
-                UINT32_MAX / stride, std::max<uint64_t>({count, 2ull * upload.capacity, 1024}));
-            auto handle = bgfx::createDynamicVertexBuffer(capacity, upload.layout);
-            if (!bgfx::isValid(handle))
-                throw std::runtime_error("Cannot allocate instance stream");
-            if (bgfx::isValid(upload.handle)) {
-                uploadInstances(upload);
-                bgfx::destroy(upload.handle);
-            }
-            upload.handle = handle;
-            upload.capacity = capacity;
-            upload.cursor = 0;
-        }
-        upload.bytes.resize(size_t(upload.cursor + count) * stride);
-        std::memcpy(upload.bytes.data() + size_t(upload.cursor) * stride, mInstanceBytes.data(),
-                    size_t(count) * stride);
-        bgfx::setInstanceDataBuffer(upload.handle, upload.cursor, count);
-        upload.cursor += count;
-    }
+    InstanceStream mInstances;
     void flush() {
-        // Upload one contiguous stream per layout. Per-draw updates otherwise
-        // create many Metal staging buffers and blit commands in each frame.
-        for (const auto &[stride, upload] : mInstanceUploads)
-            uploadInstances(upload);
+        mInstances.flush();
         // bgfx sorts views numerically unless explicitly remapped. Preserve API
         // dependency order even when a sampled target was allocated later.
         auto count = mPassCount;
@@ -246,8 +194,7 @@ class BgfxRenderer final : public Renderer {
         bgfx::setViewOrder(0, mPassOrder.size(), mPassOrder.data());
         mGpuFrame = bgfx::frame();
         mTiming.collect(mGpuFrame, *bgfx::getStats());
-        for (auto &[stride, upload] : mInstanceUploads)
-            upload.cursor = 0;
+        mInstances.reset();
         mPendingCommands = false;
         mPassCount = 0;
         mNextSceneView = 48;
@@ -400,14 +347,13 @@ class BgfxRenderer final : public Renderer {
                 if (!count)
                     continue;
                 constexpr uint16_t stride = 12 * sizeof(float);
-                auto *buffer = instanceMemory(count, stride);
+                auto *buffer = mInstances.allocate(count, stride).data();
                 for (size_t i = 0; i < count; ++i)
                     std::memcpy(buffer + i * stride, scene.instances[mDrawIndices[i]].data(),
                                 stride);
                 const auto &mesh = *scene.meshes[batch.mesh];
                 bgfx::setVertexBuffer(0, mesh.vertices);
                 bgfx::setIndexBuffer(mesh.indices);
-                bindInstances(count, stride);
                 uint64_t state = BGFX_STATE_CULL_CW;
                 if (light) {
                     bgfx::setUniform(mShadowLightPosition, light);
@@ -534,12 +480,11 @@ class BgfxRenderer final : public Renderer {
             if (!count)
                 continue;
             constexpr uint16_t stride = 12 * sizeof(float);
-            auto *buffer = instanceMemory(count, stride);
+            auto *buffer = mInstances.allocate(count, stride).data();
             for (size_t i = 0; i < count; ++i)
                 std::memcpy(buffer + i * stride, scene.instances[mDrawIndices[i]].data(), stride);
             bgfx::setVertexBuffer(0, scene.meshes[batch.mesh]->vertices);
             bgfx::setIndexBuffer(scene.meshes[batch.mesh]->indices);
-            bindInstances(count, stride);
             bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_CULL_CW | BGFX_STATE_MSAA);
             bgfx::submit(maskView, mMaskProgram);
             ++mStats.drawCalls;
@@ -1110,9 +1055,7 @@ class BgfxRenderer final : public Renderer {
         for (auto h : {mMaskSampler, mOutlineSize, mOutlineColor})
             if (bgfx::isValid(h))
                 bgfx::destroy(h);
-        for (auto &[stride, upload] : mInstanceUploads)
-            if (bgfx::isValid(upload.handle))
-                bgfx::destroy(upload.handle);
+        mInstances.clear();
         for (auto h : {mIdentitySampler, mIdentitySize, mReadbackImage, mReadbackRegion,
                        mReadbackLayout, mUiTextureInfo})
             if (bgfx::isValid(h))
@@ -1828,7 +1771,7 @@ class BgfxRenderer final : public Renderer {
             bool wire = !pass && (current.style.wireframe || current.style.debugView == 5);
             bool lit = !pass && (current.lighting.enabled || wire);
             uint16_t stride = (lit ? 32 : 20) * sizeof(float);
-            auto *buffer = instanceMemory(count, stride);
+            auto *buffer = mInstances.allocate(count, stride).data();
             for (size_t i = 0; i < count; ++i) {
                 auto *destination = buffer + i * stride;
                 const auto &source = current.instances[indices[i]];
@@ -1869,7 +1812,6 @@ class BgfxRenderer final : public Renderer {
                 bgfx::setVertexBuffer(0, mesh.vertices);
                 bgfx::setIndexBuffer(mesh.indices);
             }
-            bindInstances(count, stride);
             uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS;
             if (pass || !transparent)
                 state |= BGFX_STATE_WRITE_Z;
