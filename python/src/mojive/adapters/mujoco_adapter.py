@@ -3160,10 +3160,10 @@ class MuJoCoAdapter(SceneAdapterBase):
         if self._model_edit_batch_depth:
             raise RuntimeError("Nested model rebuild batches are unsupported")
         self._model_edit_batch_depth = 1
-        self._model_edit_batch_rebuild = True
+        self._model_edit_batch_rebuild = False
         try:
             yield
-            state = self._capture_named_model_state()
+            state = self._capture_named_model_state() if self._model_edit_batch_rebuild else None
         except BaseException:
             self._model_edit_batch_rebuild = False
             raise
@@ -7781,6 +7781,7 @@ class MuJoCoAdapter(SceneAdapterBase):
             compiled_size[:3] = values[:3]
         element.size = authored_size
         if self._model_edit_batch_depth:
+            self._model_edit_batch_rebuild = True
             self._mark_model_edited(model_id)
             return True
         if node_type is NodeType.GEOM:

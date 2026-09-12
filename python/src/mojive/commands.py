@@ -437,6 +437,18 @@ class SetPose(Command):
 
 
 @dataclass(frozen=True)
+class SetScale(Command):
+    """Bake positive local XYZ factors into geometry, returning scale to identity.
+
+    UI drafts replace earlier factors for the same node and preview without a rebuild.
+    Direct submission applies the factors once to the current authored dimensions.
+    """
+
+    node_id: int
+    scale: np.ndarray
+
+
+@dataclass(frozen=True)
 class SetLight(Command):
     """Replace a light at its current SceneSource array index."""
 

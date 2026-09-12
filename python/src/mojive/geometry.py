@@ -9,6 +9,23 @@ import numpy as np
 from .types import MeshShape
 
 
+def scale_vector(value) -> np.ndarray:
+    """Validate the positive local XYZ factors shared by previews and write-back."""
+    factors = np.asarray(value, np.float64)
+    if factors.shape != (3,) or not np.isfinite(factors).all() or np.any(factors <= 0):
+        raise ValueError("Scale must contain three positive finite values")
+    return factors
+
+
+def scaled_geometry_size(size, factors) -> np.ndarray:
+    """Bake local factors into render dimensions without changing world pose."""
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        result = (np.asarray(size, np.float64) * scale_vector(factors)).astype(np.float32)
+    if not np.isfinite(result).all() or np.any(result <= 0):
+        raise ValueError("Scaled dimensions must remain positive and finite")
+    return result
+
+
 @dataclass(frozen=True)
 class DimensionHandle:
     """Map one body axis, or the center, to an authored dimension."""
@@ -70,6 +87,16 @@ def geometry_dimensions(shape: MeshShape, size) -> GeometryDimensions | None:
         )
     if shape in (MeshShape.CYLINDER, MeshShape.CONE, MeshShape.CAPSULE_SHAFT):
         shaft = shape is MeshShape.CAPSULE_SHAFT
+        if not np.isclose(value[0], value[1], rtol=1e-5, atol=1e-7):
+            length = "shaft length" if shaft else "height"
+            return GeometryDimensions(
+                f"diameters x / y / {length}",
+                tuple(value * 2.0),
+                tuple(
+                    DimensionHandle(axis, axis, 2.0, label)
+                    for axis, label in enumerate(("X diameter", "Y diameter", length))
+                ),
+            )
         return GeometryDimensions(
             "diameter / shaft length" if shaft else "diameter / height",
             (float(value[0] * 2.0), float(value[2] * 2.0)),
@@ -98,8 +125,11 @@ def geometry_size_from_dimensions(shape: MeshShape, size, dimensions) -> np.ndar
         else:
             value[:] = dimensions[0]
     elif shape in (MeshShape.CYLINDER, MeshShape.CONE, MeshShape.CAPSULE_SHAFT):
-        value[:2] = half[0]
-        value[2] = half[1]
+        if len(dimensions) == 3:
+            value[:] = half[:3]
+        else:
+            value[:2] = half[0]
+            value[2] = half[1]
     return value
 
 
@@ -108,4 +138,6 @@ __all__ = [
     "GeometryDimensions",
     "geometry_dimensions",
     "geometry_size_from_dimensions",
+    "scale_vector",
+    "scaled_geometry_size",
 ]

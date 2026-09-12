@@ -42,6 +42,7 @@ from .adapters.base import (
 )
 from .bounds import SceneBounds, _MeshBoundsCache, _node_local_bounds, _node_world_bounds
 from .commands import Command, CommandResult, Query
+from .geometry import scale_vector
 from .history import EditHistory, EditRecord
 from .model_edits import _ModelEditPlan, intercept_model_edit
 from .rates import StepRate
@@ -176,6 +177,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.AddResourceRoot,
     cmd.RemoveResourceRoot,
     cmd.SetPose,
+    cmd.SetScale,
     cmd.SetJointProperties,
     cmd.SetJointAdvancedProperties,
     cmd.SetSiteProperties,
@@ -736,6 +738,27 @@ class Session:
             if node is None
             else _node_local_bounds(self.source, self.frame, node, self._mesh_bounds_cache)
         )
+
+    def scale_target(self, node_id: int) -> SceneNode | None:
+        """Resolve one editable geometry shared by an object and its Inspector row."""
+        node = self.node(node_id)
+        if node is None or not node.scalable or not self._adapter.caps.write_scale:
+            return None
+        if node.type is NodeType.GEOM:
+            return node
+        children = [self.node(child) for child in node.children]
+        geometry = [child for child in children if child is not None and child.scalable]
+        return geometry[0] if len(geometry) == 1 and geometry[0].type is NodeType.GEOM else None
+
+    def scale_factors(self, node_id: int) -> tuple[float, float, float]:
+        """Return pending local scale; baked geometry always has identity scale."""
+        target = self.scale_target(node_id)
+        preview = getattr(self, "_model_edit_preview", None)
+        if target is not None and preview is not None and preview.visible:
+            command = preview.pending_scale(target.node_id)
+            if command is not None:
+                return tuple(command.scale)
+        return (1.0, 1.0, 1.0)
 
     def node_world_bounds(self, node_id: int) -> CenteredBounds | None:
         """Return selected geometry center and half extent in world space."""
@@ -1329,6 +1352,7 @@ class Session:
                 command,
                 (
                     cmd.SetPose,
+                    cmd.SetScale,
                     cmd.SetMaterial,
                     cmd.SetGeometryColor,
                     cmd.SetGeometrySize,
@@ -2265,6 +2289,21 @@ class Session:
                 return CommandResult.bad(message)
             ok = self._adapter.set_pose(c.node_id, c.position, c.rotation)
             return CommandResult.good("") if ok else CommandResult.bad("Pose update failed")
+
+        if isinstance(c, cmd.SetScale):
+            if not self._paused:
+                return CommandResult.bad("Pause simulation before scaling geometry")
+            target = self.scale_target(c.node_id)
+            if target is None:
+                return CommandResult.bad("This entity does not support local geometry scaling")
+            try:
+                scale = scale_vector(c.scale)
+            except (TypeError, ValueError) as error:
+                return CommandResult.bad(str(error))
+            if not self._adapter.set_scale(target.node_id, scale):
+                return CommandResult.bad("Geometry scale update failed")
+            self._refresh_structure()
+            return CommandResult.good("")
 
         if isinstance(c, cmd.SetQpos):
             if not caps.write_qpos:

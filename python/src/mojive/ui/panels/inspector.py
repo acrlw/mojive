@@ -912,6 +912,7 @@ class InspectorPanel(Panel):
         editable = _pose_editable(
             ctx.session.adapter.caps.write_pose, ctx.session.paused, node.posable
         )
+        scale_editable = ctx.session.paused and ctx.session.scale_target(node.node_id) is not None
         self._transform_velocity = _has_free_velocity(ctx.session.joints, node.body_index)
         velocity = _free_velocity(ctx.session.frame.qvel, ctx.session.joints, node.body_index)
         label_width = (
@@ -931,11 +932,18 @@ class InspectorPanel(Panel):
             (
                 (ctx.tr("position"), pos, 0.01, "%.3f", None),
                 (ctx.tr("rotation"), euler, 0.5, "%.1f", None),
+                (ctx.tr("Scale"), ctx.session.scale_factors(node.node_id), 0.01, "%.3f", (1, 1, 1)),
             ),
-            editable=editable,
+            editable=(editable, editable, scale_editable),
             label_width=label_width,
         )
-        (pos_changed, new_pos), (rot_changed, new_euler) = edits
+        (pos_changed, new_pos), (rot_changed, new_euler), (scale_changed, new_scale) = edits
+        if scale_changed:
+            # The shared pending-edit workflow previews scale and bakes it once on Apply.
+            ctx.submit(cmd.SetScale(node.node_id, new_scale))
+        if scale_editable:
+            imgui.text_disabled(ctx.tr("Apply to bake scale."))
+            imgui.set_item_tooltip(ctx.tr("Apply bakes Scale into dimensions and resets it to 1."))
         if velocity is not None:
             _vector_fields(
                 ctx,
@@ -3529,7 +3537,7 @@ def _vector_fields(
     table_id: str,
     rows,
     *,
-    editable: bool = True,
+    editable: bool | tuple[bool, ...] = True,
     label_width: float = 0.0,
 ) -> tuple[tuple[bool, np.ndarray], ...]:
     label_width = max(
@@ -3566,14 +3574,14 @@ def _vector_fields(
             node,
             name,
             values,
-            editable=editable,
+            editable=editable if isinstance(editable, bool) else editable[index],
             speed=speed,
             fmt=fmt,
             compact=compact,
             stacked=layout == 2,
             reset_values=reset_values,
         )
-        for name, values, speed, fmt, reset_values in rows
+        for index, (name, values, speed, fmt, reset_values) in enumerate(rows)
     )
     imgui.end_table()
     return result
@@ -3640,6 +3648,7 @@ def _vector_row(
             speed=speed,
             fmt=fmt,
             grouped=not stacked,
+            reset_value=float(resets[axis]),
         )
         if reset:
             out[axis] = resets[axis]
@@ -3670,6 +3679,7 @@ def _axis_field(
     lo: float = 0.0,
     hi: float = 0.0,
     grouped: bool = True,
+    reset_value: float = 0.0,
 ) -> tuple[bool, bool, float]:
     gap = 5.0 * ctx.style_scale if grouped else 0.0
     if grouped:
@@ -3713,7 +3723,9 @@ def _axis_field(
     button_id = imgui.get_item_id()
     imgui.pop_style_color(5)
     if button_hovered:
-        imgui.set_tooltip(ctx.tr("Click to reset to 0") if editable else ctx.tr("Read only"))
+        imgui.set_tooltip(
+            f"{ctx.tr('Reset')}: {reset_value:g}" if editable else ctx.tr("Read only")
+        )
 
     group_gap = (2 - axis) * gap / 3.0
     imgui.same_line(0.0, 0.0)

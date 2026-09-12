@@ -19,6 +19,7 @@ from .adapters.base import (
     SceneSource,
 )
 from .bounds import SceneBounds
+from .geometry import scaled_geometry_size
 from .types import (
     DEFAULT_HEADLIGHT,
     DEFAULT_MATERIAL,
@@ -62,6 +63,10 @@ class SceneObject:
     def set_size(self, size) -> None:
         """Set three positive shape dimensions."""
         self.scene.set_object_size(self.object_id, size)
+
+    def scale(self, factors) -> None:
+        """Bake positive local XYZ scale factors into this object's dimensions."""
+        self.scene.scale_object(self.object_id, factors)
 
     def remove(self) -> None:
         """Remove this object from its scene."""
@@ -446,6 +451,21 @@ class Scene:
             return False
         return True
 
+    def scale_object(self, object_id: int, factors) -> None:
+        """Scale authored geometry locally without changing its world pose."""
+        self.set_object_size(object_id, scaled_geometry_size(self._item(object_id).size, factors))
+
+    def set_scale(self, node_id: int, scale) -> bool:
+        """Bake scale through either the object's link or its geometry node."""
+        object_id = self._node_to_oid.get(node_id, self._geom_node_to_oid.get(node_id))
+        if object_id is None:
+            return False
+        try:
+            self.scale_object(object_id, scale)
+        except ValueError:
+            return False
+        return True
+
     def set_light(self, light_id: int, light) -> bool:
         """Replace a light by stable ID."""
         try:
@@ -625,6 +645,7 @@ class Scene:
                     object_id=item.object_id,
                     posable=True,
                     body_index=body_index,
+                    scalable=True,
                 )
             )
             nodes.append(
@@ -635,6 +656,7 @@ class Scene:
                     parent=link_id,
                     body_index=body_index,
                     geom_index=i,
+                    scalable=True,
                 )
             )
             nodes[0].children.append(link_id)

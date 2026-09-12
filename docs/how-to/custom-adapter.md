@@ -99,6 +99,21 @@ the documented `ModelComponentInfo` / keyframe method contracts, not arbitrary e
 Adapters must implement those contracts completely before advertising them. New incompatible
 payloads need a new extension revision or a distinct namespaced operation.
 
+### Local geometry scale
+
+Advertise `AdapterCaps.write_scale` and mark each supported geometry `SceneNode.scalable`.
+A single-geometry object's parent can also be scalable; Session resolves it to that geometry,
+so both Inspector selections share one pending value. Implement `set_scale(node_id, factors)`
+to atomically bake positive local XYZ factors into authored dimensions, preserve world position
+and rotation, and advance `structure_revision`. Return `False` without mutations for unsupported
+targets. This contract scales geometry in its local frame, not articulated subtrees or shear.
+Only mark shapes that can preserve the requested nonuniform scaling.
+
+`SetScale` submitted directly applies its factors once. The UI coalesces it in `ModelEditDraft`,
+previews the render sizes, and applies one transaction on confirmation. The committed transform
+has identity scale; saved scenes and future rebuilds use the baked dimensions. `SceneObject.scale`
+provides the equivalent operation for programmatic authored scenes.
+
 RPC discovery includes operation `version`, `method_versions`, `available_methods`, and
 availability reasons. Clients should discover once per connection and refresh after document
 or adapter changes. Requests may send `operation_version`; a mismatch is rejected before

@@ -18,7 +18,7 @@ from ..assets import resolve
 from ..composition import build, build_editor, build_scene
 from ..gizmo import RING_RADIUS, SIZE_PT, TRACKBALL_RADIUS, GizmoHandle, project, world_scale
 from ..scene import Scene
-from ..types import CameraView
+from ..types import CameraView, MeshShape
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,8 +30,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--status-only", action="store_true", help="Capture telemetry spacing at digit boundaries"
     )
+    parser.add_argument(
+        "--scale-only", action="store_true", help="Exercise Inspector scale preview, Apply and Undo"
+    )
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.scale_only:
+        _capture_scale_authoring(args.output)
+        return 0
     if args.status_only:
         _capture_status_spacing(args.output)
         return 0
@@ -417,6 +423,70 @@ def _capture_selection_flow(output: Path) -> None:
         _save_window_crop(viewer, "Hierarchy", output / "selection-replaced-closeup.png", padding=4)
     finally:
         viewer.release()
+
+
+def _capture_scale_authoring(output: Path) -> None:
+    """Exercise the real Inspector against an empty composed workspace."""
+    with build_editor(vsync=False, width=1600, height=1000, show_window=False) as viewer:
+        viewer.app.localizer.set_language("en", persist=False)
+        _settle(viewer, 8)
+        session = viewer.session
+        result = session.submit(
+            cmd.AddSceneObject(
+                MeshShape.BOX,
+                "Scaled box",
+                (0.3, 0.3, 0.3),
+                (0, 0, 0.3),
+            )
+        )
+        assert result.ok, result.message
+        session.submit(cmd.Select(result.entity_id))
+        _settle(viewer, 3)
+        _activate_panel(viewer, "Inspector")
+        node = session.selected_node
+        _save(viewer, output / "scale-identity.png")
+        _enter_numeric_value(viewer, f"##Scale_0_{node.node_id}", "2")
+        np.testing.assert_allclose(session.scale_factors(node.node_id), [2, 1, 1])
+        np.testing.assert_allclose(session._source.geom_size[-1], [0.3, 0.3, 0.3])
+        np.testing.assert_allclose(session.source.geom_size[-1], [0.6, 0.3, 0.3])
+        _park_cursor(viewer)
+        _settle(viewer, 3)
+        _save(viewer, output / "scale-preview.png")
+        _save_window_crop(viewer, "Inspector", output / "scale-preview-inspector.png")
+        _click(viewer, _item_center(viewer, "button", f"X##Scale_0_{node.node_id}"))
+        assert session.scale_factors(node.node_id) == (1, 1, 1)
+        _enter_numeric_value(viewer, f"##Scale_0_{node.node_id}", "2")
+        _click(viewer, _item_center(viewer, "button", "Apply##apply_model_edits"))
+        deadline = time.monotonic() + 10
+        while viewer.app.model_edits.active and time.monotonic() < deadline:
+            viewer.sync()
+        assert not viewer.app.model_edits.active, viewer.app.model_edits.error
+        _settle(viewer, 3)
+        np.testing.assert_allclose(session.source.geom_size[-1], [0.6, 0.3, 0.3])
+        assert session.scale_factors(node.node_id) == (1, 1, 1)
+        _save(viewer, output / "scale-applied.png")
+        _save_window_crop(viewer, "Inspector", output / "scale-applied-inspector.png")
+        assert session.submit(cmd.Undo()).ok
+        _settle(viewer, 3)
+        np.testing.assert_allclose(session.source.geom_size[-1], [0.3, 0.3, 0.3])
+        _save(viewer, output / "scale-undo.png")
+        _enter_numeric_value(viewer, f"##Scale_0_{node.node_id}", "3")
+        _click(viewer, _item_center(viewer, "button", "Discard##discard_model_edits"))
+        assert not viewer.app.model_edits.active
+        np.testing.assert_allclose(session.source.geom_size[-1], [0.3, 0.3, 0.3])
+
+
+def _enter_numeric_value(viewer, label: str, text: str) -> None:
+    point = _item_center(viewer, "drag_float", label)
+    io = imgui.get_io()
+    _click(viewer, point)
+    _click(viewer, point)
+    io.add_input_characters_utf8(text)
+    viewer.sync()
+    io.add_key_event(imgui.Key.enter, True)
+    viewer.sync()
+    io.add_key_event(imgui.Key.enter, False)
+    _settle(viewer, 3)
 
 
 def _capture_empty_workspace(output: Path) -> None:
