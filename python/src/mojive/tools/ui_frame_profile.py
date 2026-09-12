@@ -188,7 +188,11 @@ def main(argv: list[str] | None = None) -> int:
 
         profile_path = args.output / "ui-frame-profile.prof"
         from ..ui.draw2d import _cached_fringe_points, _concave_indices
-        from ..ui.icons import _production_icon_layout, production_helper_strokes
+        from ..ui.icons import (
+            _icon_draw_commands,
+            _production_icon_layout,
+            production_helper_strokes,
+        )
         from ..ui.panels.filters import severity_meshes
         from ..ui.viewport_widgets import _scaled_reset_glyph
 
@@ -196,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             "diagnostic_meshes": severity_meshes,
             "fringes": _cached_fringe_points,
             "icon_layout": _production_icon_layout,
+            "icon_commands": _icon_draw_commands,
             "helper_icon_paths": production_helper_strokes,
             "triangulation": _concave_indices,
             "reset_glyph": _scaled_reset_glyph,
