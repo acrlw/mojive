@@ -40,6 +40,8 @@ class GeometryPreview:
 
     def __init__(self, session):
         base = session._source
+        self.base_source = base
+        self._instance_indices = {}
         self.source = replace(
             base,
             geom_mesh=list(base.geom_mesh),
@@ -53,6 +55,16 @@ class GeometryPreview:
         self._base_frame = None
         self._frame = None
         self._buffers = {}
+
+    def reset_sizes(self):
+        """Restore dimension buffers before replaying a coalesced scale/size gesture."""
+        np.copyto(self.source.geom_size, self.base_source.geom_size)
+        np.copyto(self.source.geom_local, self.base_source.geom_local)
+
+    def _instances(self, node_id):
+        if node_id not in self._instance_indices:
+            self._instance_indices[node_id] = np.flatnonzero(self.source.geom_node == node_id)
+        return self._instance_indices[node_id]
 
     def add(self, session, command, creation):
         kind, _, subtype = command.element_type.partition(":")
@@ -102,6 +114,7 @@ class GeometryPreview:
         self._append(parts, node, index, material, kind)
 
     def _append(self, parts, node, index, material, kind):
+        self._instance_indices.clear()
         source = self.source
         count, added = source.instance_count, len(parts)
         for name, values in (
@@ -142,7 +155,7 @@ class GeometryPreview:
     def edit(self, command, node_id):
         source = self.source
         if isinstance(command, cmd.SetGeometrySize):
-            for index in np.flatnonzero(source.geom_node == node_id):
+            for index in self._instances(node_id):
                 shape = source.geom_mesh[index].shape
                 size = np.asarray(command.size, np.float32)
                 if shape is MeshShape.CAPSULE_CAP:
@@ -151,6 +164,8 @@ class GeometryPreview:
                     local[2, 3] = np.copysign(size[2], local[2, 2])
                 else:
                     source.geom_size[index] = size
+        elif isinstance(command, cmd.SetScale):
+            source.geom_size[self._instances(node_id)] *= command.scale
         elif isinstance(command, cmd.SetGeometryColor):
             source.geom_rgba[source.geom_node == node_id] = command.rgba
         elif isinstance(command, cmd.SetPose):
@@ -167,6 +182,7 @@ class GeometryPreview:
                 if node.node_id == node_id:
                     node.name = command.name.strip()
         elif isinstance(command, cmd.RemoveModelElement):
+            self._instance_indices.clear()
             removed = {node_id}
             for node in self.nodes:
                 if node.parent in removed:

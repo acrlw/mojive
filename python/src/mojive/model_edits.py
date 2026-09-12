@@ -13,6 +13,7 @@ import numpy as np
 
 from . import commands as cmd
 from .adapters.base import NodeType
+from .geometry import scale_vector, scaled_geometry_size
 from .model_preview import GeometryPreview
 
 if TYPE_CHECKING:
@@ -65,6 +66,7 @@ class _ModelEditPlan:
 # A geometry color keeps its direct path too, unless it styles an element that this
 # batch creates, which only becomes addressable after Apply.
 MODEL_REBUILD_COMMANDS = (
+    cmd.SetScale,
     cmd.SetGeometrySize,
     cmd.SetGeometryColor,
     cmd.SetSceneModelTransform,
@@ -154,6 +156,7 @@ class ModelEditDraft:
         self.by_node_id = {}
         self.by_object_id = {}
         self.geometry = None
+        self._size_only_preview = False
         self.error = ""
         self._document_id = None
         self._adapter_revision = None
@@ -171,6 +174,38 @@ class ModelEditDraft:
     @property
     def visible(self):
         return self.active and not self.applying and self.compatible()
+
+    def pending_scale(self, node_id):
+        """Return the coalesced factors for a canonical geometry node."""
+        return next(
+            (
+                item
+                for item in self.commands
+                if isinstance(item, cmd.SetScale) and item.node_id == node_id
+            ),
+            None,
+        )
+
+    def stage_scaled_size(self, command):
+        """Keep absolute dimension edits relative to the same unmodified scale baseline."""
+        source = self.session._source
+        sizes = source.geom_size[source.geom_node == command.node_id]
+        if len(sizes) != 1:
+            return cmd.CommandResult.bad("Scale dimension editing requires one geometry instance")
+        baseline = sizes[0]
+        for pending in self.commands:
+            if getattr(pending, "node_id", None) != command.node_id:
+                continue
+            if isinstance(pending, cmd.SetScale):
+                break
+            if isinstance(pending, cmd.SetGeometrySize):
+                baseline = pending.size
+        try:
+            with np.errstate(over="ignore", invalid="ignore"):
+                factors = scale_vector(command.size) / baseline
+        except (TypeError, ValueError) as error:
+            return cmd.CommandResult.bad(str(error))
+        return self.stage(cmd.SetScale(command.node_id, factors))
 
     @staticmethod
     def _key(command):
@@ -230,6 +265,15 @@ class ModelEditDraft:
             size = np.asarray(command.size)
             if size.shape != (3,) or not np.isfinite(size).all() or np.any(size <= 0):
                 return cmd.CommandResult.bad("Geometry size must contain three positive values")
+        if isinstance(command, cmd.SetScale):
+            target = self.session.scale_target(command.node_id)
+            if target is None:
+                return cmd.CommandResult.bad("This entity does not support local geometry scaling")
+            try:
+                scale_vector(command.scale)
+            except (TypeError, ValueError) as error:
+                return cmd.CommandResult.bad(str(error))
+            command = replace(command, node_id=target.node_id)
         if isinstance(command, cmd.AddModelKeyframe):
             name = str(command.name).strip()
             if not name:
@@ -270,6 +314,9 @@ class ModelEditDraft:
             ),
             None,
         )
+        error = self._scale_dimensions_error(command, index)
+        if error:
+            return cmd.CommandResult.bad(error)
         if index is None:
             if len(self.commands) >= 512:
                 return cmd.CommandResult.bad("Apply pending edits before adding more operations")
@@ -288,6 +335,33 @@ class ModelEditDraft:
         return cmd.CommandResult.good(
             "", entity_id=creation.node_id if creation else -1, entity_key=created
         )
+
+    def _scale_dimensions_error(self, command, index):
+        """Validate composed factors before replacing a valid preview or pending command."""
+        if not isinstance(command, (cmd.SetScale, cmd.SetGeometrySize)):
+            return None
+        proposed = list(self.commands)
+        if index is None:
+            proposed.append(command)
+        else:
+            proposed[index] = command
+        if not any(
+            isinstance(item, cmd.SetScale) and item.node_id == command.node_id for item in proposed
+        ):
+            return None
+        source = self.session._source
+        size = source.geom_size[source.geom_node == command.node_id]
+        try:
+            for item in proposed:
+                if getattr(item, "node_id", None) != command.node_id:
+                    continue
+                if isinstance(item, cmd.SetGeometrySize):
+                    size = item.size
+                elif isinstance(item, cmd.SetScale):
+                    size = scaled_geometry_size(size, item.scale)
+        except (TypeError, ValueError) as error:
+            return str(error)
+        return None
 
     def model_keyframe_names(self, model_id: int) -> set[str]:
         """Return compiled and pending names reserved by one model edit batch."""
@@ -468,6 +542,23 @@ class ModelEditDraft:
     def refresh_preview(self):
         session = self.session
         base = session._source
+        sizes_only = all(
+            isinstance(command, (cmd.SetGeometrySize, cmd.SetScale)) for command in self.commands
+        )
+        if (
+            self.geometry is not None
+            and self.geometry.base_source is base
+            and self._size_only_preview
+            and sizes_only
+        ):
+            # Dimension gestures do not change topology. Reuse source buffers and
+            # node indexes instead of cloning the entire hierarchy on every drag tick.
+            self.geometry.reset_sizes()
+            for command in self.commands:
+                self.geometry.edit(command, command.node_id)
+            self._invalidate_bounds()
+            return
+        self._size_only_preview = sizes_only
         self.geometry = GeometryPreview(session) if base is not None else None
         for command in self.commands:
             if self.geometry is not None:
@@ -498,9 +589,12 @@ class ModelEditDraft:
                         for field in fields(command)
                         if getattr(command, field.name) is not None
                     }
-        session._mesh_bounds_cache.clear()
-        session._scene_bounds = None
-        session._preview_generation += 1
+        self._invalidate_bounds()
+
+    def _invalidate_bounds(self):
+        self.session._mesh_bounds_cache.clear()
+        self.session._scene_bounds = None
+        self.session._preview_generation += 1
 
     def rebase_after_failure(self):
         self.applying = False

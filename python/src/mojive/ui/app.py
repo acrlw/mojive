@@ -1190,6 +1190,15 @@ class ViewerApp:
         draft = self.model_edits
         if draft.applying:
             return None
+        # Scale is a dimension-baking operation. Keep its factors editable until
+        # Apply, even when other model property writes use the live-update mode.
+        if isinstance(command, cmd.SetScale):
+            return draft.stage(command)
+        if (
+            isinstance(command, cmd.SetGeometrySize)
+            and draft.pending_scale(command.node_id) is not None
+        ):
+            return draft.stage_scaled_size(command)
         if isinstance(command, cmd.BeginEditTransaction) and not self.live_model_updates:
             if draft._checkpoint is not None or self.session.editing:
                 return cmd.CommandResult.bad("An edit transaction is already active")

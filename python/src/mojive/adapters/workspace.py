@@ -62,6 +62,7 @@ class WorkspaceAdapter(SceneAdapterBase):
             primary.caps,
             name=f"workspace:{primary.caps.name}",
             write_pose=True,
+            write_scale=True,
             model_cameras=True,
             scene_authoring=True,
             scene_files=True,
@@ -449,6 +450,12 @@ class WorkspaceAdapter(SceneAdapterBase):
         if scene_node is not None:
             return self.scene.set_geometry_size(scene_node, size)
         return self.primary.set_geometry_size(node_id, size)
+
+    def set_scale(self, node_id: int, scale) -> bool:
+        scene_node = self._node_to_scene.get(int(node_id))
+        if scene_node is not None:
+            return self.scene.set_scale(scene_node, scale)
+        return self.primary.set_scale(node_id, scale)
 
     def add_scene_object(self, shape, name, size, position, rotation, color, material) -> int:
         raw = self.scene.add(

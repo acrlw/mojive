@@ -33,6 +33,20 @@ Double-click the Inspector's name to rename an editable entity. Enter or leaving
 the field commits; Escape cancels. Renaming uses the existing authoring and Undo/Redo routes.
 Hierarchy type/count filters wrap to the available width; context actions remain capability-based.
 
+Inspector **Transform > Scale** accepts positive factors along the object's local XYZ axes.
+Drag a value or double-click to type it; click an axis badge to reset that factor to 1.
+Mojive-authored primitives and meshes support scaling, including in an empty MuJoCo workspace.
+MuJoCo model entities currently show read-only identity scale. Position editing and scaling have
+independent capabilities, so a geometry can be scalable even when its parent owns its pose.
+
+Scale edits share the pending-edit preview and **Apply / Discard** controls. Apply multiplies
+the authored dimensions, rebuilds once, and returns Scale to `(1, 1, 1)` without moving or rotating
+the object. Undo restores the dimensions before Apply. Scale always uses this explicit baking
+step, including with live model updates enabled. Nonuniformly scaled spheres retain three radii;
+nonuniform cylinders and cones retain separate X/Y diameters. Physics subtrees, negative scale,
+and shear are not part of this operation. Run `make ui-runtime ARGS="--scale-only"` to exercise
+numeric input, preview, Apply, and Undo in a new composed workspace.
+
 Control and Joints use one padded row per scalar value, with a thin slider and compact numeric
 entry. The fill runs from the minimum to the current value; hover and pressing change its colors.
 Right-click the numeric field to restore its initial value. Angular units appear in a joined

@@ -22,6 +22,7 @@ class StaticSceneAdapter(SceneAdapterBase):
         name="static",
         simulation=False,
         write_pose=True,
+        write_scale=True,
         model_cameras=True,
         reload=True,
         scene_authoring=True,
@@ -94,6 +95,9 @@ class StaticSceneAdapter(SceneAdapterBase):
 
     def set_geometry_size(self, node_id, size) -> bool:
         return self.scene.set_geometry_size(node_id, size)
+
+    def set_scale(self, node_id, scale) -> bool:
+        return self.scene.set_scale(node_id, scale)
 
     def cameras(self) -> list[CameraInfo]:
         return self.scene.camera_infos()

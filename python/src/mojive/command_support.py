@@ -32,6 +32,7 @@ _REQUIREMENTS = {
         ("scene_files",),
     ),
     **dict.fromkeys((cmd.SetPose,), ("write_pose",)),
+    cmd.SetScale: ("write_scale",),
     **dict.fromkeys(
         (
             cmd.SetJointProperties,

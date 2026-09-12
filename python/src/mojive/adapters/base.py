@@ -84,6 +84,10 @@ class SceneNode:
     # separate: a free body can be movable even when no authored source exists.
     source_editable: bool = False
 
+    # Local geometry scaling is separate from runtime pose control. Adapters
+    # advertise it only where set_scale can bake dimensions without losing shape.
+    scalable: bool = False
+
 
 @dataclass
 class JointInfo:
@@ -448,6 +452,7 @@ class AdapterCaps:
     model_formats: tuple[str, ...] = ()
     features: tuple[tuple[str, int], ...] = ()
     write_ctrl: bool = False
+    write_scale: bool = False
 
     def supports(self, feature: str, version: int = 1) -> bool:
         """Check an exact feature contract revision; unknown features are unavailable.
@@ -1293,6 +1298,15 @@ class SceneAdapterBase:
         """Set authored primitive dimensions for a geometry or site node."""
         return False
 
+    def set_scale(self, node_id: int, scale: np.ndarray) -> bool:
+        """Bake positive local XYZ factors into a scalable node's geometry.
+
+        Preserve position and rotation, update authored dimensions atomically, and
+        publish a new structure revision. Unsupported targets remain unchanged.
+        Scalable nodes own geometry in their local frame, not articulated subtrees.
+        """
+        return False
+
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
         """Write a backend-neutral view to a model camera."""
         return False
@@ -1538,6 +1552,8 @@ class SceneAdapter(SceneProvider, Protocol):
     def set_material(self, material_index: int, material: Material) -> bool: ...
     def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool: ...
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool: ...
+
+    def set_scale(self, node_id: int, scale: np.ndarray) -> bool: ...
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
     def add_scene_object(
         self,

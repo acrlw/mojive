@@ -65,6 +65,26 @@ def test_staging_coalesces_without_physics_writes_and_apply_has_one_undo(scene, 
     assert not session.submit(cmd.Undo()).ok
 
 
+def test_mujoco_geometry_is_read_only_for_scale_but_authored_objects_are_not(scene):
+    from mojive.types import MeshShape
+
+    session, adapter, draft = scene
+    box = next(n for n in session.nodes if n.name == "box")
+    model = adapter._m
+    assert session.scale_factors(box.node_id) == (1, 1, 1)
+    assert not draft.stage(cmd.SetScale(box.node_id, [2, 2, 2])).ok
+    assert not session.submit(cmd.SetScale(box.node_id, [2, 2, 2])).ok
+    result = session.submit(cmd.AddSceneObject(MeshShape.BOX, "authored"))
+    assert result.ok
+    authored = session.node_by_object_id(result.entity_id)
+    assert draft.stage(cmd.SetScale(authored.node_id, [2, 3, 4])).ok
+    draft.applying = True
+    assert session.apply_model_edits(draft.resolve_commands(session)).ok
+    draft.clear()
+    np.testing.assert_allclose(session.source.geom_size[-1], [1, 1.5, 2])
+    assert adapter._m is model
+
+
 def test_pending_model_keyframes_reserve_generated_names_until_apply(scene):
     from mojive.ui.panels.keyframes import unique_keyframe_name
 
