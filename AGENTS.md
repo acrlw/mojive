@@ -57,7 +57,9 @@ Use these names consistently:
 
 - Keep changes focused and compact.
 - Prefer direct control flow and established invariants.
-- Use professional English for code, comments, logs, UI copy, documentation, and commits.
+- Use professional English for code, comments, logs, UI copy, general documentation, and commits.
+- Write architecture proposals and plans in Chinese for quick review; keep API identifiers and
+  established technical terms in English where useful.
 - Comments explain architectural constraints, platform behavior, and non-obvious algorithms.
 - Public names describe domain meaning and match existing terminology.
 - Hot frame paths reuse buffers and avoid transient allocations.
