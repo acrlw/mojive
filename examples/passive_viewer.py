@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image
 
 from mojive import launch_passive
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 
 
 def main() -> None:

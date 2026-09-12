@@ -15,6 +15,7 @@ def test_projection_pair_is_centered_without_text_origin_truncation(monkeypatch,
     from imgui_bundle import imgui
 
     from mojive.ui.draw2d import ImguiDraw2D
+    from mojive.ui.icons import ICON_GRID, production_icon_metrics
     from mojive.ui.panels import segmented_control
     from mojive.ui.window import Window, WindowConfig
 
@@ -67,14 +68,16 @@ def test_projection_pair_is_centered_without_text_origin_truncation(monkeypatch,
 
         assert len(records) == 2
         text_origins = []
-        for lo, hi, ink_left, ink_top, ink_right, ink, body, pos in records:
+        for index, (lo, hi, ink_left, ink_top, ink_right, ink, body, pos) in enumerate(records):
             # Native AddText must honor the same fractional origin as layout.
             assert ink_left == pytest.approx(pos[0] + ink[0], abs=1e-4)
             assert ink_top == pytest.approx(pos[1] + ink[1], abs=1e-4)
             body_center = ink_top - ink[1] + (body[1] + body[3]) * 0.5
             assert body_center == pytest.approx((lo.y + hi.y) * 0.5, abs=1e-4)
             glyph_scale = max(0.65, (hi.y - lo.y) / 24.0)
-            glyph_width = 10.4 * glyph_scale + max(1.0, 1.25 * glyph_scale)
+            name = ("panel-perspective", "panel-orthographic")[index]
+            bounds = production_icon_metrics(name).bounds
+            glyph_width = (bounds[2] - bounds[0]) * 16.0 * glyph_scale / ICON_GRID
             pair_left = ink_left - 7.0 * glyph_scale - glyph_width
             assert (pair_left + ink_right) * 0.5 == pytest.approx((lo.x + hi.x) * 0.5, abs=1e-4)
             text_origins.append(pos[1])

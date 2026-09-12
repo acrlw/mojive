@@ -8,9 +8,10 @@ from functools import lru_cache
 
 from imgui_bundle import imgui
 
+from mojive.drawing.curves import CORNER_SMOOTHING, smooth_polygon_corners
+
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
-from ...curves2d import CORNER_SMOOTHING, smooth_polygon_corners
 from ..draw2d import ImguiDraw2D, text_line_y
 from ..pointer_bindings import PointerAction
 from ..theme import ROW_PADDING_X, ROW_PADDING_Y

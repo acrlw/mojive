@@ -8,7 +8,7 @@ from imgui_bundle import imgui
 
 from mojive import build
 from mojive import commands as cmd
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]

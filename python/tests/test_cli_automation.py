@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from mojive import cli
-from mojive.control_rpc import ControlServer, ControlService, RpcClient
+from mojive.control.rpc import ControlServer, ControlService, RpcClient
 
 
 @pytest.mark.parametrize("argument", ["--params", "--params-file"])
@@ -90,7 +90,7 @@ def test_json_missing_files_are_machine_readable(args, capsys):
 
 def test_offline_catalog_matches_live_contracts(capsys):
     from mojive.adapters.static import StaticSceneAdapter
-    from mojive.operations import OPERATIONS
+    from mojive.control.operations import OPERATIONS
     from mojive.scene import Scene
 
     assert cli.main(["operations", "--json"]) == 0
@@ -132,7 +132,7 @@ def test_offline_catalog_does_not_start_application_or_graphics():
 import sys
 from mojive.cli import main
 assert main(['operations', 'set_camera', '--json']) == 0
-for name in ('mojive.control', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl', 'wgpu'):
+for name in ('mojive.control.application', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl', 'wgpu'):
     assert name not in sys.modules, name
 """,
         ],
@@ -181,10 +181,10 @@ def test_assets_release_adapter_when_node_query_fails(monkeypatch, capsys):
     def fail():
         raise RuntimeError("metadata unavailable")
 
-    monkeypatch.setattr("mojive.assets.list_assets", lambda: ["test"])
-    monkeypatch.setattr("mojive.assets.resolve", lambda name: name)
+    monkeypatch.setattr("mojive.scene.assets.list_assets", lambda: ["test"])
+    monkeypatch.setattr("mojive.scene.assets.resolve", lambda name: name)
     monkeypatch.setattr(
-        "mojive.backends.make_adapter",
+        "mojive.application.backends.make_adapter",
         lambda *args: SimpleNamespace(nodes=fail, release=lambda: released.append(True)),
     )
     assert cli.main(["assets", "--json"]) == 0
@@ -246,17 +246,18 @@ def test_probe_uses_an_installed_module(monkeypatch):
 
 def test_rpc_serve_releases_service_when_socket_creation_fails(monkeypatch):
     closed = []
-    monkeypatch.setattr(cli, "_resolve", lambda value: value)
-    monkeypatch.setattr("mojive.backends.make_adapter", lambda *args: None)
+    monkeypatch.setattr("mojive.cli.viewer._resolve", lambda value: value)
+    monkeypatch.setattr("mojive.cli.control._resolve", lambda value: value)
+    monkeypatch.setattr("mojive.application.backends.make_adapter", lambda *args: None)
     monkeypatch.setattr(
-        "mojive.control_rpc.ControlService",
+        "mojive.control.rpc.ControlService",
         lambda *args: SimpleNamespace(close=lambda: closed.append(True)),
     )
 
     def fail(*args):
         raise OSError("Socket already active")
 
-    monkeypatch.setattr("mojive.control_rpc.ControlServer", fail)
+    monkeypatch.setattr("mojive.control.rpc.ControlServer", fail)
     assert cli.main(["rpc-serve", "unused"]) == 2
     assert closed == [True]
 
@@ -264,8 +265,9 @@ def test_rpc_serve_releases_service_when_socket_creation_fails(monkeypatch):
 @pytest.mark.parametrize("stage", ["publisher", "writer"])
 def test_snapshot_serve_releases_acquired_resources_when_startup_fails(stage, monkeypatch):
     closed = []
-    monkeypatch.setattr(cli, "_resolve", lambda value: value)
-    monkeypatch.setattr("mojive.backends.make_adapter", lambda *args: None)
+    monkeypatch.setattr("mojive.cli.viewer._resolve", lambda value: value)
+    monkeypatch.setattr("mojive.cli.control._resolve", lambda value: value)
+    monkeypatch.setattr("mojive.application.backends.make_adapter", lambda *args: None)
     monkeypatch.setattr(
         "mojive.session.Session",
         lambda *args: SimpleNamespace(release=lambda: closed.append("session")),
@@ -280,7 +282,7 @@ def test_snapshot_serve_releases_acquired_resources_when_startup_fails(stage, mo
         if stage == "publisher"
         else lambda *args: SimpleNamespace(close=lambda: closed.append("publisher")),
     )
-    monkeypatch.setattr("mojive.recording.SnapshotWriter", fail)
+    monkeypatch.setattr("mojive.capture.recording.SnapshotWriter", fail)
     assert cli.main(["serve", "unused", "--record-snapshot", "unused.fvs"]) == 2
     assert closed == (["session"] if stage == "publisher" else ["publisher", "session"])
 

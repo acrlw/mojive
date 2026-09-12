@@ -1033,7 +1033,7 @@ def test_invalid_take_loop_preserves_existing_range(bounds):
 
 
 def test_state_take_stops_at_the_frame_budget(monkeypatch):
-    import mojive.session as session_module
+    import mojive.session.playback as session_module
 
     monkeypatch.setattr(session_module, "STATE_TAKE_FRAME_LIMIT", 2)
     session = Session(SnapshotToyPhysics())
@@ -1049,7 +1049,7 @@ def test_state_take_stops_at_the_frame_budget(monkeypatch):
 
 
 def test_state_take_rejects_a_first_frame_over_the_memory_budget(monkeypatch):
-    import mojive.session as session_module
+    import mojive.session.playback as session_module
 
     monkeypatch.setattr(session_module, "STATE_TAKE_BYTE_LIMIT", 1)
     session = Session(SnapshotToyPhysics())

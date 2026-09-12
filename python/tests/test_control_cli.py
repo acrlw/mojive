@@ -5,7 +5,7 @@ import json
 import pytest
 
 from mojive import cli
-from mojive.control_rpc import RpcError
+from mojive.control.rpc import RpcError
 
 
 @pytest.mark.parametrize("params", ["[]", "false", "{broken"])

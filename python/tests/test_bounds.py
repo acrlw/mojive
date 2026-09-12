@@ -7,7 +7,7 @@ import numpy as np
 from mojive import Scene
 from mojive.adapters.base import FrameNeeds
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.bounds import SceneBounds
+from mojive.scene.bounds import SceneBounds
 from mojive.session import Session
 from mojive.types import Bounds, CenteredBounds, InstancePoseSource, MeshData, MeshUpdate
 
@@ -179,7 +179,7 @@ def test_authored_source_framing_metadata_includes_offset_mesh_vertices():
 
 def test_selected_bounds_filter_current_metadata_without_stale_membership():
     from mojive.adapters.base import NodeType, SceneNode
-    from mojive.bounds import _node_local_bounds, _node_world_bounds
+    from mojive.scene.bounds import _node_local_bounds, _node_world_bounds
 
     scene = Scene()
     for i in range(6):

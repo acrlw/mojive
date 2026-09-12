@@ -30,6 +30,38 @@ The root `pyproject.toml` remains the Python build entry point. Imports never co
 `cpp`, `3rdparty`, or a backend library name. C++ headers describe Mojive's contracts rather
 than exposing bgfx handles, ImGui types, or MuJoCo-owned mutable state.
 
+## Python domain packages
+
+Implementation code is grouped by responsibility: `application/` constructs viewers;
+`scene/` owns authored scenes and serialization; `session/` owns document state and typed
+command routing; `control/` exposes operations and RPC; `capture/`, `remote/`,
+`interaction/` and `drawing/` contain their independent contracts and implementations.
+The root keeps shared vocabulary and explicit compatibility exports. Use the
+[Python module map (Chinese)](python-layout.zh.md) to locate owners and verification entry points.
+
+## Adapter packages
+
+Built-in implementations live in `adapters/mujoco/`, `adapters/static/` and
+`adapters/toy/`. Import their public adapter class from the package. The old
+`adapters.mujoco_adapter` module only preserves the published class import; it
+contains no implementation. New backends follow the same package layout.
+
+MuJoCo keeps one model/data owner in `adapter.py`. Its private implementation
+classes group methods by responsibility without a second state owner or forwarding
+layer: `composition.py` owns attachment and recompilation transactions;
+`model_editing.py`, `properties.py` and `keyframes.py` implement capability-specific
+edits; `source.py` converts stable structure; `diagnostics.py` publishes debug data;
+`export.py` serializes authored scenes. `spec.py` and `schema.py` contain model-format
+operations, while `simulation.py` and `deformables.py` own their dedicated runtime work.
+These private classes are parts of this adapter, not extension points for other
+backends. Other adapters implement the shared contracts in `adapters/base.py`.
+
+Prefer cohesive modules around 500–1,000 lines. Review a module before it exceeds
+2,500 lines; split by responsibility rather than arbitrary line ranges. Keep small
+adapters small, and retain abstractions only when they enforce a boundary or have
+concrete reuse. Format owned Python with `make fmt` and owned C++ with `make fmt-cpp`;
+never apply project formatting to third-party sources.
+
 ## Naming
 
 Owned directories use lowercase names, with underscores between words (`python/binding_tests`).
@@ -206,7 +238,7 @@ keyboard input. `clearable_combo` shares its inset clear action with `search_inp
 `pill_label` draws passive capsule badges. Existing panel imports re-export common controls.
 
 Reuse `compound_fields.py` for joined numeric fields and inset focus contours, `panels/value_cards.py` for value
-rails, `panels/filters.py` for filter pills and severity icons, and `viewport_widgets.py`
+rails, `panels/filters.py` for filter pills and severity icons, and `viewport_widgets/`
 for overlay glyphs. Keep domain commands in callers. Cache stable measurements and local
 geometry by their actual font, scale, text or size inputs, rather than duplicating painters
 inside each panel. Compound controls suppress the native rectangular focus cursor and draw

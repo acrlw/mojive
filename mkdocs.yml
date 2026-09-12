@@ -34,6 +34,7 @@ nav:
       - Editor and MJCF: guides/editor-and-mjcf.md
       - Testing: guides/testing.md
       - Python and C++ development: guides/development.md
+      - Python module map (中文): guides/python-layout.zh.md
       - G3 UI corners: how-to/ui-corners.md
       - Extend UI drawing: how-to/ui-drawing.md
       - Design UI icons: how-to/ui-icons.md

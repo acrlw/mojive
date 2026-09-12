@@ -8,7 +8,7 @@ from imgui_bundle import imgui
 
 from mojive import build
 from mojive import commands as cmd
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 from mojive.ui.panels.keyframes import timeline_status_hints
 
 pytestmark = pytest.mark.gpu

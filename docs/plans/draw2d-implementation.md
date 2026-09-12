@@ -132,19 +132,19 @@ RPC 查询补齐、请求预算、统一编辑批处理。下一节的任务均�
 | 要解决的问题 | 从哪里进入 |
 | --- | --- |
 | 图标参数与布局 | `python/src/mojive/ui/icons.py`：`ICON_TUNING_DEFAULTS`、`ICON_GLYPH_PADDING_DEFAULTS`、`ICON_GLYPH_STROKE_DEFAULTS`、`_production_icon_layout`、`draw_icon`。 |
-| 图标调用与胶囊 | `ui/viewport_widgets.py`；`ui/app.py` 的 `_draw_playback_widget`、`_draw_tool_column_widget`、`_draw_context_hint_widget`。 |
-| 当前几何和 AA | `ui/draw2d.py`：`_concave_indices`、`indexed_fill`、`_write_anti_alias_fringe`；`curves2d.py` 与 `draglink2d.py`。 |
+| 图标调用与胶囊 | `ui/viewport_widgets/glyphs.py`；`ui/app/viewport.py` 的 `_draw_playback_widget`、`_draw_tool_column_widget`、`_draw_context_hint_widget`。 |
+| 当前几何和 AA | `ui/draw2d.py`：`_concave_indices`、`indexed_fill`、`_write_anti_alias_fringe`；`drawing/curves.py` 与 `drawing/drag_link.py`。 |
 | UI Feasibility | `design/tools/render_ui_feasibility.py`：Icon Library、生产预览替换和参数导出；不要复制生产 painter。 |
 | OpenGL/WebGPU 窗口 | `ui/window.py`、`ui/window_wgpu.py` 的 `end_frame` 与字体/纹理处理。 |
 | 原生提交与复制 | `ui/window_native.py` 的 `_draw_packet`、`end_frame`；`cpp/bindings/Render.cpp` 的 `render_ui`；`cpp/src/bgfx/Renderer.cpp` 的 `renderUi`。 |
 | 原生契约与线程 | `cpp/include/mojive/Render.hpp`、`RenderRuntime.hpp`、`cpp/src/Contracts.cpp`、`RenderRuntime.cpp`。 |
 | 原生 UI shader | `cpp/shaders/vs_ui.sc`、`fs_ui.sc`、`varying.def.sc`；调试 shader 可参考 `fs_debugStroke.sc` 等。 |
 | 世界/屏幕调试图形 | `render/debugdraw.py` 的 Layer、PackedFrame；`render/overlay.py`；OpenGL/WebGPU 的 debug pass。 |
-| Scale 与草稿 | `commands.py`、`geometry.py`、`model_edits.py`、`model_preview.py`、`session.py` 的 `scale_target`、`scale_factors`、`apply_model_edits`。 |
-| 物理与自建对象边界 | `scene.py`、`adapters/base.py`、`adapters/static.py`、`adapters/workspace.py`、`adapters/mujoco_adapter.py`。 |
-| CLI/RPC 共用入口 | `operations.py` 的 `Operation`、`_cmd`、`prepare_operation`；`control_schema.py`；`control.py` 的 `dispatch`、`_edit_scene`、`_inspect_object`。 |
-| RPC 排队与关闭 | `control_rpc.py` 的 `ViewerControlService`、`_RequestHandler`、`RpcClient`；`ui/app.py` 的 RPC pump 和草稿作用域。 |
-| CLI 参数与错误 | `cli.py` 的 `cmd_control`、`cmd_operations`；复用 schema 和结构化错误，不新增第二套解析器。 |
+| Scale 与草稿 | `commands.py`、`scene/geometry.py`、`session/model_edits.py`、`session/model_preview.py`、`session/core.py` 的 `scale_target`、`scale_factors`，以及 `session/editing.py` 的 `apply_model_edits`。 |
+| 物理与自建对象边界 | `scene/model.py`、`adapters/base.py`、`adapters/static/adapter.py`、`adapters/workspace.py`、`adapters/mujoco/adapter.py`。 |
+| CLI/RPC 共用入口 | `control/operations.py` 的 `Operation`、`_cmd`、`prepare_operation`；`control/schema.py`；`control/application.py` 的 `dispatch`、`_edit_scene`、`_inspect_object`。 |
+| RPC 排队与关闭 | `control/rpc.py` 的 `ViewerControlService`、`_RequestHandler`、`RpcClient`；`ui/app/core.py` 的 RPC pump 和草稿作用域。 |
+| CLI 参数与错误 | `cli/control.py` 的 `cmd_control`、`cmd_operations`；复用 schema 和结构化错误，不新增第二套解析器。 |
 
 必读背景：[绘图扩展指南](../how-to/ui-drawing.md)、[图标设计与验收](../how-to/ui-icons.md)、
 [G3 圆角](../how-to/ui-corners.md)、[RPC 控制](../how-to/rpc-control.md)、
@@ -171,12 +171,12 @@ RPC 查询补齐、请求预算、统一编辑批处理。下一节的任务均�
 
 ### T01：Scale 的 CLI/RPC 闭环（R10；依赖 T00）
 
-- [ ] 在 `operations.py` 用现有 `_cmd` 注册 `set_scale`：`node_id`、三个正数 `scale`、可选文档前置条件；要求 paused、`write_scale`，允许事务。
+- [ ] 在 `control/operations.py` 用现有 `_cmd` 注册 `set_scale`：`node_id`、三个正数 `scale`、可选文档前置条件；要求 paused、`write_scale`，允许事务。
 - [ ] 复用 `SetScale` 和 Session 的目标解析，禁止在 control/CLI 中重写缩放乘法。
-- [ ] 更新 `control_schema.py` 和 inspection：至少返回 `scalable` 与已提交的 Scale 状态；在文档中说明直接调用会立即烘焙、之后为 identity。
+- [ ] 更新 `control/schema.py` 和 inspection：至少返回 `scalable` 与已提交的 Scale 状态；在文档中说明直接调用会立即烘焙、之后为 identity。
 - [ ] 测试发现/schema、父节点与几何节点、无能力目标、非法/非有限数/溢出、过期文档、Undo/Redo、保存重开。
 - [ ] 增加 CLI 真正通过 socket 执行的用例，不只测字典里出现了方法名；维护 `docs/how-to/rpc-control.md`。
-- [ ] 对照 `commands.py` 与 `operations.py` 输出命令覆盖表，标记公共操作、内部事务和本地交互；补齐本范围内的缺口，记录其他未公开命令的理由。
+- [ ] 对照 `commands.py` 与 `control/operations.py` 输出命令覆盖表，标记公共操作、内部事务和本地交互；补齐本范围内的缺口，记录其他未公开命令的理由。
 
 参考测试：`test_operations.py`、`test_rpc_scene.py`、`test_control_cli.py`、`test_cli_automation.py`、`test_scale.py`。
 完成证据：真实创建对象→查询 ID→缩放→查询尺寸→Undo/Redo 的无窗口和 attached-viewer 两条链路。
@@ -200,7 +200,7 @@ RPC 查询补齐、请求预算、统一编辑批处理。下一节的任务均�
 - [ ] 队列满返回 `busy`；超大消息在完整 JSON 解析之前拒绝；不能截断后继续当成另一条消息解析。
 - [ ] 保留截止时间、取消、`completion_unknown`、关闭排空和“不自动重试修改”的语义。
 - [ ] 对昂贵准备任务复用已有 worker，提交在所属线程完成；禁止把 Session 任意丢给线程池并发修改。
-- [ ] 添加有界 RPC 统计与读取入口，继续使用 `operations.py`；测试突发请求、断线、截止前/执行中超时、关闭和大消息。
+- [ ] 添加有界 RPC 统计与读取入口，继续使用 `control/operations.py`；测试突发请求、断线、截止前/执行中超时、关闭和大消息。
 
 参考测试：`test_rpc_lifecycle.py`、`test_rpc_client_validation.py`、`test_control_rpc.py`。
 完成证据：已拒绝、排队超时或取消的未启动请求不得写入场景；耗尽本帧预算但仍有效的请求留待后续帧。
@@ -460,7 +460,7 @@ RSS 峰值与关闭后的资源计数。GPU timer 不可用记为 null，不记�
 
 | 瓶颈表现 | 优先检查 | 合理做法 |
 | --- | --- | --- |
-| 静态图标仍消耗大量 Python CPU | `icons.py`、`draw2d.py`、`curves2d.py` | 拆开几何与放置；缓存真实不变输入；将批量转换一次完成。 |
+| 静态图标仍消耗大量 Python CPU | `icons.py`、`draw2d.py`、`drawing/curves.py` | 拆开几何与放置；缓存真实不变输入；将批量转换一次完成。 |
 | 拖动时越来越卡 | 缓存键、任务队列、临时图层 | 排除鼠标位置造成的无限缓存；有界 LRU/内存预算；合并旧版本编译任务。 |
 | UI 提交复制太多 | `window_native._draw_packet`、绑定 `render_ui`、bgfx transient buffer | 常驻几何与实例更新；减少边界复制，但保留明确数据所有权。 |
 | 改一个尺寸复制整个场景 | `ModelEditDraft.refresh_preview`、`GeometryPreview` | 同拓扑复用数组和 node index；结构变更才重建；不要破坏现有优化。 |

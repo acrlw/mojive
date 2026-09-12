@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from imgui_bundle import imgui
 
+from mojive.interaction.input import physical_ctrl_super
+
 from ...adapters.base import FrameNeeds
 from ...config import PanelConfig
-from ...input import physical_ctrl_super
 from ..controls import (
     button_row_layout,
     button_width,

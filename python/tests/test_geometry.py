@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mojive.geometry import geometry_dimensions, geometry_size_from_dimensions
+from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimensions
 from mojive.types import MeshShape
 
 

@@ -5,6 +5,8 @@ from itertools import pairwise
 import numpy as np
 import pytest
 
+from mojive.drawing.polygons import segment_intersection
+from mojive.drawing.polygons import signed_polygon_area as _polygon_area
 from mojive.ui import icons as production_icons
 from mojive.ui import viewport_widgets
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
@@ -32,7 +34,6 @@ from mojive.ui.viewport_widgets import (
     ViewportControl,
     ViewportLabels,
     _hint_groups,
-    _polygon_area,
     _rotate_visible_ring_polygons,
     _status_performance_layout,
     _viewport_control_colors,
@@ -265,7 +266,7 @@ class _RecordedGlyph:
         self.paths.append(tuple(points))
 
     def arrow(self, start, end, color, width, **style):
-        from mojive.curves2d import arrow_points
+        from mojive.drawing.curves import arrow_points
 
         self.fringed_concave_fill(arrow_points(start, end, width, **style), color)
 
@@ -545,6 +546,28 @@ def test_rotate_shell_subtraction_supports_geometry_controls(stroke, gap_ratio, 
     rings = _rotate_visible_ring_polygons(stroke, gap_ratio, cap)
 
     assert tuple(len(ring) for ring in rings) == (2, 2, 2)
+    assert all(_polygon_area(polygon) > 0.0 for ring in rings for polygon in ring)
+
+
+@pytest.mark.parametrize("cap", ("butt", "round"))
+def test_wide_rotate_knockout_has_no_folded_boundaries(cap):
+    # The largest stroke/padding settings with a one-stroke crossing gap.
+    width = 2.5 * 10.0 / (12.0 - 4.0)
+    for path in viewport_widgets._ROTATE_HALF_RINGS:
+        shell = viewport_widgets._rotate_stroke_outline(path, width * 3.0, cap)
+        assert all(viewport_widgets._point_in_polygon(point, shell) for point in path[1:-1])
+        for first in range(len(shell)):
+            for second in range(first + 2, len(shell)):
+                assert (
+                    segment_intersection(
+                        shell[first],
+                        shell[(first + 1) % len(shell)],
+                        shell[second],
+                        shell[(second + 1) % len(shell)],
+                    )
+                    is None
+                )
+    rings = _rotate_visible_ring_polygons(width * TOOL_GLYPH_SCALE, 1.0, cap)
     assert all(_polygon_area(polygon) > 0.0 for ring in rings for polygon in ring)
 
 

@@ -8,9 +8,9 @@ from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
-from mojive.geometry import geometry_dimensions, geometry_size_from_dimensions
-from mojive.model_edits import ModelEditDraft
+from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimensions
 from mojive.session import Session
+from mojive.session.model_edits import ModelEditDraft
 from mojive.types import MeshShape
 
 
@@ -115,7 +115,7 @@ def test_scale_requires_explicit_entity_capability(authored):
 
 @pytest.mark.parametrize("pending_dimensions", [False, True])
 def test_absolute_dimensions_during_scale_preview_do_not_scale_twice(authored, pending_dimensions):
-    from mojive.model_edits import model_edit_scope
+    from mojive.session.model_edits import model_edit_scope
     from mojive.ui.app import ViewerApp
 
     _scene, session, node = authored

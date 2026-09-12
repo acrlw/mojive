@@ -5,7 +5,7 @@ from __future__ import annotations
 import moderngl
 import numpy as np
 
-from ....gizmo import (
+from mojive.interaction.gizmo import (
     ACTIVE_HANDLE_COLOR,
     AXIS_COLORS,
     AXIS_HANDLES,
@@ -33,6 +33,7 @@ from ....gizmo import (
     screen_rotation_basis,
     trackball_color,
 )
+
 from ....log import get_logger
 from ....types import MeshKey, MeshShape
 from ...backend import RenderFlag

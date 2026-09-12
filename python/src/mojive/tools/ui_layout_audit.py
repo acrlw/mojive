@@ -12,10 +12,11 @@ from unittest.mock import patch
 import numpy as np
 from imgui_bundle import imgui
 
+from mojive.application.composition import build
+from mojive.interaction.gizmo import GizmoHandle
+from mojive.scene.assets import resolve
+
 from .. import commands as cmd
-from ..assets import resolve
-from ..composition import build
-from ..gizmo import GizmoHandle
 from ..types import CameraView
 from .gizmo_gallery import _save as _save_gizmo_crop
 from .ui_runtime import (
@@ -151,7 +152,7 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
         _capture_interaction_chrome(viewer, folder)
         from PIL import Image
 
-        from ..model_edits import model_edit_scope
+        from mojive.session.model_edits import model_edit_scope
 
         pending_node = next(
             n for n in viewer.session.nodes if n.source_editable and n.geom_index >= 0

@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.recording import (
+from mojive.capture.recording import (
     LEGACY_SNAPSHOT_FORMATS,
     LEGACY_SNAPSHOT_PREFIXES,
     SNAPSHOT_FORMAT_VERSION,

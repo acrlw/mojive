@@ -12,12 +12,20 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.application.composition import build, build_editor, build_scene
+from mojive.interaction.gizmo import (
+    RING_RADIUS,
+    SIZE_PT,
+    TRACKBALL_RADIUS,
+    GizmoHandle,
+    project,
+    world_scale,
+)
+from mojive.scene import Scene
+from mojive.scene.assets import resolve
+
 from .. import commands as cmd
 from ..adapters.base import NodeType
-from ..assets import resolve
-from ..composition import build, build_editor, build_scene
-from ..gizmo import RING_RADIUS, SIZE_PT, TRACKBALL_RADIUS, GizmoHandle, project, world_scale
-from ..scene import Scene
 from ..types import CameraView, MeshShape
 
 

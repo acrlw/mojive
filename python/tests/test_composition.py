@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mojive.composition import Viewer
+from mojive.application.composition import Viewer
 from mojive.ui.input_bindings import InputAction
 
 
@@ -152,7 +152,7 @@ def test_viewer_record_restores_the_previous_render_size_on_failure(tmp_path, pr
 
 
 def test_viewer_record_restores_render_size_after_success(tmp_path, monkeypatch):
-    from mojive import recording
+    from mojive.capture import recording as recording
 
     viewer, app, backend, *_ = _viewer()
     backend.target = type(
@@ -188,7 +188,7 @@ def test_viewer_record_restores_render_size_after_success(tmp_path, monkeypatch)
 
 
 def test_viewer_record_pipelines_async_readback_in_frame_order(tmp_path, monkeypatch):
-    from mojive import recording
+    from mojive.capture import recording as recording
 
     viewer, app, backend, *_ = _viewer()
 
@@ -229,15 +229,15 @@ def test_viewer_record_pipelines_async_readback_in_frame_order(tmp_path, monkeyp
 
 
 def test_explicit_adapter_and_renderer_selection_reaches_composition(monkeypatch, tmp_path):
-    from mojive import composition
     from mojive.adapters import registry
+    from mojive.application import composition as composition
 
     sentinel = object()
     calls = []
     monkeypatch.setattr(
         registry, "make_adapter", lambda name, asset: calls.append((name, asset)) or sentinel
     )
-    monkeypatch.setattr("mojive.backends.make_adapter", registry.make_adapter)
+    monkeypatch.setattr("mojive.application.backends.make_adapter", registry.make_adapter)
 
     def compose(factory, **kwargs):
         assert factory() is sentinel

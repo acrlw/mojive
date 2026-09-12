@@ -10,8 +10,8 @@ import pytest
 mujoco = pytest.importorskip("mujoco")
 
 import mojive  # noqa: E402
-import mojive.renderer as renderer_module  # noqa: E402
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter  # noqa: E402
+import mojive.application.renderer as renderer_module  # noqa: E402
+from mojive.adapters.mujoco import MuJoCoAdapter  # noqa: E402
 
 
 def _model(*, width: int = 64, height: int = 48):

@@ -10,11 +10,8 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
-from .. import commands as cmd
-from ..adapters.base import NodeType
-from ..assets import resolve
-from ..composition import build
-from ..gizmo import (
+from mojive.application.composition import build
+from mojive.interaction.gizmo import (
     AXIS_END,
     RING_RADIUS,
     SIZE_PT,
@@ -24,13 +21,20 @@ from ..gizmo import (
     project,
     world_scale,
 )
+from mojive.scene.assets import resolve
+from mojive.scene.queries import node_world_pose
+
+from .. import commands as cmd
+from ..adapters.base import NodeType
 from ..ui import viewcube
-from ..ui.gizmo import node_world_pose
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", type=Path, default=Path("output/gizmo-gallery"))
+    parser.add_argument(
+        "--rotation-edge-only", action="store_true", help="Capture an idle rotation camera sweep"
+    )
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -45,11 +49,18 @@ def main(argv: list[str] | None = None) -> int:
             return replace(native_input_state(), left=viewer.app._gallery_left_down)
 
         viewer.app._input_state = gallery_input_state
-        node = next(node for node in viewer.session.nodes if node.posable)
+        node = next(
+            node
+            for node in viewer.session.nodes
+            if node.posable and (not args.rotation_edge_only or node.name == "free_sphere")
+        )
         viewer.session.submit(cmd.Select(node.object_id))
         viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
         for _ in range(4):
             viewer.sync()
+        if args.rotation_edge_only:
+            _rotation_edge_sweep(viewer, node, args.output)
+            return 0
         _save_view_gizmo(viewer, args.output / "view-gizmo.png")
 
         for style in ("2d", "3d"):
@@ -398,6 +409,35 @@ def _entity_capsule(viewer, output: Path) -> None:
     _save(viewer, node, output / "entity-capsule-move-drag.png")
     viewer.app._gallery_left_down = False
     viewer.sync()
+
+
+def _rotation_edge_sweep(viewer, node, output: Path) -> None:
+    """Exercise projected half-arcs across both sides of the edge-on direction."""
+    viewer.app.gizmo.set_mode("rotate")
+    viewer.app.gizmo.set_style("2d")
+    viewer.app.gizmo.set_space("world")
+    origin, _rotation = node_world_pose(viewer.session, node)
+    imgui.get_io().add_mouse_pos_event(-100.0, -100.0)
+    for orthographic in (False, True):
+        viewer.app.camera.set_orthographic(orthographic)
+        projection = "orthographic" if orthographic else "perspective"
+        frames = []
+        for index, yaw in enumerate(np.linspace(-25.0, 25.0, 51)):
+            viewer.app.camera.look_from_target(
+                yaw, 20.0, origin, 2.0, viewer.app.camera_out, animate=False
+            )
+            viewer.sync()
+            path = output / f"rotation-edge-{projection}-{index:02d}.png"
+            _save(viewer, node, path)
+            with Image.open(path) as image:
+                frames.append(image.resize((540, 540), Image.Resampling.LANCZOS))
+        frames[0].save(
+            output / f"rotation-edge-{projection}.gif",
+            save_all=True,
+            append_images=frames[1:] + frames[-2:0:-1],
+            duration=70,
+            loop=0,
+        )
 
 
 def _state(viewer, node):

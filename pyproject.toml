@@ -52,6 +52,7 @@ path = "tools/native_wheel_hook.py"
 
 [tool.hatch.build]
 artifacts = [
+    "python/src/mojive/ui/icon_presets.json",
     "python/src/mojive/render/opengl/shaders/*.glsl",
     "python/src/mojive/render/webgpu/shaders/*.wgsl",
 ]

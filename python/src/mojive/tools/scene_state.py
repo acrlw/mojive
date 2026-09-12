@@ -6,11 +6,12 @@ import argparse
 import json
 from pathlib import Path
 
+from mojive.scene.assets import resolve
+from mojive.scene.state import camera_bookmark, capture_scene, restore_scene, save_named_snapshot
+
 from .. import commands as cmd
-from ..adapters.mujoco_adapter import MuJoCoAdapter
-from ..assets import resolve
+from ..adapters.mujoco import MuJoCoAdapter
 from ..render.backend import RenderFlag
-from ..scene_state import camera_bookmark, capture_scene, restore_scene, save_named_snapshot
 from ..session import Session
 from ..ui.camera import OrbitCamera
 

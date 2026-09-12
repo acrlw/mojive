@@ -12,8 +12,9 @@ import numpy as np
 from ..types import CameraView, ViewportImage
 
 if TYPE_CHECKING:
+    from mojive.interaction.gizmo import GizmoFrame
+
     from ..adapters.base import SceneFrame, SceneSource
-    from ..gizmo import GizmoFrame
     from .debugdraw import DebugDraw
 
 

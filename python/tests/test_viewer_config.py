@@ -15,7 +15,7 @@ from mojive import (
     ViewportChromeColors,
     ViewportOverlayConfig,
 )
-from mojive.composition import _viewer_layout_path
+from mojive.application.composition import _viewer_layout_path
 
 
 def test_partial_preference_mapping_uses_documented_defaults() -> None:

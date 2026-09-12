@@ -16,7 +16,7 @@ import numpy as np
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
-from mojive.composition import build_editor
+from mojive.application.composition import build_editor
 from mojive.config import LayoutConfig, ViewerConfig
 from mojive.types import MeshShape
 

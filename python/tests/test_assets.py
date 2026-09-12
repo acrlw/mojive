@@ -5,13 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mojive.assets import (
-    ASSET_SUFFIXES,
-    AssetNotFoundError,
-    assets_dir,
-    list_assets,
-    resolve,
-)
+from mojive.scene.assets import ASSET_SUFFIXES, AssetNotFoundError, assets_dir, list_assets, resolve
 
 EXPECTED_ASSETS = (
     "actuator_visuals.xml",

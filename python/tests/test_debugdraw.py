@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mojive.bridge import APP, DebugBridge, socket_path
+from mojive.remote.bridge import APP, DebugBridge, socket_path
 from mojive.render.backend import BackendCaps, NullBackend
 from mojive.render.debugdraw import (
     ARROW_CORNER_RADIUS_RATIO,
@@ -117,7 +117,7 @@ def test_batch_points_and_arrows_keep_one_id_and_per_item_colors():
 
 
 def test_debug_arrow_uses_the_position_gizmo_head_proportion():
-    from mojive.gizmo import (
+    from mojive.interaction.gizmo import (
         ARROW_CORNER_RADIUS_PT,
         AXIS_HEAD_LENGTH_PT,
         AXIS_SHAFT_HALF_PT,
@@ -838,7 +838,7 @@ def test_external_bad_line_does_not_take_the_connection_down(short_dir):
 
 
 def test_screen_arrow_reuses_mesh_and_updates_retained_geometry():
-    from mojive.curves2d import arrow_triangles
+    from mojive.drawing.curves import arrow_triangles
 
     dd = DebugDraw()
     layer = dd.layer("ui", Occlusion.ALWAYS)

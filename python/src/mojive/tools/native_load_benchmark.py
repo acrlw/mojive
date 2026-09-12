@@ -32,9 +32,9 @@ def worker(args):
     import numpy as np
     from PIL import Image
 
-    from mojive.assets import resolve
-    from mojive.composition import build
+    from mojive.application.composition import build
     from mojive.config import LayoutConfig, ViewerConfig
+    from mojive.scene.assets import resolve
 
     result = {"backend": args.worker, "model": args.model, "loads": []}
     asset = args.root / args.model / "scene.xml"

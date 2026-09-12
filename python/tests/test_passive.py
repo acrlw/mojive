@@ -6,7 +6,7 @@ import threading
 import numpy as np
 import pytest
 
-from mojive.passive import PassiveViewer, _Mailbox
+from mojive.application.passive import PassiveViewer, _Mailbox
 
 pytestmark = pytest.mark.physics
 mujoco = pytest.importorskip("mujoco")

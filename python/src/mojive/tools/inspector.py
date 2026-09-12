@@ -8,9 +8,10 @@ from pathlib import Path
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.application.composition import build
+from mojive.scene.assets import resolve
+
 from .. import commands as cmd
-from ..assets import resolve
-from ..composition import build
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,7 +9,7 @@ from imgui_bundle import imgui
 
 from mojive import build
 from mojive import commands as cmd
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 from mojive.tools.ui_runtime import (
     _activate_panel,
     _click,
@@ -93,7 +93,7 @@ def test_hinge_axis_hover_and_drag_use_the_ring_handle(
 
     import numpy as np
 
-    from mojive.gizmo import GizmoHandle, project
+    from mojive.interaction.gizmo import GizmoHandle, project
     from mojive.types import CameraView
 
     session, gizmo = viewer.session, viewer.app.gizmo
@@ -205,7 +205,7 @@ def test_output_toggles_and_copy_are_scoped_to_output_focus(viewer):
 def test_ctrl_click_reveals_output_and_status_paths_without_changing_scene_selection(
     viewer, tmp_path, monkeypatch
 ):
-    from mojive.ui import app as app_module
+    from mojive.ui.app import status as app_module
     from mojive.ui.panels import output as output_module
 
     path = tmp_path / "视频 with spaces.mp4"
@@ -220,25 +220,26 @@ def test_ctrl_click_reveals_output_and_status_paths_without_changing_scene_selec
     _click(viewer, point)
     assert revealed == []
     io = imgui.get_io()
-    io.add_key_event(imgui.Key.mod_ctrl, True)
+    modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    io.add_key_event(modifier, True)
     _click(viewer, point)
     assert revealed == [path]
-    io.add_key_event(imgui.Key.mod_ctrl, False)
+    io.add_key_event(modifier, False)
     _settle(viewer, 2)
     lo_x, lo_y, hi_x, hi_y = viewer.app._status_path_bounds
     selected = viewer.session.selected
-    io.add_key_event(imgui.Key.mod_ctrl, True)
+    io.add_key_event(modifier, True)
     _click(viewer, ((lo_x + hi_x) * 0.5, (lo_y + hi_y) * 0.5))
-    io.add_key_event(imgui.Key.mod_ctrl, False)
+    io.add_key_event(modifier, False)
     viewer.sync()
     assert revealed == [path, path]
     assert viewer.session.selected == selected
     _click(viewer, _item_center(viewer, "button", "##output-collapse"))
     _settle(viewer, 2)
     point = _item_center(viewer, "invisible_button", "##output-latest")
-    io.add_key_event(imgui.Key.mod_ctrl, True)
+    io.add_key_event(modifier, True)
     _click(viewer, point)
-    io.add_key_event(imgui.Key.mod_ctrl, False)
+    io.add_key_event(modifier, False)
     viewer.sync()
     assert revealed == [path, path, path]
 
@@ -558,7 +559,7 @@ def test_inspector_camera_sync_and_bookmark_paste_preserve_the_editor_view(viewe
 
     import numpy as np
 
-    from mojive.scene_state import camera_bookmark
+    from mojive.scene.state import camera_bookmark
 
     path = tmp_path / "camera.xml"
     path.write_text(
@@ -631,7 +632,7 @@ def test_view_camera_click_eases_and_pointer_handoff_keeps_the_displayed_pose(vi
 def test_pending_model_apply_discard_and_realtime_mode(viewer, tmp_path):
     import numpy as np
 
-    from mojive.model_edits import model_edit_scope
+    from mojive.session.model_edits import model_edit_scope
 
     app, session = viewer.app, viewer.session
     path = tmp_path / "pending.xml"
@@ -699,7 +700,7 @@ def test_creating_an_element_previews_geometry_styling_and_selection_before_appl
 ):
     import numpy as np
 
-    from mojive.model_edits import model_edit_scope
+    from mojive.session.model_edits import model_edit_scope
     from mojive.types import MeshShape
     from mojive.ui.app import ViewerApp
 

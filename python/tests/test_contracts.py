@@ -151,7 +151,7 @@ def test_debug_outputs_are_not_exposed_as_independent_render_flags():
 def test_mujoco_visual_audit_covers_every_enum_flag():
     mujoco = pytest.importorskip("mujoco")
 
-    from mojive.mujoco_audit import visual_coverage
+    from mojive.adapters.mujoco.audit import visual_coverage
 
     coverage = visual_coverage()
     actual_rnd = {item["feature"] for item in coverage["mjtRndFlag"]}
@@ -175,8 +175,8 @@ def test_mujoco_visual_audit_covers_every_enum_flag():
 
 
 def test_mujoco_schema_audit_classifies_every_attributed_path():
-    from mojive.adapters.mujoco_adapter import _MJCF_SCHEMA_ATTRIBUTES
-    from mojive.mujoco_audit import schema_coverage
+    from mojive.adapters.mujoco.audit import schema_coverage
+    from mojive.adapters.mujoco.schema import _MJCF_SCHEMA_ATTRIBUTES
 
     report = schema_coverage()
     rows = {item["path"]: item for item in report["rows"]}

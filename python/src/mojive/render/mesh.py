@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..curves2d import smooth_rect_points
-from ..gizmo import (
+from mojive.drawing.curves import smooth_rect_points
+from mojive.interaction.gizmo import (
     AXIS_HEAD_HALF_PT,
     AXIS_HEAD_LENGTH_PT,
     AXIS_SHAFT_HALF_PT,
@@ -21,6 +21,7 @@ from ..gizmo import (
     SCREEN_RING_TUBE,
     SIZE_PT,
 )
+
 from ..types import MeshData, MeshKey, MeshShape
 
 CIRCLE_SEGMENTS = 32

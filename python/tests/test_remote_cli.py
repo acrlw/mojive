@@ -8,7 +8,7 @@ import pytest
 from mojive import cli
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
-from mojive.recording import SnapshotWriter, read_snapshots
+from mojive.capture.recording import SnapshotWriter, read_snapshots
 from mojive.remote import RemoteFrame, snapshot_structure
 from mojive.scene import Scene
 from mojive.session import Session
@@ -118,8 +118,10 @@ def test_serve_records_the_frame_structure_revision_at_requested_rate(tmp_path, 
             pass
 
     monkeypatch.setattr("mojive.remote.SnapshotPublisher", Publisher)
-    monkeypatch.setattr("mojive.backends.make_adapter", lambda *args: ToyPhysicsAdapter())
-    monkeypatch.setattr(cli, "_resolve", lambda asset: tmp_path / "toy.xml")
+    monkeypatch.setattr(
+        "mojive.application.backends.make_adapter", lambda *args: ToyPhysicsAdapter()
+    )
+    monkeypatch.setattr("mojive.cli.viewer._resolve", lambda asset: tmp_path / "toy.xml")
     args = SimpleNamespace(
         asset=None,
         backend="toy",

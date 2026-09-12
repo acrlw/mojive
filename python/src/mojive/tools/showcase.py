@@ -7,8 +7,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ..assets import resolve
-from ..bridge import Occlusion, bridge
+from mojive.remote.bridge import Occlusion, bridge
+from mojive.scene.assets import resolve
+
 from ._harness import OffscreenHarness
 
 OUT = Path("output/showcase")

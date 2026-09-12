@@ -245,7 +245,7 @@ def test_gizmo_mesh_winding_matches_its_normals(name: str) -> None:
 
 def test_gizmo_arrow_is_one_continuous_silhouette() -> None:
 
-    from mojive.gizmo import (
+    from mojive.interaction.gizmo import (
         AXIS_HEAD_HALF_PT,
         AXIS_HEAD_LENGTH_PT,
         AXIS_SHAFT_HALF_PT,
@@ -267,7 +267,7 @@ def test_gizmo_arrow_is_one_continuous_silhouette() -> None:
 
 
 def test_solid_gizmo_ring_widths_match_the_flat_overlay() -> None:
-    from mojive.gizmo import (
+    from mojive.interaction.gizmo import (
         CONTRAST_EDGE_PT,
         JOINT_OUTLINE_PT,
         RING_WIDTH_PT,
@@ -287,7 +287,7 @@ def test_solid_gizmo_ring_widths_match_the_flat_overlay() -> None:
 
 
 def test_solid_gizmo_half_ring_has_round_caps() -> None:
-    from mojive.gizmo import RING_TUBE
+    from mojive.interaction.gizmo import RING_TUBE
 
     points = gizmo_mesh("half_ring").positions
 

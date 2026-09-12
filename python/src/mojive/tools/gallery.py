@@ -7,7 +7,8 @@ import sys
 import traceback
 from pathlib import Path
 
-from ..assets import assets_dir, list_assets
+from mojive.scene.assets import assets_dir, list_assets
+
 from ._harness import OffscreenHarness
 
 OUT = Path("output/gallery")
@@ -30,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in names:
         path = assets_dir() / name if (assets_dir() / name).exists() else None
         if path is None:
-            from ..assets import resolve
+            from mojive.scene.assets import resolve
 
             try:
                 path = resolve(name)

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..assets import resolve
+from mojive.scene.assets import resolve
+
 from ..render.backend import RenderFlag
 from ..types import CameraView
 from ._harness import OffscreenHarness

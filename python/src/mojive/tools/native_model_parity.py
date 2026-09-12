@@ -12,8 +12,8 @@ from PIL import Image
 
 from mojive import RenderFlag, RenderProduct, SceneRenderer
 from mojive.adapters.base import FrameNeeds, NodeType
-from mojive.assets import resolve
-from mojive.backends import make_adapter
+from mojive.application.backends import make_adapter
+from mojive.scene.assets import resolve
 from mojive.tools.native_parity import compare
 
 

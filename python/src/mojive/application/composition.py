@@ -1,0 +1,905 @@
+"""Viewer construction and high-level runtime helpers."""
+
+from __future__ import annotations
+
+import contextlib
+import operator
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from mojive.capture import CaptureSurface, RecordingInfo
+from mojive.config import (
+    CameraTrackingConfig,
+    InteractionConfig,
+    LayoutConfig,
+    RecordingConfig,
+    SelectionStyle,
+    ViewerConfig,
+    ViewportLayers,
+    ViewportOverlayConfig,
+)
+from mojive.log import get_logger
+from mojive.render.selection import render_backend_name
+
+log = get_logger("composition")
+
+if TYPE_CHECKING:
+    from mujoco import MjData, MjModel
+
+    from mojive.adapters.base import SceneAdapter
+    from mojive.control.rpc import ViewerRpcServer
+    from mojive.drawing.canvas import Canvas2D
+    from mojive.remote.bridge import DebugBridge
+    from mojive.render.backend import RenderBackend
+    from mojive.scene import Scene
+    from mojive.session import Session
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.theme import Theme
+    from mojive.ui.window import Window
+
+
+def _viewer_layout_path(config: ViewerConfig | None, *, vsync: bool) -> str:
+    """Resolve one viewer's ImGui persistence path without creating it."""
+
+    layout = config.layout if config is not None else LayoutConfig()
+    if not vsync or not layout.persistence:
+        return ""
+    if layout.path is not None:
+        return str(Path(layout.path).expanduser())
+    from mojive.ui.window import layout_settings_path
+
+    return str(layout_settings_path())
+
+
+@dataclass
+class Viewer:
+    """Own the objects that make up one interactive viewer.
+
+    Create instances through :func:`build`, :func:`build_workspace`,
+    :func:`build_scene`, or :func:`build_from_adapter`. Call :meth:`release`
+    when an application embeds the viewer without using a context manager.
+    """
+
+    app: ViewerApp
+    session: Session
+    backend: RenderBackend
+    window: Window
+    bridge: DebugBridge
+    _released: bool = field(default=False, init=False, repr=False)
+    _rpc_server: ViewerRpcServer | None = field(default=None, init=False, repr=False)
+    _canvas_2d: Canvas2D | None = field(default=None, init=False, repr=False)
+
+    def run(self, max_frames: int | None = None) -> None:
+        """Run the UI event loop until the window closes or a frame limit is reached."""
+        self.app.run(max_frames=max_frames)
+
+    def sync(self) -> None:
+        """Advance the session and render one frame without entering the event loop."""
+        if self._released:
+            raise RuntimeError("The viewer is closed")
+        self.app.sync()
+
+    def is_running(self) -> bool:
+        """Return whether the viewer remains open, including pending save prompts."""
+        return not self._released and not self.app._should_close()
+
+    def close(self) -> None:
+        """Close the viewer and release its resources on the owning UI thread."""
+        self.release()
+
+    @property
+    def panels(self):
+        """Return the runtime panel manager."""
+
+        return self.app.panels
+
+    @property
+    def canvas2d(self):
+        """Return a retained 2D diagnostic canvas sharing this viewer's debug pass."""
+
+        if self._canvas_2d is None:
+            from mojive.drawing.canvas import Canvas2D
+
+            draw = getattr(self.backend, "debug", None)
+            if draw is None:
+                raise RuntimeError("the active backend does not provide debug drawing")
+            self._canvas_2d = Canvas2D(draw)
+        return self._canvas_2d
+
+    @property
+    def viewport_size(self) -> tuple[float, float]:
+        """Return the current viewport content size in logical pixels."""
+
+        return float(self.app._viewport_rect[2]), float(self.app._viewport_rect[3])
+
+    @property
+    def interactions(self) -> InteractionConfig:
+        """Return the active built-in interaction switches."""
+
+        return self.app.interactions
+
+    @property
+    def selection_style(self) -> SelectionStyle:
+        """Return the active presentation settings for logical selection."""
+
+        return self.app.selection_style
+
+    @property
+    def theme(self) -> Theme:
+        """Return the colors used by this viewer's native and custom UI."""
+
+        return self.app.theme
+
+    def set_theme(self, theme: Theme) -> None:
+        """Apply colors to this viewer while preserving its scene and layout."""
+
+        self.app.set_theme(theme)
+
+    @property
+    def shadow_quality(self):
+        """Return the active renderer shadow quality preset."""
+
+        return self.backend.get_shadow_quality()
+
+    def configure_interactions(self, value: InteractionConfig, *, persist: bool = False) -> None:
+        """Replace the built-in interaction policy for this viewer."""
+
+        self.app.set_interactions(value, persist=persist)
+
+    def configure_selection(self, value: SelectionStyle, *, persist: bool = False) -> None:
+        """Replace the selection presentation policy for this viewer."""
+
+        self.app.set_selection_style(value, persist=persist)
+
+    def configure_viewport_overlays(
+        self, value: ViewportOverlayConfig, *, persist: bool = False
+    ) -> None:
+        """Configure placement, scaling, and dragging for viewport capsules."""
+
+        self.app.set_viewport_overlays(value, persist=persist)
+
+    def configure_layers(self, value: ViewportLayers, *, persist: bool = False) -> None:
+        """Set content visibility for the live viewport and viewport recordings."""
+        self.app.set_viewport_layers(value, persist=persist)
+
+    def configure_recording(self, value: RecordingConfig, *, persist: bool = False) -> None:
+        """Set countdown, surface, and frame rate defaults for future recordings."""
+        self.app.set_recording_config(value, persist=persist)
+
+    @property
+    def gizmo_mode(self) -> str:
+        """Return the active viewport gizmo mode."""
+
+        return self.app.gizmo.mode
+
+    def set_gizmo_mode(self, mode: str) -> None:
+        """Select ``translate``, ``rotate``, or primitive ``dimensions`` editing."""
+
+        from mojive.interaction.gizmo import GizmoMode
+
+        selected = GizmoMode(mode)
+        if self.app.gizmo.using:
+            raise RuntimeError("cannot change gizmo mode during an active edit")
+        self.app.gizmo.set_mode(selected.value)
+
+    def configure_input_binding(
+        self,
+        action,
+        key_id: str | None,
+        *,
+        persist: bool = False,
+    ) -> None:
+        """Assign one optional editor shortcut without changing input ownership."""
+
+        from mojive.ui.input_bindings import InputAction
+
+        self.app.set_input_binding(InputAction(action), key_id, persist=persist)
+
+    def configure_pointer_binding(
+        self, action: str, chords: tuple[str, ...], *, persist: bool = False
+    ) -> None:
+        """Map a mouse action to chords such as ``alt+left`` or ``left+right``.
+
+        Pass an empty tuple to unbind. Invalid or conflicting maps leave the
+        active configuration unchanged. Changes apply on the next input frame.
+        """
+        from mojive.ui.pointer_bindings import PointerAction
+
+        self.app.set_pointer_binding(PointerAction(action), chords, persist=persist)
+
+    def configure_navigation_preset(self, name: str, *, persist: bool = False) -> None:
+        """Apply Mojive, Blender, Unity, Unreal, or MuJoCo camera navigation."""
+        self.app.set_navigation_preset(name, persist=persist)
+
+    def set_camera(self, view) -> None:
+        """Adopt a backend-neutral camera view in the interactive editor camera."""
+
+        self.app.set_viewport_camera(view)
+
+    @property
+    def tracking_node_id(self) -> int | None:
+        """Return the followed hierarchy node, or None when tracking is disabled."""
+        return self.app.tracking_node_id
+
+    def track_node(self, node_id: int | None) -> None:
+        """Follow a stable hierarchy node with the configured axes and smoothing.
+
+        The Camera panel offers the same target selection. Pass None to stop
+        at the current view. Orbit, zoom, and pan remain available while following.
+        """
+        self.app.track_node(node_id)
+
+    def configure_tracking(self, value: CameraTrackingConfig, *, persist: bool = False) -> None:
+        """Set world axes and smoothing half-life in seconds for camera following."""
+        self.app.set_camera_tracking(value, persist=persist)
+
+    def track_body(self, body: str | int | None) -> None:
+        """Follow a body by unique name or composed body index; None stops following."""
+        from mojive.adapters.base import NodeType
+
+        if body is None:
+            self.track_node(None)
+            return
+        matches = [
+            node
+            for node in self.session.nodes
+            if node.type in (NodeType.ROBOT, NodeType.LINK)
+            and (
+                node.name == body
+                if isinstance(body, str)
+                else node.body_index == operator.index(body)
+            )
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"Expected one body matching {body!r}, found {len(matches)}")
+        self.track_node(matches[0].node_id)
+
+    def configure_shadow_quality(self, value, *, persist: bool = False) -> None:
+        """Set shadow quality for this viewer."""
+
+        if not self.app.set_shadow_quality(value, persist=persist):
+            raise RuntimeError(f"The {self.backend.caps.name} backend rejected shadow quality")
+
+    @property
+    def recording(self) -> RecordingInfo:
+        """Return the current interactive recording state."""
+
+        return self.app.recording
+
+    def capture(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str = CaptureSurface.SCENE,
+    ) -> Path:
+        """Capture the next frame, defaulting to the UI-free scene image."""
+
+        path = self.app.request_capture(output, surface=surface)
+        self.sync()
+        return path
+
+    def capture_array(self, *, surface: CaptureSurface | str = CaptureSurface.SCENE) -> np.ndarray:
+        """Render and return an owned top-left RGB image without writing a file."""
+        future = self.app.request_capture_async(surface=surface, memory=True)
+        self.sync()
+        return future.result()["image"]
+
+    def capture_into(self, out: np.ndarray, *, surface=CaptureSurface.SCENE) -> np.ndarray:
+        """Capture one presented frame into a reusable RGB destination array."""
+        future = self.app.request_capture_async(surface=surface, memory=True, out=out)
+        self.sync()
+        return future.result()["image"]
+
+    def start_recording(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
+    ) -> Path:
+        """Schedule recording using configured defaults; zero delay starts on the next frame."""
+
+        return self.app.start_recording(output, surface=surface, fps=fps, countdown=countdown)
+
+    def start_take_video(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
+        end_hold: float | None = None,
+    ) -> Path:
+        """Record a take from its first frame through the final hold, then save automatically."""
+        return self.app.start_take_video(
+            output, surface=surface, fps=fps, countdown=countdown, end_hold=end_hold
+        )
+
+    def pause_recording(self) -> bool:
+        """Pause an active user-driven recording."""
+
+        return self.app.pause_recording()
+
+    def resume_recording(self) -> bool:
+        """Resume a paused user-driven recording."""
+
+        return self.app.resume_recording()
+
+    def stop_recording(self) -> Path | None:
+        """Finalize an active user-driven recording."""
+
+        return self.app.stop_recording()
+
+    def set_input_handler(self, handler) -> None:
+        """Install a per-frame input handler that can claim keys or pointer input."""
+
+        self.app.set_input_handler(handler)
+
+    def start_rpc(self, socket_path=None):
+        """Expose this viewer through a local, UI-thread-safe control socket."""
+
+        if self._rpc_server is not None:
+            return self._rpc_server
+        from mojive.control.rpc import DEFAULT_SOCKET, ViewerRpcServer
+
+        self._rpc_server = ViewerRpcServer(
+            self, DEFAULT_SOCKET if socket_path is None else socket_path
+        )
+        return self._rpc_server
+
+    def stop_rpc(self) -> None:
+        """Stop the control socket previously created by :meth:`start_rpc`."""
+
+        if self._rpc_server is None:
+            return
+        self._rpc_server.close()
+        self._rpc_server = None
+
+    def release(self) -> None:
+        """Release application-owned resources and the native window once."""
+        if self._released:
+            return
+        self._released = True
+        self.stop_rpc()
+        try:
+            self.app.release()
+        except Exception as e:
+            log.warning("Failed to release viewer application: {}", e)
+        try:
+            self.window.close()
+        except Exception as e:
+            log.warning("Failed to close the window: {}", e)
+
+    def __enter__(self) -> Viewer:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        del exc_type, exc_value, traceback
+        self.release()
+
+    def record(
+        self,
+        output: Path,
+        frames: int,
+        fps: float = 30.0,
+        before_frame: Callable[[int, Viewer], None] | None = None,
+        size: tuple[int, int] | None = None,
+    ) -> Path:
+        """Render a fixed number of scene-only frames to a video file.
+
+        Args:
+            output: Destination video path.
+            frames: Number of frames to encode.
+            fps: Playback frame rate stored in the video.
+            before_frame: Optional callback invoked before each rendered frame.
+            size: Optional fixed render width and height.
+
+        Returns:
+            The destination path.
+        """
+        from mojive.capture.recording import VideoRecorder
+
+        try:
+            frame_count = operator.index(frames)
+        except TypeError as exc:
+            raise TypeError("frame count must be an integer") from exc
+        if frame_count <= 0:
+            raise ValueError("frame count must be positive")
+        if not np.isfinite(fps) or fps <= 0.0:
+            raise ValueError("frame rate must be finite and positive")
+        previous_size = self.app.fixed_render_size if size is not None else None
+        if size is not None:
+            self.app.set_fixed_render_size(*size)
+        recorder = None
+        pending = deque()
+
+        def append(image: np.ndarray) -> None:
+            nonlocal recorder
+            if recorder is None:
+                recorder = VideoRecorder(
+                    output, (int(image.shape[1]), int(image.shape[0])), fps=fps
+                )
+            recorder.append(image)
+
+        try:
+            for index in range(frame_count):
+                if before_frame is not None:
+                    before_frame(index, self)
+                self.sync()
+                target = self.app._scene_capture.render(
+                    self.backend, self.session, self.app._camera_view()
+                )
+                async_read = getattr(target, "read_rgb_async", None)
+                if callable(async_read):
+                    pending.append(async_read(flip=True))
+                    if len(pending) >= 3:
+                        append(pending.popleft().result())
+                else:
+                    append(target.read_color(flip=True)[..., :3])
+            while pending:
+                append(pending.popleft().result())
+        finally:
+            try:
+                if recorder is not None:
+                    recorder.close()
+            finally:
+                if size is not None:
+                    if previous_size is None:
+                        self.app.clear_fixed_render_size()
+                    else:
+                        self.app.set_fixed_render_size(*previous_size)
+        return Path(output)
+
+
+def _adapter_name(adapter_name: str | None, backend_name: str | None) -> str:
+    if adapter_name is not None and backend_name is not None and adapter_name != backend_name:
+        raise ValueError("adapter_name conflicts with the legacy backend_name argument")
+    return adapter_name or backend_name or "mujoco"
+
+
+def build(
+    asset: str | Path | MjModel | None = None,
+    backend_name: str | None = None,
+    *,
+    model: MjModel | None = None,
+    data: MjData | None = None,
+    external_clock: bool | None = None,
+    adapter_name: str | None = None,
+    renderer: str | None = None,
+    paused: bool = True,
+    vsync: bool = True,
+    width: int = 1600,
+    height: int = 1000,
+    samples: int = 4,
+    title: str = "Mojive",
+    show_window: bool = True,
+    config: ViewerConfig | None = None,
+    theme: Theme | None = None,
+) -> Viewer:
+    """Build an interactive viewer for a model or scene asset.
+
+    Args:
+        asset: Asset path accepted by the selected scene adapter.
+            An instantiated MuJoCo model is also accepted here.
+        model: Existing MuJoCo model, as an alternative to ``asset``.
+        data: Existing MuJoCo data belonging to ``model``; preserved by identity.
+        external_clock: Let the caller own physics stepping. Defaults to true
+            for instantiated models and false for asset paths. UI pause/play
+            cannot take ownership of an external clock.
+        backend_name: Legacy positional alias for ``adapter_name``.
+        adapter_name: Scene adapter name, such as ``"mujoco"`` (the default).
+        renderer: ``"opengl"`` or ``"wgpu"``; defaults to environment settings.
+        paused: Start physics in the paused state.
+        vsync: Synchronize presentation to the display.
+        width: Initial logical window width.
+        height: Initial logical window height.
+        samples: Requested MSAA sample count.
+        title: Native window title.
+        show_window: Show the native window when rendering starts. Disable for
+            automated UI tests and off-screen capture.
+        config: Optional programmatic interaction, selection, and panel policy.
+        theme: Optional colors for this viewer's native controls, viewport capsules,
+            semantic badges, and authored-object palette.
+
+    Returns:
+        A composed viewer ready to run or step manually.
+    """
+    from mojive.application.backends import make_adapter
+
+    name = _adapter_name(adapter_name, backend_name)
+    if model is not None and asset is not None:
+        raise ValueError("Specify either asset or model")
+    if model is None and asset is not None and not isinstance(asset, (str, Path)):
+        model, asset = asset, None
+    if model is not None or external_clock is not None:
+        if name != "mujoco":
+            raise ValueError("model, data, and external_clock require the MuJoCo adapter")
+        from mojive.adapters.mujoco import MuJoCoAdapter
+
+        def create_adapter():
+            adapter = MuJoCoAdapter(
+                asset,
+                external_clock=(model is not None if external_clock is None else external_clock),
+            )
+            if model is not None:
+                adapter.load_model(model, data)
+            return adapter
+    else:
+
+        def create_adapter():
+            return make_adapter(name, asset)
+
+    if asset is None and model is None:
+        raise ValueError("An asset path or instantiated model is required")
+    if data is not None and model is None:
+        raise ValueError("data requires an instantiated model")
+    return _compose(
+        create_adapter,
+        asset_path=asset,
+        paused=paused,
+        vsync=vsync,
+        width=width,
+        height=height,
+        samples=samples,
+        title=title,
+        show_window=show_window,
+        viewer_config=config,
+        theme=theme,
+        renderer=renderer,
+    )
+
+
+def build_workspace(
+    asset: Path,
+    backend_name: str | None = None,
+    *,
+    adapter_name: str | None = None,
+    renderer: str | None = None,
+    paused: bool = True,
+    vsync: bool = True,
+    width: int = 1600,
+    height: int = 1000,
+    samples: int = 4,
+    title: str = "Mojive",
+    show_window: bool = True,
+    config: ViewerConfig | None = None,
+    theme: Theme | None = None,
+) -> Viewer:
+    """Build an editable workspace around a model adapter."""
+    from mojive.adapters.workspace import WorkspaceAdapter
+    from mojive.application.backends import make_adapter
+
+    name = _adapter_name(adapter_name, backend_name)
+    return _compose(
+        lambda: WorkspaceAdapter(make_adapter(name, asset)),
+        asset_path=asset,
+        paused=paused,
+        vsync=vsync,
+        width=width,
+        height=height,
+        samples=samples,
+        title=title,
+        show_window=show_window,
+        viewer_config=config,
+        theme=theme,
+        renderer=renderer,
+    )
+
+
+def build_from_adapter(
+    adapter: SceneAdapter,
+    *,
+    renderer: str | None = None,
+    paused: bool = False,
+    vsync: bool = True,
+    width: int = 1600,
+    height: int = 1000,
+    samples: int = 4,
+    title: str = "Mojive",
+    show_window: bool = True,
+    config: ViewerConfig | None = None,
+    theme: Theme | None = None,
+) -> Viewer:
+    """Build an interactive viewer around an initialized scene adapter."""
+
+    return _compose(
+        lambda: adapter,
+        asset_path=None,
+        paused=paused,
+        vsync=vsync,
+        width=width,
+        height=height,
+        samples=samples,
+        title=title,
+        show_window=show_window,
+        viewer_config=config,
+        theme=theme,
+        renderer=renderer,
+    )
+
+
+def build_scene(scene: Scene, **kwargs) -> Viewer:
+    """Build an interactive viewer for a backend-neutral authored scene."""
+
+    from mojive.adapters.static import StaticSceneAdapter
+
+    return build_from_adapter(StaticSceneAdapter(scene), **kwargs)
+
+
+def build_editor(**kwargs) -> Viewer:
+    """Build an empty workspace with MuJoCo models and Mojive-authored entities."""
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.adapters.workspace import WorkspaceAdapter
+
+    primary = MuJoCoAdapter()
+    primary.new_scene()
+    return build_from_adapter(WorkspaceAdapter(primary), paused=True, **kwargs)
+
+
+def _compose(
+    adapter_factory: Callable[[], SceneAdapter],
+    *,
+    asset_path: Path | None,
+    paused: bool,
+    vsync: bool,
+    width: int,
+    height: int,
+    samples: int,
+    title: str,
+    show_window: bool,
+    viewer_config: ViewerConfig | None,
+    theme: Theme | None,
+    renderer: str | None = None,
+) -> Viewer:
+    from mojive import commands as cmd
+    from mojive.remote.bridge import DebugBridge
+    from mojive.session import Session
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.window import WindowConfig
+
+    renderer = render_backend_name(renderer)
+    ini = _viewer_layout_path(viewer_config, vsync=vsync)
+    if ini:
+        Path(ini).parent.mkdir(parents=True, exist_ok=True)
+    window_config = WindowConfig(
+        title=title,
+        width=width,
+        height=height,
+        vsync=vsync,
+        ini_path=ini,
+        show_on_start=show_window,
+    )
+
+    window = None
+    backend = None
+    debug_bridge = None
+    adapter = None
+    session = None
+    try:
+        if renderer == "bgfx":
+            from mojive.render.native.backend import NativeBackend
+            from mojive.render.native.device import acquire_device
+            from mojive.ui.window_native import NativeWindow
+
+            window = NativeWindow(window_config, device_factory=acquire_device)
+            fb_w, fb_h = window.size_pixels
+            backend = NativeBackend(fb_w, fb_h, samples)
+        elif renderer == "wgpu":
+            from mojive.render.webgpu.backend import WgpuBackend
+            from mojive.ui.window_wgpu import WgpuWindow
+
+            window = WgpuWindow(window_config)
+            fb_w, fb_h = window.size_pixels
+            backend = WgpuBackend(fb_w, fb_h, samples, device=window.device)
+        else:
+            from mojive.render.opengl.backend import OpenGLBackend
+            from mojive.ui.window import Window
+
+            window = Window(window_config)
+            window.make_current()
+            fb_w, fb_h = window.size_pixels
+            backend = OpenGLBackend(None, fb_w, fb_h, samples)
+
+        debug_bridge = DebugBridge(backend)
+        debug_bridge.serve()
+
+        adapter = adapter_factory()
+        session = Session(adapter, asset_path)
+        if paused and not session.paused:
+            session.submit(cmd.Pause())
+
+        app = ViewerApp(
+            session,
+            backend,
+            window,
+            title=title,
+            debug_bridge=debug_bridge,
+            config=viewer_config,
+            theme=theme,
+        )
+        if viewer_config is not None and viewer_config.layout.reset:
+            app.reset_layout(persist=bool(window.config.ini_path))
+        return Viewer(
+            app=app,
+            session=session,
+            backend=backend,
+            window=window,
+            bridge=debug_bridge,
+        )
+    except Exception:
+        if debug_bridge is not None:
+            with contextlib.suppress(Exception):
+                debug_bridge.close()
+        if backend is not None:
+            with contextlib.suppress(Exception):
+                backend.release()
+        if session is not None:
+            with contextlib.suppress(Exception):
+                session.release()
+        elif adapter is not None:
+            with contextlib.suppress(Exception):
+                adapter.release()
+        if window is not None:
+            with contextlib.suppress(Exception):
+                window.close()
+        raise
+
+
+def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
+    """Exercise viewer composition and return structured diagnostic checks.
+
+    The diagnostic creates a real window and renderer, renders several frames,
+    checks readback and simulation progress, then releases all resources.
+    """
+    checks: list[tuple[str, bool, str]] = []
+    viewer: Viewer | None = None
+    try:
+        viewer = build(asset, backend_name, paused=False, vsync=False, width=960, height=720)
+        caps = viewer.backend.caps
+        is_wgpu = caps.name == "wgpu"
+
+        if is_wgpu:
+            checks.append(("GPU device", True, caps.renderer))
+        else:
+            gl = viewer.backend.gl_caps
+            checks.append(
+                ("GL context", gl.usable, f"{gl.version} ({gl.renderer}) core={gl.core_profile}")
+            )
+        target = viewer.backend.target
+        target_detail = f"{target.width}×{target.height} {target.samples}× MSAA"
+        id_layout = getattr(target, "id_layout", None)
+        if id_layout is not None:
+            target_detail += f", id layout {id_layout}"
+        checks.append(("render target", target.width > 0 and target.height > 0, target_detail))
+        failures = getattr(viewer.backend, "pass_load_failures", {})
+        checks.append(
+            ("pass loading", not failures, "complete" if not failures else f"failed: {failures}")
+        )
+
+        last_image = None
+        for _ in range(frames):
+            viewer.sync()
+            last_image = viewer.app._viewport_image
+            if viewer.window.should_close():
+                break
+
+        checks.append((f"render {frames} frames", True, f"{viewer.window.frame_index} frames"))
+        checks.append(
+            (
+                "viewport image",
+                last_image is not None,
+                "ViewportImage received" if last_image is not None else "render() returned None",
+            )
+        )
+        if last_image is not None:
+            # WebGPU color targets are top-row-first; the GL resolve texture is not.
+            expect_flip = not is_wgpu
+            checks.append(
+                ("flip_y", last_image.flip_y is expect_flip, f"flip_y={last_image.flip_y}")
+            )
+
+        frame_px = viewer.window.read_frame()
+        if frame_px is None:
+            checks.append(("window readback", False, "read_frame() returned None"))
+        else:
+            spread = float(np.asarray(frame_px)[..., :3].std())
+            checks.append(
+                ("window content", spread > 1.0, f"pixel standard deviation {spread:.2f}")
+            )
+
+        f = viewer.session.frame
+        checks.append(("simulation step", f.step > 0, f"step={f.step} time={f.time:.3f}s"))
+
+        if not is_wgpu:
+            from mojive.render.opengl import gl_native as G
+
+            err = G.native().drain_errors()
+            checks.append(("GL errors", err == 0, f"glGetError={err}"))
+
+        stats = viewer.backend.stats
+        checks.append(
+            (
+                "statistics",
+                stats.instances > 0,
+                f"draws {stats.draw_calls} · instances {stats.instances} · triangles {stats.triangles}",
+            )
+        )
+        checks.append(("capabilities", bool(caps.render_flags), f"{len(caps.render_flags)} flags"))
+    except Exception as e:
+        checks.append(("composition", False, f"{type(e).__name__}: {e}"))
+        log.exception("Doctor setup failed")
+    finally:
+        if viewer is not None:
+            viewer.release()
+
+    return {"ok": all(ok for _n, ok, _m in checks), "frames": frames, "checks": checks}
+
+
+def capture(
+    asset: Path,
+    output: Path,
+    backend_name: str = "mujoco",
+    *,
+    include_ui: bool = False,
+    size: tuple[int, int] | None = None,
+    settle_frames: int = 30,
+    render_flags: tuple[str, ...] = (),
+    camera_name: str = "",
+) -> bool:
+    """Render an asset to a PNG image.
+
+    Args:
+        asset: Model or scene path.
+        output: Destination image path.
+        backend_name: Scene adapter used to load the asset.
+        include_ui: Capture the complete application window.
+        size: Optional render width and height.
+        settle_frames: Frames rendered before capture.
+        render_flags: Renderer feature names enabled for the capture.
+        camera_name: Optional named model camera.
+
+    Returns:
+        ``True`` when the image was written successfully.
+    """
+    viewer: Viewer | None = None
+    try:
+        w, h = size or (1600, 1000)
+        viewer = build(asset, backend_name, paused=True, vsync=False, width=w, height=h)
+        from mojive.render.backend import RenderFlag
+
+        for name in render_flags:
+            viewer.backend.set_flag(RenderFlag(name), True)
+        if camera_name:
+            camera = next(
+                (item for item in viewer.session.cameras if item.name == camera_name), None
+            )
+            if camera is None:
+                raise ValueError(f"model camera {camera_name!r} is unavailable")
+            viewer.app.select_model_camera(camera.camera_id)
+        for _ in range(max(1, settle_frames)):
+            viewer.sync()
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if include_ui:
+            from PIL import Image
+
+            px = viewer.window.read_frame()
+            if px is None:
+                return False
+            arr = np.asarray(px)
+
+            Image.fromarray(arr[::-1][..., :3], "RGB").save(output)
+            return True
+        return bool(viewer.backend.capture(output, size=size))
+    except Exception:
+        log.exception("Capture failed")
+        return False
+    finally:
+        if viewer is not None:
+            viewer.release()

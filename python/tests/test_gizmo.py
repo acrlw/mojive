@@ -10,8 +10,8 @@ from mojive import math3d
 from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
-from mojive.curves2d import arc_ribbon_points
-from mojive.gizmo import (
+from mojive.drawing.curves import arc_ribbon_points
+from mojive.interaction.gizmo import (
     ACTIVE_HANDLE_COLOR,
     ARROW_CORNER_RADIUS_PT,
     AXIS_COLORS,
@@ -66,6 +66,7 @@ from mojive.gizmo import (
     plane_handle_alpha,
     prepare_projection,
     project,
+    project_rotation_arc,
     rotation_dial,
     rotation_handle_color,
     rotation_ring,
@@ -510,8 +511,8 @@ def test_rotation_arc_cap_meets_a_parallel_endpoint_segment():
     assert abs(join[0] * tangent[1] - join[1] * tangent[0]) < 1e-9
 
 
-def test_rotation_gizmo_forwards_its_own_smoothing_to_arc_caps(monkeypatch):
-    from mojive.ui import gizmo as module
+def test_partial_rotation_rings_use_circular_caps_independent_of_ui_smoothing(monkeypatch):
+    from mojive.ui.gizmo import drawing as module
 
     gizmo = ObjectGizmo("rotate")
     gizmo._frame.mode = GizmoMode.ROTATE
@@ -525,7 +526,7 @@ def test_rotation_gizmo_forwards_its_own_smoothing_to_arc_caps(monkeypatch):
 
     monkeypatch.setattr(module, "arc_ribbon_mesh", record)
     gizmo._draw_flat(RecordingDraw2D(), camera(), RECT, 1.0)
-    assert values and all(value == 0.23 for value in values)
+    assert values and all(value == 0.0 for value in values)
 
 
 @pytest.mark.parametrize("degrees", [285.0, -285.0])
@@ -904,7 +905,7 @@ def test_uniform_sphere_dimension_uses_one_center_handle_and_precise_input() -> 
 def test_authored_primitive_parent_supports_transform_and_dimension_edits_without_physics(
     shape, size
 ):
-    from mojive.scene_queries import node_world_pose
+    from mojive.scene.queries import node_world_pose
 
     session, geometry = dimension_session(shape, size=size)
     owner = session.node(geometry.parent)
@@ -1089,7 +1090,7 @@ def test_hover_clears_when_the_viewport_does_not_own_input() -> None:
 
 
 def test_idle_hover_reuses_unchanged_hit_test(monkeypatch) -> None:
-    import mojive.ui.gizmo as ui_gizmo
+    import mojive.ui.gizmo.core as ui_gizmo
 
     session, _ = session_at()
     gizmo = ObjectGizmo()
@@ -1262,7 +1263,7 @@ def test_overlapping_axis_hit_matches_the_topmost_drawn_handle() -> None:
 
 
 def test_translation_center_shell_masks_continuous_axes_but_not_planes() -> None:
-    from mojive.gizmo import CONTRAST_EDGE_PT, SIZE_PT
+    from mojive.interaction.gizmo import CONTRAST_EDGE_PT, SIZE_PT
 
     visible_radius = CENTER_RADIUS + CONTRAST_EDGE_PT / SIZE_PT
     assert AXIS_START < CENTER_RADIUS < visible_radius < CENTER_SHELL_RADIUS < PLANE_INNER
@@ -1388,7 +1389,6 @@ def test_rotation_idle_uses_front_half_rings_and_an_interactive_outer_ring() -> 
     assert hit_test(cam, origin, rotation, RECT, outer, GizmoMode.ROTATE)[0] is (
         GizmoHandle.ROTATE_SCREEN
     )
-
     edge_cam = CameraView(
         eye=np.array((4.0, -6.0, 0.0)),
         target=origin,
@@ -1396,6 +1396,72 @@ def test_rotation_idle_uses_front_half_rings_and_an_interactive_outer_ring() -> 
         aspect=RECT[2] / RECT[3],
     )
     assert rotation_ring_alpha(edge_cam, origin, rotation[:, 2]) == 0.0
+
+
+@pytest.mark.parametrize("height", (300, 600, 1200))
+@pytest.mark.parametrize("style_scale", (1.0, 1.5))
+@pytest.mark.parametrize("orthographic", (False, True))
+def test_flat_rotation_ring_keeps_its_arc_when_camera_crosses_edge_angles(
+    height, style_scale, orthographic
+):
+    from tests.curve_assertions import distance_to_path
+
+    gizmo = ObjectGizmo()
+    gizmo.set_mode("rotate")
+    gizmo.set_style("2d")
+    gizmo._visible = True
+    gizmo._frame.mode = GizmoMode.ROTATE
+    rect = (0.0, 0.0, height * 4.0 / 3.0, float(height))
+    for x in np.linspace(0.5, 1.5, 61):
+        cam = CameraView(
+            eye=np.array((x, -5.0, 2.0)),
+            target=np.zeros(3),
+            up=np.array((0.0, 0.0, 1.0)),
+            aspect=4.0 / 3.0,
+            orthographic=orthographic,
+        )
+        draw = RecordingDraw2D()
+        gizmo.draw_overlay(cam, rect, draw, style_scale=style_scale)
+        rings = [args for name, args, _kwargs in draw.calls if name == "indexed_fill"]
+        assert rings
+        vertices, indices, _color = rings[0]
+        triangles = vertices[np.asarray(indices).reshape(-1, 3)]
+        a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+        signed_area = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
+        assert signed_area.min() >= -1e-7, (height, style_scale, x)
+
+        scale = world_scale(cam, np.zeros(3), height, SIZE_PT * style_scale)
+        centerline = project(
+            cam, rotation_ring(cam, np.zeros(3), np.eye(3), scale, 0, full=False), rect
+        )[:, :2]
+        # The middle of the projected arc must retain its full stroke width,
+        # including when the endpoint's first segment points away from it.
+        distance = distance_to_path(centerline[12:21], vertices, closed=True)
+        assert distance == pytest.approx(RING_WIDTH_PT * style_scale * 0.5, abs=0.04 * style_scale)
+
+
+@pytest.mark.parametrize("axis", (0, 1, 2))
+@pytest.mark.parametrize("blend", (0.0, 0.4, 1.0))
+@pytest.mark.parametrize("offset", ((0.0, 0.0, 0.0), (0.7, 0.3, 0.2)))
+def test_projected_half_ring_endpoints_do_not_turn_back(axis, blend, offset):
+    origin = np.array(offset)
+    previous = None
+    for x in np.linspace(0.5, 1.5, 61):
+        cam = CameraView(
+            eye=np.array((x, -5.0, 2.0)),
+            target=np.zeros(3),
+            up=np.array((0.0, 0.0, 1.0)),
+            aspect=4.0 / 3.0,
+            orthographic_blend=blend,
+        )
+        scale = world_scale(cam, origin, RECT[3])
+        arc = project_rotation_arc(cam, origin, np.eye(3), scale, axis, RECT)[:, :2]
+        chord = arc[-1] - arc[0]
+        direction = chord / np.linalg.norm(chord)
+        assert np.min(np.diff(arc @ direction)) >= -1e-7
+        if previous is not None:
+            assert np.linalg.norm(arc - previous, axis=1).max() < 1.0
+        previous = arc
 
 
 def test_rotation_inner_disk_is_a_background_trackball_hit() -> None:
@@ -2040,7 +2106,7 @@ def test_scale4_translation_guide_connectors_stay_beneath_both_endpoint_markers(
     assert overlay.calls[-1][2]["direction"] == pytest.approx(direction)
     along, across = vertices.T
     distance = np.linalg.norm(end - start)
-    from mojive.draglink2d import drag_link_field
+    from mojive.drawing.drag_link import drag_link_field
 
     triangles = np.asarray(overlay.calls[-1][1][1]).reshape(-1, 3)
     centroids = vertices[triangles].mean(axis=1)
@@ -2642,8 +2708,8 @@ def test_hinge_axis_is_one_arrow_with_gaps_only_behind_the_projected_disk(
 @pytest.mark.parametrize("part", ("shaft", "head", "center"))
 @pytest.mark.parametrize("camera_z", (0.0, 2.0))
 def test_hinge_axis_hover_and_press_rotate_the_joint_without_a_jump(part, camera_z):
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2678,7 +2744,7 @@ def test_hinge_axis_hover_and_press_rotate_the_joint_without_a_jump(part, camera
 
 
 def test_hinge_axis_and_ring_fade_independently_at_perpendicular_extremes():
-    from mojive.gizmo import rotation_ring_alpha
+    from mojive.interaction.gizmo import rotation_ring_alpha
 
     gizmo = ObjectGizmo("rotate")
     alphas = []
@@ -2937,8 +3003,8 @@ def test_rotation_ring_accepts_straight_cardinal_drags(direction) -> None:
 def test_joint_gizmo_edits_only_the_selected_joint_dof(
     body_name: str, handle: GizmoHandle, amount: float
 ) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -2997,8 +3063,8 @@ def test_joint_gizmo_edits_only_the_selected_joint_dof(
 
 @pytest.mark.physics
 def test_hinge_joint_rotation_accepts_a_straight_drag_off_the_ring() -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3041,8 +3107,8 @@ def test_hinge_joint_rotation_accepts_a_straight_drag_off_the_ring() -> None:
 
 @pytest.mark.physics
 def test_slide_joint_accepts_a_cardinal_drag_off_the_projected_axis() -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3075,8 +3141,8 @@ def test_slide_joint_accepts_a_cardinal_drag_off_the_projected_axis() -> None:
 @pytest.mark.physics
 @pytest.mark.parametrize("snap_overtravel", (False, True))
 def test_slide_joint_drag_rebases_at_a_clamped_limit(snap_overtravel) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3176,8 +3242,8 @@ def test_slide_joint_drag_rebases_at_a_clamped_limit(snap_overtravel) -> None:
 @pytest.mark.physics
 @pytest.mark.parametrize("snap_overtravel", (False, True))
 def test_hinge_joint_drag_rebases_at_a_clamped_limit(snap_overtravel) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3306,8 +3372,8 @@ def test_scalar_joint_drag_label_reports_the_absolute_current_value(
     delta: float,
     expected: str,
 ) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3363,8 +3429,8 @@ def test_precise_joint_input_uses_display_units_and_clamps_to_the_range(
     amount: float,
     unit: str,
 ) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3402,8 +3468,8 @@ def test_precise_joint_input_accepts_an_absolute_qpos(
     requested: float,
     expected_display: float,
 ) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3454,8 +3520,8 @@ def test_precise_joint_relative_input_keeps_display_units(
     delta: float,
     expected: float,
 ) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3477,8 +3543,8 @@ def test_precise_joint_relative_input_keeps_display_units(
 
 @pytest.mark.physics
 def test_selected_free_joint_uses_its_body_transform_without_losing_joint_selection() -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_gizmo"))
     session = Session(adapter)
@@ -3542,8 +3608,8 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     labels: set[str],
     current_value: float,
 ) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -3663,8 +3729,8 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
 @pytest.mark.physics
 @pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
 def test_joint_limit_ticks_write_the_selected_endpoint(body_name: str) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -3912,8 +3978,8 @@ def test_joint_precision_rail_draws_each_colored_stroke_once() -> None:
 
 @pytest.mark.physics
 def test_joint_precision_rail_maps_its_full_width_to_the_authored_range() -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     adapter = MuJoCoAdapter(resolve("joint_types"))
     session = Session(adapter)
@@ -4056,6 +4122,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
     )
     lower, upper = np.radians((-170.0, 170.0))
     gizmo = ObjectGizmo("rotate")
+    gizmo._frame.corner_smoothing = 0.23
     gizmo._joint_range = _JointRangeState("hinge", 0.0, lower, upper)
     overlay = RecordingDraw2D()
 
@@ -4070,6 +4137,7 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
     assert THEME.primary == JOINT_RANGE_COLOR
     assert allowed[1]["closed"] is False
     assert allowed[1]["cap"] == "round"
+    assert allowed[1]["smoothing"] == 0.0
 
     dial = _RotationDialProjector(
         cam,
@@ -4108,6 +4176,9 @@ def test_hinge_joint_range_draws_only_the_allowed_arc_across_180_degrees() -> No
         ),
     }
     assert all(kwargs["cap"] == "round" for name, _args, kwargs in overlay.calls if name == "line")
+    assert all(
+        kwargs["smoothing"] == 0.23 for name, _args, kwargs in overlay.calls if name == "line"
+    )
     assert np.linalg.norm(ticks["current"][1] - ticks["current"][0]) == pytest.approx(
         JOINT_CURRENT_TICK_PT
     )
@@ -4260,7 +4331,7 @@ def test_active_hinge_guide_rounds_only_unambiguous_limit_caps(
     upper: float,
     expected: tuple[bool, bool],
 ) -> None:
-    from mojive.ui import gizmo as gizmo_module
+    from mojive.ui.gizmo import guides as gizmo_module
 
     cam = camera()
     gizmo = ObjectGizmo("rotate")
@@ -4490,8 +4561,8 @@ def test_active_joint_rotation_guide_is_hidden_when_the_ring_is_edge_on() -> Non
 
 @pytest.mark.physics
 def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -4542,8 +4613,8 @@ def test_hinge_joint_range_stays_fixed_while_the_current_marker_moves() -> None:
 @pytest.mark.physics
 @pytest.mark.parametrize("body_name", ("hinge_body", "slide_body"))
 def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -4572,8 +4643,8 @@ def test_scalar_joint_gizmo_uses_a_joint_color_instead_of_xyz(body_name: str) ->
 
 @pytest.mark.physics
 def test_unlimited_joint_gizmo_does_not_invent_limits() -> None:
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -4609,11 +4680,11 @@ def test_unlimited_joint_gizmo_does_not_invent_limits() -> None:
 def test_inspector_omits_redundant_active_gizmo_status(monkeypatch) -> None:
     from types import SimpleNamespace
 
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
-    from mojive.assets import resolve
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.scene.assets import resolve
     from mojive.ui.panels import PanelContext
-    from mojive.ui.panels import inspector as inspector_module
     from mojive.ui.panels.inspector import InspectorPanel
+    from mojive.ui.panels.inspector import core as inspector_module
 
     session = Session(MuJoCoAdapter(resolve("joint_types")))
     assert session.submit(cmd.Pause())
@@ -4637,7 +4708,7 @@ def test_inspector_omits_redundant_active_gizmo_status(monkeypatch) -> None:
 
 
 def test_dimension_handles_round_square_corners_and_shaft_joins_and_keep_hit_regions():
-    from mojive.gizmo import DIMENSION_HANDLE_HALF_PT, dimension_axis_polygon
+    from mojive.interaction.gizmo import DIMENSION_HANDLE_HALF_PT, dimension_axis_polygon
 
     start, end = np.array((5.0, 7.0)), np.array((65.0, 7.0))
     shape = dimension_axis_polygon(start, end, 1.0)
@@ -4762,7 +4833,7 @@ def test_limited_hinge_has_a_faint_complementary_hover_target(span):
 
 @pytest.mark.physics
 def test_tiny_hinge_complement_press_drags_without_jump_and_respects_limits(tmp_path):
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.adapters.mujoco import MuJoCoAdapter
 
     path = tmp_path / "tiny.xml"
     path.write_text(

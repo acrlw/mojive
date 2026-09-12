@@ -9,7 +9,7 @@ import pytest
 
 from mojive import Scene
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.control_rpc import ControlService
+from mojive.control.rpc import ControlService
 from mojive.render.backend import RenderFlag
 
 
@@ -114,7 +114,7 @@ def test_capture_reuses_resources_and_releases_on_the_graphics_thread(
         def close(self):
             self.record("close")
 
-    monkeypatch.setattr("mojive.session_capture.SceneRenderer", Renderer)
+    monkeypatch.setattr("mojive.session.capture.SceneRenderer", Renderer)
     params = {"width": 32, "height": 24, "output": str(tmp_path / "capture.png")}
     service.dispatch("capture", params)
     service.dispatch("capture", params)

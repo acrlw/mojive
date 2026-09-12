@@ -9,13 +9,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from ..curves2d import (
+from mojive.drawing.curves import (
     CORNER_SMOOTHING,
     arrow_points,
     capped_polyline_points,
     polyline_ribbon,
     smooth_rect_points,
 )
+
 from ..ui.viewport_widgets import (
     _ROTATE_HALF_RINGS,
     OVERLAY_GEOMETRY,

@@ -28,7 +28,7 @@ class Provider:
 def backend(monkeypatch):
     backend = NullBackend()
     monkeypatch.setattr(backend, "set_shadow_quality", lambda value: True)
-    monkeypatch.setattr("mojive.scene_renderer._select_backend", lambda *args: (None, backend))
+    monkeypatch.setattr("mojive.render.offscreen._select_backend", lambda *args: (None, backend))
     return backend
 
 

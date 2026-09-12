@@ -26,8 +26,9 @@ from ..types import (
 )
 
 if TYPE_CHECKING:
+    from mojive.session.simulation import SimulationDriver
+
     from ..commands import ModelEdit
-    from ..simulation import SimulationDriver
 
 GEOMETRY_OBJECT_BASE = 0x50000000
 LIGHT_OBJECT_BASE = 0x70000000

@@ -5,7 +5,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from mojive.curves2d import (
+from mojive.drawing.curves import (
     CURVE_TOLERANCE,
     _cap_geometry,
     _fit_cap_smoothing,

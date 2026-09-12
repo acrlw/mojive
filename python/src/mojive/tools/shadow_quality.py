@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from ..assets import resolve
+from mojive.scene.assets import resolve
+
 from ..render.backend import ShadowQuality
 from ..types import CameraView
 from ._harness import OffscreenHarness

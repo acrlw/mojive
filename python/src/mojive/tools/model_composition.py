@@ -7,8 +7,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..assets import resolve
-from ..composition import build
+from mojive.application.composition import build
+from mojive.scene.assets import resolve
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -94,7 +94,7 @@ def test_mujoco_renderer_async_frame_identity_out_and_close():
 
 def test_full_viewer_two_windows_resize_selection_and_peer_survival():
     from mojive import commands as cmd
-    from mojive.composition import build
+    from mojive.application.composition import build
     from mojive.ui import window as window_module
 
     baseline = window_module._live_windows
@@ -166,7 +166,7 @@ def test_full_viewer_two_windows_resize_selection_and_peer_survival():
 
 
 def test_failed_window_initialization_releases_platform_and_device(monkeypatch, tmp_path):
-    from mojive.composition import build
+    from mojive.application.composition import build
     from mojive.ui import window as window_module
 
     baseline = window_module._live_windows
@@ -188,7 +188,7 @@ def test_failed_window_initialization_releases_platform_and_device(monkeypatch, 
 
 
 def test_hundred_humanoid_viewer_physics_and_rendering():
-    from mojive.composition import build
+    from mojive.application.composition import build
 
     model = Path(os.environ.get("MOJIVE_HUMANOIDS_MODEL", ""))
     if not model.is_file():
@@ -228,7 +228,7 @@ def test_hundred_humanoid_viewer_physics_and_rendering():
 
 @pytest.mark.parametrize("scale", [1.5, 2.5])
 def test_shown_scaled_window_and_cjk(monkeypatch, scale):
-    from mojive.composition import build
+    from mojive.application.composition import build
 
     monkeypatch.setenv("MOJIVE_LANGUAGE", "zh")
     monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
@@ -309,7 +309,7 @@ def test_async_completion_can_close_the_last_renderer():
 
 def test_viewer_projection_and_colors_match_opengl_after_resize(monkeypatch):
     from mojive import CameraView
-    from mojive.composition import build
+    from mojive.application.composition import build
     from mojive.ui import window as window_module
 
     # Fixed-size projection comparisons need a fixed layout scale. Desktop DPI can
@@ -402,7 +402,7 @@ def _metal_presentation(window):
 
 @pytest.mark.skipif(os.sys.platform != "darwin", reason="Inspect the actual macOS display layer")
 def test_vsync_controls_gpu_presentation_and_survives_peer_close():
-    from mojive.composition import build
+    from mojive.application.composition import build
 
     with build(
         Path("assets/test_scene.xml"),

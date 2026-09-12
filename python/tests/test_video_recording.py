@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from mojive import VideoRecorder
-from mojive import recording as recording_module
+from mojive.capture import recording as recording_module
 
 
 @pytest.mark.parametrize("size", ((0, 10), (10, -1), (10, 20, 30)))

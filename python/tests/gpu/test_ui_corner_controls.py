@@ -256,7 +256,7 @@ def test_slider_grab_endpoints_and_center_match_mouse_input(vertical, integer, m
 def test_tab_focus_uses_the_control_radius_and_outset(radius, height, monkeypatch):
     from tests.curve_assertions import distance_to_path
 
-    from mojive.curves2d import smooth_rect_points
+    from mojive.drawing.curves import smooth_rect_points
 
     window = Window(
         WindowConfig(width=480, height=340, docking=False, ini_path="", show_on_start=False)
@@ -410,7 +410,7 @@ def test_native_menu_highlight_keeps_text_padding(monkeypatch):
 def test_input_focus_follows_the_full_control_contour(control, scale, monkeypatch):
     from tests.curve_assertions import distance_to_path
 
-    from mojive.curves2d import smooth_rect_points
+    from mojive.drawing.curves import smooth_rect_points
     from mojive.ui.panels import search_input
 
     monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))

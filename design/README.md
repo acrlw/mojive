@@ -43,6 +43,14 @@ an entire family every frame. Every family row also exposes live per-glyph paddi
 overrides plus a reset button. Viewport tools default to `0.5u` padding; every other component
 group defaults to `2.0u`. Playback Previous, Next, and More override that default with `4.0u`.
 The Status group also exposes mouse width.
+
+`Keyframe follow` compares the production Off, Page, and Locked icons in compact segmented
+controls with English/Chinese tooltips. The toolbar hides the Follow heading and option captions;
+each square segment centers its icon and retains the selected-state fill. Each glyph has its own Pad and
+Stroke sliders, restored by Default and included in Copy icon parameters. These icons default to
+`0.5u` padding and `1.5u` stroke. Icon Library preview applies live edits to the Workspaces
+Keyframes toolbar; turning it off restores production defaults. Run `make ui-keyframe-follow`
+for the focused 1x/2x family and production toolbar captures.
 Family sheets,
 capsule specimens, and the whole-UI preview resolve the values for the component they show. Each
 detail row reports circular padding, its declared placement anchor, and one secondary diagnostic.

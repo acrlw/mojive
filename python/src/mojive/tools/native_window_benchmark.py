@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from mojive.composition import build
+from mojive.application.composition import build
 from mojive.config import LayoutConfig, ViewerConfig
 
 

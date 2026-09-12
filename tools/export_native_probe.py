@@ -16,7 +16,7 @@ import mujoco
 import numpy as np
 
 from mojive.adapters.base import FrameNeeds
-from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.render.builder import SceneSourceBuilder
 from mojive.render.mesh import builtin_mesh
 from mojive.types import CameraView

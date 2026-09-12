@@ -9,9 +9,9 @@ import pytest
 
 from mojive import Scene, SharedImage
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.control_rpc import ControlService, RpcError
-from mojive.control_schema import Validator
-from mojive.operations import OPERATIONS, apply_session_operation, document_state
+from mojive.control.operations import OPERATIONS, apply_session_operation, document_state
+from mojive.control.rpc import ControlService, RpcError
+from mojive.control.schema import Validator
 from mojive.types import CameraView, Light, Material
 
 
@@ -58,7 +58,7 @@ def test_rpc_client_import_does_not_initialize_application_or_graphics():
             """
 import sys
 from mojive.control_rpc import RpcClient
-for name in ('jsonschema', 'mojive.control', 'mojive.operations', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl'):
+for name in ('jsonschema', 'mojive.control.application', 'mojive.control.operations', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl'):
     assert name not in sys.modules, name
 """,
         ],

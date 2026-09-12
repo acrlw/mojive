@@ -10,8 +10,7 @@ moderngl = pytest.importorskip("moderngl")
 pytest.importorskip("mujoco")
 
 from mojive.adapters.base import FrameNeeds  # noqa: E402
-from mojive.assets import resolve  # noqa: E402
-from mojive.backends import make_adapter  # noqa: E402
+from mojive.application.backends import make_adapter  # noqa: E402
 from mojive.render.backend import DebugView, RenderFlag  # noqa: E402
 from mojive.render.builder import SceneSourceBuilder  # noqa: E402
 from mojive.render.debugdraw import Occlusion, PrimitiveType  # noqa: E402
@@ -19,6 +18,7 @@ from mojive.render.opengl import gl_native as G  # noqa: E402
 from mojive.render.opengl import passes as _passes  # noqa: E402
 from mojive.render.opengl.backend import PASS_ORDER, OpenGLBackend, registered  # noqa: E402
 from mojive.render.opengl.state_guard import GLStateGuard  # noqa: E402
+from mojive.scene.assets import resolve  # noqa: E402
 from mojive.types import CameraView  # noqa: E402
 
 WIDTH, HEIGHT = 480, 360

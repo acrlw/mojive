@@ -157,6 +157,34 @@ def test_labelled_snapshot_preview_places_the_selected_anchor_on_text_ink(monkey
     assert kwargs["alignment"] == alignment
 
 
+@pytest.mark.parametrize("mode", ("off", "page", "locked"))
+def test_follow_label_preview_and_export_share_live_tuning(monkeypatch, mode):
+    name = f"key-follow-{mode}"
+    state = probe.ProbeState()
+    state.set_icon_padding_for_glyph(name, 3.0)
+    state.set_icon_stroke_for_glyph(name, 1.25)
+    calls = []
+    monkeypatch.setattr(probe, "draw_icon_label", lambda *a, **kw: calls.append((a, kw)))
+    color = (0.4, 0.6, 0.2, 0.5)
+    probe._draw_icon_library_label(
+        object(),
+        (10.0, 20.0),
+        (90.0, 48.0),
+        color,
+        1.0,
+        name,
+        mode,
+        state=state,
+    )
+    args, kwargs = calls[0]
+    assert args[3] == color
+    assert kwargs["style"].padding == 3.0
+    assert kwargs["style"].stroke_width == 1.25
+    exported = probe._icon_values_text(state)
+    assert f"icon_padding_key_follow_{mode}=3.0," in exported
+    assert f"icon_stroke_key_follow_{mode}=1.25," in exported
+
+
 def test_probe_geometry_defaults_follow_production_constants():
     state = probe.ProbeState()
 
@@ -167,6 +195,7 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == probe.DEFAULT_SELECTION_PADDING
     assert state.corner_radius == probe.OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
+    assert state.timeline_panel.follow_mode_icon_drawer is probe.draw_icon_label
     assert all(
         state.icon_stroke_for(group) == probe.ICON_STROKE
         for group in probe.ICON_GROUP_STROKE_DEFAULTS
@@ -174,7 +203,7 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.icon_padding_for("Viewport tools") == 0.5
     assert state.icon_padding_for_glyph("tool-rotate") == 0.0
     assert state.icon_padding_for_glyph("playback-previous") == 4.0
-    assert state.rotate_ring_gap_ratio == 0.8
+    assert state.rotate_ring_gap_ratio == 1.0
     assert state.rotate_ring_cap == "round"
     assert state.move_head_scale == 0.85
     assert state.scale_handle_scale == 1.15

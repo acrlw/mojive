@@ -7,7 +7,7 @@ import pytest
 from mojive import register_adapter, unregister_adapter
 from mojive.adapters.base import SceneAdapterBase
 from mojive.adapters.registry import make_adapter
-from mojive.backends import available_backends, backend_info
+from mojive.application.backends import available_backends, backend_info
 
 
 class CustomAdapter(SceneAdapterBase):

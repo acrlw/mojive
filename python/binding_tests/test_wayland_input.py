@@ -15,7 +15,7 @@ import pytest
 from imgui_bundle import imgui
 from PIL import Image
 
-from mojive.composition import build
+from mojive.application.composition import build
 from mojive.ui import window as wm
 
 pytestmark = pytest.mark.skipif(

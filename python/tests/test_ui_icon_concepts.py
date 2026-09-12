@@ -5,7 +5,7 @@ from itertools import combinations
 
 import pytest
 
-from mojive.curves2d import CORNER_SMOOTHING, arrow_mesh, smooth_rect_points
+from mojive.drawing.curves import CORNER_SMOOTHING, arrow_mesh, smooth_rect_points
 from mojive.ui import icons as icon_concepts
 from mojive.ui.icons import (
     BOX_CENTERED_ICONS,
@@ -296,7 +296,7 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
 
 
 def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> None:
-    assert ICON_ROTATE_RING_GAP_RATIO == 0.8
+    assert ICON_ROTATE_RING_GAP_RATIO == 1.0
     assert ICON_GLYPH_PADDING_DEFAULTS == {
         "tool-rotate": 0.0,
         "playback-previous": 4.0,
@@ -313,6 +313,12 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "key-previous": 4.0,
         "key-next": 4.0,
         "key-snapshot": 0.5,
+        "key-fit": 0.5,
+        "key-follow": 0.5,
+        "key-follow-off": 0.5,
+        "key-follow-page": 0.5,
+        "key-follow-locked": 0.5,
+        "key-view": 0.5,
         "panel-search": 4.0,
         "panel-sort": 4.0,
         "panel-clear": 4.0,
@@ -326,12 +332,12 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "helper-light": 0.5,
     }
     assert ICON_GLYPH_STROKE_DEFAULTS == {
-        "tool-move": 1.1,
-        "tool-rotate": 1.1,
-        "tool-scale": 1.1,
-        "tool-world": 1.1,
-        "tool-body": 1.1,
-        "tool-snap": 1.1,
+        "tool-move": 1.0,
+        "tool-rotate": 1.0,
+        "tool-scale": 1.0,
+        "tool-world": 1.0,
+        "tool-body": 1.0,
+        "tool-snap": 1.0,
         "playback-previous": 2.0,
         "playback-next": 2.0,
         "playback-reset": 1.25,
@@ -348,6 +354,9 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "key-next": 1.5,
         "key-fit": 1.25,
         "key-follow": 1.5,
+        "key-follow-off": 1.5,
+        "key-follow-page": 1.5,
+        "key-follow-locked": 1.5,
         "key-view": 1.5,
         "panel-search": 1.0,
         "panel-sort": 1.0,
@@ -361,10 +370,24 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
     }
 
 
+@pytest.mark.parametrize("mode", ("off", "page", "locked"))
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+def test_icon_only_follow_segments_center_without_measuring_text(mode, scale) -> None:
+    draw = _RecordingDraw()
+    lo = (25.5, 42.25)
+    hi = (lo[0] + 28.0 * scale, lo[1] + 28.0 * scale)
+    icon_concepts.draw_icon_label(draw, lo, hi, (1.0,) * 4, scale, f"key-follow-{mode}", "")
+    x0, y0, x1, y1 = draw.bounds
+    assert (x0 + x1) * 0.5 == pytest.approx((lo[0] + hi[0]) * 0.5)
+    assert (y0 + y1) * 0.5 == pytest.approx((lo[1] + hi[1]) * 0.5)
+    assert lo[0] < x0 < x1 < hi[0]
+    assert lo[1] < y0 < y1 < hi[1]
+
+
 def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> None:
     style = production_icon_style("helper-camera")
     assert (style.padding, style.stroke_width, style.alignment) == (0.5, 1.5, "box")
-    assert style.rotate_ring_gap_ratio == 0.8
+    assert style.rotate_ring_gap_ratio == 1.0
     assert style.rotate_ring_cap == "round"
 
     icon_concepts._production_icon_layout.cache_clear()
@@ -381,6 +404,9 @@ def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> No
 def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
     assert {
         "tool-snap",
+        "key-follow-off",
+        "key-follow-page",
+        "key-follow-locked",
         "playback-previous",
         "playback-next",
         "playback-more",
@@ -755,7 +781,10 @@ def test_authored_shape_controls_change_geometry_without_breaking_circle_fit(
 
     assert changed.filled_paths != original.filled_paths
     assert icon_metrics(name, tuning=adjusted).circular_clearance == pytest.approx(
-        ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)], abs=1e-5
+        ICON_GLYPH_PADDING_DEFAULTS.get(
+            name, ICON_GROUP_LAYOUT_DEFAULTS[icon_component_group(name)]
+        ),
+        abs=1e-5,
     )
 
 
@@ -1091,6 +1120,24 @@ def test_key_follow_arrow_has_a_round_tail() -> None:
     assert draw.arrows[0][3]
 
 
+@pytest.mark.parametrize("padding,stroke", ((0.5, 1.0), (2.0, 1.5), (4.0, 2.5)))
+def test_follow_modes_share_the_frame_and_keep_marks_inside(padding, stroke):
+    captures = [
+        _render(f"key-follow-{mode}", ICON_GRID, padding=padding, stroke_width=stroke)
+        for mode in ("off", "page", "locked")
+    ]
+    for draw in captures[1:]:
+        assert draw.bounds == pytest.approx(captures[0].bounds, abs=1e-6)
+    for mode in ("off", "page", "locked"):
+        metrics = icon_metrics(f"key-follow-{mode}", padding, stroke_width=stroke)
+        assert metrics.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
+    # The fixed-playhead silhouette is a single head/stem, separate from its frame.
+    locked = captures[2]
+    assert len(locked.filled_paths) == 1
+    assert len(locked.filled_paths[0]) > 6
+    assert max(abs(y) for _x, y in locked.filled_paths[0]) < locked.bounds[3] - stroke
+
+
 @pytest.mark.parametrize("name", _icons())
 def test_concept_icon_bounds_and_strokes_scale_as_one_master(name: str) -> None:
     sizes = (14.0, 24.0, 56.0, 112.0)
@@ -1148,3 +1195,40 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
             )
             draw_icon(actual, center, size, name, foreground, accent_color=accent)
             assert actual.calls == expected.calls
+
+
+def test_production_presets_match_dynamic_layout_and_visible_metrics():
+    from dataclasses import asdict, astuple
+
+    presets = icon_concepts._production_icon_presets()
+    names = {name for _family, entries in ICON_FAMILIES for _label, name in entries}
+    assert presets.keys() == names
+    for name in names:
+        style = icon_concepts.production_icon_style(name)
+        assert presets[name]["style"] == asdict(style), f"Regenerate {name} with make icon-presets"
+        options = asdict(style)
+        options["tuning"] = style.tuning
+        actual = icon_concepts._production_icon_layout(name)[1]
+        expected = icon_concepts._icon_layout(name, **options)
+        assert actual[0] == pytest.approx(expected[0], abs=1e-9)
+        assert actual[1] == pytest.approx(expected[1], abs=1e-9)
+        assert actual[2] == pytest.approx(expected[2], abs=1e-9)
+        actual_metrics = astuple(icon_concepts.production_icon_metrics(name))
+        expected_metrics = astuple(icon_concepts.icon_metrics(name, **options))
+        for actual_value, expected_value in zip(actual_metrics, expected_metrics, strict=True):
+            assert actual_value == pytest.approx(expected_value, abs=1e-9)
+
+
+def test_cold_production_icons_skip_dynamic_fitting(monkeypatch):
+    def unexpected_fit(*args, **kwargs):
+        pytest.fail("Production icon startup must use precomputed layout and metrics")
+
+    for name in ("_production_icon_layout", "production_icon_metrics", "_icon_draw_commands"):
+        getattr(icon_concepts, name).cache_clear()
+    monkeypatch.setattr(icon_concepts, "_icon_layout", unexpected_fit)
+    monkeypatch.setattr(icon_concepts, "_measure_raw_icon", unexpected_fit)
+    monkeypatch.setattr(icon_concepts, "icon_metrics", unexpected_fit)
+    for _family, entries in ICON_FAMILIES:
+        for _label, name in entries:
+            icon_concepts.production_icon_metrics(name)
+            assert icon_concepts._icon_draw_commands(name, (0.0, 0.0), 24.0, None)

@@ -14,13 +14,14 @@ from imageio_ffmpeg import read_frames
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.application.composition import build
+from mojive.capture import CaptureSurface, RecordingPhase
+from mojive.drawing.canvas import Canvas2D
+from mojive.interaction.gizmo import SIZE_PT, GizmoHandle
+from mojive.scene.assets import resolve
+
 from .. import commands as cmd
-from ..assets import resolve
-from ..canvas2d import Canvas2D
-from ..capture import CaptureSurface, RecordingPhase
-from ..composition import build
 from ..config import PanelConfig, RecordingConfig, ViewerConfig, ViewportLayers
-from ..gizmo import SIZE_PT, GizmoHandle
 from ..render.debugdraw import Occlusion
 from ..types import CameraView
 from ..ui.gizmo import JOINT_RANGE_RADIUS, _RotationDialProjector

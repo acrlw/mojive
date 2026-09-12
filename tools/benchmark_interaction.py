@@ -16,8 +16,15 @@ import numpy as np
 
 from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.draglink2d import smooth_drag_link_mesh
-from mojive.gizmo import GizmoMode, hit_test, prepare_projection, project, visibility, world_scale
+from mojive.drawing.drag_link import smooth_drag_link_mesh
+from mojive.interaction.gizmo import (
+    GizmoMode,
+    hit_test,
+    prepare_projection,
+    project,
+    visibility,
+    world_scale,
+)
 from mojive.scene import Scene
 from mojive.session import Session
 from mojive.types import CameraView

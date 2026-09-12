@@ -24,7 +24,7 @@ moderngl = pytest.importorskip("moderngl")
 
 from mojive import math3d as M  # noqa: E402
 from mojive.adapters.base import SceneSource  # noqa: E402
-from mojive.gizmo import (  # noqa: E402
+from mojive.interaction.gizmo import (  # noqa: E402
     ACTIVE_HANDLE_COLOR,
     AXIS_COLORS,
     CENTER_RADIUS,

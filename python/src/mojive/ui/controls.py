@@ -6,18 +6,33 @@ state and translations; geometry and interaction belong here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import lru_cache
 
 from imgui_bundle import imgui
 
-from ..curves2d import smooth_capsule_points
+from mojive.drawing.curves import smooth_capsule_points
+
 from .compound_fields import draw_focus_frame
-from .draw2d import ImguiDraw2D, fit_text
+from .draw2d import Draw2D, ImguiDraw2D, fit_text
 from .input_bindings import DEFAULT_INPUT_BINDINGS
 from .pointer_bindings import PointerAction
 from .theme import THEME, Theme
 from .viewport_widgets import draw_projection_label
+
+IconLabelDrawer = Callable[
+    [
+        Draw2D,
+        tuple[float, float],
+        tuple[float, float],
+        tuple[float, float, float, float],
+        float,
+        str,
+        str,
+    ],
+    None,
+]
 
 
 def _production_control_icon(draw, center, size: float, kind: str, color) -> None:
@@ -363,11 +378,31 @@ def themed_checkbox(
 
 
 @lru_cache(maxsize=256)
-def _segment_width(font, font_size, labels, icons, padding, glyph_scale):
+def _segment_width(font, font_size, labels, icons, padding, glyph_scale, icon_only_width):
     """Measure stable labels once per font, language and UI scale."""
     return max(
-        imgui.calc_text_size(label).x + padding + (20.0 * glyph_scale if icon else 0.0)
+        icon_only_width
+        if icon and icon_only_width
+        else imgui.calc_text_size(label).x + padding + (20.0 * glyph_scale if icon else 0.0)
         for label, icon in zip(labels, icons, strict=True)
+    )
+
+
+def segmented_control_width(
+    labels: tuple[str, ...], *, icons: tuple[str, ...] | None = None, show_labels: bool = True
+) -> float:
+    """Return the horizontal width using the control's actual font and padding."""
+    if not labels:
+        return 0.0
+    icons = tuple(icons[i] if icons and i < len(icons) else "" for i in range(len(labels)))
+    return len(labels) * _segment_width(
+        imgui.get_font(),
+        imgui.get_font_size(),
+        labels,
+        icons,
+        2 * imgui.get_style().frame_padding.x,
+        max(0.65, imgui.get_frame_height() / 24.0),
+        0.0 if show_labels else imgui.get_frame_height(),
     )
 
 
@@ -379,12 +414,15 @@ def segmented_control(
     width: float = 0.0,
     theme: Theme = THEME,
     icons: tuple[str, ...] | None = None,
+    icon_label_drawer: IconLabelDrawer | None = None,
+    show_labels: bool = True,
 ) -> int:
     """Choose one of N equal segments in one rounded frame.
 
     Only outer corners are rounded. Options form a contiguous vertical group
     when their labels cannot fit horizontally. Stable native button IDs retain
     keyboard navigation; measurement is cached independently of hover/selection.
+    Hidden icon captions become per-item tooltips and use square segments.
     """
     if not labels:
         return 0
@@ -392,15 +430,7 @@ def segmented_control(
     available = max(1.0, float(width if width > 0 else imgui.get_content_region_avail().x))
     glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
     icons = tuple(icons[i] if icons and i < len(icons) else "" for i in range(len(labels)))
-    minimum = _segment_width(
-        imgui.get_font(),
-        imgui.get_font_size(),
-        labels,
-        icons,
-        2 * style.frame_padding.x,
-        glyph_scale,
-    )
-    inline = minimum * len(labels) <= available
+    inline = segmented_control_width(labels, icons=icons, show_labels=show_labels) <= available
     selected = min(max(0, int(selected)), len(labels) - 1)
     result = selected
     draw = ImguiDraw2D()
@@ -479,16 +509,18 @@ def segmented_control(
         if icon:
             splitter.set_current_channel(dl, 1)
             dl.push_clip_rect(lo, hi, True)
-            draw_projection_label(
+            (icon_label_drawer or draw_projection_label)(
                 draw,
                 (lo.x, lo.y),
                 (hi.x, hi.y),
                 (*color[:3], color[3] * style.alpha),
                 glyph_scale,
                 icon,
-                label,
+                label if show_labels else "",
             )
             dl.pop_clip_rect()
+            if not show_labels:
+                imgui.set_item_tooltip(label)
         if clicked:
             result = index
     splitter.merge(dl)

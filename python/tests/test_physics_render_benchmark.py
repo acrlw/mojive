@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from mojive.simulation import Snapshot, SnapshotPool
+from mojive.session.simulation import Snapshot, SnapshotPool
 from mojive.tools.physics_render_benchmark import interval_overlap
 
 

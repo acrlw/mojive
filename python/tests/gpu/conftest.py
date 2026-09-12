@@ -24,7 +24,7 @@ glfw = _load_glfw()
 def _keep_composed_windows_hidden():
     """Prevent automated UI tests from interrupting the active desktop."""
 
-    from mojive import composition
+    from mojive.application import composition as composition
 
     original = composition._compose
 

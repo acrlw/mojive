@@ -12,7 +12,7 @@ import pytest
 
 from mojive import commands as cmd
 from mojive.adapters.toy import ToyPhysicsAdapter
-from mojive.control_rpc import (
+from mojive.control.rpc import (
     PROTOCOL_VERSION,
     ControlServer,
     ControlService,

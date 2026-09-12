@@ -149,7 +149,7 @@ def test_axis_colors_are_luminance_balanced():
 
 def test_native_gizmo_uses_theme_axis_colors():
 
-    from mojive.gizmo import AXIS_COLORS as GIZMO_COLORS
+    from mojive.interaction.gizmo import AXIS_COLORS as GIZMO_COLORS
 
     expected = [theme.AXIS_COLORS[k] for k in theme.AXIS_ORDER]
     for actual, want in zip(GIZMO_COLORS, expected, strict=True):
@@ -157,7 +157,7 @@ def test_native_gizmo_uses_theme_axis_colors():
 
 
 def test_joint_gizmo_uses_primary_while_reserved_purple_stays_in_the_palette():
-    from mojive.gizmo import ACTIVE_HANDLE_COLOR, JOINT_HANDLE_COLOR
+    from mojive.interaction.gizmo import ACTIVE_HANDLE_COLOR, JOINT_HANDLE_COLOR
     from mojive.ui.gizmo import JOINT_ACTIVE_DARK_COLOR, JOINT_RANGE_COLOR
 
     assert tuple(JOINT_HANDLE_COLOR) == pytest.approx(theme.PRIMARY)

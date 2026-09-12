@@ -9,8 +9,8 @@ pytest.importorskip("glfw")
 pytest.importorskip("moderngl")
 pytest.importorskip("mujoco")
 
-from mojive.assets import resolve  # noqa: E402
 from mojive.render.backend import DebugView, RenderFlag  # noqa: E402
+from mojive.scene.assets import resolve  # noqa: E402
 from mojive.tools._harness import OffscreenHarness  # noqa: E402
 from mojive.types import CameraView  # noqa: E402
 

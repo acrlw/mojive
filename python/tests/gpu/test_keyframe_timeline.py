@@ -6,7 +6,7 @@ from imgui_bundle import imgui
 
 from mojive import ViewerConfig, build
 from mojive import commands as cmd
-from mojive.assets import resolve
+from mojive.scene.assets import resolve
 from mojive.tools.keyframe_timeline import (
     choose_follow,
     drag,
@@ -25,7 +25,7 @@ def test_timeline_without_models_preserves_drag_and_view_range(backend, tmp_path
     from mojive.adapters.base import SceneAdapterBase, SceneFrame, SceneSource
     from mojive.adapters.static import StaticSceneAdapter
     from mojive.adapters.toy import ToyPhysicsAdapter
-    from mojive.composition import build_from_adapter
+    from mojive.application.composition import build_from_adapter
     from mojive.scene import Scene
 
     class FakeAdapter(SceneAdapterBase):

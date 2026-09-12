@@ -7,8 +7,9 @@ import tempfile
 import threading
 from pathlib import Path
 
-from ..adapters.mujoco_adapter import MuJoCoAdapter
-from ..control_rpc import ControlServer, ControlService, RpcClient
+from mojive.control.rpc import ControlServer, ControlService, RpcClient
+
+from ..adapters.mujoco import MuJoCoAdapter
 
 
 def main() -> None:

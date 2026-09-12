@@ -13,10 +13,11 @@ from pathlib import Path
 import numpy as np
 from imgui_bundle import imgui
 
+from mojive.application.composition import build
+from mojive.interaction.gizmo import GizmoMode, project
+from mojive.scene.assets import resolve
+
 from .. import commands as cmd
-from ..assets import resolve
-from ..composition import build
-from ..gizmo import GizmoMode, project
 
 _CAPSULE_METHODS = (
     "_draw_playback_widget",

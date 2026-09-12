@@ -13,7 +13,13 @@ from functools import cached_property, lru_cache
 
 from imgui_bundle import imgui
 
-from ..input import InputClaim, _imgui_keys, imgui_key_for_physical_key, physical_ctrl_super
+from mojive.interaction.input import (
+    InputClaim,
+    _imgui_keys,
+    imgui_key_for_physical_key,
+    physical_ctrl_super,
+)
+
 from .pointer_bindings import (
     DEFAULT_POINTER_BINDINGS,
     NAVIGATION_PRESETS,

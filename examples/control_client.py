@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from mojive.control_rpc import DEFAULT_SOCKET, RpcClient
+from mojive.control.rpc import DEFAULT_SOCKET, RpcClient
 
 
 def parse_args() -> argparse.Namespace:

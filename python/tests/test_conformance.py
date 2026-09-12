@@ -10,7 +10,7 @@ from mojive.adapters.base import FrameNeeds
 from mojive.adapters.conformance import check_adapter
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
-from mojive.backends import available_backends, make_adapter
+from mojive.application.backends import available_backends, make_adapter
 from mojive.scene import Scene
 from mojive.session import Session
 from mojive.types import Light, LightSet

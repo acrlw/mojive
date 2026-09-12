@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 import wgpu
 
-from ....gizmo import GizmoFrame
+from mojive.interaction.gizmo import GizmoFrame
+
 from ....types import CameraView, MeshKey, MeshShape
 from ...gizmo_plan import _MESHES, GizmoPlanner
 from ...mesh import builtin_mesh, gizmo_mesh

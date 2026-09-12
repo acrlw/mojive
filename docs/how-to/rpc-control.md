@@ -106,7 +106,7 @@ Each description includes JSON Schema Draft 2020-12 `input_schema` and `output_s
 Availability reflects the adapter, pause state, history, and viewer attachment. Refresh it after
 state changes. Input validation rejects missing, unknown, incorrectly typed, and non-finite
 parameters before dispatch. Python clients can call `client.describe_operations(name="edit_scene")`.
-The catalog in `operations.py` drives both discovery and dispatch. Result schemas describe
+The catalog in `control/operations.py` drives both discovery and dispatch. Result schemas describe
 scene inspection, physics array shapes/values, camera bookmarks, viewer settings, and discovery
 records. Native remote authoring commands consume and check `expected_document` before command
 construction, retaining their existing `CommandResult` error format.

@@ -13,10 +13,10 @@ from PIL import Image
 from mojive import RenderProduct, Scene, SceneRenderer, SharedImage
 from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.composition import build_scene
-from mojive.control_rpc import ControlServer, ControlService, RpcClient
-from mojive.control_schema import Validator
-from mojive.operations import OPERATIONS
+from mojive.application.composition import build_scene
+from mojive.control.operations import OPERATIONS
+from mojive.control.rpc import ControlServer, ControlService, RpcClient
+from mojive.control.schema import Validator
 from mojive.types import CameraView
 
 pytestmark = pytest.mark.gpu
@@ -97,7 +97,7 @@ def test_in_memory_scene_capture_creates_no_files(
 
 @pytest.mark.physics
 def test_control_service_captures_rgb_depth_and_segmentation(tmp_path, standalone_capture_backend):
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.adapters.mujoco import MuJoCoAdapter
 
     asset = Path("assets/test_scene.xml").resolve()
     service = ControlService(MuJoCoAdapter(asset), asset)
@@ -306,7 +306,7 @@ def test_mujoco_capture_keeps_session_overrides_and_model_render_limits(
 ):
     import mujoco
 
-    from mojive.adapters.mujoco_adapter import MuJoCoAdapter
+    from mojive.adapters.mujoco import MuJoCoAdapter
 
     model = mujoco.MjModel.from_xml_string(
         '<mujoco><visual><global offwidth="32" offheight="24"/></visual>'
@@ -351,7 +351,7 @@ def test_mujoco_capture_keeps_session_overrides_and_model_render_limits(
 def test_unsupported_worker_opengl_capture_returns_error_without_killing_service(
     tmp_path, monkeypatch
 ):
-    from mojive.control_rpc import RpcError
+    from mojive.control.rpc import RpcError
 
     monkeypatch.setenv("MOJIVE_RENDERER", "opengl")
     monkeypatch.setenv("MOJIVE_GL", "glfw")

@@ -1,0 +1,34 @@
+"""Command-line entry points for viewing, capture, and diagnostics."""
+
+from .capture import cmd_capture as cmd_capture
+from .capture import cmd_keyframes as cmd_keyframes
+from .capture import cmd_probe as cmd_probe
+from .capture import cmd_record as cmd_record
+from .common import DEFAULT_BACKEND as DEFAULT_BACKEND
+from .common import _positive_float as _positive_float
+from .common import _positive_int as _positive_int
+from .common import _resolve as _resolve
+from .common import _setup_logging as _setup_logging
+from .common import log as log
+from .control import cmd_control as cmd_control
+from .control import cmd_operations as cmd_operations
+from .control import cmd_rpc_serve as cmd_rpc_serve
+from .inspection import _print_tree as _print_tree
+from .inspection import cmd_assets as cmd_assets
+from .inspection import cmd_audit as cmd_audit
+from .inspection import cmd_backends as cmd_backends
+from .inspection import cmd_conformance as cmd_conformance
+from .inspection import cmd_doctor as cmd_doctor
+from .inspection import cmd_inspect as cmd_inspect
+from .parser import _ArgumentParser as _ArgumentParser
+from .parser import _report_error as _report_error
+from .parser import _UsageError as _UsageError
+from .parser import build_parser as build_parser
+from .parser import main as main
+from .viewer import cmd_attach as cmd_attach
+from .viewer import cmd_canvas as cmd_canvas
+from .viewer import cmd_editor as cmd_editor
+from .viewer import cmd_replay as cmd_replay
+from .viewer import cmd_serve as cmd_serve
+from .viewer import cmd_toy as cmd_toy
+from .viewer import cmd_view as cmd_view
