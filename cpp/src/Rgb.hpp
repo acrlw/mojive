@@ -9,7 +9,7 @@ namespace mojive {
 namespace detail {
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 __attribute__((target("ssse3"))) inline void copyRgbSimd(std::byte *destination,
-                                                       const std::byte *source, size_t count) {
+                                                         const std::byte *source, size_t count) {
     const auto mask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
     size_t x = 0;
     for (; x + 4 <= count; x += 4) {
