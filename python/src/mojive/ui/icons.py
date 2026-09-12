@@ -7,6 +7,7 @@ import random
 from dataclasses import dataclass, replace
 from functools import cache, lru_cache
 from itertools import pairwise
+from typing import ClassVar
 
 from ..curves2d import (
     CORNER_SMOOTHING,
@@ -251,7 +252,7 @@ ICON_TUNING_DEFAULTS = IconTuning()
 class IconStyle:
     """Frozen production inputs for one reviewed icon."""
 
-    padding: float
+    padding: float | None
     stroke_width: float
     alignment: str | None
     mouse_width: float = STATUS_MOUSE_DEFAULT_WIDTH
@@ -1938,35 +1939,16 @@ def draw_concept_icon(
 ) -> None:
     """Draw one declared-anchor candidate fitted to a padded circular slot."""
 
-    layout_scale, offset, stroke_compensation = _icon_layout(
-        name,
-        padding,
-        mouse_width,
-        stroke_width,
-        rotate_ring_gap_ratio,
-        rotate_ring_cap,
-        tuning,
-        alignment,
-    )
-    unit_scale = float(size) / ICON_GRID
-    adjusted_center = (
-        float(center[0]) + offset[0] * unit_scale,
-        float(center[1]) + offset[1] * unit_scale,
-    )
-    _draw_concept_icon_raw(
-        draw,
-        adjusted_center,
-        size * layout_scale,
-        name,
-        color,
-        accent_color=accent_color,
+    style = IconStyle(
+        padding=padding,
         mouse_width=mouse_width,
         stroke_width=stroke_width,
-        stroke_compensation=stroke_compensation,
         rotate_ring_gap_ratio=rotate_ring_gap_ratio,
         rotate_ring_cap=rotate_ring_cap,
         tuning=tuning,
+        alignment=alignment,
     )
+    _draw_cached_icon(draw, center, size, name, color, accent_color, style)
 
 
 @cache
@@ -2001,22 +1983,82 @@ def _production_icon_layout(
     return style, layout
 
 
-def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None) -> None:
-    """Draw a production icon using its reviewed geometry and cached placement."""
+class _IconCommands:
+    """Record immutable Draw2D geometry with late-bound foreground/accent colors."""
 
-    style, (layout_scale, offset, stroke_compensation) = _production_icon_layout(name)
-    unit_scale = float(size) / ICON_GRID
+    _COLOR_ARGUMENT: ClassVar[dict[str, int]] = {
+        "line": 2,
+        "arrow": 2,
+        "polyline": 1,
+        "convex_fill": 1,
+        "fringed_concave_fill": 1,
+        "indexed_fill": 2,
+        "circle": 2,
+        "circle_filled": 2,
+        "rect": 2,
+        "rect_filled": 2,
+    }
+
+    def __init__(self):
+        self.commands = []
+
+    def __getattr__(self, method):
+        if method not in self._COLOR_ARGUMENT:
+            raise AttributeError(method)
+        color_index = self._COLOR_ARGUMENT[method]
+
+        def record(*args, **kwargs):
+            self.commands.append(
+                (
+                    method,
+                    args[:color_index],
+                    args[color_index],
+                    args[color_index + 1 :],
+                    kwargs,
+                )
+            )
+
+        return record
+
+
+@lru_cache(maxsize=512)
+def _icon_draw_commands(
+    name: str, center: tuple[float, float], size: float, style: IconStyle | None
+):
+    """Compile each visible placement once; never retain a draw list or actual color.
+
+    The bounded screen-placement cache also avoids transforming the same vertex
+    arrays every frame. Resizing or scrolling produces a new placement; ordinary
+    hover, press and disabled states reuse it with their current semantic colors.
+    """
+
+    if style is None:
+        style, layout = _production_icon_layout(name)
+    else:
+        layout = _icon_layout(
+            name,
+            style.padding,
+            style.mouse_width,
+            style.stroke_width,
+            style.rotate_ring_gap_ratio,
+            style.rotate_ring_cap,
+            style.tuning,
+            style.alignment,
+        )
+    layout_scale, offset, stroke_compensation = layout
+    unit_scale = size / ICON_GRID
     adjusted_center = (
-        float(center[0]) + offset[0] * unit_scale,
-        float(center[1]) + offset[1] * unit_scale,
+        center[0] + offset[0] * unit_scale,
+        center[1] + offset[1] * unit_scale,
     )
+    recording = _IconCommands()
     _draw_concept_icon_raw(
-        draw,
+        recording,
         adjusted_center,
         size * layout_scale,
         name,
-        color,
-        accent_color=accent_color,
+        0,
+        accent_color=1,
         mouse_width=style.mouse_width,
         stroke_width=style.stroke_width,
         stroke_compensation=stroke_compensation,
@@ -2024,6 +2066,21 @@ def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None)
         rotate_ring_cap=style.rotate_ring_cap,
         tuning=style.tuning,
     )
+    return tuple(recording.commands)
+
+
+def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None) -> None:
+    """Submit cached production geometry with the current interaction colors."""
+
+    _draw_cached_icon(draw, center, size, name, color, accent_color, None)
+
+
+def _draw_cached_icon(draw, center, size, name, color, accent_color, style):
+    colors = (color, color if accent_color is None else accent_color)
+    for method, before, slot, after, options in _icon_draw_commands(
+        name, (float(center[0]), float(center[1])), float(size), style
+    ):
+        getattr(draw, method)(*before, colors[slot], *after, **options)
 
 
 def draw_control_icon(draw, center, size: float, kind: str, color) -> None:

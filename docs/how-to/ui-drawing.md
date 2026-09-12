@@ -67,6 +67,28 @@ can record protocol calls for tests or render them to another surface without cr
 
 ## Reuse geometry and retain clear ownership
 
+Production icons compile their reviewed contours into a bounded cache of Draw2D calls, keyed by
+glyph, logical size, and placement. Calls retain geometry and color slots, never a draw list,
+ImGui context, theme, or actual interaction color. Hover, press, selection and disabled opacity
+are resolved when replaying the calls. Icon Library tuning shares this path and adds its complete
+style parameters to the key; unchanged previews reuse the same geometry. Do not put UI state into geometry caches.
+`make ui-frame-profile` reports the compilation cache hit/miss counts and timed capsule draws.
+
+Dimension previews similarly reuse their source arrays and node indexes while only size/scale
+commands change. Topology edits or a new base source rebuild those derived buffers. Ownership is:
+
+| Layer | Owns |
+| --- | --- |
+| Inspector | Numeric interaction and display, using shared vector rows |
+| `ModelEditDraft` / `GeometryPreview` | Pending commands and disposable render preview |
+| `Session` | Capability checks, transaction, Apply/Undo, authoritative adapter routing |
+| `Scene` / physics adapter | Authored dimensions and backend-specific rebuild |
+| `icons` / `ImguiDraw2D` | Pure glyph geometry / submission, AA and current color |
+
+Keep this path shared between production UI, scripted visual acceptance and programmatic commands.
+An empty MuJoCo edit batch does not compile; writes that defer constants explicitly request the
+single final rebuild.
+
 Use `panels.padded_selectable` for standard list rows and native `imgui.menu_item` for menus.
 The list helper retains native selection, keyboard navigation, IDs, and highlighting while giving
 text explicit insets and equal first/middle/last row bounds. Custom G3 geometry belongs to `Draw2D`;

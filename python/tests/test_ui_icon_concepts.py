@@ -1109,3 +1109,42 @@ def test_concept_icon_bounds_and_strokes_scale_as_one_master(name: str) -> None:
     for widths in normalized_widths[1:]:
         assert widths == pytest.approx(normalized_widths[0], abs=1e-6)
     assert all(width <= 2.5 / ICON_GRID + 1e-6 for width in normalized_widths[0])
+
+
+@pytest.mark.parametrize("name", [name for _, names in ICON_FAMILIES for _, name in names])
+def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
+    class Calls:
+        def __init__(self):
+            self.calls = []
+
+        def __getattr__(self, method):
+            def record(*args, **kwargs):
+                self.calls.append((method, args, kwargs))
+
+            return record
+
+    style, (fitted, offset, compensation) = icon_concepts._production_icon_layout(name)
+    for size in (14.0, 31.5):
+        center = (13.25, 17.5)
+        for foreground, accent in (
+            ((1, 0.4, 0.2, 0.3), (0.2, 0.4, 1, 0.5)),
+            ((0.2, 1, 0.3, 0.8), None),
+        ):
+            expected, actual = Calls(), Calls()
+            unit = size / ICON_GRID
+            icon_concepts._draw_concept_icon_raw(
+                expected,
+                (center[0] + offset[0] * unit, center[1] + offset[1] * unit),
+                size * fitted,
+                name,
+                foreground,
+                accent_color=accent,
+                mouse_width=style.mouse_width,
+                stroke_width=style.stroke_width,
+                stroke_compensation=compensation,
+                rotate_ring_gap_ratio=style.rotate_ring_gap_ratio,
+                rotate_ring_cap=style.rotate_ring_cap,
+                tuning=style.tuning,
+            )
+            draw_icon(actual, center, size, name, foreground, accent_color=accent)
+            assert actual.calls == expected.calls
