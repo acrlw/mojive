@@ -141,7 +141,8 @@ def test_geometry_export_names_production_overlay_fields():
     assert "icon_tool_move_head_scale=0.85," in values
     assert "icon_tool_scale_handle_scale=1.15," in values
     assert "icon_tool_snap_endpoint_scale=1.3," in values
-    assert "icon_key_fit_arm_length=4.0," in values
+    assert "icon_key_fit_arm_length=4.5," in values
+    assert "icon_reset_head_scale=1.5," in values
     assert "hint_mouse_wheel_gap_ratio=" in values
 
 
@@ -150,6 +151,7 @@ def test_icon_library_export_contains_group_glyph_and_shape_controls():
     state.set_icon_padding_for_glyph("tool-move", 0.85)
     state.set_icon_stroke_for_glyph("key-fit", 2.1)
     state.move_head_scale = 1.2
+    state.reset_head_scale = 1.6
 
     values = probe_tuning._icon_values_text(state)
 
@@ -157,6 +159,8 @@ def test_icon_library_export_contains_group_glyph_and_shape_controls():
     assert "icon_padding_tool_move=0.85," in values
     assert "icon_stroke_key_fit=2.1," in values
     assert "icon_tool_move_head_scale=1.2," in values
+    assert "icon_reset_head_scale=1.6," in values
+    assert state.icon_tuning().reset_head_scale == 1.6
     assert "icon_tool_snap_endpoint_scale=1.3," in values
     assert "icon_alignment_key_snapshot='box'," in values
 
@@ -235,7 +239,7 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.move_head_scale == 0.85
     assert state.scale_handle_scale == 1.15
     assert state.snap_endpoint_scale == 1.3
-    assert state.key_fit_arm_length == 4.0
+    assert state.key_fit_arm_length == 4.5
     assert state.hint_mouse_width == 14
     assert {
         name: state.icon_stroke_for_glyph(name) for name in ICON_GLYPH_STROKE_DEFAULTS

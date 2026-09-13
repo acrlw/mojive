@@ -171,8 +171,9 @@ def _draw_reset_icon(
     _surface=None,
     *,
     stroke_width: float = OVERLAY_GEOMETRY.tool_stroke,
+    head_scale: float = ICON_TUNING_DEFAULTS.reset_head_scale,
 ) -> None:
-    draw_reset_glyph(draw, center, color, scale, stroke_width)
+    draw_reset_glyph(draw, center, color, scale, stroke_width, head_scale=head_scale)
 
 
 def _circular_icon_button(

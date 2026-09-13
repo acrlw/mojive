@@ -651,6 +651,16 @@ def _draw_icon_family_detail(
                 "%.2f u",
                 0.10,
             )
+        elif name in {"playback-reset", "transport-reset"}:
+            shape_control = (
+                "Head",
+                "##reset-head-scale",
+                state.reset_head_scale,
+                0.65,
+                2.0,
+                "%.2f × original",
+                0.05,
+            )
         if shape_control is not None:
             label, item_id, value, minimum, maximum, display_format, step = shape_control
             draw.text(
@@ -670,6 +680,11 @@ def _draw_icon_family_detail(
                 display_format,
                 step=step,
             )
+            if name in {"playback-reset", "transport-reset"}:
+                imgui.set_item_tooltip(
+                    "Shared reset/refresh arrowhead size. Scales the head length and width; "
+                    "the Stroke control sets the arc weight."
+                )
             if changed:
                 if name == "tool-rotate":
                     state.rotate_ring_gap_ratio = value
@@ -679,6 +694,8 @@ def _draw_icon_family_detail(
                     state.scale_handle_scale = value
                 elif name == "tool-snap":
                     state.snap_endpoint_scale = value
+                elif name in {"playback-reset", "transport-reset"}:
+                    state.reset_head_scale = value
                 else:
                     state.key_fit_arm_length = value
         if name in ICON_ALIGNMENT_EDITABLE_ICONS:
@@ -716,6 +733,8 @@ def _draw_icon_family_detail(
                 state.snap_endpoint_scale = ICON_TUNING_DEFAULTS.snap_endpoint_scale
             elif name == "key-fit":
                 state.key_fit_arm_length = ICON_TUNING_DEFAULTS.key_fit_arm_length
+            elif name in {"playback-reset", "transport-reset"}:
+                state.reset_head_scale = ICON_TUNING_DEFAULTS.reset_head_scale
             padding = state.icon_padding_for_glyph(name)
             stroke_width = state.icon_stroke_for_glyph(name)
             alignment = state.icon_alignment_for_glyph(name)

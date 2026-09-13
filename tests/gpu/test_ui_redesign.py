@@ -495,3 +495,85 @@ def test_capsules_and_narrow_fields_fit_at_fractional_scales(monkeypatch, scale,
             narrow.save(f"{section.lower()}-narrow-{language}-{scale:g}x.png")
     finally:
         narrow.close()
+
+
+def test_reset_head_slider_updates_both_families_and_restores_default(monkeypatch):
+    from mojive.tools.ui_feasibility import icon_library, tuning
+
+    rig = Rig(monkeypatch, width=1800, height=1700, scale=0.75)
+    slider, button = imgui.slider_float, imgui.button
+    specimen = icon_library._draw_concept_icon_specimen
+    head_id = None
+    glyph_rect = None
+
+    def remember(key):
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        rig.state.rects[key] = (lo.x, lo.y, hi.x, hi.y)
+
+    def record_slider(label, *args, **kwargs):
+        nonlocal head_id
+        result = slider(label, *args, **kwargs)
+        if label == "##reset-head-scale":
+            head_id = imgui.get_id(label)
+            remember("reset-head")
+        return result
+
+    def record_button(label, *args, **kwargs):
+        result = button(label, *args, **kwargs)
+        if label == "Default" and imgui.get_id("##reset-head-scale") == head_id:
+            remember("reset-default")
+        return result
+
+    def record_specimen(draw, center, size, name, *args, **kwargs):
+        nonlocal glyph_rect
+        if name.endswith("-reset") and size == 56 * rig.window.style_scale:
+            glyph_rect = (*center, size)
+        return specimen(draw, center, size, name, *args, **kwargs)
+
+    monkeypatch.setattr(imgui, "slider_float", record_slider)
+    monkeypatch.setattr(imgui, "button", record_button)
+    monkeypatch.setattr(icon_library, "_draw_concept_icon_specimen", record_specimen)
+    try:
+        rig.probe.page, rig.probe.geometry_tab = "Geometry", "Icon library"
+        rig.probe.icon_library_tab = "Viewport playback"
+        for _ in range(3):
+            rig.frame()
+        baseline = rig.pixels[::-1].copy()
+        x0, y0, x1, y1 = rig.state.rects["reset-head"]
+        rig.move(x0 + (x1 - x0) * 0.75, (y0 + y1) * 0.5)
+        for down in (True, False):
+            rig.events.append(("add_mouse_button_event", (0, down)))
+            rig.frame()
+        rig.frame()
+        value = rig.probe.reset_head_scale
+        assert 1.5 < value < 1.9
+        assert f"icon_reset_head_scale={value}," in tuning._icon_values_text(rig.probe)
+        x, y, size = glyph_rect
+        density = rig.window.pixel_scale
+        left, top, right, bottom = map(
+            round,
+            (
+                (x - size) * density,
+                (y - size) * density,
+                (x + size) * density,
+                (y + size) * density,
+            ),
+        )
+        assert (
+            np.count_nonzero(
+                baseline[top:bottom, left:right] != rig.pixels[::-1][top:bottom, left:right]
+            )
+            > 100
+        )
+        rig.probe.icon_library_tab = "Keyframe transport"
+        rig.frame()
+        assert rig.probe.reset_head_scale == value
+        assert rig.probe.icon_tuning().reset_head_scale == value
+        rig.save("reset-head-slider.png")
+        rig.click("reset-default")
+        assert rig.probe.reset_head_scale == 1.5
+        rig.probe.icon_library_tab = "Viewport playback"
+        rig.frame()
+        assert rig.probe.icon_tuning().reset_head_scale == 1.5
+    finally:
+        rig.close()

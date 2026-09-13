@@ -139,6 +139,14 @@ accepted defaults to `mojive.ui.icons`; runtime consumers and review sheets must
 geometry. The `gap / stroke` control keeps its full 0.25 to 1.00 review range and must not clamp
 production geometry.
 
+Reset and refresh arrows share `icon_reset_head_scale`, exposed as `Head` in both Reset rows.
+It defaults to 1.5 and adjusts the head length, width, neck offset and corner radius together;
+the arc keeps its selected stroke weight and its ring remains centered. The review range is
+0.65–2.0. Both parameter exports include the value, and each Reset row's Default button restores
+it for both rows. Value-restore glyphs also accept `head_scale` and share the production default.
+`make ui-reset-heads BACKEND=bgfx` compares original and enlarged heads at four UI scales.
+The feasibility CLI also accepts `--reset-head-scale 1.6`.
+
 Use the shared G3 curve builders for rounded heads, boxes, and structural corners. In particular,
 `arrow_points`, `box_handle_points`, and `smooth_polygon_corners` preserve continuous curvature at
 the visible joins. Drawing a square on top of a shaft or letting round-capped cube spokes terminate

@@ -41,6 +41,7 @@ def _geometry_values_text(state: ProbeState) -> str:
         ("icon_tool_scale_handle_scale", state.scale_handle_scale),
         ("icon_tool_snap_endpoint_scale", state.snap_endpoint_scale),
         ("icon_key_fit_arm_length", state.key_fit_arm_length),
+        ("icon_reset_head_scale", state.reset_head_scale),
         ("hint_control_height", state.hint_control_height),
         ("hint_padding_x", state.hint_padding_x),
         ("hint_padding_y", state.hint_padding_y),
@@ -93,6 +94,7 @@ def _icon_values_text(state: ProbeState) -> str:
         ("icon_tool_scale_handle_scale", state.scale_handle_scale),
         ("icon_tool_snap_endpoint_scale", state.snap_endpoint_scale),
         ("icon_key_fit_arm_length", state.key_fit_arm_length),
+        ("icon_reset_head_scale", state.reset_head_scale),
         ("icon_status_mouse_width", state.hint_mouse_width),
     ]
     values.extend(
@@ -426,6 +428,7 @@ def _draw_geometry_controls(position, size, state: ProbeState) -> None:
         state.scale_handle_scale = ICON_TUNING_DEFAULTS.scale_handle_scale
         state.snap_endpoint_scale = ICON_TUNING_DEFAULTS.snap_endpoint_scale
         state.key_fit_arm_length = ICON_TUNING_DEFAULTS.key_fit_arm_length
+        state.reset_head_scale = ICON_TUNING_DEFAULTS.reset_head_scale
         state.hint_control_height = int(OVERLAY_GEOMETRY.hint_control_height)
         state.hint_padding_x = int(OVERLAY_GEOMETRY.hint_padding_x)
         state.hint_padding_y = int(OVERLAY_GEOMETRY.hint_padding_y)
