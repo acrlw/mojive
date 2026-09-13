@@ -87,7 +87,7 @@ declared geometric feature per silhouette:
 - Previous, Next, More, Keyframe Transport First/Last, and Tool Snap center their complete visible
   axis-aligned box;
 - Playback and Keyframe Transport Reset place the center of the authored circular ring on the slot;
-- Snapshot, Camera, and Light expose a per-glyph Box/Circle selector for direct comparison;
+- Snapshot, Camera, and Light default to Box alignment and expose a per-glyph Box/Circle selector;
 - all remaining candidates center their sampled minimum enclosing circle.
 
 The concept library samples the full visible boundary, including half of each outline stroke,
@@ -305,8 +305,9 @@ uses that expose weak dots, crowded safe areas, and mismatched weights.
 
 For the full candidate set, `make ui-icon-concepts` writes 14, 24, 56, and 112-point family pages
 under `output/ui-icon-concepts/`, including separate `viewport-playback.png` and
-`keyframe-transport.png` sheets, plus `tools-max-gap.png` at the production 1.46-pixel stroke and
-the full `gap / stroke = 1.00` setting. `capsules.png` uses the actual playback and viewport-tool
+`keyframe-transport.png` sheets, plus `tools-max-gap.png` at the configured tool stroke and
+`gap / stroke = 1.00`. Read current defaults from `python/ui/icons.py` and generated
+`python/ui/icon_presets.json` rather than hard-coding a screen-pixel weight. `capsules.png` uses the actual playback and viewport-tool
 capsules with their icon slots and state circles exposed. Viewport playback and Keyframe transport
 each keep their own Previous/Next padding adjustment so
 the chevrons' visible height does not exceed that component's Play/Pause. Scale preserves its

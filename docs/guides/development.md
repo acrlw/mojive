@@ -165,8 +165,7 @@ fix does not imply authorization to push, merge or publish it.
 ## Local preparation
 
 ```bash
-uv sync --extra dev --extra docs --extra mujoco --extra wgpu --extra native
-make setup-imgui
+make setup
 make cpp-deps
 make check
 make cpp-test
@@ -183,7 +182,7 @@ Linux native window builds need the X11, Wayland and xkbcommon development libra
 
 `make setup-imgui` installs the project's ImGui Bundle wheel with bulk drawing and
 slider/focus geometry fixes. Run it again after `uv sync` or a synchronizing
-`uv run` command (including `make docs-check`) replaces the wheel with the upstream
+`uv run` command replaces the wheel with the upstream
 release; the GPU UI tests require these fixes. The command reuses its
 cached platform wheel when the build recipe has not changed.
 
@@ -232,17 +231,16 @@ and joins the owned compiler process group. GPU program replacement still runs o
 
 Read the repository's `3rdparty/README.md` before editing an upstream source tree.
 Dear ImGui is tracked directly to make custom drawing changes reviewable alongside Mojive.
-Its first import has no local behavior patches. The standalone native gallery builds this core;
-the Python Viewer currently uses `imgui-bundle` for UI generation on all rendering backends.
+The standalone native gallery builds the tracked core; the Python Viewer uses the locally
+built `imgui-bundle` customization for UI generation on all rendering backends.
 Editing the tracked core does not change the installed Bundle wheel. See the dependency README
 for the source/build relationship and the requirements for global corner customization.
 
-The [native dependency plan (Chinese)](../plans/cpp-dependencies.zh.md) recommends GLM for
-graphics math and spdlog for runtime-owned native output and bounded log history. Python can
-publish records, configure output and subscribe through optional Loguru/logging bridges; native
-output must not depend on a Python consumer. C++ provides rendering and runtime infrastructure;
-business algorithms and extension policy remain in Python. Eigen and native business solvers are
-outside the current roadmap. EnTT requires a demonstrated infrastructure need. GLM and spdlog are pinned build dependencies; Eigen and EnTT are not included.
+GLM supplies native graphics math; spdlog owns native output and bounded log history.
+Python can publish records, configure output and subscribe through Loguru/logging bridges;
+native output does not require a Python consumer. Dependencies are pinned in `3rdparty`.
+C++ owns rendering and runtime infrastructure; application algorithms and extension policy
+remain in Python.
 
 ## Shared UI controls
 
@@ -325,5 +323,39 @@ remain specific to those implementations. Automated composition tests hide their
 run explicit shown-window lifecycle tools on a separate display when desktop focus must
 remain uninterrupted.
 
-See the [Viewer guide (Chinese)](../how-to/native-viewer.zh.md) for public usage and the
-[acceptance record (Chinese)](../plans/native-renderer-parity.zh.md) for measured coverage and limits.
+See the [native backend guide](../how-to/native-viewer.md) for public usage and the
+[verification matrix](testing.md#change-mapping) for current acceptance requirements.
+
+## Documentation
+
+Keep usage guides aligned with public commands and APIs. Include executable example files with
+MkDocs snippets where practical; avoid copying implementation plans or dated benchmark reports
+into user-facing navigation. Git preserves historical plans. New measurements belong under
+`output/` with their commands, inputs and platform details.
+
+Install documentation tools without replacing the customized application environment:
+
+```bash
+uv pip install "mkdocs>=1.6" "mkdocs-material>=9.6" "mkdocstrings[python]>=0.29"
+make docs-check
+make docs-serve
+```
+
+`make docs-check` validates API docstrings, CLI/config coverage, example catalogs, snippets,
+asset paths and local Markdown links, then builds the site strictly into `output/site/`.
+API pages are generated from current Python definitions through `python/tools/docs_hooks.py`.
+
+### README media
+
+Run `make readme-media` to capture the production UI and renderer at 1920 × 1200. It uses
+isolated settings and a hidden OpenGL window, records a short take in the bundled `joint_types`
+scene, and places Keyframes across the space below Hierarchy and the viewport, with Joints
+above Inspector on the right. Output stays collapsed and both viewport capsules remain visible.
+The physical UI scale is 1.3; the logical scale is adjusted for display density (0.65 on a 2×
+Retina display). The manifest records both values. The third image renders the bundled showcase
+at the same size. No image is cropped or composited after capture.
+
+Inspect the three images and `manifest.json` in `output/readme-media/`; maintained copies live
+in `docs/images/readme/`. Check panel alignment, readable labels, actual joint controls, full
+capsules and timeline content before committing updated media. The capture script does not
+change the production default layout or the user's saved settings.

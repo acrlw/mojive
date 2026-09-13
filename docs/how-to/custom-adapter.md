@@ -16,7 +16,7 @@ and command paths.
 ## Minimal simulation adapter
 
 ```bash
-uv run python examples/custom_adapter.py
+uv run --no-sync python examples/custom_adapter.py
 ```
 
 ```python

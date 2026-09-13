@@ -2,7 +2,7 @@
 
 ## Install from a source checkout
 
-Source builds require Python 3.11 or newer, uv, CMake and a C++20 toolchain:
+Source builds require Python 3.11 or newer, uv, CMake, Ninja and a C++20 toolchain:
 
 ```bash
 git clone --recurse-submodules https://github.com/acrlw/mojive.git
@@ -39,7 +39,7 @@ editing model topology or root transforms.
 You can also open a model directly:
 
 ```bash
-uv run --no-sync mojive editor assets/test_scene.xml
+uv run --no-sync mojive editor assets/joint_types.xml
 ```
 
 The editor saves `.mojive.json` workspaces. These retain model references, root transforms,
@@ -47,6 +47,17 @@ resource directories, edited model XML, and Mojive-authored entities. **File > S
 a portable MJCF/XML model instead.
 
 ## Open the viewer
+
+For a scene with editable joints and actuator controls, start with:
+
+```bash
+uv run --no-sync mojive view joint_types
+```
+
+Open **Joints**, **Inspector** and **Keyframes** from Window. Drag tabs to arrange them;
+collapse Output using its toolbar arrow. Select a body in Hierarchy to inspect it, and enable
+**G** or **R** for its supported viewport manipulation. Joint controls display real adapter data;
+a static scene without joints has no joint controls to populate.
 
 Use `view` for one model or bundled scene:
 
@@ -66,21 +77,24 @@ The viewer starts paused by default. Pass `--play` to start simulation immediate
 
 ## Choose a render backend
 
-OpenGL is the default. Select wgpu with an environment variable:
+OpenGL is the default. The same scene can use any installed renderer:
 
 ```bash
-MOJIVE_BACKEND=wgpu uv run --no-sync mojive editor
-MOJIVE_BACKEND=wgpu uv run --no-sync mojive view test_scene
+MOJIVE_RENDERER=opengl uv run --no-sync mojive view joint_types
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive view joint_types
+make native-viewer SCENE=joint_types
 ```
 
-Do not use `--backend wgpu`: `-b/--backend` selects the scene/physics adapter, while
-`MOJIVE_BACKEND` selects rendering. The [CLI reference](reference/cli.md) documents both layers.
+The native target builds bgfx and its shaders, then opens the same Python UI. See
+[native backend setup](how-to/native-viewer.md) for scripts and installed packages.
+`MOJIVE_RENDERER` selects rendering; `--adapter` selects scene/physics integration.
+The compatible `-b/--backend` option also means adapter, not renderer.
 
-Validate a window and rendering path with:
+Validate the chosen runtime with:
 
 ```bash
-uv run --no-sync mojive doctor test_scene
-MOJIVE_BACKEND=wgpu uv run --no-sync mojive doctor test_scene
+uv run --no-sync mojive doctor joint_types
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive doctor joint_types
 ```
 
 ## Configure the UI
@@ -130,12 +144,11 @@ These commands exercise useful non-interactive paths:
 ```bash
 uv run --no-sync mojive inspect test_scene
 uv run --no-sync mojive audit test_scene --strict
-uv run python examples/mujoco_render.py assets/test_scene.xml \
+uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 ```
 
-Repository contributors should run `make check`. Rendering changes additionally run `make gpu`;
-the [testing guide](guides/testing.md) maps changes to focused targets.
+Repository contributors should run `make check`. The [testing guide](guides/testing.md) maps changes to focused targets.
 
 ## Next steps
 

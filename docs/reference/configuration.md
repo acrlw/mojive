@@ -8,8 +8,8 @@ it does not block viewport interaction.
 
 | Variable | Values | Purpose |
 |---|---|---|
-| `MOJIVE_RENDERER` | `opengl`, `wgpu` | Select the renderer for interactive and offscreen rendering; an explicit `renderer=` argument takes precedence. |
-| `MOJIVE_BACKEND` | `opengl`, `wgpu` | Legacy renderer setting, used when `MOJIVE_RENDERER` is unset. |
+| `MOJIVE_RENDERER` | `opengl`, `wgpu`, `bgfx` | Select the renderer for interactive and offscreen rendering; an explicit `renderer=` argument takes precedence. |
+| `MOJIVE_BACKEND` | `opengl`, `wgpu`, `bgfx` | Legacy renderer setting, used when `MOJIVE_RENDERER` is unset. |
 | `MOJIVE_GL` | `auto`, `native`, `glfw`, `egl` | Select OpenGL context creation. Offscreen `auto` tries EGL on Linux, then hidden GLFW only when a desktop display and the main thread are available. |
 | `MOJIVE_UI_SCALE` | positive number | Override the logical UI scale when desktop scale detection is wrong. |
 | `MOJIVE_LANGUAGE` | `en`, `zh_CN` | Override the UI language for the process. |
@@ -40,7 +40,7 @@ Application preferences default to these locations:
 path. `MOJIVE_CONFIG_DIR` affects the layout file only.
 
 The Settings panel writes user choices to the JSON settings file and restores them at the next
-launch. The file is intentionally backend-neutral, so switching between OpenGL and WebGPU keeps
+launch. The file is intentionally backend-neutral, so switching between OpenGL, WebGPU and bgfx keeps
 the same preference.
 
 | Preference | Values | Settings panel |
@@ -340,7 +340,7 @@ Offscreen `Renderer` has a separate context policy:
 A hidden window is offscreen, not display-free. On a Linux desktop where EGL fails, try:
 
 ```bash
-MOJIVE_GL=glfw uv run python examples/mujoco_render.py assets/test_scene.xml
+MOJIVE_GL=glfw uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml
 ```
 
 On a server without X11/Wayland, keep EGL and check the GPU driver, EGL vendor libraries, and
@@ -349,7 +349,7 @@ server. Worker threads do not automatically fall back to GLFW. Require EGL for r
 headless jobs and benchmarks:
 
 ```bash
-MOJIVE_GL=egl uv run python examples/mujoco_video.py assets/test_scene.xml
+MOJIVE_GL=egl uv run --no-sync python examples/mujoco_video.py assets/test_scene.xml
 ```
 
 Context errors retain the original initialization failure and every attempted backend. A
@@ -360,9 +360,13 @@ The wgpu backend requires the `wgpu` optional dependency and a compatible Metal,
 adapter:
 
 ```bash
-uv sync --extra wgpu
-MOJIVE_BACKEND=wgpu uv run mojive doctor test_scene
+uv pip install "wgpu>=0.32"
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive doctor test_scene
 ```
+
+The bgfx backend requires the native extension and compiled shaders. Build with
+`make native-python-build`; use `MOJIVE_NATIVE_BUILD` to select that development build.
+See the [native backend guide](../how-to/native-viewer.md) for setup and platform checks.
 
 Use `mojive backends` for adapter availability and `mojive probe` for OpenGL capability details.
 
@@ -390,7 +394,7 @@ controls, overlays, gizmos, labels, and hit regions retain a consistent physical
 scale only to diagnose a desktop-reporting problem or to run visual acceptance:
 
 ```bash
-MOJIVE_UI_SCALE=2 uv run mojive editor
+MOJIVE_UI_SCALE=2 uv run --no-sync mojive editor
 ```
 
 The UI atlas uses JetBrains Mono and a CJK fallback. Mojive searches for an installed Noto Sans SC

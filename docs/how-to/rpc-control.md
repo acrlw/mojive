@@ -9,14 +9,14 @@ and reconnects after a transport failure.
 Start an editor with an attached endpoint, or attach one to an existing viewer in Python:
 
 ```bash
-uv run mojive editor --rpc-socket output/mojive.sock
-uv run mojive view assets/test_scene.xml --rpc-socket output/model.sock
+uv run --no-sync mojive editor --rpc-socket output/mojive.sock
+uv run --no-sync mojive view assets/test_scene.xml --rpc-socket output/model.sock
 ```
 
 For a separate standalone simulation:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run mojive rpc-serve assets/test_scene.xml \
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive rpc-serve assets/test_scene.xml \
   --socket output/mojive.sock
 ```
 
@@ -51,7 +51,7 @@ Shutdown removes only the socket entry owned by that service.
 ## Run the Python client
 
 ```bash
-uv run python examples/control_client.py \
+uv run --no-sync python examples/control_client.py \
   --socket output/mojive.sock \
   --steps 120 \
   --capture output/examples/rpc.png
@@ -64,15 +64,15 @@ uv run python examples/control_client.py \
 The command-line client provides the same protocol for scripts and shell automation:
 
 ```bash
-uv run mojive control get_state --socket output/mojive.sock --json
+uv run --no-sync mojive control get_state --socket output/mojive.sock --json
 ```
 
 Pass method parameters as one JSON object:
 
 ```bash
-uv run mojive control step --params '{"count":10}' --json
-uv run mojive control set_qpos --params '{"index":0,"value":0.25}' --json
-uv run mojive control capture \
+uv run --no-sync mojive control step --params '{"count":10}' --json
+uv run --no-sync mojive control set_qpos --params '{"index":0,"value":0.25}' --json
+uv run --no-sync mojive control capture \
   --params '{"mode":"depth","width":640,"height":480,"output":"output/depth.npy"}' \
   --json
 ```
@@ -143,9 +143,9 @@ Omitted fields keep their defaults; unknown fields, invalid counts and non-finit
 before creating the viewer or connecting the client.
 
 ```bash
-uv run mojive editor --rpc-socket output/mojive.sock --rpc-limits output/rpc-limits.json
-uv run mojive rpc-serve test_scene --socket output/mojive.sock --limits-file output/rpc-limits.json
-uv run mojive control get_rpc_stats --socket output/mojive.sock --json
+uv run --no-sync mojive editor --rpc-socket output/mojive.sock --rpc-limits output/rpc-limits.json
+uv run --no-sync mojive rpc-serve test_scene --socket output/mojive.sock --limits-file output/rpc-limits.json
+uv run --no-sync mojive control get_rpc_stats --socket output/mojive.sock --json
 ```
 
 `control --limits-file PATH` configures the client's outgoing-request and incoming-response
@@ -179,8 +179,8 @@ input tail latency. This is a pump-policy comparison, not a comparison of whole 
 whether a viewer is attached. Query the schema for the operation you need:
 
 ```bash
-uv run mojive control describe_operations --params '{"name":"add_scene_object"}' --json
-uv run mojive control describe_operations --params '{"scope":"viewport","available_only":true}' --json
+uv run --no-sync mojive control describe_operations --params '{"name":"add_scene_object"}' --json
+uv run --no-sync mojive control describe_operations --params '{"scope":"viewport","available_only":true}' --json
 ```
 
 Each description includes JSON Schema Draft 2020-12 `input_schema` and `output_schema`, defaults,

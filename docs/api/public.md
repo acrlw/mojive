@@ -11,4 +11,4 @@ protocol, function, enum, and value type links to its owning implementation wher
 `mojive` remains physics-package neutral. Their owning module also defines the structured
 finding and coverage value types.
 
-::: mojive.mujoco_audit
+::: mojive.adapters.mujoco.audit

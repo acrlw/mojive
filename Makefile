@@ -183,7 +183,7 @@ help:
 		'  MOJIVE_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
 		'  make egl-viewer                   Linux GLFW EGL context' \
 		'' \
-		'BACKEND accepts opengl (OpenGL) or wgpu. Leave UI scale unset for automatic scaling.'
+		'BACKEND accepts opengl, wgpu or bgfx (requires native build). Leave UI scale unset for automatic scaling.'
 
 setup:
 	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu --extra native
@@ -245,7 +245,7 @@ fmt-cpp:
 	rg --files cpp -g '*.cpp' -g '*.hpp' | xargs clang-format -i
 
 docs:
-	uv run --extra docs mkdocs build --strict --site-dir output/site
+	uv run --no-sync mkdocs build --strict --site-dir output/site
 
 docs-check: examples-check
 	$(PY) -m mojive.tools.check_docs
@@ -255,7 +255,7 @@ examples-check:
 	$(PY) -m compileall -q examples
 
 docs-serve:
-	uv run --extra docs mkdocs serve --strict --open
+	uv run --no-sync mkdocs serve --strict --open
 
 ## Fast tests contain pure CPU behavior and module contracts.
 test-fast:
@@ -399,14 +399,8 @@ ui-redesign:
 
 ## Refresh README images with unmodified production UI and renderer captures.
 readme-media:
-	MOJIVE_RENDERER=opengl $(PY) -m mojive.tools.ui_runtime \
-		-o output/readme-media/runtime
-	MOJIVE_RENDERER=opengl $(PY) -m mojive.tools.showcase \
-		-o output/readme-media/showcase.png --width 1920 --height 1080
 	$(PY) -m mojive.tools.build_readme_media \
-		--runtime output/readme-media/runtime \
-		--showcase output/readme-media/showcase.png \
-		--output docs/images/readme
+		--output output/readme-media --publish docs/images/readme $(ARGS)
 
 ## Export production Tool Column geometry on transparent 1024px canvases.
 tool-icons:
@@ -504,7 +498,7 @@ bench:
 showcase:
 	$(PY) -m mojive.tools.showcase
 
-## Refresh the measurements recorded in docs/PLATFORM.md.
+## Probe current OpenGL platform capabilities.
 probe:
 	$(PY) -m mojive.tools.probe_gl
 

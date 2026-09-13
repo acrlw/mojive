@@ -1,6 +1,6 @@
 # Command-line reference
 
-Run commands as `uv run mojive ...` from a source checkout, or as `mojive ...` after installing
+Run commands as `uv run --no-sync mojive ...` from a source checkout, or as `mojive ...` after installing
 the package. `mojive -v ...` enables verbose logging. Commands with `--json` reserve stdout for the
 JSON document and send logs to stderr.
 
@@ -12,7 +12,7 @@ status 0; diagnostic acceptance failures can exit with status 1. Interrupts exit
 
 Mojive has two independent backend choices:
 
-- `MOJIVE_RENDERER=opengl|wgpu` selects the renderer. OpenGL is the default;
+- `MOJIVE_RENDERER=opengl|wgpu|bgfx` selects the renderer. OpenGL is the default;
   `MOJIVE_BACKEND` remains a compatible fallback.
 - `--adapter` on model commands selects the scene/physics adapter. The default is `mujoco`;
   `-b/--backend` remain compatible aliases.
@@ -20,7 +20,7 @@ Mojive has two independent backend choices:
 For example, this loads a MuJoCo model through the MuJoCo adapter and renders it through wgpu:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run mojive view test_scene --adapter mujoco
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive view test_scene --adapter mujoco
 ```
 
 Asset arguments accept a filesystem path or a bundled asset name. The extension is optional for
@@ -243,7 +243,7 @@ mojive rpc-serve ASSET [-b ADAPTER] [--socket PATH] [--limits-file PATH]
 
 The default socket is `output/mojive.sock`.
 
-On macOS, start the service with `MOJIVE_BACKEND=wgpu` when using `capture`; RPC requests run on
+On macOS, start the service with `MOJIVE_RENDERER=wgpu` when using `capture`; RPC requests run on
 worker threads and the platform OpenGL context path is main-thread-only. Linux can use OpenGL.
 
 ### `control`

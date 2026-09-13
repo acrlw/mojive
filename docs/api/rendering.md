@@ -2,15 +2,15 @@
 
 ## Backend-neutral scene renderer
 
-::: mojive.scene_renderer.SceneRenderer
+::: mojive.render.offscreen.SceneRenderer
 
 ## MuJoCo-compatible renderer
 
-::: mojive.renderer.Renderer
+::: mojive.app.renderer.Renderer
 
 ## Shared image buffers
 
-::: mojive.shared_image.SharedImage
+::: mojive.capture.shared_image.SharedImage
 
 ## Backend contracts
 
