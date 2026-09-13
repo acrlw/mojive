@@ -3,12 +3,12 @@
 ![A jointed scene with joint controls, Inspector and Keyframes](images/readme/hero.png)
 
 Mojive is a backend-neutral 3D viewer, editor, and renderer for robotics and simulation.
-MJCF, URDF, authored Python scenes, custom adapters, remote publishers and recordings share
-scene contracts. Choose OpenGL, WebGPU (`wgpu`) or native bgfx independently from physics.
+It supports MJCF and URDF models, scenes created in Python, custom simulations, remote streams,
+and recordings. Rendering uses OpenGL, WebGPU (`wgpu`), or bgfx, independently of the physics adapter.
 
-## Choose a workflow
+## User guide
 
-| Goal | Start here |
+| Topic | Documentation |
 |---|---|
 | Install and open a jointed scene | [Getting started](getting-started.md) |
 | Edit geometry, joints, models and keyframes | [Editor and MJCF](guides/editor-and-mjcf.md) |
@@ -20,8 +20,16 @@ scene contracts. Choose OpenGL, WebGPU (`wgpu`) or native bgfx independently fro
 | Control a local viewer from another process | [RPC control](how-to/rpc-control.md) |
 | Add diagnostic shapes or paths | [DebugDraw](how-to/debug-draw.md), [Canvas2D](how-to/canvas2d.md) |
 
-The [CLI reference](reference/cli.md), [configuration reference](reference/configuration.md),
-and [API map](api/index.md) describe the current interfaces. The
-[architecture](concepts/architecture.md), [renderer](concepts/rendering.md),
-[development](guides/development.md), and [testing](guides/testing.md) guides cover implementation
-ownership and verification. Runnable recipes live in the [example catalog](guides/examples.md).
+## Reference
+
+- [Command-line reference](reference/cli.md)
+- [Configuration](reference/configuration.md)
+- [Python API](api/index.md)
+- [Example programs](guides/examples.md)
+
+## Development
+
+- [Architecture](concepts/architecture.md)
+- [Rendering](concepts/rendering.md)
+- [Build and development instructions](guides/development.md)
+- [Testing](guides/testing.md)

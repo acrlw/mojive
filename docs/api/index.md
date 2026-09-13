@@ -1,8 +1,8 @@
 # API map
 
-The public package exports the common scene, rendering, adapter, remote, and recording types from
-`mojive`. The module paths below identify implementation owners. Existing compatibility imports remain
-available, but new integrations can use the owning modules directly.
+Common scene, rendering, adapter, remote, and recording types can be imported from `mojive`.
+The table lists the modules that define these interfaces. Existing compatibility imports are
+also supported; new code can import from the defining modules directly.
 
 | Module | Purpose | Primary interfaces |
 |---|---|---|
@@ -28,7 +28,7 @@ available, but new integrations can use the owning modules directly.
 
 ## Integration paths
 
-| Goal | Start with | Example |
+| Task | API | Example |
 |---|---|---|
 | Build a scene in Python | `Scene`, `build_scene` | `examples/programmatic_scene.py` |
 | Render authored or custom scene frames | `SceneRenderer` | `examples/offscreen_scene.py` |
@@ -39,13 +39,13 @@ available, but new integrations can use the owning modules directly.
 | Compose MJCF and URDF | `WorkspaceAdapter` | `examples/compose_scene.py` |
 | Publish a live scene | `SnapshotPublisher` | `examples/remote_publish.py` |
 
-The [examples guide](../guides/examples.md) explains how to run each workflow. The module pages
+The [examples guide](../guides/examples.md) explains how to run these programs. The module pages
 list signatures, types, and public members generated from the source documentation.
-For custom widgets, icons, or screen diagnostics, use the [drawing extension guide](../how-to/ui-drawing.md)
-to choose the surface and its state owner before changing a renderer or UI controller.
+The [drawing extension guide](../how-to/ui-drawing.md) describes the interfaces and coordinate
+systems used by UI widgets, icons, and diagnostics.
 
 ## Stability
 
-Names exported from `mojive.__all__` form the supported public surface. Adapter
+Names exported from `mojive.__all__` form the supported public API. Adapter
 implementations and render-pass modules expose extension points with a narrower compatibility
 scope. Shader resources and UI internals are implementation details.

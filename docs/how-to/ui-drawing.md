@@ -1,9 +1,8 @@
 # Extend UI drawing
 
-Start with the drawing surface and its state owner. UI widgets use ImGui draw lists through
-the `Draw2D` protocol; that name describes the existing UI interface, not a separate rendering
-module. Retained diagnostics use a DebugDraw `Layer` or Canvas2D. Both paths reuse CPU geometry
-without importing each other.
+UI widgets draw through the `Draw2D` protocol, which is implemented with ImGui draw lists.
+This protocol does not define a separate renderer. Retained diagnostics use a DebugDraw `Layer`
+or Canvas2D. Both use CPU geometry functions; neither imports the other's drawing code.
 For example commands and the pixel-coordinate debug API, see [Debug drawing](debug-draw.md).
 For radius, smoothing, and native installation, see [G3 UI corners](ui-corners.md).
 For canonical grids, optical sizing, family consistency, and multi-size acceptance, see
@@ -25,12 +24,12 @@ Use `BACKEND=opengl` or `BACKEND=wgpu` for the other renderers. Direct module in
 `--renderer`; otherwise they use `MOJIVE_RENDERER`, then OpenGL. Captures use the selected
 window's framebuffer. Use `make ui-icon-concepts` for multi-size icon captures.
 
-The tool lives in `python/tools/ui_feasibility/`. `state.py` owns review parameters;
-`tuning.py` owns controls and export; `icon_library.py` owns family and context specimens;
-`geometry.py` composes experiments; `panels.py` composes panel specimens; `workspace.py` owns
-navigation; `runtime.py` owns window lifetime and the CLI. Import private helpers from their
-owner when extending or testing the tool. Do not restore a monolithic facade or a second icon
-implementation. The existing `python -m mojive.tools.ui_feasibility` entry remains available.
+The tool is implemented in `python/tools/ui_feasibility/`. `state.py` defines review parameters;
+`tuning.py` implements controls and parameter export; `icon_library.py` draws icon specimens;
+`geometry.py` and `panels.py` construct geometry and panel examples; `workspace.py` handles
+navigation; and `runtime.py` manages the window and CLI. Import private helpers from the modules
+that define them. Do not consolidate these modules into one facade or duplicate the icon code.
+The tool can also be run as `python -m mojive.tools.ui_feasibility`.
 
 ## Choose the entry point
 

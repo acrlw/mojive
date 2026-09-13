@@ -1,11 +1,7 @@
 # Agent workflows
 
-Use this guide for entry points, runnable examples, and Skill maintenance. Read the section needed
-for the task; ordinary scene operation does not require running repository acceptance suites.
-Choose the entry point by the state you need to operate on:
-
-For repository UI development, start with the [drawing extension guide](ui-drawing.md). It maps
-shape helpers, drawing adapters, retained diagnostics, coordinate units, caching, and tests.
+This guide describes scene operation and Skill maintenance. Operating a scene does not require
+running the repository test suites. Use the interface for the process that contains the scene:
 
 | Task | Entry point | State owner |
 |---|---|---|
@@ -14,6 +10,9 @@ shape helpers, drawing adapters, retained diagnostics, coordinate units, caching
 | Control a standalone simulation | `mojive rpc-serve` and the same RPC client | The service's Session |
 | Display a caller-owned MuJoCo rollout | `launch_passive(model, data)` and `sync()` | The caller's physics loop |
 | Display a remote publisher | Snapshot transport | The publisher owns simulation state |
+
+For UI implementation changes, see the [drawing extension guide](ui-drawing.md) for shape
+functions, drawing adapters, retained diagnostics, coordinate units, caching, and tests.
 
 Starting a standalone service creates a separate Session. To inspect the scene already visible
 to a user, connect to its attached RPC endpoint. See [local RPC control](rpc-control.md) for
@@ -83,7 +82,7 @@ viewport and window images. Both modes shut down their service on completion.
 
 ## Skill discovery
 
-The source skill lives in `skills/mojive/SKILL.md`. The repository's `.agents/skills/mojive` symlink
+The source skill is `skills/mojive/SKILL.md`. The repository's `.agents/skills/mojive` symlink
 points to that directory for repository discovery. Edit the source once; do not maintain a second
 copy. Resolve Skill references from the source directory. The skill can be invoked as `$mojive`
 once discovered, or selected automatically for matching scene tasks.
