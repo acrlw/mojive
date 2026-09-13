@@ -19,8 +19,8 @@ than a valid-looking result from another scene.
 ## Build and run
 
 Use a C++20 compiler, CMake 3.24+, Ninja and initialized pinned submodules. Build products and
-reports stay under `output/`; dependency provenance lives in `3rdparty/README.md` and
-`3rdparty/dependencies.json`.
+reports are written to `output/`. `3rdparty/README.md` and `3rdparty/dependencies.json` document
+dependency sources and versions.
 
 | Target | Purpose |
 |---|---|

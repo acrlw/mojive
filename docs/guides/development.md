@@ -1,10 +1,10 @@
 # Python and C++ development
 
-Mojive remains a Python package. `mojive.Renderer`, `SceneRenderer`, Viewer entry points and
-existing snake_case methods remain the user-facing API. C++ supplies selected implementation
-workloads through the private `mojive._native` extension. Select `renderer="bgfx"` in the
-existing Python API or run `make native-viewer`; the C++ tools remain acceptance fixtures,
-not a replacement standalone product.
+Mojive provides a Python API for rendering, viewing, and scene editing. `mojive.Renderer`,
+`SceneRenderer`, the viewer constructors, and their snake_case methods are public interfaces.
+The private `mojive._native` extension implements native rendering and geometry operations in C++.
+Select `renderer="bgfx"` in Python or run `make native-viewer` to use the native renderer.
+The standalone C++ tools test components of this implementation.
 
 ## Source layout
 
@@ -41,23 +41,24 @@ to preserve the locally built ImGui wheel and native registration.
 
 ## Python domain packages
 
-Implementation code is grouped by responsibility: `app/` constructs viewers;
-`scene/` owns authored scenes and serialization; `session/` owns document state and typed
-command routing; `control/` exposes operations and RPC; `capture/`, `remote/`,
-`interaction/` and `geometry2d/` contain their independent contracts and computations.
-`geometry2d/` owns CPU curves, contours and tessellation. The retained Canvas2D API belongs
-to `render/canvas.py` and submits through the existing DebugDraw pass. Do not introduce a
-second 2D renderer or a generic `drawing` package. Gizmo screen overlays belong to
-`ui/gizmo/overlay.py`.
-The ImGui adapter belongs to `ui/imgui_draw.py`; backend-neutral label layout and drag-link
-submission belong to `ui/text_layout.py` and `ui/drag_link.py`. `ui/draw2d.py` only preserves
-published imports. New implementation imports its owner directly.
-The root keeps shared vocabulary and explicit compatibility exports. Use the
-[Python module map (Chinese)](python-layout.zh.md) to locate owners and verification entry points.
+The Python modules are grouped by function. `app/` constructs viewers; `scene/` implements
+scene creation and serialization; `session/` stores document state and processes typed commands;
+and `control/` implements operation discovery and RPC. Capture, transport, and interaction code
+are in `capture/`, `remote/`, and `interaction/` respectively.
+
+`geometry2d/` computes curves, contours, and tessellation on the CPU. `render/canvas.py` implements
+Canvas2D using the DebugDraw render pass. Do not add a second 2D renderer or a generic `drawing`
+package. Gizmo screen overlays are implemented in `ui/gizmo/overlay.py`.
+
+`ui/imgui_draw.py` implements the ImGui adapter. `ui/text_layout.py` and `ui/drag_link.py` implement
+label layout and drag-link submission without depending on a renderer. `ui/draw2d.py` re-exports
+existing names for compatibility; new code should import from the modules that define them.
+The package root contains shared types and compatibility exports. The
+[Python module map (Chinese)](python-layout.zh.md) lists the modules and their tests.
 
 ## Adapter packages
 
-Built-in implementations live in `adapters/mujoco/`, `adapters/static/` and
+Built-in adapters are implemented in `adapters/mujoco/`, `adapters/static/` and
 `adapters/toy/`. Import their public adapter class from the package. The old
 `adapters.mujoco_adapter` module only preserves the published class import; it
 contains no implementation. New backends follow the same package layout.
@@ -81,7 +82,7 @@ never apply project formatting to third-party sources.
 ## Naming
 
 Owned directories use lowercase names, with underscores between words (`tests/native`).
-Repository-managed dependencies live in `3rdparty`, with upstream names such as `bgfx.cmake`
+The `3rdparty/` directory contains dependencies, with upstream names such as `bgfx.cmake`
 and `robin-map`. Directory names do not follow C++ identifier casing. Existing submodule section
 names in `.gitmodules` are stable Git identifiers; the `path` entries define their locations.
 
@@ -139,8 +140,8 @@ Use the [verification matrix](testing.md#change-mapping) for the applicable comp
 
 ## Collaboration and commits
 
-`AGENTS.md` is the entry point for repository instructions; this guide owns implementation detail,
-and the testing guide owns the verification matrix. Extend those sources instead of copying
+`AGENTS.md` contains repository instructions; this guide describes implementation conventions,
+and the testing guide specifies required checks. Update these documents instead of copying
 rules into new skills, agent notes or task-specific checklists. Add a skill only for a distinct,
 reusable workflow; historical plans and generated reports do not override current guidance.
 
@@ -191,10 +192,10 @@ platform wheel with the native extension, compiled shaders and dependency licens
 installs it in isolation and renders through the public Python API. Local native builds do not
 replace the installed Python package; Make selects the extension with `MOJIVE_NATIVE_BUILD`.
 
-`cpp-*` targets are convenient entry points; the earlier `native-*` acceptance commands remain
-available. C++ builds use fresh `output/cpp-build`, `output/cpp-core-build` and
-`output/cpp-bindings-build` directories so previous evaluation artifacts stay readable.
-The renderer is selected at the composition root; SDL comparison remains opt-in.
+The `cpp-*` Make targets build and test C++ code. The `native-*` test targets are also supported.
+Builds are written to `output/cpp-build`, `output/cpp-core-build`, and `output/cpp-bindings-build`,
+separately from earlier test results. Renderer selection is handled when creating a viewer or
+renderer instance. SDL is used only when explicitly selected for comparison tests.
 
 The user deferred workflow CI. No evaluation workflow is installed by this branch. Linux native
 windows support X11 and Wayland; the runtime selects the protocol reported by GLFW. All windows
@@ -328,10 +329,15 @@ See the [native backend guide](../how-to/native-viewer.md) for public usage and 
 
 ## Documentation
 
+Describe what a component does, how to use it, and any relevant conditions or limitations.
+Use concrete subjects and verbs: a directory contains files, a method returns a value, and a
+command writes output. Avoid promotional claims, metaphors, and summaries that repeat the text.
+Keep prerequisites, examples, and compatibility details when shortening a page.
+
 Keep usage guides aligned with public commands and APIs. Include executable example files with
 MkDocs snippets where practical; avoid copying implementation plans or dated benchmark reports
-into user-facing navigation. Git preserves historical plans. New measurements belong under
-`output/` with their commands, inputs and platform details.
+into user-facing navigation. Historical plans can be retrieved from Git. Save new measurements
+in `output/` with the commands, inputs, and platform details needed to reproduce them.
 
 Install documentation tools without replacing the customized application environment:
 
@@ -355,7 +361,7 @@ The physical UI scale is 1.3; the logical scale is adjusted for display density 
 Retina display). The manifest records both values. The third image renders the bundled showcase
 at the same size. No image is cropped or composited after capture.
 
-Inspect the three images and `manifest.json` in `output/readme-media/`; maintained copies live
-in `docs/images/readme/`. Check panel alignment, readable labels, actual joint controls, full
-capsules and timeline content before committing updated media. The capture script does not
+Inspect the three images and `manifest.json` in `output/readme-media/`; copies used by the
+documentation are in `docs/images/readme/`. Check panel alignment, readable labels, actual joint
+controls, full capsules and timeline content before committing updated media. The capture script does not
 change the production default layout or the user's saved settings.

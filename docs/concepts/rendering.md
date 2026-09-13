@@ -115,9 +115,10 @@ Overlay drawing must preserve the ID attachment used for picking and segmentatio
 
 ## Verification and profiling
 
-Use the [verification matrix](../guides/testing.md#change-mapping) for required gates. Useful
-entry points include `make scene-renderer`, `make showcase`, `make parity`, `make calibrate`,
-`make renderer-benchmark`, and `make native-parity`. Current reports belong under `output/`.
+Required checks are listed in the [verification matrix](../guides/testing.md#change-mapping).
+Render examples and comparisons with `make scene-renderer`, `make showcase`, `make parity`,
+`make calibrate`, or `make native-parity`. Use `make renderer-benchmark` for timing measurements.
+Save reports in `output/`.
 
 Compare identical scenes, poses, cameras, resolution, sampling and output products. Report cold
 startup separately from warmed frames, and CPU submission separately from completed GPU output

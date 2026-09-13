@@ -10,23 +10,23 @@ cd mojive
 make setup
 ```
 
-The extras are independent:
+Optional dependencies are grouped into the following extras:
 
 - `mujoco` loads MJCF/URDF, runs simulation, and enables the compatible `Renderer` API;
 - `wgpu` enables the Metal/Vulkan/DX12 render backend;
 - `dev` installs pytest and Ruff; and
-- `docs` installs the strict documentation build.
+- `docs` installs the documentation build tools.
 
 `make setup` installs the development and backend dependencies, builds the
 [custom ImGui bindings](how-to/ui-corners.md), and registers the native compiler with the
 editable Python package. Use `uv run --no-sync` after setup to preserve the locally built
-ImGui wheel and native registration. If you replace the editable install, run
-`make native-editable` before opening the viewer. `MOJIVE_NATIVE_BUILD` can still select
-an explicit alternative build for development and acceptance.
+ImGui wheel and native registration. If you reinstall the editable package, run
+`make native-editable` before opening the viewer. Set `MOJIVE_NATIVE_BUILD` to load the native
+extension from a different build directory.
 
 ## Open the editor
 
-Start with an empty workspace:
+To open an empty workspace:
 
 ```bash
 uv run --no-sync mojive editor
@@ -48,16 +48,16 @@ a portable MJCF/XML model instead.
 
 ## Open the viewer
 
-For a scene with editable joints and actuator controls, start with:
+The bundled `joint_types` scene includes joints and actuators:
 
 ```bash
 uv run --no-sync mojive view joint_types
 ```
 
-Open **Joints**, **Inspector** and **Keyframes** from Window. Drag tabs to arrange them;
-collapse Output using its toolbar arrow. Select a body in Hierarchy to inspect it, and enable
-**G** or **R** for its supported viewport manipulation. Joint controls display real adapter data;
-a static scene without joints has no joint controls to populate.
+Open **Joints**, **Inspector** and **Keyframes** from the Window menu. Drag their tabs to dock
+them. The arrow in Output collapses the panel. Select a body in Hierarchy to inspect its
+properties; press **G** or **R** to enable the position or rotation tool. Available controls
+depend on the selected entity and the adapter's capabilities.
 
 Use `view` for one model or bundled scene:
 
@@ -85,12 +85,12 @@ MOJIVE_RENDERER=wgpu uv run --no-sync mojive view joint_types
 make native-viewer SCENE=joint_types
 ```
 
-The native target builds bgfx and its shaders, then opens the same Python UI. See
+The native target builds bgfx and its shaders, then starts the viewer with that renderer. See
 [native backend setup](how-to/native-viewer.md) for scripts and installed packages.
 `MOJIVE_RENDERER` selects rendering; `--adapter` selects scene/physics integration.
 The compatible `-b/--backend` option also means adapter, not renderer.
 
-Validate the chosen runtime with:
+To check that a renderer can create a window and render frames:
 
 ```bash
 uv run --no-sync mojive doctor joint_types
@@ -103,11 +103,11 @@ Open **Edit > Settings...**, **Window > Settings**, or press `F9`. Settings is a
 non-modal panel. It controls interaction, shortcuts, render flags, visual groups, debug views,
 labels, frames, UI language, and helper visibility.
 
-Camera preview is disabled by default. Select a camera and enable **preview** in Inspector when a
-live inset is useful.
+Camera preview is disabled by default. To display a camera's image in the viewport, select the
+camera and enable **preview** in Inspector.
 
-Mojive normally follows the display content scale. These process overrides are useful for visual
-acceptance or a misreported desktop scale:
+Mojive uses the display's reported scale by default. The following environment variables override
+the scale, language, and Chinese font for one process:
 
 ```bash
 MOJIVE_UI_SCALE=2 uv run --no-sync mojive editor
@@ -134,12 +134,12 @@ with Renderer(model, width=640, height=480) as renderer:
     rgb = renderer.render()
 ```
 
-Continue with the [MuJoCo rendering tutorial](tutorials/mujoco-rendering.md) for metric depth,
+See the [MuJoCo rendering tutorial](tutorials/mujoco-rendering.md) for metric depth,
 segmentation, multiple cameras, and wgpu.
 
 ## Run a headless check
 
-These commands exercise useful non-interactive paths:
+These commands inspect, audit, or render a model without opening an interactive viewer:
 
 ```bash
 uv run --no-sync mojive inspect test_scene

@@ -114,15 +114,16 @@ metadata carries vertical image orientation.
 
 ## Dependency boundaries
 
-Shared contracts live in `types.py`, `commands.py`, `math3d.py`, and `adapters/base.py`. Render
-code imports shared contracts. Adapter integrations own physics-specific code. UI modules depend
+Shared types, commands, math functions, and adapter interfaces are defined in `types.py`,
+`commands.py`, `math3d.py`, and `adapters/base.py`. Render modules import these shared definitions.
+Physics-specific code is implemented in adapters. UI modules depend
 on session state and protocols. `tests/test_layering.py` enforces these boundaries.
 
-For overlays, `geometry2d/curves.py` owns reusable paths and stroke profiles; `geometry2d/drag_link.py` owns the
-implicit hollow-connector field and mesh. Both remain independent of UI and backend imports.
+For overlays, `geometry2d/curves.py` computes paths and stroke profiles; `geometry2d/drag_link.py`
+computes the implicit hollow-connector field and mesh. Neither module imports UI or backend code.
 `ui/paint_protocol.py` defines the immediate UI contract; `ui/imgui_draw.py` adapts it
 to ImGui. `render/canvas.py` provides the retained Canvas2D API over DebugDraw.
-`geometry2d/` owns CPU path sampling and triangulation; the shared debug pass renders its output.
-Widgets own placement and
-interaction; retained debug layers own identifiers, lifetime, budgets, and stream packing.
-The [UI drawing guide](../how-to/ui-drawing.md) lists extension entry points and examples.
+`geometry2d/` performs CPU path sampling and triangulation; the shared debug pass renders its output.
+Widgets determine placement and handle input. Retained debug layers manage identifiers, lifetime,
+budgets, and stream packing. The [UI drawing guide](../how-to/ui-drawing.md) describes these
+interfaces and includes examples.

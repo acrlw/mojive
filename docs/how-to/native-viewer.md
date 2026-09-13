@@ -1,21 +1,20 @@
 # Use the native bgfx backend
 
-The native backend plugs into the existing Python Viewer, `Renderer`, and `SceneRenderer`.
-Window interaction, panels, Session and adapters retain their public interfaces. C++ owns
-GPU resources, submission and readback; bgfx selects the platform graphics API independently
-from wgpu.
+The bgfx backend is available through the Python Viewer, `Renderer`, and `SceneRenderer` APIs.
+It uses the same window controls, panels, Session, and adapter interfaces as the other renderers.
+C++ allocates GPU resources, submits drawing commands, and reads back images. bgfx selects the
+platform graphics API without depending on wgpu.
 
 ## Build and launch
 
-Start with the [source installation](../getting-started.md). Then build the native renderer and
-its shaders:
+After [installing from source](../getting-started.md), build the native renderer and its shaders:
 
 ```bash
 make native-viewer SCENE=joint_types
 make native-editor
 ```
 
-These targets configure the development build and open the production UI. Subsequent runs use
+These targets configure the build and start the viewer. Subsequent runs use
 incremental compilation. `make native-python-build` builds without opening a viewer.
 For scripts using that development build:
 
