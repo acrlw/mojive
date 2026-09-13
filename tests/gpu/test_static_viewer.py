@@ -944,3 +944,99 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
     finally:
         viewer.stop_recording()
         viewer.configure_recording(previous)
+
+
+def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch):
+    from imgui_bundle import imgui
+
+    from mojive.ui import icons
+    from mojive.ui.app import status as app_status
+    from mojive.ui.imgui_draw import ImguiDraw2D
+
+    viewer, _scene = canvas
+    names = (
+        "tool-move",
+        "tool-rotate",
+        "tool-scale",
+        "tool-world",
+        "tool-body",
+        "tool-snap",
+        "playback-next",
+        "playback-reset",
+        "key-fit",
+        "key-follow-locked",
+        "key-view",
+        "key-snapshot",
+    )
+    scales = (0.65, 1.0, 1.25, 1.5)
+    original = app_status.draw_status
+    phase = 0.0
+
+    def draw_status(*args, **kwargs):
+        result = original(*args, **kwargs)
+        draw = ImguiDraw2D(imgui.get_foreground_draw_list())
+        draw.rect_filled((0, 0), (1000, 650), (0, 0, 0, 1))
+        for row, scale in enumerate(scales):
+            for col, name in enumerate(names):
+                slot = (
+                    23.6 if name.startswith("tool-") else 20 if name.startswith("playback-") else 16
+                )
+                icons.draw_icon(
+                    draw,
+                    (55 + col * 75 + phase, 70 + row * 145 + phase),
+                    slot * scale,
+                    name,
+                    (1, 1, 1, 1),
+                )
+        return result
+
+    monkeypatch.setattr(app_status, "draw_status", draw_status)
+    for _ in range(3):
+        viewer.sync()
+    density = viewer.window.pixel_scale
+
+    def coverage(bounds):
+        left, top, right, bottom = (round(v * density) for v in bounds)
+        return float(pixels[top:bottom, left:right].sum())
+
+    areas = np.zeros((len(names), len(scales)))
+    widths = np.zeros((len(scales), 2))
+    _, (fit, offset, _) = icons._production_icon_layout("tool-body")
+    # Average pixel phases: an isolated subpixel corner can land directly on
+    # or between samples, especially at 1x display density. The invariant is
+    # scale-dependent weight, independent of that placement variation.
+    for pixel_phase in (0.0, 0.25, 0.5, 0.75):
+        phase = pixel_phase / density
+        viewer.sync()
+        pixels = snap(viewer)[:, :, 0].astype(float) / 255
+        for col in range(len(names)):
+            for row, scale in enumerate(scales):
+                x, y = 55 + col * 75 + phase, 70 + row * 145 + phase
+                areas[col, row] += (
+                    coverage((x - 32, y - 32, x + 32, y + 32)) / (scale * density) ** 2
+                )
+        for row, scale in enumerate(scales):
+            slot = 23.6 * scale / icons.ICON_GRID
+            unit = slot * fit
+            x = 355 + phase + offset[0] * slot
+            y = 70 + row * 145 + phase + offset[1] * slot
+            for col, center in enumerate((0, 7.5)):
+                widths[row, col] += coverage(
+                    (
+                        x + (center - 2.5) * unit,
+                        y + 2 * unit,
+                        x + (center + 2.5) * unit,
+                        y + 4 * unit,
+                    )
+                )
+
+    for name, values in zip(names, areas, strict=True):
+        # Pixel sampling varies at compact sizes, but coverage must not grow
+        # by 45-80% just because the UI shrank, as the fixed outward fringe did.
+        assert min(values) > 0
+        assert max(values) / min(values) < 1.2, (name, values)
+
+    for scale, (inside, outside) in zip(scales, widths, strict=True):
+        # Compare the vertical interior spoke and the parallel outer edge at
+        # the same height. Equal nominal widths must produce equal coverage.
+        assert inside == pytest.approx(outside, rel=0.2), (scale, inside, outside)

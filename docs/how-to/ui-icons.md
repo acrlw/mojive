@@ -39,12 +39,20 @@ floor changes the icon's proportions at the threshold. In particular, a minimum 
 the stem and dot consume more of a small circle while its safe area continues to shrink.
 
 The antialias fringe is different from authored geometry. `ImguiDraw2D` normally keeps that fringe
-one logical pixel wide so an edge remains smooth at each display density. Do not feed the fringe
-width back into the icon's frame, mark, or spacing dimensions. A compound mark with subpixel
-knockout gaps needs one shared, size-aware fringe for every contour: limit each fringe to a
-documented fraction of the rendered gap until the gap can contain the normal one-pixel ramp. This
-preserves the authored stroke and gap ratios instead of changing either geometry value at small
-sizes.
+one logical pixel wide. Icons use `ImguiIconDraw`: both open and closed strokes are filled
+contours, with an outward fringe limited to half the rendered canonical stroke and at most one
+logical pixel. Mixing native ImGui outlines with outward-fringed internal lines makes their weights
+differ; keeping a fixed fringe also makes small icons disproportionately heavy. The shared budget
+applies in production and Icon Library, without changing layout, stroke defaults or font size.
+Rotation additionally limits its fringe to half the rendered crossing gap. Reviewed Output symbols
+and mouse hints retain their existing painters.
+
+Closed stroke meshes remove inward offset loops at tight corners before triangulation and
+antialiasing. Geometry and native vertex arrays are cached by path, width and placement; an
+unchanged frame only submits the cached data. Check the actual raster output at UI scales 0.65,
+1.0, 1.25 and 1.5, including world/body spokes versus frames and the Keyframes toolbar.
+`make ui-icon-scales BACKEND=bgfx` captures these scales in `output/ui-icon-scales/`;
+`BACKEND=opengl` and `BACKEND=wgpu` use the same specimens.
 
 ### Use explicit geometric centers
 

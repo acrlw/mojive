@@ -383,6 +383,16 @@ ui-icon-concepts:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page geometry --geometry-tab workspaces -o output/ui-icon-concepts/context-keyframes.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
 
+.PHONY: ui-icon-scales
+ui-icon-scales:
+	@set -e; for scale in 0.65 1 1.25 1.5; do \
+		for group in viewport-tools viewport-playback keyframes; do \
+			MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
+				--ui-scale $$scale --height 2050 --page geometry --geometry-tab icons \
+				--icon-group $$group -o output/ui-icon-scales/$$group-$$scale.png; \
+		done; \
+	done
+
 ui-feasibility:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive $(ARGS)
 
