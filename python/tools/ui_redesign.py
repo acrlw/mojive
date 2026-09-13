@@ -379,7 +379,14 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     smoothing=geometry.tool_smoothing,
                 )
             elif kind == "reset":
-                draw_reset_glyph(target, center, color, icon_scale, geometry.tool_stroke_width)
+                draw_reset_glyph(
+                    target,
+                    center,
+                    color,
+                    icon_scale,
+                    geometry.tool_stroke_width,
+                    head_scale=geometry.reset_head_scale,
+                )
             elif kind == "record":
                 draw_recording_glyph(
                     target, center, color, icon_scale, recording=bool(state.recording)

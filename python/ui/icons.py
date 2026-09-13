@@ -34,6 +34,7 @@ from .viewport_widgets import (
     mouse_button_geometry,
     mouse_wheel_geometry,
 )
+from .viewport_widgets.model import DEFAULT_RESET_HEAD_SCALE
 
 ICON_GRID = 24.0
 ICON_STROKE = 1.75
@@ -229,9 +230,9 @@ ICON_GLYPH_STROKE_DEFAULTS = {
     "playback-more": 2.0,
     "transport-previous": 2.0,
     "transport-next": 2.0,
-    "transport-reset": 2.0,
+    "transport-reset": 1.5,
     "transport-more": 2.0,
-    "key-snapshot": 1.5,
+    "key-snapshot": 1.25,
     "key-keyframe": 1.5,
     "key-add": 1.5,
     "key-clear": 1.5,
@@ -262,7 +263,12 @@ class IconTuning:
     move_head_scale: float = 0.85
     scale_handle_scale: float = 1.15
     snap_endpoint_scale: float = 1.3
-    key_fit_arm_length: float = 4.0
+    key_fit_arm_length: float = 4.5
+    reset_head_scale: float = DEFAULT_RESET_HEAD_SCALE
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.reset_head_scale) or self.reset_head_scale <= 0:
+            raise ValueError("reset head scale must be finite and positive")
 
 
 ICON_TUNING_DEFAULTS = IconTuning()
@@ -780,7 +786,13 @@ def _arc_arrow(
     )
     tangent = (-math.sin(end_angle) * direction, math.cos(end_angle) * direction)
     normal = (math.cos(end_angle), math.sin(end_angle))
-    base_center = (end[0] - tangent[0] * 0.8, end[1] - tangent[1] * 0.8)
+    head_scale = p.tuning.reset_head_scale
+    head_length *= head_scale
+    head_half_width *= head_scale
+    base_center = (
+        end[0] - tangent[0] * 0.8 * head_scale,
+        end[1] - tangent[1] * 0.8 * head_scale,
+    )
     base_outer = (
         base_center[0] + normal[0] * head_half_width,
         base_center[1] + normal[1] * head_half_width,
@@ -794,7 +806,7 @@ def _arc_arrow(
     head_start = len(outer)
     p.smooth_polygon(
         outline,
-        0.42,
+        0.42 * head_scale,
         corners=(head_start, head_start + 1, head_start + 2),
         convex_only=False,
     )

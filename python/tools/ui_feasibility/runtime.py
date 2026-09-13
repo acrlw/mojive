@@ -47,6 +47,7 @@ def render(
     initial_imgui_radius: float | None = None,
     initial_tool_stroke: float | None = None,
     initial_rotate_gap_ratio: float | None = None,
+    initial_reset_head_scale: float | None = None,
     initial_playback_zoom: float | None = None,
     initial_icon_padding: float | None = None,
     initial_icon_stroke: float | None = None,
@@ -97,6 +98,8 @@ def render(
             state.tool_stroke_width = initial_tool_stroke
         if initial_rotate_gap_ratio is not None:
             state.rotate_ring_gap_ratio = initial_rotate_gap_ratio
+        if initial_reset_head_scale is not None:
+            state.reset_head_scale = initial_reset_head_scale
         if initial_playback_zoom is not None:
             state.construction_playback_scale = initial_playback_zoom
         initial_adjustment_group = (
@@ -240,6 +243,12 @@ def main() -> None:
         help="Initial Playback construction zoom, from 1.5 to 4.0",
     )
     parser.add_argument(
+        "--reset-head-scale",
+        type=float,
+        default=None,
+        help="Shared reset/refresh arrowhead size, from 0.65 to 2.0 times the original",
+    )
+    parser.add_argument(
         "--icon-padding",
         type=float,
         default=None,
@@ -300,6 +309,8 @@ def main() -> None:
         parser.error("--tool-stroke must be between 1.0 and 2.2")
     if args.rotate_gap_ratio is not None and not 0.25 <= args.rotate_gap_ratio <= 1.0:
         parser.error("--rotate-gap-ratio must be between 0.25 and 1.00")
+    if args.reset_head_scale is not None and not 0.65 <= args.reset_head_scale <= 2.0:
+        parser.error("--reset-head-scale must be between 0.65 and 2.0")
     if args.playback_zoom is not None and not 1.5 <= args.playback_zoom <= 4.0:
         parser.error("--playback-zoom must be between 1.5 and 4.0")
     if (
@@ -344,6 +355,7 @@ def main() -> None:
         initial_imgui_radius=args.imgui_radius,
         initial_tool_stroke=args.tool_stroke,
         initial_rotate_gap_ratio=args.rotate_gap_ratio,
+        initial_reset_head_scale=args.reset_head_scale,
         initial_playback_zoom=args.playback_zoom,
         initial_icon_padding=args.icon_padding,
         initial_icon_stroke=args.icon_stroke,

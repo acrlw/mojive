@@ -578,7 +578,11 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 (
                     "Reset simulation",
                     f"Envelope Ø{2 * icon_radius * RESET_GLYPH_SCALE:.2f}",
-                    lambda *args: _draw_reset_icon(*args, stroke_width=state.tool_stroke_width),
+                    lambda *args: _draw_reset_icon(
+                        *args,
+                        stroke_width=state.tool_stroke_width,
+                        head_scale=state.reset_head_scale,
+                    ),
                 ),
                 (
                     "Record Take / Video",

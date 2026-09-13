@@ -30,6 +30,7 @@ from .model import (
     _PROJECTION_HALF_WIDTH_PT,
     _PROJECTION_STROKE_PT,
     CAPSULE_SMOOTHING,
+    DEFAULT_RESET_HEAD_SCALE,
     FRAME_LABEL_MAX_WIDTH,
     OVERLAY_GEOMETRY,
     PLAYBACK_HALF_HEIGHT_PT,
@@ -49,8 +50,15 @@ from .rotate import (
 
 
 @lru_cache(maxsize=64)
-def reset_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
+def reset_glyph_path(
+    stroke: float,
+    smoothing: float = CORNER_SMOOTHING,
+    *,
+    head_scale: float = DEFAULT_RESET_HEAD_SCALE,
+):
     """Construct a counterclockwise arrow within Geometry's normalized icon circle."""
+    if not math.isfinite(head_scale) or head_scale <= 0:
+        raise ValueError("reset head scale must be finite and positive")
     radius = OVERLAY_GEOMETRY.icon_radius - stroke / 2
     angles = np.radians(np.linspace(140, -140, 65))
     radial = np.column_stack((np.cos(angles), np.sin(angles)))
@@ -58,9 +66,9 @@ def reset_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
     outer, inner = (radius + stroke / 2) * radial, (radius - stroke / 2) * radial
     head = np.array(
         (
-            (radius + 2 * stroke) * radial[-1],
-            radius * radial[-1] + 4 * stroke * tangent,
-            (radius - 2 * stroke) * radial[-1],
+            (radius + 2 * stroke * head_scale) * radial[-1],
+            radius * radial[-1] + 4 * stroke * head_scale * tangent,
+            (radius - 2 * stroke * head_scale) * radial[-1],
         )
     )
     cap = smooth_line_cap(
@@ -69,7 +77,10 @@ def reset_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
     outline = np.vstack((outer, head, inner[::-1], cap))
     # The head and arc share one silhouette, rounded with the existing G3 primitive.
     outline = smooth_polygon_corners(
-        outline, stroke * 0.28, tuple(range(len(outer), len(outer) + 3)), smoothing=smoothing
+        outline,
+        stroke * 0.28 * head_scale,
+        tuple(range(len(outer), len(outer) + 3)),
+        smoothing=smoothing,
     )
     outline *= (
         OVERLAY_GEOMETRY.icon_radius * RESET_GLYPH_SCALE / np.linalg.norm(outline, axis=1).max()
@@ -78,17 +89,28 @@ def reset_glyph_path(stroke: float, smoothing: float = CORNER_SMOOTHING):
 
 
 @lru_cache(maxsize=128)
-def _scaled_reset_glyph(scale, stroke, smoothing):
-    return tuple((x * scale, y * scale) for x, y in reset_glyph_path(stroke, smoothing))
+def _scaled_reset_glyph(scale, stroke, smoothing, head_scale=DEFAULT_RESET_HEAD_SCALE):
+    return tuple(
+        (x * scale, y * scale)
+        for x, y in reset_glyph_path(stroke, smoothing, head_scale=head_scale)
+    )
 
 
 def draw_reset_glyph(
-    draw, center, color, scale, stroke=OVERLAY_GEOMETRY.tool_stroke, *, smoothing=None
+    draw,
+    center,
+    color,
+    scale,
+    stroke=OVERLAY_GEOMETRY.tool_stroke,
+    *,
+    smoothing=None,
+    head_scale=DEFAULT_RESET_HEAD_SCALE,
 ):
     path = _scaled_reset_glyph(
         scale,
         stroke,
         getattr(draw, "corner_smoothing", CORNER_SMOOTHING) if smoothing is None else smoothing,
+        head_scale,
     )
     draw.fringed_concave_fill(path, color, origin=center)
 

@@ -344,9 +344,9 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "playback-more": 2.0,
         "transport-previous": 2.0,
         "transport-next": 2.0,
-        "transport-reset": 2.0,
+        "transport-reset": 1.5,
         "transport-more": 2.0,
-        "key-snapshot": 1.5,
+        "key-snapshot": 1.25,
         "key-keyframe": 1.5,
         "key-add": 1.5,
         "key-clear": 1.5,
@@ -571,8 +571,13 @@ def test_reviewed_transport_bars_keep_their_authored_width(
 
 @pytest.mark.parametrize("name", ("playback-reset", "transport-reset"))
 @pytest.mark.parametrize("stroke_width", (ICON_MIN_STROKE, ICON_STROKE, ICON_MAX_STROKE))
-def test_reset_arc_uses_the_shared_visible_stroke(name: str, stroke_width: float) -> None:
-    draw = _render(name, ICON_GRID, stroke_width=stroke_width)
+@pytest.mark.parametrize("head_scale", (0.65, 1.0, 1.5, 2.0))
+def test_reset_arc_uses_the_shared_visible_stroke(
+    name: str, stroke_width: float, head_scale: float
+) -> None:
+    draw = _render(
+        name, ICON_GRID, stroke_width=stroke_width, tuning=IconTuning(reset_head_scale=head_scale)
+    )
     outline = draw.filled_paths[0]
     outer_radius = math.hypot(*outline[0])
     inner_radius = math.hypot(*outline[-1])
@@ -771,6 +776,8 @@ def test_panel_disclosures_use_equilateral_triangles_and_circle_anchors(name: st
             ICON_TUNING_DEFAULTS,
             IconTuning(key_fit_arm_length=5.0),
         ),
+        ("playback-reset", ICON_TUNING_DEFAULTS, IconTuning(reset_head_scale=1.6)),
+        ("transport-reset", ICON_TUNING_DEFAULTS, IconTuning(reset_head_scale=1.6)),
     ),
 )
 def test_authored_shape_controls_change_geometry_without_breaking_circle_fit(
@@ -1232,3 +1239,27 @@ def test_cold_production_icons_skip_dynamic_fitting(monkeypatch):
         for _label, name in entries:
             icon_concepts.production_icon_metrics(name)
             assert icon_concepts._icon_draw_commands(name, (0.0, 0.0), 24.0, None)
+
+
+@pytest.mark.parametrize("head_scale", (0.65, 1.6, 2.0))
+def test_value_restore_head_control_preserves_its_envelope_and_cache(head_scale):
+    from mojive.ui.viewport_widgets import OVERLAY_GEOMETRY, reset_glyph_path
+    from mojive.ui.viewport_widgets.model import RESET_GLYPH_SCALE
+
+    original = reset_glyph_path(1.5)
+    changed = reset_glyph_path(1.5, head_scale=head_scale)
+    assert changed != original
+    assert changed is reset_glyph_path(1.5, head_scale=head_scale)
+    assert max(math.hypot(x, y) for x, y in changed) == pytest.approx(
+        OVERLAY_GEOMETRY.icon_radius * RESET_GLYPH_SCALE
+    )
+
+
+@pytest.mark.parametrize("head_scale", (0, -1, float("inf"), float("nan")))
+def test_reset_head_scale_rejects_invalid_dimensions(head_scale):
+    from mojive.ui.viewport_widgets import reset_glyph_path
+
+    with pytest.raises(ValueError, match="reset head scale"):
+        IconTuning(reset_head_scale=head_scale)
+    with pytest.raises(ValueError, match="reset head scale"):
+        reset_glyph_path(1.5, head_scale=head_scale)

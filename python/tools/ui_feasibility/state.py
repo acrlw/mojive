@@ -160,6 +160,7 @@ class ProbeState:
     scale_handle_scale: float = ICON_TUNING_DEFAULTS.scale_handle_scale
     snap_endpoint_scale: float = ICON_TUNING_DEFAULTS.snap_endpoint_scale
     key_fit_arm_length: float = ICON_TUNING_DEFAULTS.key_fit_arm_length
+    reset_head_scale: float = ICON_TUNING_DEFAULTS.reset_head_scale
     hint_control_height: int = int(OVERLAY_GEOMETRY.hint_control_height)
     hint_padding_x: int = int(OVERLAY_GEOMETRY.hint_padding_x)
     hint_padding_y: int = int(OVERLAY_GEOMETRY.hint_padding_y)
@@ -224,6 +225,7 @@ class ProbeState:
             scale_handle_scale=self.scale_handle_scale,
             snap_endpoint_scale=self.snap_endpoint_scale,
             key_fit_arm_length=self.key_fit_arm_length,
+            reset_head_scale=self.reset_head_scale,
         )
 
     def concept_mouse_width(self) -> float:

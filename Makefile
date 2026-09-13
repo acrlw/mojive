@@ -393,6 +393,17 @@ ui-icon-scales:
 		done; \
 	done
 
+.PHONY: ui-reset-heads
+ui-reset-heads:
+	@set -e; for scale in 0.65 1 1.25 1.5; do \
+		for head in 1 1.5 2; do \
+			MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
+				--ui-scale $$scale --height 1850 --page geometry --geometry-tab icons \
+				--icon-group keyframe-transport --reset-head-scale $$head \
+				-o output/ui-reset-heads/scale-$$scale-head-$$head.png; \
+		done; \
+	done
+
 ui-feasibility:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive $(ARGS)
 
