@@ -1,0 +1,520 @@
+"""Generate close-up acceptance images for the native 2D/3D gizmos."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+from imgui_bundle import imgui
+from PIL import Image
+
+from mojive.app.composition import build
+from mojive.interaction.gizmo import (
+    AXIS_END,
+    RING_RADIUS,
+    SIZE_PT,
+    GizmoHandle,
+    GizmoMode,
+    hit_test,
+    project,
+    world_scale,
+)
+from mojive.scene.assets import resolve
+from mojive.scene.queries import node_world_pose
+
+from .. import commands as cmd
+from ..adapters.base import NodeType
+from ..ui import viewcube
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-o", "--output", type=Path, default=Path("output/gizmo-gallery"))
+    parser.add_argument(
+        "--rotation-edge-only", action="store_true", help="Capture an idle rotation camera sweep"
+    )
+    args = parser.parse_args(argv)
+    args.output.mkdir(parents=True, exist_ok=True)
+
+    viewer = build(resolve("gizmo"), paused=True, vsync=False, width=1600, height=1000)
+    try:
+        # GLFW reports the real mouse buttons every frame.  A gallery needs a
+        # deterministic held-button source independent of the operator's hand.
+        native_input_state = viewer.app._input_state
+        viewer.app._gallery_left_down = False
+
+        def gallery_input_state():
+            return replace(native_input_state(), left=viewer.app._gallery_left_down)
+
+        viewer.app._input_state = gallery_input_state
+        node = next(
+            node
+            for node in viewer.session.nodes
+            if node.posable and (not args.rotation_edge_only or node.name == "free_sphere")
+        )
+        viewer.session.submit(cmd.Select(node.object_id))
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+        for _ in range(4):
+            viewer.sync()
+        if args.rotation_edge_only:
+            _rotation_edge_sweep(viewer, node, args.output)
+            return 0
+        _save_view_gizmo(viewer, args.output / "view-gizmo.png")
+
+        for style in ("2d", "3d"):
+            _position(viewer, node, style, args.output)
+            _rotation(viewer, node, style, args.output)
+        geometry = next(
+            item
+            for item in viewer.session.nodes
+            if item.type is NodeType.GEOM and item.name == "box"
+        )
+        _dimensions(viewer, geometry, args.output)
+        _entity_capsule(viewer, args.output)
+    finally:
+        viewer.release()
+    print(args.output.resolve())
+    return 0
+
+
+def _position(viewer, node, style: str, output: Path) -> None:
+    io = imgui.get_io()
+    viewer.app.gizmo.set_mode("translate")
+    viewer.app.gizmo.set_style(style)
+    viewer.app.gizmo.set_space("body")
+    for orthographic in (False, True):
+        suffix = "-orthographic" if orthographic else ""
+        viewer.app.camera.set_orthographic(orthographic)
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, node, output / f"position{suffix}-{style}.png")
+
+        camera, rect, origin, rotation, scale = _state(viewer, node)
+        cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
+        io.add_mouse_pos_event(*cursor)
+        viewer.sync()
+        viewer.app._gallery_left_down = True
+        viewer.sync()
+        axis = project(camera, (origin, origin + rotation[:, 2] * scale), rect)[:, :2]
+        direction = axis[1] - axis[0]
+        direction /= np.linalg.norm(direction)
+        io.add_mouse_pos_event(*(cursor + direction * 42.0))
+        viewer.sync()
+        _save(viewer, node, output / f"position-drag{suffix}-{style}.png")
+        viewer.app.gizmo.translation_snap_m = 0.5
+        # The gallery is a deterministic visual target.  GLFW refreshes real
+        # modifier state during begin_frame, so use the production Snap latch
+        # instead of racing a synthetic Shift event against the backend.
+        viewer.app._snap_latched = True
+        io.add_mouse_pos_event(*(cursor + direction * 57.0))
+        viewer.sync()
+        if not viewer.app.gizmo.snapping:
+            raise RuntimeError(
+                "position snap input was not applied "
+                f"(latched={viewer.app._snap_latched}, using={viewer.app.gizmo.using}, "
+                f"active={viewer.app.gizmo.active_handle!s}, left={viewer.app._state.left}, "
+                f"over={viewer.app._state.over_viewport}, "
+                f"hovered={viewer.app._state.gizmo_hovered}, "
+                f"handle={viewer.app.gizmo.hovered_handle!s}, "
+                f"claimed={viewer.app.router.wants_gizmo()})"
+            )
+        _save(viewer, node, output / f"position-snap{suffix}-{style}.png")
+        viewer.app._snap_latched = False
+        viewer.app._gallery_left_down = False
+        viewer.sync()
+        viewer.session.submit(cmd.Reset())
+        viewer.sync()
+    viewer.app.camera.set_orthographic(False)
+
+
+def _rotation(viewer, node, style: str, output: Path) -> None:
+    io = imgui.get_io()
+    viewer.app.gizmo.set_mode("rotate")
+    viewer.app.gizmo.set_style(style)
+    viewer.app.gizmo.set_space("body")
+    for orthographic in (False, True):
+        suffix = "-orthographic" if orthographic else ""
+        viewer.app.camera.set_orthographic(orthographic)
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        camera, rect, origin, rotation, scale = _state(viewer, node)
+        start_rotation = rotation.copy()
+
+        start_angle = next(
+            angle
+            for angle in np.linspace(0.0, 2.0 * np.pi, 96, endpoint=False)
+            if hit_test(
+                camera,
+                origin,
+                rotation,
+                rect,
+                tuple(
+                    np.floor(
+                        project(
+                            camera,
+                            (_rotation_ring_point(origin, start_rotation, scale, angle),),
+                            rect,
+                        )[0, :2]
+                    )
+                ),
+                GizmoMode.ROTATE,
+                viewer.window.style_scale,
+            )[0]
+            is GizmoHandle.ROTATE_Z
+        )
+        start = np.floor(
+            project(
+                camera,
+                (_rotation_ring_point(origin, start_rotation, scale, start_angle),),
+                rect,
+            )[0, :2]
+        )
+        io.add_mouse_pos_event(*start)
+        viewer.sync()
+        viewer.app._gallery_left_down = True
+        viewer.sync()
+        small = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle + np.radians(5.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*small)
+        viewer.sync()
+        _save(viewer, node, output / f"rotation-drag{suffix}-small-{style}.png")
+        viewer.app._snap_latched = True
+        io.add_mouse_pos_event(*small)
+        viewer.sync()
+        if not viewer.app.gizmo.snapping:
+            raise RuntimeError("small-angle rotation snap input was not applied")
+        _save(viewer, node, output / f"rotation-snap{suffix}-small-{style}.png")
+        negative = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle - np.radians(30.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*negative)
+        viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-negative-{style}.png")
+        viewer.app._snap_latched = False
+        viewer.sync()
+        end = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle + np.radians(42.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*end)
+        viewer.sync()
+        _save(viewer, node, output / f"rotation-drag{suffix}-{style}.png")
+
+        viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-drag{suffix}-edge-{style}.png")
+        viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        camera, rect, origin, _rotation, scale = _state(viewer, node)
+        viewer.app.gizmo.rotation_snap_deg = 5.0
+        viewer.app._snap_latched = True
+        snapped = project(
+            camera,
+            (
+                _rotation_ring_point(
+                    origin,
+                    start_rotation,
+                    scale,
+                    start_angle + np.radians(49.0),
+                ),
+            ),
+            rect,
+        )[0, :2]
+        io.add_mouse_pos_event(*snapped)
+        viewer.sync()
+        if not viewer.app.gizmo.snapping:
+            raise RuntimeError("rotation snap input was not applied")
+        _save(viewer, node, output / f"rotation-snap{suffix}-{style}.png")
+
+        for degrees in np.linspace(50.0, 285.0, 48):
+            cursor = project(
+                camera,
+                (
+                    _rotation_ring_point(
+                        origin,
+                        start_rotation,
+                        scale,
+                        start_angle + np.radians(float(degrees)),
+                    ),
+                ),
+                rect,
+            )[0, :2]
+            io.add_mouse_pos_event(*cursor)
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-reflex-{style}.png")
+
+        for degrees in np.linspace(280.0, 50.0, 47):
+            cursor = project(
+                camera,
+                (
+                    _rotation_ring_point(
+                        origin,
+                        start_rotation,
+                        scale,
+                        start_angle + np.radians(float(degrees)),
+                    ),
+                ),
+                rect,
+            )[0, :2]
+            io.add_mouse_pos_event(*cursor)
+            viewer.sync()
+        for degrees in np.linspace(50.0, -415.0, 94):
+            cursor = project(
+                camera,
+                (
+                    _rotation_ring_point(
+                        origin,
+                        start_rotation,
+                        scale,
+                        start_angle + np.radians(float(degrees)),
+                    ),
+                ),
+                rect,
+            )[0, :2]
+            io.add_mouse_pos_event(*cursor)
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-multiturn-{style}.png")
+        viewer.app.camera.look_from(-135.0, 0.0, viewer.app.camera_out, animate=False)
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, node, output / f"rotation-snap{suffix}-edge-{style}.png")
+        viewer.app._snap_latched = False
+        viewer.app._gallery_left_down = False
+        viewer.sync()
+        viewer.session.submit(cmd.Reset())
+        viewer.sync()
+    viewer.app.camera.set_orthographic(False)
+    viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+
+
+def _dimensions(viewer, node, output: Path) -> None:
+    """Capture the primitive-aware scale-style geometry tool."""
+
+    viewer.session.submit(cmd.SelectNode(node.node_id))
+    viewer.app.gizmo.set_mode("dimensions")
+    viewer.app.gizmo.set_style("2d")
+    viewer.app.camera.set_orthographic(False)
+    viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
+    for _ in range(4):
+        viewer.sync()
+    _save_full(viewer, output / "dimensions-box-window.png")
+    _save(viewer, node, output / "dimensions-box.png")
+
+    camera, rect, origin, rotation, scale = _state(viewer, node)
+    cursor = project(
+        camera,
+        (origin + rotation[:, 0] * scale * AXIS_END,),
+        rect,
+    )[0, :2]
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*cursor)
+    viewer.sync()
+    viewer.app._gallery_left_down = True
+    viewer.sync()
+    direction = project(
+        camera,
+        (origin, origin + rotation[:, 0] * scale),
+        rect,
+    )[:, :2]
+    direction = direction[1] - direction[0]
+    direction /= np.linalg.norm(direction)
+    io.add_mouse_pos_event(*(cursor + direction * 42.0))
+    viewer.sync()
+    _save(viewer, node, output / "dimensions-box-drag.png")
+    viewer.app._gallery_left_down = False
+    viewer.sync()
+
+
+def _entity_capsule(viewer, output: Path) -> None:
+    """Capture a colored Entity-created capsule before and during translation."""
+
+    world = next(
+        node for node in viewer.session.nodes if node.type is NodeType.WORLD and node.parent < 0
+    )
+    viewer.session.submit(cmd.SelectNode(world.node_id))
+    viewer.app._add_model_primitive("capsule", "entity capsule")
+    node = viewer.session.selected_node
+    if node is None or node.type is not NodeType.GEOM:
+        raise RuntimeError("Entity capsule was not created and selected")
+    # Entity creation chooses a random palette color; comparisons need one fixed material.
+    result = viewer.session.submit(
+        cmd.SetGeometryColor(node.node_id, np.array((0.55, 0.75, 0.35, 1.0)))
+    )
+    if not result.ok:
+        raise RuntimeError(result.message)
+
+    position = np.array((0.0, -1.0, 0.65), np.float32)
+    viewer.session.submit(cmd.SetGeometrySize(node.node_id, np.array((0.22, 0.22, 0.4))))
+    viewer.session.submit(cmd.SetPose(node.node_id, position, np.eye(3)))
+    viewer.app.gizmo.set_mode("translate")
+    viewer.app.gizmo.set_style("2d")
+    viewer.app.gizmo.set_space("body")
+    viewer.app.camera.look_from_target(
+        -135.0,
+        25.0,
+        position,
+        0.7,
+        viewer.app.camera_out,
+        animate=False,
+    )
+    for _ in range(4):
+        viewer.sync()
+    _save_full(viewer, output / "entity-capsule-move-window.png")
+    _save(viewer, node, output / "entity-capsule-move.png")
+
+    camera, rect, origin, rotation, scale = _state(viewer, node)
+    cursor = _axis_cursor(viewer, camera, rect, origin, rotation, scale)
+    io = imgui.get_io()
+    io.add_mouse_pos_event(*cursor)
+    viewer.sync()
+    viewer.app._gallery_left_down = True
+    viewer.sync()
+    axis = project(camera, (origin, origin + rotation[:, 2] * scale), rect)[:, :2]
+    direction = axis[1] - axis[0]
+    direction /= np.linalg.norm(direction)
+    io.add_mouse_pos_event(*(cursor + direction * 48.0))
+    viewer.sync()
+    _save(viewer, node, output / "entity-capsule-move-drag.png")
+    viewer.app._gallery_left_down = False
+    viewer.sync()
+
+
+def _rotation_edge_sweep(viewer, node, output: Path) -> None:
+    """Exercise projected half-arcs across both sides of the edge-on direction."""
+    viewer.app.gizmo.set_mode("rotate")
+    viewer.app.gizmo.set_style("2d")
+    viewer.app.gizmo.set_space("world")
+    origin, _rotation = node_world_pose(viewer.session, node)
+    imgui.get_io().add_mouse_pos_event(-100.0, -100.0)
+    for orthographic in (False, True):
+        viewer.app.camera.set_orthographic(orthographic)
+        projection = "orthographic" if orthographic else "perspective"
+        frames = []
+        for index, yaw in enumerate(np.linspace(-25.0, 25.0, 51)):
+            viewer.app.camera.look_from_target(
+                yaw, 20.0, origin, 2.0, viewer.app.camera_out, animate=False
+            )
+            viewer.sync()
+            path = output / f"rotation-edge-{projection}-{index:02d}.png"
+            _save(viewer, node, path)
+            with Image.open(path) as image:
+                frames.append(image.resize((540, 540), Image.Resampling.LANCZOS))
+        frames[0].save(
+            output / f"rotation-edge-{projection}.gif",
+            save_all=True,
+            append_images=frames[1:] + frames[-2:0:-1],
+            duration=70,
+            loop=0,
+        )
+
+
+def _state(viewer, node):
+    camera = viewer.app.camera.view()
+    rect = viewer.app._viewport_rect
+    origin, rotation = node_world_pose(viewer.session, node)
+    return (
+        camera,
+        rect,
+        origin,
+        rotation,
+        world_scale(camera, origin, rect[3], SIZE_PT * viewer.window.style_scale),
+    )
+
+
+def _rotation_ring_point(origin, rotation, scale: float, angle: float) -> np.ndarray:
+    return origin + scale * RING_RADIUS * (
+        np.cos(angle) * rotation[:, 0] + np.sin(angle) * rotation[:, 1]
+    )
+
+
+def _axis_cursor(viewer, camera, rect, origin, rotation, scale) -> np.ndarray:
+    for fraction in np.linspace(0.4, 0.75, 15):
+        point = np.floor(
+            project(camera, (origin + rotation[:, 2] * scale * fraction,), rect)[0, :2]
+        )
+        handle, _axes, _planes = hit_test(
+            camera,
+            origin,
+            rotation,
+            rect,
+            tuple(point),
+            GizmoMode.TRANSLATE,
+            viewer.window.style_scale,
+        )
+        if handle is GizmoHandle.Z:
+            return point
+    raise RuntimeError("Z-axis gizmo handle is not visible")
+
+
+def _save(viewer, node, path: Path) -> None:
+    # The front buffer trails the interaction update by one frame.
+    viewer.sync()
+    pixels = viewer.window.read_frame()[::-1, :, :3]
+    camera, rect, origin, _rotation, _scale = _state(viewer, node)
+    center = project(camera, (origin,), rect)[0, :2]
+    display = imgui.get_io().display_size
+    sx = pixels.shape[1] / display.x
+    sy = pixels.shape[0] / display.y
+    crop_points = 180.0 if viewer.window.style_scale <= 1.0 else 240.0 * viewer.window.style_scale
+    half = int(crop_points * max(sx, sy))
+    x0 = max(0, int(center[0] * sx) - half)
+    y0 = max(0, int(center[1] * sy) - half)
+    crop = pixels[y0 : y0 + 2 * half, x0 : x0 + 2 * half]
+    Image.fromarray(crop, "RGB").resize((1080, 1080), Image.Resampling.LANCZOS).save(path)
+
+
+def _save_view_gizmo(viewer, path: Path) -> None:
+    viewer.sync()
+    pixels = viewer.window.read_frame()[::-1, :, :3]
+    center = viewcube.widget_center(viewer.app._viewport_rect, viewer.window.style_scale)
+    display = imgui.get_io().display_size
+    sx = pixels.shape[1] / display.x
+    sy = pixels.shape[0] / display.y
+    half_x = int(120.0 * sx)
+    half_y = int(120.0 * sy)
+    x = int(center[0] * sx)
+    y = int(center[1] * sy)
+    crop = pixels[max(0, y - half_y) : y + half_y, max(0, x - half_x) : x + half_x]
+    Image.fromarray(crop, "RGB").save(path)
+
+
+def _save_full(viewer, path: Path) -> None:
+    viewer.sync()
+    pixels = viewer.window.read_frame()[::-1, :, :3]
+    Image.fromarray(pixels, "RGB").save(path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

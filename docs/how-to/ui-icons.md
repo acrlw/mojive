@@ -291,9 +291,9 @@ For every icon-family change:
 For Output severity glyphs, run:
 
 ```bash
-.venv/bin/pytest -q python/tests/test_panels.py -k severity
+.venv/bin/pytest -q tests/test_panels.py -k severity
 make ui-diagnostics
-.venv/bin/pytest -q -m gpu python/tests/gpu/test_ui_refinement.py \
+.venv/bin/pytest -q -m gpu tests/gpu/test_ui_refinement.py \
   -k 'output_toggles or output_filters or output_collapse'
 make check
 ```

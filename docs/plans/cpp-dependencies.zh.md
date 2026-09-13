@@ -23,7 +23,7 @@ GLM 与 Eigen 都可以处理小矩阵，选择 GLM 是当前图形基础设施�
 - `cpp/src/Contracts.cpp` 已使用 GLM 的右手系相机算法，替换验证阶段的手写向量和矩阵公式。输入退化检查、行主序边界及深度契约保留。
 - `cpp/include/mojive/Render.hpp` 已有 `SceneSource`、`SceneFrame`、`objectId` 和连续的变换数组。标准库数据契约便于隔离后端，不要求内部也只能用标准库计算。
 - Python 的 `Session` 已经负责选择、命令和编辑状态。增加另一份 ECS 世界，首先会产生状态归属、对象映射和同步问题，不能仅凭库的微基准判断收益。
-- `python/src/mojive/log.py` 已用 Loguru；`ui/messages.py` 的 `OutputBuffer` 已是有界、带锁的日志历史。迁移期间它可以订阅原生记录；原生文件输出不以此 Python 面板为前提。
+- `python/log.py` 已用 Loguru；`ui/messages.py` 的 `OutputBuffer` 已是有界、带锁的日志历史。迁移期间它可以订阅原生记录；原生文件输出不以此 Python 面板为前提。
 - 当前日志的 `configure()` 会调用无参数 `logger.remove()`，目前由 CLI 初始化调用。接入原生库时不能把它直接复用到模块导入或每个 Renderer 的构造过程，否则会移除宿主应用配置的 Loguru sink。
 
 ## GLM：使用现成算法，明确存储边界

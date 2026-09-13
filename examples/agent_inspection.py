@@ -94,6 +94,10 @@ def exercise(socket_path: Path, output: Path) -> None:
                         "params": {"node_id": geometry["node_id"], "size": [0.55, 0.45, 0.65]},
                     },
                     {
+                        "method": "set_scale",
+                        "params": {"node_id": node["node_id"], "scale": [1.2, 1, 0.8]},
+                    },
+                    {
                         "method": "set_geometry_color",
                         "params": {"node_id": geometry["node_id"], "rgba": [0.1, 0.8, 0.35, 1]},
                     },
@@ -102,7 +106,8 @@ def exercise(socket_path: Path, output: Path) -> None:
         )
         verified = client.call("inspect_object", {"object_id": node["object_id"]})
         np.testing.assert_allclose(verified["geometries"][0]["rgba"], [0.1, 0.8, 0.35, 1])
-        np.testing.assert_allclose(verified["geometries"][0]["size"], [0.55, 0.45, 0.65])
+        np.testing.assert_allclose(verified["geometries"][0]["size"], [0.66, 0.45, 0.52])
+        assert verified["scalable"] and verified["scale"] == [1, 1, 1]
         assert verified["position"] == [
             0,
             -1,
@@ -189,7 +194,7 @@ def main() -> None:
         socket_path = Path(directory) / "control.sock"
         scene = inspection_scene()
         if args.viewer:
-            from mojive.application.composition import build_scene
+            from mojive.app.composition import build_scene
 
             with build_scene(
                 scene, width=960, height=720, vsync=False, show_window=False

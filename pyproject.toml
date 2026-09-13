@@ -38,29 +38,32 @@ Repository = "https://github.com/acrlw/mojive"
 Issues = "https://github.com/acrlw/mojive/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "editables>=0.6"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/src/mojive"]
+packages = ["python"]
+sources = { "python" = "mojive" }
+# Hatch cannot infer editable imports when a source prefix is renamed.
+dev-mode-dirs = ["output/editable"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
-path = "tools/native_wheel_hook.py"
+path = "python/tools/build_hook.py"
 
 [tool.hatch.build.targets.wheel.force-include]
 "assets" = "mojive/data/assets"
 
 [tool.hatch.build]
 artifacts = [
-    "python/src/mojive/ui/icon_presets.json",
-    "python/src/mojive/render/opengl/shaders/*.glsl",
-    "python/src/mojive/render/webgpu/shaders/*.wgsl",
+    "python/ui/icon_presets.json",
+    "python/render/opengl/shaders/*.glsl",
+    "python/render/webgpu/shaders/*.wgsl",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["python/src", "python/tests"]
+src = ["python", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
@@ -73,15 +76,19 @@ ignore = [
     "SIM108",
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["mojive"]
+
 [tool.ruff.lint.per-file-ignores]
-"python/tests/*" = ["B011"]
+"tests/*" = ["B011"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.pytest.ini_options]
-testpaths = ["python/tests"]
-pythonpath = ["python/src", "."]
+testpaths = ["tests"]
+pythonpath = ["."]
+norecursedirs = ["native"]
 # The default suite excludes real GPU and physics worlds.
 addopts = "-m 'not gpu and not physics' --strict-markers"
 markers = [

@@ -3,7 +3,7 @@
 状态：历史实现记录。M1–M18、D1–D8 已落地；当前 UI 行为以代码、用户指南和 `make ui-gallery`
 产物为准。本文保留当时的设计约束和阶段记录，不作为现行操作手册。
 概念设计来源：`design/index.html` 的 M1–M18 与 D1–D8
-绘制可行性探针：`design/tools/render_ui_feasibility.py`
+绘制可行性探针：`python/tools/ui_feasibility.py`
 
 ## 1. 目标
 
@@ -266,16 +266,16 @@ filter、mask、文字和越界 stroke，使未来接入 runtime 时不需要 SV
 绘制可行性图可使用以下命令复现：
 
 ```bash
-.venv/bin/python design/tools/render_ui_feasibility.py
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab hints
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab gizmos
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab helpers
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab status
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab shell
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab panels
-.venv/bin/python design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces
+.venv/bin/python -m mojive.tools.ui_feasibility
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab playback
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab tools
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab hints
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab gizmos
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab helpers
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab status
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab shell
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab panels
+.venv/bin/python -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces
 ```
 
 该探针创建项目真实的 `Window` / ImGui 上下文：标准控件由 ImGui 渲染，自绘图形复用

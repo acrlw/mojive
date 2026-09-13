@@ -41,40 +41,28 @@ All images in this README are unmodified Mojive captures.
 
 ## Quick start
 
-Mojive requires Python 3.11 or newer. The default window uses an OpenGL 3.3 core profile.
+Source builds require Python 3.11 or newer, uv, CMake and a C++20 toolchain.
+The default window uses an OpenGL 3.3 core profile.
 
 ```bash
-git clone https://github.com/acrlw/mojive.git
+git clone --recurse-submodules https://github.com/acrlw/mojive.git
 cd mojive
-uv sync --python 3.11 --extra mujoco
-uv run mojive editor
+make setup
+uv run --no-sync mojive editor
 ```
 
 Open a bundled scene, MJCF file, or URDF file:
 
 ```bash
-uv run mojive view test_scene
-uv run mojive view path/to/model.xml --paused
-uv run mojive view path/to/model.urdf --paused
+uv run --no-sync mojive view test_scene
+uv run --no-sync mojive view path/to/model.xml --paused
+uv run --no-sync mojive view path/to/model.urdf --paused
 ```
 
-To install without `uv`:
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[mujoco]"
-mojive editor
-```
-
-For development dependencies:
-
-```bash
-make setup
-```
-
-This also builds the [bulk UI drawing bindings and slider/focus fixes](docs/how-to/ui-corners.md),
-requiring CMake and a C++17 toolchain. Launch that build with `uv run --no-sync mojive editor`.
+`make setup` installs development and backend dependencies, builds the
+[custom ImGui bindings](docs/how-to/ui-corners.md), and registers the native geometry compiler
+with the editable Python package. `--no-sync` preserves those local builds. After replacing
+an editable install, run `make native-editable` to register the current native build again.
 
 For Python offscreen rendering on a Linux server, OpenGL uses EGL and needs a working GPU
 driver/EGL installation, but no desktop display. In `MOJIVE_GL=auto`, a failed EGL initialization
@@ -88,16 +76,16 @@ OpenGL is the default and recommended backend. To test wgpu:
 
 ```bash
 uv sync --extra mujoco --extra wgpu
-MOJIVE_BACKEND=wgpu uv run mojive editor
+MOJIVE_BACKEND=wgpu uv run --no-sync mojive editor
 ```
 
 `MOJIVE_BACKEND` selects `opengl` or `wgpu`. The CLI `--backend` option selects the scene adapter,
 such as `mujoco` or `toy`.
 
 ```bash
-uv run mojive backends
-uv run mojive assets --quick
-uv run mojive --help
+uv run --no-sync mojive backends
+uv run --no-sync mojive assets --quick
+uv run --no-sync mojive --help
 ```
 
 ## Editor
@@ -128,8 +116,8 @@ Select a camera to edit it. Enable **preview** in Inspector when a live camera p
 Input bindings can be changed in Settings. UI scale and language normally follow the desktop:
 
 ```bash
-MOJIVE_UI_SCALE=1.5 uv run mojive editor
-MOJIVE_LANGUAGE=zh_CN uv run mojive editor
+MOJIVE_UI_SCALE=1.5 uv run --no-sync mojive editor
+MOJIVE_LANGUAGE=zh_CN uv run --no-sync mojive editor
 ```
 
 See the [configuration reference](docs/reference/configuration.md) for every runtime option.
@@ -198,23 +186,23 @@ See the [custom adapter guide](docs/how-to/custom-adapter.md) and the runnable
 Run simulation in one process and view it from another:
 
 ```bash
-uv run mojive serve deformables --host 127.0.0.1 --port 47650
-uv run mojive attach --host 127.0.0.1 --port 47650
+uv run --no-sync mojive serve deformables --host 127.0.0.1 --port 47650
+uv run --no-sync mojive attach --host 127.0.0.1 --port 47650
 ```
 
 Record and replay a published session:
 
 ```bash
-uv run mojive serve deformables --record-snapshot output/session.fvs
-uv run mojive replay output/session.fvs --loop
-uv run mojive attach
+uv run --no-sync mojive serve deformables --record-snapshot output/session.fvs
+uv run --no-sync mojive replay output/session.fvs --loop
+uv run --no-sync mojive attach
 ```
 
 Start a local control service and query it from another process:
 
 ```bash
-uv run mojive rpc-serve test_scene --socket output/mojive.sock
-uv run mojive control get_state --socket output/mojive.sock --json
+uv run --no-sync mojive rpc-serve test_scene --socket output/mojive.sock
+uv run --no-sync mojive control get_state --socket output/mojive.sock --json
 ```
 
 See the [remote viewing tutorial](docs/tutorials/remote-viewing.md) and
@@ -222,7 +210,7 @@ See the [remote viewing tutorial](docs/tutorials/remote-viewing.md) and
 
 ## Development
 
-Mojive remains a Python package: its public API lives in `python/src/mojive`, and selected native
+Mojive remains a Python package: its public API lives in `mojive`, and selected native
 implementation work lives in `cpp`. Upstream sources are managed under `3rdparty`. See the
 [Python/C++ development guide](docs/guides/development.md) for Qt-style C++ naming, dependency
 setup and the boundary between Python application logic and native infrastructure.

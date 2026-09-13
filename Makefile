@@ -64,6 +64,7 @@ help:
 		'  make editor-performance composition editing performance baseline' \
 		'  make stability          long-frame, large-model, and multi-camera gates' \
 		'  make rpc-soak           persistent RPC, concurrency, timeout, and recovery' \
+		'  make rpc-benchmark      real socket load, frame budgets, and input latency' \
 		'  make format-validation  current scene snapshot and recording formats' \
 		'  make robot             Unitree Go2; downloads on first run' \
 		'  make outline           selection and antialiased outline' \
@@ -187,10 +188,11 @@ help:
 setup:
 	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu --extra native
 	$(MAKE) setup-imgui
+	$(MAKE) native-editable
 
 .PHONY: setup-imgui setup-g3 g3-ui g3-benchmark interaction-benchmark ui-corners ui-corners-gallery
 setup-imgui:
-	$(PY) tools/build_imgui.py --install
+	$(PY) -m mojive.tools.build_imgui --install
 
 # Keep the previous setup command working for existing checkouts.
 setup-g3: setup-imgui
@@ -201,43 +203,43 @@ g3-ui:
 	$(PY) -m mojive.tools.ui_runtime -o output/g3-ui/runtime
 
 g3-benchmark:
-	$(PY) tools/benchmark_g3.py $(ARGS)
+	$(PY) -m mojive.tools.benchmark_g3 $(ARGS)
 
 interaction-benchmark:
-	$(PY) tools/benchmark_interaction.py $(ARGS)
+	$(PY) -m mojive.tools.benchmark_interaction $(ARGS)
 
 ui-corners:
-	$(PY) design/tools/render_ui_feasibility.py --interactive --page geometry --geometry-tab corners $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page geometry --geometry-tab corners $(ARGS)
 
 ui-corners-gallery:
-	$(PYTEST) -q -m gpu python/tests/gpu/test_ui_corner_controls.py -k tab_focus
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 0 -o output/g3-controls/corners-000.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 0.6 -o output/g3-controls/corners-060.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --smoothing 1 -o output/g3-controls/corners-100.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 0 -o output/g3-controls/radius-00.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 8 -o output/g3-controls/radius-08.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 12 -o output/g3-controls/radius-12.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab corners --imgui-radius 16 -o output/g3-controls/radius-16.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/g3-controls/playback-aligned.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/g3-controls/workspaces.png
-	$(PY) design/tools/render_ui_feasibility.py --page panels -o output/g3-controls/panels.png
-	MOJIVE_BACKEND=opengl $(PYTEST) -q -m gpu python/tests/gpu/test_debugdraw.py -k screen_arrows
-	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu python/tests/gpu/test_debugdraw.py -k screen_arrows
+	$(PYTEST) -q -m gpu tests/gpu/test_ui_corner_controls.py -k tab_focus
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --smoothing 0 -o output/g3-controls/corners-000.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --smoothing 0.6 -o output/g3-controls/corners-060.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --smoothing 1 -o output/g3-controls/corners-100.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --imgui-radius 0 -o output/g3-controls/radius-00.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --imgui-radius 8 -o output/g3-controls/radius-08.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --imgui-radius 12 -o output/g3-controls/radius-12.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab corners --imgui-radius 16 -o output/g3-controls/radius-16.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab playback -o output/g3-controls/playback-aligned.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces -o output/g3-controls/workspaces.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page panels -o output/g3-controls/panels.png
+	MOJIVE_BACKEND=opengl $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
+	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
 
 ## Lint, formatting, and CPU tests.
 check: lint test
 
 lint:
-	$(RUFF) check python tools examples
-	$(RUFF) format --check python tools examples
+	$(RUFF) check python tests examples
+	$(RUFF) format --check python tests examples
 
 fmt:
-	$(RUFF) check --fix python tools examples
-	$(RUFF) format python tools examples
+	$(RUFF) check --fix python tests examples
+	$(RUFF) format python tests examples
 
 .PHONY: icon-presets fmt-cpp
 icon-presets:
-	$(PY) tools/generate_icon_presets.py $(ARGS)
+	$(PY) -m mojive.tools.generate_icon_presets $(ARGS)
 
 fmt-cpp:
 	rg --files cpp -g '*.cpp' -g '*.hpp' | xargs clang-format -i
@@ -246,7 +248,7 @@ docs:
 	uv run --extra docs mkdocs build --strict --site-dir output/site
 
 docs-check: examples-check
-	$(PY) tools/check_docs.py
+	$(PY) -m mojive.tools.check_docs
 	$(MAKE) docs
 
 examples-check:
@@ -272,17 +274,19 @@ test-physics:
 test-all: test test-physics gpu gpu-wgpu
 
 mjcf-roundtrip:
-	$(PYTEST) -q -m physics python/tests/test_workspace.py -k 'mjcf_export or exports_formatted or export_current_pose'
+	$(PYTEST) -q -m physics tests/test_workspace.py -k 'mjcf_export or exports_formatted or export_current_pose'
 
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
-	@for f in $$(ls python/tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
-GPU_WGPU_FILES := python/tests/gpu/test_input_ownership.py python/tests/gpu/test_scene_renderer.py python/tests/gpu/test_renderer_api.py python/tests/gpu/test_control_rpc_capture.py python/tests/gpu/test_hidpi.py python/tests/gpu/test_horizon_haze.py python/tests/gpu/test_shading.py python/tests/gpu/test_shadows.py python/tests/gpu/test_reflection.py python/tests/gpu/test_outline.py python/tests/gpu/test_tendon.py python/tests/gpu/test_debugdraw.py python/tests/gpu/test_gizmo.py python/tests/gpu/test_pipeline.py python/tests/gpu/test_viewer_wgpu.py python/tests/gpu/test_static_viewer.py python/tests/gpu/test_model_loading.py python/tests/gpu/test_ui_interaction.py python/tests/gpu/test_ui_layout_input.py python/tests/gpu/test_wgpu_shader_reload.py
-GPU_WGPU_FILES += python/tests/gpu/test_passive.py
-GPU_WGPU_FILES += python/tests/gpu/test_camera_tracking.py python/tests/gpu/test_input_mapping.py
-GPU_WGPU_FILES += python/tests/gpu/test_keyframe_timeline.py python/tests/gpu/test_ui_refinement.py python/tests/gpu/test_ui_redesign.py python/tests/gpu/test_take_video.py python/tests/gpu/test_ui_corner_controls.py
-GPU_WGPU_FILES += python/tests/gpu/test_scene_capture.py
+GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_ui_layout_input.py tests/gpu/test_wgpu_shader_reload.py
+GPU_WGPU_FILES += tests/gpu/test_passive.py
+GPU_WGPU_FILES += tests/gpu/test_camera_tracking.py tests/gpu/test_input_mapping.py
+GPU_WGPU_FILES += tests/gpu/test_keyframe_timeline.py tests/gpu/test_ui_refinement.py tests/gpu/test_ui_redesign.py tests/gpu/test_take_video.py tests/gpu/test_ui_corner_controls.py
+GPU_WGPU_FILES += tests/gpu/test_scene_capture.py
+GPU_WGPU_FILES +=  tests/gpu/test_ui_feasibility_backend.py
+GPU_WGPU_FILES += tests/gpu/test_control_scale.py tests/gpu/test_canvas2d.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
 gpu-wgpu:
@@ -291,25 +295,25 @@ gpu-wgpu:
 .PHONY: gpu-bgfx
 gpu-bgfx: native-python-build setup-imgui
 	@export MOJIVE_RENDERER=bgfx MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))"; \
-	for f in $(wildcard python/tests/gpu/test_*.py); do $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
+	for f in $(wildcard tests/gpu/test_*.py); do $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 egl:
 	@test "$$(uname -s)" = Linux || { echo 'make egl requires Linux'; exit 2; }
-	MOJIVE_GL=egl $(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py
+	MOJIVE_GL=egl $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 
 .PHONY: scene-renderer
 scene-renderer:
 	$(PY) examples/offscreen_scene.py
 
 renderer-api:
-	$(PYTEST) -q python/tests/test_renderer_api.py
-	$(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py
+	$(PYTEST) -q tests/test_renderer_api.py
+	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 	$(PY) -m mojive.tools.renderer_api
 
 ## Same Renderer API checks against the wgpu backend.
 renderer-api-wgpu:
-	MOJIVE_RENDERER=wgpu $(PYTEST) -q python/tests/test_renderer_api.py
-	MOJIVE_RENDERER=wgpu $(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py
+	MOJIVE_RENDERER=wgpu $(PYTEST) -q tests/test_renderer_api.py
+	MOJIVE_RENDERER=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 	MOJIVE_RENDERER=wgpu $(PY) -m mojive.tools.renderer_api
 
 renderer-benchmark:
@@ -345,42 +349,42 @@ gallery:
 
 .PHONY: ui-diagnostics
 ui-diagnostics:
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png $(ARGS)
 
 .PHONY: ui-keyframe-follow
 ui-keyframe-follow:
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group keyframe-follow -o output/ui-keyframe-follow/family.png
-	$(PY) design/tools/render_ui_feasibility.py --ui-scale 2 --page geometry --geometry-tab icons --icon-group keyframe-follow -o output/ui-keyframe-follow/family-hidpi.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-keyframe-follow/keyframes.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab icons --icon-group keyframe-follow -o output/ui-keyframe-follow/family.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 2 --page geometry --geometry-tab icons --icon-group keyframe-follow -o output/ui-keyframe-follow/family-hidpi.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces -o output/ui-keyframe-follow/keyframes.png
 
 .PHONY: ui-icon-concepts
 ui-icon-concepts:
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
 	$(MAKE) ui-keyframe-follow
-	$(PY) design/tools/render_ui_feasibility.py --height 1100 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1100 --page geometry --geometry-tab icons --icon-group ui-context --icon-alignment box -o output/ui-icon-concepts/ui-context-box.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1100 --ui-scale 2 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context-hidpi.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1400 --page geometry --geometry-tab icons --icon-group capsules -o output/ui-icon-concepts/capsules.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group viewport-playback -o output/ui-icon-concepts/viewport-playback.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1800 --page geometry --geometry-tab icons --icon-group keyframe-transport -o output/ui-icon-concepts/keyframe-transport.png
-	$(PY) design/tools/render_ui_feasibility.py --height 2050 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
-	$(PY) design/tools/render_ui_feasibility.py --height 2050 --page geometry --geometry-tab icons --icon-group keyframes --icon-alignment box -o output/ui-icon-concepts/keyframes-box.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers --icon-alignment box -o output/ui-icon-concepts/scene-helpers-box.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1650 --page geometry --geometry-tab icons --icon-group status-and-input -o output/ui-icon-concepts/status-input.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools --tool-stroke 1.46 --rotate-gap-ratio 1.0 -o output/ui-icon-concepts/tools-max-gap.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1850 --page geometry --geometry-tab playback --preview-icon-library --playback-zoom 4 -o output/ui-icon-concepts/playback-layout-4x.png
-	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page workspace -o output/ui-icon-concepts/context-workspace.png
-	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page panels -o output/ui-icon-concepts/context-panels.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1200 --preview-icon-library --page geometry --geometry-tab hints -o output/ui-icon-concepts/context-hints.png
-	$(PY) design/tools/render_ui_feasibility.py --height 1200 --ui-scale 2 --preview-icon-library --page geometry --geometry-tab hints -o output/ui-icon-concepts/context-hints-hidpi.png
-	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page geometry --geometry-tab workspaces -o output/ui-icon-concepts/context-keyframes.png
-	$(PY) design/tools/render_ui_feasibility.py --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1100 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1100 --page geometry --geometry-tab icons --icon-group ui-context --icon-alignment box -o output/ui-icon-concepts/ui-context-box.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1100 --ui-scale 2 --page geometry --geometry-tab icons --icon-group ui-context -o output/ui-icon-concepts/ui-context-hidpi.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1400 --page geometry --geometry-tab icons --icon-group capsules -o output/ui-icon-concepts/capsules.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1650 --page geometry --geometry-tab icons --icon-group viewport-tools -o output/ui-icon-concepts/viewport-tools.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1650 --page geometry --geometry-tab icons --icon-group viewport-playback -o output/ui-icon-concepts/viewport-playback.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1800 --page geometry --geometry-tab icons --icon-group keyframe-transport -o output/ui-icon-concepts/keyframe-transport.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 2050 --page geometry --geometry-tab icons --icon-group keyframes -o output/ui-icon-concepts/keyframes.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 2050 --page geometry --geometry-tab icons --icon-group keyframes --icon-alignment box -o output/ui-icon-concepts/keyframes-box.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1650 --page geometry --geometry-tab icons --icon-group panels -o output/ui-icon-concepts/panels.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers -o output/ui-icon-concepts/scene-helpers.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1650 --page geometry --geometry-tab icons --icon-group scene-helpers --icon-alignment box -o output/ui-icon-concepts/scene-helpers-box.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1650 --page geometry --geometry-tab icons --icon-group status-and-input -o output/ui-icon-concepts/status-input.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab tools --tool-stroke 1.46 --rotate-gap-ratio 1.0 -o output/ui-icon-concepts/tools-max-gap.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1850 --page geometry --geometry-tab playback --preview-icon-library --playback-zoom 4 -o output/ui-icon-concepts/playback-layout-4x.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page workspace -o output/ui-icon-concepts/context-workspace.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page panels -o output/ui-icon-concepts/context-panels.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1200 --preview-icon-library --page geometry --geometry-tab hints -o output/ui-icon-concepts/context-hints.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --height 1200 --ui-scale 2 --preview-icon-library --page geometry --geometry-tab hints -o output/ui-icon-concepts/context-hints-hidpi.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page geometry --geometry-tab workspaces -o output/ui-icon-concepts/context-keyframes.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
 
 ui-feasibility:
-	$(PY) design/tools/render_ui_feasibility.py --interactive $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive $(ARGS)
 
 ui-runtime:
 	$(PY) -m mojive.tools.ui_runtime $(ARGS)
@@ -391,7 +395,7 @@ ui-layout-audit:
 
 .PHONY: ui-redesign
 ui-redesign:
-	$(PY) design/tools/render_ui_feasibility.py --page redesign -o output/ui-redesign/overview.png $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page redesign -o output/ui-redesign/overview.png $(ARGS)
 
 ## Refresh README images with unmodified production UI and renderer captures.
 readme-media:
@@ -399,7 +403,7 @@ readme-media:
 		-o output/readme-media/runtime
 	MOJIVE_RENDERER=opengl $(PY) -m mojive.tools.showcase \
 		-o output/readme-media/showcase.png --width 1920 --height 1080
-	$(PY) tools/build_readme_media.py \
+	$(PY) -m mojive.tools.build_readme_media \
 		--runtime output/readme-media/runtime \
 		--showcase output/readme-media/showcase.png \
 		--output docs/images/readme
@@ -422,21 +426,21 @@ ui-frame-profile:
 	$(PY) -m mojive.tools.ui_frame_profile $(ARGS)
 
 ui-gallery:
-	$(PY) design/tools/render_ui_feasibility.py --page workspace -o output/ui-workspace.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab playback -o output/ui-geometry-playback.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab tools -o output/ui-geometry-tools.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab hints -o output/ui-geometry-hints.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab gizmos -o output/ui-geometry-transform-gizmos.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab status -o output/ui-geometry-status.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
-	$(PY) design/tools/render_ui_feasibility.py --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png
-	$(PY) design/tools/render_ui_feasibility.py --ui-scale 4 --page workspace -o output/ui-workspace-hidpi.png
-	$(PY) design/tools/render_ui_feasibility.py --ui-scale 4 --page panels -o output/ui-panels-hidpi.png
-	$(PY) design/tools/render_ui_feasibility.py --ui-scale 4 --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers-hidpi.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page workspace -o output/ui-workspace.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab playback -o output/ui-geometry-playback.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab tools -o output/ui-geometry-tools.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab icons --icon-group overview -o output/ui-icon-concepts/overview.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab hints -o output/ui-geometry-hints.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab gizmos -o output/ui-geometry-transform-gizmos.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab status -o output/ui-geometry-status.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab diagnostics -o output/ui-diagnostics.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 4 --page workspace -o output/ui-workspace-hidpi.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 4 --page panels -o output/ui-panels-hidpi.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 4 --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers-hidpi.png
 	$(PY) -m mojive.tools.ui_runtime -o output/ui-runtime
 
 gizmo-gallery:
@@ -450,39 +454,43 @@ model-loading:
 	$(PY) -m mojive.tools.model_loading $(ARGS)
 
 model-composition:
-	$(PYTEST) -q -m physics python/tests/test_adapter.py -k 'mjspec_model_composition'
+	$(PYTEST) -q -m physics tests/test_adapter.py -k 'mjspec_model_composition'
 	$(PY) -m mojive.tools.model_composition $(ARGS)
 
 editor-performance:
-	$(PYTEST) -q -m physics python/tests/test_editor_performance.py
+	$(PYTEST) -q -m physics tests/test_editor_performance.py
 	$(PY) -m mojive.tools.editor_performance $(ARGS)
 
 stability: rpc-soak format-validation
-	$(PYTEST) -q -m physics python/tests/test_stability.py
-	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu python/tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
+	$(PYTEST) -q -m physics tests/test_stability.py
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py -k 'multi_camera_concurrency'
 	$(PY) -m mojive.tools.stability $(ARGS)
 
 rpc-soak:
-	$(PYTEST) -q -m physics python/tests/test_control_rpc.py -k 'reuses_one_connection or recovers_after_invalid or idle_connection or reconnects_on_the_call'
+	$(PYTEST) -q -m physics tests/test_control_rpc.py -k 'reuses_one_connection or recovers_after_invalid or idle_connection or reconnects_on_the_call'
+
+.PHONY: rpc-benchmark
+rpc-benchmark:
+	$(PY) -m mojive.tools.benchmark_rpc --backend $(BACKEND) $(ARGS)
 
 format-validation:
-	$(PYTEST) -q python/tests/test_recording.py
-	$(PYTEST) -q -m physics python/tests/test_scene_state.py -k 'version or current or future'
+	$(PYTEST) -q tests/test_recording.py
+	$(PYTEST) -q -m physics tests/test_scene_state.py -k 'version or current or future'
 
 scene-io:
 	$(PY) -m mojive.tools.scene_io $(ARGS)
 
 editor-files:
-	$(PYTEST) -q python/tests/test_static_scene.py -k 'document_commands'
+	$(PYTEST) -q tests/test_static_scene.py -k 'document_commands'
 	$(PY) -m mojive.tools.scene_io $(ARGS)
 
 entity-edit:
-	$(PYTEST) -q python/tests/test_static_scene.py -k 'entity_lifecycle'
-	$(PYTEST) -q -m gpu python/tests/gpu/test_static_viewer.py -k 'editor_actions'
+	$(PYTEST) -q tests/test_static_scene.py -k 'entity_lifecycle'
+	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'editor_actions'
 
 undo-redo:
-	$(PYTEST) -q python/tests/test_static_scene.py -k 'undo_redo or history or edit_transaction'
-	$(PYTEST) -q -m gpu python/tests/gpu/test_static_viewer.py -k 'undo_redo'
+	$(PYTEST) -q tests/test_static_scene.py -k 'undo_redo or history or edit_transaction'
+	$(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py -k 'undo_redo'
 
 remote-authoring:
 	$(PY) -m mojive.tools.remote_authoring $(ARGS)
@@ -498,11 +506,11 @@ showcase:
 
 ## Refresh the measurements recorded in docs/PLATFORM.md.
 probe:
-	$(PY) tools/probe_gl.py
+	$(PY) -m mojive.tools.probe_gl
 
 ## Apply registered mutations and confirm their regression checks fail.
 reverse:
-	$(PY) tools/reverse_verify.py
+	$(PY) -m mojive.tools.reverse_verify
 
 ## Open an asset. Pass viewer flags through ARGS.
 SCENE ?= test_scene
@@ -529,7 +537,7 @@ editor:
 	MOJIVE_RENDERER=$(BACKEND) MOJIVE_LANGUAGE=$(LANGUAGE) $(PY) -m mojive.cli editor $(ARGS)
 
 workspace-edit:
-	$(PYTEST) -q python/tests/test_workspace.py python/tests/test_scene_entities.py
+	$(PYTEST) -q tests/test_workspace.py tests/test_scene_entities.py
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor $(ARGS)
 
 ## Programmatic scene, OpenGL rendering, and the standard UI.
@@ -561,15 +569,15 @@ many-lights:
 	$(PY) -m mojive.tools.mujoco_many_lights $(ARGS)
 
 material-parity:
-	$(PYTEST) -q python/tests/test_builder.py python/tests/test_scene.py
+	$(PYTEST) -q tests/test_builder.py tests/test_scene.py
 	$(PY) -m mojive.tools.material_parity $(ARGS)
 
 material-parity-accept:
 	$(PY) -m mojive.tools.material_parity --accept $(ARGS)
 
 shadow-scheduling:
-	$(PYTEST) -q python/tests/test_light_schedule.py
-	$(PYTEST) -q -m gpu python/tests/gpu/test_shadows.py -k 'eight_local or local_light_indices'
+	$(PYTEST) -q tests/test_light_schedule.py
+	$(PYTEST) -q -m gpu tests/gpu/test_shadows.py -k 'eight_local or local_light_indices'
 	$(PY) -m mojive.tools.shadow_scheduling $(ARGS)
 
 scene-icons:
@@ -577,7 +585,7 @@ scene-icons:
 		--enable-render camera --enable-render light $(ARGS)
 
 scene-entities:
-	$(PYTEST) -q python/tests/test_scene_entities.py
+	$(PYTEST) -q tests/test_scene_entities.py
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.scene_entities $(ARGS)
 
 ## World anchors, screen offsets, alignment, and depth modes with the UI font.
@@ -630,18 +638,18 @@ snapshot-replay:
 	$(PY) -m mojive.cli attach --host $(LIVE_HOST) --port $(LIVE_PORT) --title "Mojive replay" $(ARGS)
 
 camera-state:
-	$(PY) -m pytest -q -m physics python/tests/test_scene_state.py -k camera
+	$(PY) -m pytest -q -m physics tests/test_scene_state.py -k camera
 	$(PY) -m mojive.tools.scene_state $(ARGS)
 
 scene-snapshot:
-	$(PY) -m pytest -q -m physics python/tests/test_scene_state.py
+	$(PY) -m pytest -q -m physics tests/test_scene_state.py
 	$(PY) -m mojive.tools.scene_state $(ARGS)
 
 cli:
-	$(PYTEST) -q -m physics python/tests/test_control_rpc.py
+	$(PYTEST) -q -m physics tests/test_control_rpc.py
 
 rpc: cli
-	$(PYTEST) -q -m "gpu or physics" python/tests/gpu/test_control_rpc_capture.py
+	$(PYTEST) -q -m "gpu or physics" tests/gpu/test_control_rpc_capture.py
 	$(PY) -m mojive.tools.control_rpc
 
 .PHONY: agent-control agent-viewer
@@ -755,7 +763,7 @@ local-shadow-precision:
 		"$(LOCAL_SHADOW_SCENE)"
 
 shadow-quality:
-	$(PYTEST) -q python/tests/test_cascades.py python/tests/test_panels.py -k shadow_quality
+	$(PYTEST) -q tests/test_cascades.py tests/test_panels.py -k shadow_quality
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.shadow_quality $(ARGS)
 
 AUDIT_SCENE ?= mujoco_visuals
@@ -865,7 +873,7 @@ native-build:
 	cmake --build $(NATIVE_BUILD) --parallel $(NATIVE_JOBS)
 
 native-test:
-	$(PY) tools/check_native_layers.py
+	$(PY) -m mojive.tools.check_native_layers
 	cmake -S cpp -B output/cpp-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF -DMOJIVE_BUILD_PYTHON=OFF
 	cmake --build output/cpp-core-build --parallel $(NATIVE_JOBS)
 	ctest --test-dir output/cpp-core-build --output-on-failure
@@ -875,13 +883,13 @@ native-probe: native-build
 
 native-fixture:
 	$(if $(HUMANOIDS_MODEL),,$(error Set HUMANOIDS_MODEL to the official humanoid/100_humanoids.xml))
-	$(PY) tools/export_native_probe.py "$(HUMANOIDS_MODEL)" --output "$(NATIVE_SCENE)"
+	$(PY) -m mojive.tools.export_native_probe "$(HUMANOIDS_MODEL)" --output "$(NATIVE_SCENE)"
 
 native-gallery: native-build native-fixture
 	$(NATIVE_BUILD)/mojive_native_gallery $(NATIVE_BUILD)/shaders "$(NATIVE_SCENE)" $(NATIVE_OUTPUT) "$(NATIVE_FONT_LATIN)" "$(NATIVE_FONT_CJK)" $(NATIVE_BACKEND)
 
 native-benchmark: native-build native-fixture
-	$(PY) tools/run_native_benchmark.py --build $(NATIVE_BUILD) --scene "$(NATIVE_SCENE)" --backends "$(NATIVE_BACKEND)" $(ARGS)
+	$(PY) -m mojive.tools.run_native_benchmark --build $(NATIVE_BUILD) --scene "$(NATIVE_SCENE)" --backends "$(NATIVE_BACKEND)" $(ARGS)
 
 .PHONY: native-bindings native-bindings-test native-bindings-benchmark
 native-bindings:
@@ -889,10 +897,10 @@ native-bindings:
 	cmake --build $(NATIVE_BINDINGS_BUILD) --parallel $(NATIVE_JOBS)
 
 native-bindings-test: native-bindings
-	PYTHONPATH="$(NATIVE_BINDINGS_BUILD)/bindings" $(PYTEST) -q python/binding_tests/test_bindings.py
+	PYTHONPATH="$(NATIVE_BINDINGS_BUILD)/bindings" $(PYTEST) -q tests/native/test_bindings.py
 
 native-bindings-benchmark: native-bindings native-fixture
-	$(PY) tools/benchmark_native_bindings.py --modules "$(NATIVE_BINDINGS_BUILD)/bindings" --model "$(HUMANOIDS_MODEL)" --scene "$(NATIVE_SCENE)" $(ARGS)
+	$(PY) -m mojive.tools.benchmark_native_bindings --modules "$(NATIVE_BINDINGS_BUILD)/bindings" --model "$(HUMANOIDS_MODEL)" --scene "$(NATIVE_SCENE)" $(ARGS)
 
 .PHONY: native-composition native-windows native-runtime
 native-composition: native-build
@@ -902,7 +910,7 @@ native-windows: native-build
 	$(NATIVE_BUILD)/mojive_native_windows $(NATIVE_BUILD)/shaders $(NATIVE_OUTPUT) $(NATIVE_BACKEND)
 
 native-runtime: native-build native-fixture
-	$(PY) tools/run_native_runtime.py --build $(NATIVE_BUILD) --scene "$(NATIVE_SCENE)" --model "$(HUMANOIDS_MODEL)" $(ARGS)
+	$(PY) -m mojive.tools.run_native_runtime --build $(NATIVE_BUILD) --scene "$(NATIVE_SCENE)" --model "$(HUMANOIDS_MODEL)" $(ARGS)
 
 .PHONY: native-scene-capture
 native-scene-capture: native-build native-fixture
@@ -912,7 +920,7 @@ native-scene-capture: native-build native-fixture
 .PHONY: cpp-deps cpp-build cpp-test cpp-probe cpp-gallery
 cpp-deps:
 	git submodule update --init --depth 1
-	$(PY) tools/check_dependencies.py
+	$(PY) -m mojive.tools.check_dependencies
 
 cpp-build: native-build
 cpp-test: native-test
@@ -923,17 +931,28 @@ cpp-gallery: native-gallery
 CPP_PYTHON_BUILD ?= output/cpp-python-build
 CPP_PYTHON_BGFX ?= OFF
 .PHONY: cpp-python cpp-python-test
+.PHONY: native-editable
+native-editable: native-python-build
+	MOJIVE_NATIVE_EDITABLE_BUILD="$(abspath $(NATIVE_BUILD))" uv pip install --no-deps --python "$(abspath $(PY))" -e .
+
 cpp-python:
 	cmake -S cpp -B $(CPP_PYTHON_BUILD) -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=$(CPP_PYTHON_BGFX) -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_PYTHON=ON -DPython_EXECUTABLE="$(abspath $(PY))"
 	cmake --build $(CPP_PYTHON_BUILD) --target _native --parallel $(NATIVE_JOBS)
 
 cpp-python-test: cpp-python
-	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q python/binding_tests/test_native.py python/binding_tests/test_native_mesh_processing.py
+	cmake --build $(CPP_PYTHON_BUILD) --target mojive_geometry2d_test mojive_tessellator_test --parallel $(NATIVE_JOBS)
+	ctest --test-dir $(CPP_PYTHON_BUILD) -R '^geometry2d' --output-on-failure
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q tests/native/test_native.py tests/native/test_native_mesh_processing.py tests/native/test_native_geometry2d.py tests/native/test_native_tessellation.py tests/native/test_native_stroke.py
+
+.PHONY: ui-upload-benchmark
+## Compare the current and upstream WebGPU ImGui upload paths on identical buffers.
+ui-upload-benchmark:
+	$(PY) -m mojive.tools.benchmark_ui_upload $(ARGS)
 
 .PHONY: cpp-python-gpu
 cpp-python-gpu:
 	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
-	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q python/binding_tests/test_native.py python/binding_tests/test_native_render.py
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q tests/native/test_native.py tests/native/test_native_render.py
 
 # Opt-in native development entry points use the existing Python Viewer and tools.
 .PHONY: native-python-build native-viewer native-editor native-viewer-test
@@ -941,20 +960,20 @@ native-python-build:
 	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
 
 native-viewer: native-python-build setup-imgui
-	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) viewer BACKEND=bgfx
+	PYTHONPATH="$(abspath .)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) viewer BACKEND=bgfx
 
 native-editor: native-python-build setup-imgui
-	PYTHONPATH="$(abspath python/src)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) editor BACKEND=bgfx
+	PYTHONPATH="$(abspath .)$(if $(PYTHONPATH),:$(PYTHONPATH))" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(MAKE) editor BACKEND=bgfx
 
 native-viewer-test: native-python-build setup-imgui
-	PYTHONPATH="$(abspath python/src)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q python/binding_tests/test_native_viewer.py
+	PYTHONPATH="$(abspath .)" MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_HUMANOIDS_MODEL="$(HUMANOIDS_MODEL)" $(PYTEST) -q tests/native/test_native_viewer.py
 
 .PHONY: native-wayland-test native-wayland-viewer
 native-wayland-test: native-python-build setup-imgui
-	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) tools/run_wayland_acceptance.py --prepare $(ARGS)
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.run_wayland_acceptance --prepare $(ARGS)
 
 native-wayland-viewer: native-python-build setup-imgui
-	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) tools/run_wayland_viewer.py --prepare --scene "$(SCENE)" $(ARGS)
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.run_wayland_viewer --prepare --scene "$(SCENE)" $(ARGS)
 
 # Matched visual products and native-only feature regression checks.
 .PHONY: native-parity native-features-test native-spirv
@@ -962,10 +981,10 @@ native-parity: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_parity --check $(ARGS)
 
 native-features-test: native-python-build
-	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q python/binding_tests/test_native_features.py python/binding_tests/test_native_shader_reload.py
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q tests/native/test_native_features.py tests/native/test_native_shader_reload.py
 
 native-spirv: native-build
-	$(PY) tools/check_native_shaders.py --build $(NATIVE_BUILD)
+	$(PY) -m mojive.tools.check_native_shaders --build $(NATIVE_BUILD)
 
 .PHONY: native-wheel
 native-wheel: native-python-build
@@ -973,7 +992,7 @@ native-wheel: native-python-build
 
 .PHONY: native-wheel-test
 native-wheel-test: native-wheel
-	$(PY) tools/check_native_wheel.py $$(ls -t output/native-wheel/*.whl | head -1)
+	$(PY) -m mojive.tools.check_native_wheel $$(ls -t output/native-wheel/*.whl | head -1)
 
 .PHONY: native-model-parity
 native-model-parity: native-python-build
@@ -1018,3 +1037,10 @@ g1-worlds-transport:
 .PHONY: g1-worlds-monitor-benchmark
 g1-worlds-monitor-benchmark: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --monitor --output output/g1-worlds-monitor $(ARGS)
+
+.PHONY: canvas-2d-gallery canvas-2d-test
+canvas-2d-gallery:
+	$(PY) -m mojive.tools.canvas_gallery --backend $(BACKEND) $(ARGS)
+
+canvas-2d-test:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_canvas2d.py

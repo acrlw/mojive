@@ -274,7 +274,7 @@ and MuJoCo 3.11.0. Seven alternating runs measured identical shared C++ kernels.
 Five alternating incremental wrapper rebuilds, with support libraries and the kernel already
 built, took a median 1.788 s for pybind11 and 0.449 s for nanobind. This measures editing one
 wrapper, not initial full-project compilation. Reproduce with
-`python tools/benchmark_native_binding_builds.py` after `make native-bindings`.
+`python -m mojive.tools.benchmark_native_binding_builds` after `make native-bindings`.
 
 Nanobind is the preferred thin-binding candidate for the next native core slice. Small boundary
 costs and rebuild time improved; shared batch computation was effectively unchanged. Both

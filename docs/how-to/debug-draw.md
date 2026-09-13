@@ -107,3 +107,5 @@ dragging; `canvas.canvas_to_screen(...)` provides the inverse projection for cus
 
 Run `make canvas-2d` for visual acceptance. The complete program is
 `examples/canvas2d.py` in the repository root.
+
+See [Canvas2D](canvas2d.md) for filled shapes, paths, transforms, batches, and offscreen rendering.

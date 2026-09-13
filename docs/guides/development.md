@@ -9,10 +9,11 @@ not a replacement standalone product.
 ## Source layout
 
 ```text
-python/
-  src/mojive/       Python package and compatibility facade
-  tests/           Python tests, GPU tests and reviewed golden fixtures
-  binding_tests/   Optional native binding comparison tests
+python/            Public Python package and domain implementations
+  app/             Viewer composition and application lifecycle
+  tools/           Diagnostics, benchmarks and repository maintenance
+tests/             Python tests, GPU tests and reviewed golden fixtures
+  native/          Optional native binding comparison tests
 cpp/
   include/mojive/   Backend-neutral C++ contracts
   src/             Common code and private renderer adapters
@@ -22,20 +23,35 @@ cpp/
   cmake/           Build integration
 3rdparty/          Vendored ImGui and pinned upstream submodules
 examples/          Python usage examples
-tools/             Repository maintenance and verification scripts
 output/            Generated builds, captures and reports
 ```
 
-The root `pyproject.toml` remains the Python build entry point. Imports never contain `python`,
+The root `pyproject.toml` maps `python/` to the installed `mojive` package. Editable installs
+generate a lazy import entry under `output/editable/`; rerun `uv pip install -e .` after changing
+the source layout. Imports never contain `python`,
 `cpp`, `3rdparty`, or a backend library name. C++ headers describe Mojive's contracts rather
 than exposing bgfx handles, ImGui types, or MuJoCo-owned mutable state.
 
+`make native-editable` builds the native extension and registers that explicit build in the
+editable package search path. It does not copy binaries into `python/` or guess a build at runtime.
+`make setup` includes this step. After rebuilding the same directory, the next Python process
+loads the new extension. `MOJIVE_NATIVE_BUILD` still selects an explicit alternative for acceptance.
+Reinstall with `make native-editable` after replacing the editable install; use `uv run --no-sync`
+to preserve the locally built ImGui wheel and native registration.
+
 ## Python domain packages
 
-Implementation code is grouped by responsibility: `application/` constructs viewers;
+Implementation code is grouped by responsibility: `app/` constructs viewers;
 `scene/` owns authored scenes and serialization; `session/` owns document state and typed
 command routing; `control/` exposes operations and RPC; `capture/`, `remote/`,
-`interaction/` and `drawing/` contain their independent contracts and implementations.
+`interaction/` and `geometry2d/` contain their independent contracts and computations.
+`geometry2d/` owns CPU curves, contours and tessellation. The retained Canvas2D API belongs
+to `render/canvas.py` and submits through the existing DebugDraw pass. Do not introduce a
+second 2D renderer or a generic `drawing` package. Gizmo screen overlays belong to
+`ui/gizmo/overlay.py`.
+The ImGui adapter belongs to `ui/imgui_draw.py`; backend-neutral label layout and drag-link
+submission belong to `ui/text_layout.py` and `ui/drag_link.py`. `ui/draw2d.py` only preserves
+published imports. New implementation imports its owner directly.
 The root keeps shared vocabulary and explicit compatibility exports. Use the
 [Python module map (Chinese)](python-layout.zh.md) to locate owners and verification entry points.
 
@@ -64,7 +80,7 @@ never apply project formatting to third-party sources.
 
 ## Naming
 
-Owned directories use lowercase names, with underscores between words (`python/binding_tests`).
+Owned directories use lowercase names, with underscores between words (`tests/native`).
 Repository-managed dependencies live in `3rdparty`, with upstream names such as `bgfx.cmake`
 and `robin-map`. Directory names do not follow C++ identifier casing. Existing submodule section
 names in `.gitmodules` are stable Git identifiers; the `path` entries define their locations.
@@ -230,7 +246,7 @@ outside the current roadmap. EnTT requires a demonstrated infrastructure need. G
 
 ## Shared UI controls
 
-Keep reusable ImGui controls in `python/src/mojive/ui/controls.py`, independent of panel
+Keep reusable ImGui controls in `python/ui/controls.py`, independent of panel
 and session state. Use `segmented_control` for N-way exclusive choices; it owns connected
 outer corners, equal segment widths, narrow-layout reflow, disabled styling and native
 keyboard input. `clearable_combo` shares its inset clear action with `search_input`.

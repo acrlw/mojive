@@ -105,7 +105,7 @@ there need not be replaced. Repository operation requires no personal installati
 
 Maintain instructions or examples when that work is part of the requested task. Ordinary scene
 operation can report a demonstrated workflow gap without changing repository instructions.
-Keep the Skill focused on task decisions; the operation catalog in `python/src/mojive/control/operations.py` owns
+Keep the Skill focused on task decisions; the operation catalog in `python/control/operations.py` owns
 parameter definitions and `control/schema.py` owns shared schemas. Component responsibilities are
 documented in [architecture](../concepts/architecture.md#ownership).
 

@@ -5,6 +5,7 @@
 #include "Reflections.hpp"
 #include "Shadows.hpp"
 #include "Timing.hpp"
+#include "UiPass.hpp"
 #include "Visibility.hpp"
 #include <algorithm>
 #include <atomic>
@@ -93,7 +94,7 @@ struct GpuScene {
     Lighting lighting;
     OverlayFrame overlays;
     bgfx::DynamicVertexBufferHandle surfaceBuffer = BGFX_INVALID_HANDLE;
-    std::array<bgfx::DynamicVertexBufferHandle, 9> debugBuffers;
+    std::array<bgfx::DynamicVertexBufferHandle, debugRecordFloats.size()> debugBuffers;
     GpuScene() {
         debugBuffers.fill(bgfx::DynamicVertexBufferHandle{bgfx::kInvalidHandle});
     }
@@ -160,6 +161,8 @@ class BgfxRenderer final : public Renderer {
     };
     std::map<TextureKey, TextureEntry> mTextureCache;
     ResourceStats mResources;
+    std::unique_ptr<UiPass> mUiPass;
+    uint32_t mUiUploadFrame = UINT32_MAX;
     uint64_t mSubmission = 0;
     uint32_t mGpuFrame = 0;
     // Submit presentation with its rendered frame, including when the caller pauses.
@@ -223,11 +226,11 @@ class BgfxRenderer final : public Renderer {
     std::vector<ReadbackSlot> mReadbacks;
     uint16_t mTargetViews = 0;
     FrameStats mStats;
-    bgfx::VertexLayout mVertices, mUiVertices, mWireVertices;
+    bgfx::VertexLayout mVertices, mWireVertices;
     std::vector<uint32_t> mDrawIndices;
-    std::array<bgfx::VertexLayout, 9> mDebugLayouts;
-    std::array<bgfx::ProgramHandle, 9> mDebugPrograms = [] {
-        std::array<bgfx::ProgramHandle, 9> handles;
+    std::array<bgfx::VertexLayout, debugRecordFloats.size()> mDebugLayouts;
+    std::array<bgfx::ProgramHandle, debugRecordFloats.size()> mDebugPrograms = [] {
+        std::array<bgfx::ProgramHandle, debugRecordFloats.size()> handles;
         handles.fill(bgfx::ProgramHandle{bgfx::kInvalidHandle});
         return handles;
     }();
@@ -631,7 +634,7 @@ class BgfxRenderer final : public Renderer {
         auto canonicalProj = columnMajor(camera.projection);
         auto vp = glm::make_mat4(canonicalProj.data()) * glm::make_mat4(view.data());
         float pxScale = 2.f / (camera.projection[5] * target.size.height);
-        const uint32_t vertices[] = {6, 15, 6, 24, 0, 96, 6, 3, 6};
+        const uint32_t vertices[] = {6, 15, 6, 24, 0, 96, 6, 3, 6, 3};
         auto draw = [&](const DebugBatch &batch, bool ghost) {
             if (!batch.count)
                 return;
@@ -753,7 +756,7 @@ class BgfxRenderer final : public Renderer {
         };
         try {
             const char *debugNames[] = {"Line",   "Arrow",    "Point",  "Stroke", "Solid",
-                                        "Sector", "DragLink", "Screen", "Text"};
+                                        "Sector", "DragLink", "Screen", "Text",   "Triangle"};
             for (size_t i = 0; i < mDebugPrograms.size(); ++i) {
                 const auto name = std::string("debug") + debugNames[i];
                 stage(mDebugPrograms[i], ("vs_" + name).c_str(), ("fs_" + name).c_str());
@@ -964,13 +967,9 @@ class BgfxRenderer final : public Renderer {
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord1, 3, bgfx::AttribType::Float)
             .end();
-        mUiVertices.begin()
-            .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
-            .end();
+        mUiPass = std::make_unique<UiPass>();
         mDebugPrograms.fill(bgfx::ProgramHandle{bgfx::kInvalidHandle});
-        for (size_t i = 0; i < 9; ++i) {
+        for (size_t i = 0; i < mDebugLayouts.size(); ++i) {
             mDebugLayouts[i].begin();
             for (uint32_t col = 0; col < (debugRecordFloats[i] + 3) / 4; ++col)
                 mDebugLayouts[i].add(bgfx::Attrib::Enum(bgfx::Attrib::TexCoord0 + col), 4,
@@ -1056,6 +1055,7 @@ class BgfxRenderer final : public Renderer {
             if (bgfx::isValid(h))
                 bgfx::destroy(h);
         mInstances.clear();
+        mUiPass.reset();
         for (auto h : {mIdentitySampler, mIdentitySize, mReadbackImage, mReadbackRegion,
                        mReadbackLayout, mUiTextureInfo})
             if (bgfx::isValid(h))
@@ -2259,31 +2259,42 @@ class BgfxRenderer final : public Renderer {
         bgfx::destroy(it->second);
         mTextures.erase(it);
     }
+    std::vector<UiTexture> uiTextures(const UiFrame &ui) const {
+        std::vector<UiTexture> textures(ui.commands.size());
+        for (size_t i = 0; i < ui.commands.size(); ++i) {
+            const auto &command = ui.commands[i];
+            const auto clip = uiScissor(command, ui.size);
+            if (clip[2] && clip[3])
+                textures[i] = {textureHandle(command.texture),
+                               bgfx::getCaps()->originBottomLeft &&
+                                   (command.texture.id & targetTextureBit)};
+        }
+        return textures;
+    }
     FrameToken renderUi(const UiFrame &ui, Target output) override {
         owner();
         extent(ui.size);
         validateUi(ui);
         if (!mHasWindow && !output.id)
             throw std::logic_error("UI rendering requires a window");
+        if (output.id && target(output).size != ui.size)
+            throw std::invalid_argument("UI extent must match its target");
+        const auto textures = uiTextures(ui);
+        // Persistent uploads must not overwrite spans still queued in the same native frame.
+        if (mPendingCommands && mUiUploadFrame == mGpuFrame)
+            flush();
+        mUiPass->prepare(ui);
         if (!output.id && ui.size != mWindowSize) {
             mSwapChain.width = ui.size.width;
             mSwapChain.height = ui.size.height;
             bgfx::reset(mResetFlags, &mSwapChain);
             mWindowSize = ui.size;
         }
-        auto projection = identity();
-        projection[0] = 2.0f / ui.size.width;
-        projection[3] = -1;
-        projection[5] = -2.0f / ui.size.height;
-        projection[7] = 1;
-        projection = columnMajor(projection);
         bgfx::ViewId view = 250;
         bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
         FrameToken token;
         if (output.id) {
             auto &t = target(output);
-            if (t.size != ui.size)
-                throw std::invalid_argument("UI extent must match its target");
             beginTarget(t);
             view = t.view + 1;
             framebuffer = t.colorFb;
@@ -2292,61 +2303,23 @@ class BgfxRenderer final : public Renderer {
             t.dataProduct.reset();
             t.colorKey.reset();
             token = {output, t.generation, 0, 0, 0, ++mSubmission};
-        }
-        if (!output.id) {
+        } else {
             if (mMainRender == mGpuFrame)
                 flush();
             mMainRender = mGpuFrame;
             token.submission = ++mSubmission;
         }
         token.statistics.passes = mTiming.get(output);
-        if (output.id)
-            target(output).latest = token;
         mTiming.record(view, output, token.submission, RenderPass::Ui);
         orderPass(view);
-        bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
-        bgfx::setViewRect(view, 0, 0, ui.size.width, ui.size.height);
-        bgfx::setViewFrameBuffer(view, framebuffer);
-        bgfx::setViewTransform(view, nullptr, projection.data());
-        bgfx::setViewClear(view, BGFX_CLEAR_COLOR, 0x14191eff);
-        bgfx::touch(view);
         mPendingCommands = true;
-        if (ui.vertices.empty() || ui.indices.empty())
-            return token;
-        bgfx::TransientVertexBuffer vertices;
-        bgfx::TransientIndexBuffer indices;
-        if (bgfx::getAvailTransientVertexBuffer(ui.vertices.size(), mUiVertices) !=
-                ui.vertices.size() ||
-            bgfx::getAvailTransientIndexBuffer(ui.indices.size(), true) != ui.indices.size())
-            throw std::runtime_error("UI upload capacity exhausted");
-        bgfx::allocTransientVertexBuffer(&vertices, ui.vertices.size(), mUiVertices);
-        bgfx::allocTransientIndexBuffer(&indices, ui.indices.size(), true);
-        std::memcpy(vertices.data, ui.vertices.data(), ui.vertices.size_bytes());
-        std::memcpy(indices.data, ui.indices.data(), ui.indices.size_bytes());
-        for (const auto &command : ui.commands) {
-            auto clip = command.clip;
-            float left = std::clamp(clip[0], 0.0f, float(ui.size.width)),
-                  top = std::clamp(clip[1], 0.0f, float(ui.size.height));
-            float right = std::clamp(clip[2], left, float(ui.size.width)),
-                  bottom = std::clamp(clip[3], top, float(ui.size.height));
-            if (right <= left || bottom <= top)
-                continue;
-            bgfx::setScissor(left, top, right - left, bottom - top);
-            bgfx::setVertexBuffer(0, &vertices, command.vertexOffset,
-                                  ui.vertices.size() - command.vertexOffset);
-            bgfx::setIndexBuffer(&indices, command.firstIndex, command.indexCount);
-            const float textureInfo[] = {
-                bgfx::getCaps()->originBottomLeft && (command.texture.id & targetTextureBit) ? 1.f
-                                                                                             : 0.f,
-                0, 0, 0};
-            bgfx::setUniform(mUiTextureInfo, textureInfo);
-            bgfx::setTexture(0, mImageSampler, textureHandle(command.texture));
-            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
-                           BGFX_STATE_BLEND_FUNC_SEPARATE(
-                               BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
-                               BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA));
-            bgfx::submit(view, mUiProgram);
-        }
+        mUiUploadFrame = mGpuFrame;
+        token.statistics.drawCalls =
+            mUiPass->submit(ui, 0, ui.commands.size(), textures, view, framebuffer,
+                            {mUiProgram, mImageSampler, mUiTextureInfo}, true);
+        token.statistics.uploadBytes = mUiPass->uploadBytes();
+        if (output.id)
+            target(output).latest = token;
         return token;
     }
 };
