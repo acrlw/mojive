@@ -148,6 +148,51 @@ def test_status_bar_uses_the_comfortable_application_height(canvas):
     )
 
 
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5))
+def test_status_text_vertices_remain_centered_at_fractional_coordinates(canvas, monkeypatch, scale):
+    from mojive.ui.app import status as app_status
+    from mojive.ui.imgui_draw import ImguiDraw2D
+    from mojive.ui.viewport_widgets import ToolHint
+
+    viewer, _scene = canvas
+    monkeypatch.setattr(viewer.window, "_scale_override", scale)
+    original_status = app_status.draw_status
+    original_text = ImguiDraw2D.text
+    centers = []
+    expected = 0.0
+
+    def record_text(draw, pos, color, text, **kwargs):
+        start = len(draw._dl.vtx_buffer)
+        original_text(draw, pos, color, text, **kwargs)
+        if text == "H":
+            ys = [v.pos.y for v in list(draw._dl.vtx_buffer)[start:]]
+            assert len(ys) == 4
+            centers.append((min(ys) + max(ys)) * 0.5)
+
+    def draw_status(draw, origin, width, height, theme, scale, **kwargs):
+        nonlocal expected
+        centers.clear()
+        result = original_status(
+            draw,
+            origin,
+            width,
+            height,
+            theme,
+            scale,
+            **(kwargs | {"backend": "H", "tool_hints": (ToolHint("key", "H", "H"),)}),
+        )
+        # Compare actual ImGui glyph quads for a keycap, its label and telemetry
+        # against the center of the bar below its top divider.
+        expected = origin[1] + (height + scale) * 0.5
+        return result
+
+    monkeypatch.setattr(ImguiDraw2D, "text", record_text)
+    monkeypatch.setattr(app_status, "draw_status", draw_status)
+    viewer.sync()
+    assert len(centers) == 3
+    assert centers == pytest.approx([expected] * 3, abs=1e-4)
+
+
 def test_retained_canvas_content_suppresses_the_empty_scene_notice(monkeypatch):
     viewer = build_scene(Scene(), vsync=False, width=900, height=620, show_window=False)
     notices: list[str] = []

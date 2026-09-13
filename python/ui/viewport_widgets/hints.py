@@ -37,7 +37,9 @@ from .rotate import (
 
 def _inline_text(draw: Draw2D, x: float, center_y: float, value: str, color) -> float:
     width = draw.text_size(value)[0]
-    draw.text((x, text_line_y(draw, center_y)), color, value)
+    # Keep the shared center: ImGui's integer truncation moves only the text,
+    # by up to one logical pixel, relative to its keycap and neighboring icons.
+    draw.text((x, text_line_y(draw, center_y)), color, value, pixel_snap=False)
     return width
 
 
@@ -72,6 +74,7 @@ def _keycap(
         (x + (width - text_width) * 0.5, text_line_y(draw, center_y)),
         theme.text_disabled if muted else theme.text,
         label,
+        pixel_snap=False,
     )
     return width
 
