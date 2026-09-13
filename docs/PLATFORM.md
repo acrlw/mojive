@@ -1,6 +1,6 @@
 # Platform measurements
 
-Measurements come from `tools/probe_gl.py` on macOS 26.6.1, Apple M5, OpenGL 4.1 core over
+Measurements come from `python/tools/probe_gl.py` on macOS 26.6.1, Apple M5, OpenGL 4.1 core over
 Metal, and GLSL 410. Run `make probe` to refresh the report.
 
 ## Capability summary

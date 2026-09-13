@@ -2,12 +2,12 @@
 
 ## Install from a source checkout
 
-Mojive requires Python 3.11 or newer. Install the core package and the integrations you need:
+Source builds require Python 3.11 or newer, uv, CMake and a C++20 toolchain:
 
 ```bash
-git clone https://github.com/acrlw/mojive.git
+git clone --recurse-submodules https://github.com/acrlw/mojive.git
 cd mojive
-uv sync --python 3.11 --extra mujoco --extra wgpu
+make setup
 ```
 
 The extras are independent:
@@ -17,17 +17,19 @@ The extras are independent:
 - `dev` installs pytest and Ruff; and
 - `docs` installs the strict documentation build.
 
-`make setup` installs `dev`, `mujoco`, and `wgpu` for repository development and builds the
-[bulk UI drawing bindings and slider/focus fixes](how-to/ui-corners.md). The native build needs
-CMake and a C++17 toolchain. After this local build, use `uv run --no-sync mojive editor`
-to preserve its wheel instead of replacing it during dependency synchronization.
+`make setup` installs the development and backend dependencies, builds the
+[custom ImGui bindings](how-to/ui-corners.md), and registers the native compiler with the
+editable Python package. Use `uv run --no-sync` after setup to preserve the locally built
+ImGui wheel and native registration. If you replace the editable install, run
+`make native-editable` before opening the viewer. `MOJIVE_NATIVE_BUILD` can still select
+an explicit alternative build for development and acceptance.
 
 ## Open the editor
 
 Start with an empty workspace:
 
 ```bash
-uv run mojive editor
+uv run --no-sync mojive editor
 ```
 
 Use **File > Add Model...** or drop MJCF/URDF files into the viewport. The first dropped file opens
@@ -37,7 +39,7 @@ editing model topology or root transforms.
 You can also open a model directly:
 
 ```bash
-uv run mojive editor assets/test_scene.xml
+uv run --no-sync mojive editor assets/test_scene.xml
 ```
 
 The editor saves `.mojive.json` workspaces. These retain model references, root transforms,
@@ -49,15 +51,15 @@ a portable MJCF/XML model instead.
 Use `view` for one model or bundled scene:
 
 ```bash
-uv run mojive view test_scene
-uv run mojive view path/to/model.xml --paused
-uv run mojive view path/to/model.urdf --paused
+uv run --no-sync mojive view test_scene
+uv run --no-sync mojive view path/to/model.xml --paused
+uv run --no-sync mojive view path/to/model.urdf --paused
 ```
 
 Bundled asset names do not need an extension. List them with:
 
 ```bash
-uv run mojive assets --quick
+uv run --no-sync mojive assets --quick
 ```
 
 The viewer starts paused by default. Pass `--play` to start simulation immediately.
@@ -67,8 +69,8 @@ The viewer starts paused by default. Pass `--play` to start simulation immediate
 OpenGL is the default. Select wgpu with an environment variable:
 
 ```bash
-MOJIVE_BACKEND=wgpu uv run mojive editor
-MOJIVE_BACKEND=wgpu uv run mojive view test_scene
+MOJIVE_BACKEND=wgpu uv run --no-sync mojive editor
+MOJIVE_BACKEND=wgpu uv run --no-sync mojive view test_scene
 ```
 
 Do not use `--backend wgpu`: `-b/--backend` selects the scene/physics adapter, while
@@ -77,8 +79,8 @@ Do not use `--backend wgpu`: `-b/--backend` selects the scene/physics adapter, w
 Validate a window and rendering path with:
 
 ```bash
-uv run mojive doctor test_scene
-MOJIVE_BACKEND=wgpu uv run mojive doctor test_scene
+uv run --no-sync mojive doctor test_scene
+MOJIVE_BACKEND=wgpu uv run --no-sync mojive doctor test_scene
 ```
 
 ## Configure the UI
@@ -94,9 +96,9 @@ Mojive normally follows the display content scale. These process overrides are u
 acceptance or a misreported desktop scale:
 
 ```bash
-MOJIVE_UI_SCALE=2 uv run mojive editor
-MOJIVE_LANGUAGE=zh_CN uv run mojive editor
-MOJIVE_CJK_FONT=/path/to/font.otf uv run mojive editor
+MOJIVE_UI_SCALE=2 uv run --no-sync mojive editor
+MOJIVE_LANGUAGE=zh_CN uv run --no-sync mojive editor
+MOJIVE_CJK_FONT=/path/to/font.otf uv run --no-sync mojive editor
 ```
 
 See the [configuration reference](reference/configuration.md) for all variables and persistence
@@ -126,8 +128,8 @@ segmentation, multiple cameras, and wgpu.
 These commands exercise useful non-interactive paths:
 
 ```bash
-uv run mojive inspect test_scene
-uv run mojive audit test_scene --strict
+uv run --no-sync mojive inspect test_scene
+uv run --no-sync mojive audit test_scene --strict
 uv run python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 ```

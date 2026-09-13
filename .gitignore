@@ -1,5 +1,4 @@
 # Generated captures, recordings, downloaded models, and visual reports.
-out/
 output/
 MUJOCO_LOG.TXT
 

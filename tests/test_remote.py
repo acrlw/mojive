@@ -1,0 +1,1075 @@
+"""Remote snapshots keep physics independent from viewer frame rate."""
+
+from __future__ import annotations
+
+import socket
+import struct
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+
+import numpy as np
+import pytest
+
+from mojive import commands as cmd
+from mojive.adapters.base import (
+    CAMERA_OBJECT_BASE,
+    LIGHT_OBJECT_BASE,
+    AdapterCaps,
+    BodyProperties,
+    FrameNeeds,
+    GeometryAdvancedProperties,
+    GeometryProperties,
+    GeometryShapeProperties,
+    JointAdvancedProperties,
+    JointInfo,
+    SceneAdapterBase,
+    SiteProperties,
+)
+from mojive.adapters.static import StaticSceneAdapter
+from mojive.commands import CommandResult
+from mojive.remote import (
+    RemoteSceneAdapter,
+    SnapshotPublisher,
+    handle_session_command,
+    snapshot_structure,
+)
+from mojive.scene import Scene
+from mojive.session import Session
+from mojive.types import CameraView, Environment, Light, Material, MeshShape
+
+pytestmark = pytest.mark.integration
+
+
+def _port_pair() -> int:
+    for port in range(47000, 49000, 2):
+        sockets = []
+        try:
+            for candidate in (port, port + 1):
+                sock = socket.socket()
+                sock.bind(("127.0.0.1", candidate))
+                sockets.append(sock)
+            return port
+        except OSError:
+            pass
+        finally:
+            for sock in sockets:
+                sock.close()
+    raise RuntimeError("no free consecutive TCP ports")
+
+
+def _eventually(predicate, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(0.01)
+    raise AssertionError("condition did not become true")
+
+
+def test_failed_command_listener_releases_the_state_port():
+    port = _port_pair()
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", port + 1))
+        occupied.listen()
+        with pytest.raises(OSError):
+            SnapshotPublisher(port=port)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", port))
+
+
+def test_publisher_delivers_structure_then_latest_frame_and_debug_once():
+    scene = Scene()
+    scene.box(name="remote box")
+    source_session = Session(StaticSceneAdapter(scene))
+    geometry_node_id = source_session.nodes[-1].node_id
+    properties = GeometryProperties(
+        geometry_node_id,
+        (1.0, 0.02, 0.003),
+        3,
+        5,
+        4,
+        2,
+        0.01,
+        0.002,
+        0.7,
+    )
+    body_properties = BodyProperties(
+        geometry_node_id,
+        "diagonal",
+        2.0,
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0, 0.0),
+        (1.0, 1.5, 2.0),
+        (1.0, 1.5, 2.0, 0.0, 0.0, 0.0),
+        0.0,
+        False,
+        "auto",
+    )
+    advanced_properties = GeometryAdvancedProperties(
+        geometry_node_id,
+        2,
+        "density",
+        1.0,
+        500.0,
+        "shell",
+        True,
+        (0.6, 0.3, 1.2, 0.8, 0.7),
+    )
+    shape_properties = GeometryShapeProperties(geometry_node_id, "mesh", "part", ("part",), ())
+    joint_properties = JointAdvancedProperties(
+        0,
+        2,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.01,
+        (0.02, 1.0),
+        (0.9, 0.95, 0.001, 0.5, 2.0),
+        (0.03, 1.1),
+        (0.8, 0.9, 0.002, 0.6, 3.0),
+        "auto",
+        (-1.0, 1.0),
+        True,
+    )
+    site_properties = SiteProperties(
+        geometry_node_id,
+        "capsule",
+        2,
+        True,
+        (0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+    )
+
+    def geometry_properties(node_id: int) -> GeometryProperties | None:
+        return properties if node_id == geometry_node_id else None
+
+    source_session.geometry_properties = geometry_properties
+    source_session.body_properties = lambda node_id: (
+        body_properties if node_id == geometry_node_id else None
+    )
+    source_session.geometry_advanced_properties = lambda node_id: (
+        advanced_properties if node_id == geometry_node_id else None
+    )
+    source_session.geometry_shape_properties = lambda node_id: (
+        shape_properties if node_id == geometry_node_id else None
+    )
+    source_session._joints = [JointInfo(0, "hinge", "hinge", True, (-1.0, 1.0), 0, 0, 1)]
+    source_session.adapter.joint_advanced_properties = lambda joint_id: (
+        joint_properties if joint_id == 0 else None
+    )
+    source_session.site_properties = lambda node_id: (
+        site_properties if node_id == geometry_node_id else None
+    )
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(
+        replace(scene.frame, step=7),
+        ({"op": "text", "id": 9, "text": "remote"},),
+    )
+
+    remote = RemoteSceneAdapter(port=port)
+    try:
+        assert remote.scene_source().instance_count == 1
+        assert remote.geometry_properties(geometry_node_id) == properties
+        assert remote.body_properties(geometry_node_id) == body_properties
+        assert remote.geometry_advanced_properties(geometry_node_id) == advanced_properties
+        assert remote.geometry_shape_properties(geometry_node_id) == shape_properties
+        assert remote.joint_advanced_properties(0) == joint_properties
+        assert remote.site_properties(geometry_node_id) == site_properties
+        first = remote.frame(FrameNeeds())
+        assert first.step == 7
+        assert first.debug_commands[0]["text"] == "remote"
+        assert remote.frame(FrameNeeds()).debug_commands is None
+
+        for step in range(8, 30):
+            publisher.publish_frame(replace(scene.frame, step=step))
+        latest = _eventually(
+            lambda: frame if (frame := remote.frame(FrameNeeds())).step == 29 else None
+        )
+        assert latest.step == 29
+
+        newer = replace(snapshot_structure(source_session), structure_revision=12)
+        publisher.publish_structure(newer)
+        assert _eventually(lambda: remote.structure_revision == 12)
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_publisher_does_not_serialize_every_frame_before_a_viewer_connects(monkeypatch):
+    import mojive.remote.publisher as remote_module
+
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    dumps = remote_module.pickle.dumps
+    calls = []
+
+    def counted(value, *args, **kwargs):
+        calls.append(value)
+        return dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(remote_module.pickle, "dumps", counted)
+    try:
+        for step in range(100):
+            publisher.publish_frame(replace(source_session.frame, step=step))
+
+        assert len(calls) == 1
+        assert isinstance(calls[0], remote_module.RemoteFrame)
+        assert publisher._frame_sequence == 100
+    finally:
+        publisher.close()
+        source_session.release()
+
+
+def test_structure_update_invalidates_frames_from_the_previous_revision():
+    scene = Scene()
+    scene.box(name="first")
+    source_session = Session(StaticSceneAdapter(scene))
+    source_session.tick(FrameNeeds(poses=True))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=port, timeout=0.1)
+    try:
+        assert len(remote.frame(FrameNeeds()).geom_xpos) == 1
+
+        scene.sphere(name="second")
+        source_session.tick(FrameNeeds(poses=True))
+        revision = source_session.structure_generation
+        publisher.publish_structure(snapshot_structure(source_session))
+        assert _eventually(lambda: remote.structure_revision == revision)
+
+        with pytest.raises(TimeoutError, match="first frame"):
+            remote.frame(FrameNeeds())
+
+        publisher.publish_frame(source_session.frame)
+        frame = _eventually(
+            lambda: (
+                candidate if len((candidate := remote.frame(FrameNeeds())).geom_xpos) == 2 else None
+            )
+        )
+        assert len(frame.geom_xpos) == 2
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_remote_masks_operations_that_have_no_transport_and_retains_camera_capability():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    adapter = RemoteSceneAdapter(port=port)
+    session = Session(adapter)
+    try:
+        assert adapter.caps.model_cameras
+        assert not adapter.caps.scene_files
+        assert not adapter.caps.asset_loading
+        assert not adapter.caps.state_snapshots
+        result = session.submit(cmd.NewScene())
+        assert not result.ok
+        assert "does not support scene files" in result.message
+    finally:
+        session.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_remote_capabilities_follow_republished_structure():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = snapshot_structure(source_session)
+    publisher.publish_structure(structure)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    try:
+        assert remote.caps.scene_authoring
+        publisher.publish_structure(
+            replace(
+                structure,
+                structure_revision=structure.structure_revision + 1,
+                caps=replace(structure.caps, name="read-only", scene_authoring=False),
+            )
+        )
+        _eventually(lambda: remote.structure_revision == structure.structure_revision + 1)
+        assert not remote.caps.scene_authoring
+        assert remote.caps.name == "remote:read-only"
+        assert remote.caps.external_clock
+        assert not remote.caps.scene_files
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+@pytest.mark.parametrize("has_frame", [False, True])
+def test_remote_disconnect_reports_eof_instead_of_stale_frames_or_timeout(has_frame):
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source_session))
+    if has_frame:
+        publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=publisher.port, timeout=0.2)
+    try:
+        if has_frame:
+            remote.frame(FrameNeeds())
+        publisher.close()
+        _eventually(lambda: remote._error)
+        with pytest.raises(ConnectionError, match="remote stream closed"):
+            remote.frame(FrameNeeds())
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+@pytest.mark.parametrize("operation", ["step", "reset", "reload"])
+def test_remote_control_failure_is_not_silently_accepted(operation, monkeypatch):
+    adapter = RemoteSceneAdapter.__new__(RemoteSceneAdapter)
+    monkeypatch.setattr(adapter, "_send", lambda *args, **kwargs: CommandResult.bad("rejected"))
+    with pytest.raises(RuntimeError, match="rejected"):
+        getattr(adapter, operation)()
+
+
+def test_failed_remote_reset_returns_a_failed_session_result(monkeypatch):
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    session = Session(remote)
+    monkeypatch.setattr(remote, "_send", lambda *args, **kwargs: CommandResult.bad("rejected"))
+    try:
+        result = session.submit(cmd.Reset())
+        assert not result.ok
+        assert "rejected" in result.message
+    finally:
+        session.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_commands_use_a_separate_round_trip_channel():
+    scene = Scene()
+    scene.sphere()
+    source_session = Session(StaticSceneAdapter(scene))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(scene.frame)
+    remote = RemoteSceneAdapter(port=port)
+    received = []
+    stop = threading.Event()
+
+    def pump():
+        while not stop.is_set():
+            publisher.pump_commands(
+                lambda message: received.append(message) or CommandResult.good("accepted")
+            )
+            stop.wait(0.002)
+
+    worker = threading.Thread(target=pump)
+    worker.start()
+    try:
+        assert remote.set_paused(True)
+        assert received == [{"op": "pause", "operation_version": 1}]
+        assert remote.set_environment(Environment(ambient=np.array([0.2, 0.3, 0.4], np.float32)))
+        assert received[-1]["op"] == "environment"
+        assert received[-1]["environment"].ambient == pytest.approx([0.2, 0.3, 0.4])
+    finally:
+        stop.set()
+        worker.join()
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_timed_out_command_is_cancelled_before_it_reaches_the_handler():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port, command_timeout=0.05)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=port)
+    handled = []
+    try:
+        assert not remote.set_paused(True)
+        assert publisher.pump_commands(lambda message: handled.append(message)) == 1
+        assert handled == []
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_remote_connection_timeout_includes_a_stalled_handshake():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            accepted = workers.submit(listener.accept)
+            attempt = workers.submit(
+                RemoteSceneAdapter, port=listener.getsockname()[1], timeout=0.05
+            )
+            peer, _ = accepted.result(timeout=1)
+            try:
+                with pytest.raises(ConnectionError, match="timed out"):
+                    attempt.result(timeout=0.5)
+            finally:
+                peer.close()
+
+
+@pytest.mark.parametrize("partial_response", [False, True])
+def test_adapter_timeout_bounds_the_whole_command_and_discards_the_channel(
+    monkeypatch, partial_response
+):
+    source = Session(StaticSceneAdapter(Scene()))
+    received, finish = threading.Event(), threading.Event()
+
+    def stalled_peer(_publisher, connection):
+        try:
+            connection.recv()
+            if partial_response:
+                # A reply header can arrive before a stalled or interrupted payload.
+                connection._send(struct.pack("!i", 100))
+            received.set()
+            finish.wait(2)
+        finally:
+            connection.close()
+
+    monkeypatch.setattr(SnapshotPublisher, "_command_client", stalled_peer)
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source))
+    remote = RemoteSceneAdapter(port=publisher.port)
+    remote._timeout = 0.05
+    try:
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            future = worker.submit(remote._send, "pause")
+            assert received.wait(1)
+            try:
+                result = future.result(timeout=0.5)
+                assert not result.ok and "completion unknown" in result.message
+                assert remote._command is None
+                assert "closed" in remote._send("play").message
+            finally:
+                finish.set()
+    finally:
+        finish.set()
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+def test_publisher_timeout_distinguishes_an_already_started_command():
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair(), command_timeout=0.15)
+    publisher.publish_structure(snapshot_structure(source))
+    remote = RemoteSceneAdapter(port=publisher.port)
+    started, finish = threading.Event(), threading.Event()
+    calls = []
+
+    def handler(message):
+        calls.append(message)
+        started.set()
+        assert finish.wait(2)
+        return CommandResult.good()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            response = workers.submit(remote._send, "pause")
+            _eventually(lambda: not publisher._commands.empty())
+            pump = workers.submit(publisher.pump_commands, handler)
+            assert started.wait(1)
+            try:
+                result = response.result(timeout=1)
+                assert not result.ok and "completion unknown" in result.message
+            finally:
+                finish.set()
+            assert pump.result(timeout=1) == 1
+            assert calls == [{"op": "pause", "operation_version": 1}]
+    finally:
+        finish.set()
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+def test_publisher_close_unblocks_a_waiting_remote_command():
+    source_session = Session(StaticSceneAdapter(Scene()))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port, command_timeout=5.0)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = RemoteSceneAdapter(port=port)
+    results = []
+    worker = threading.Thread(target=lambda: results.append(remote.set_paused(True)))
+    worker.start()
+    try:
+        _eventually(lambda: not publisher._commands.empty())
+        publisher.close()
+        worker.join(timeout=1.0)
+
+        assert not worker.is_alive()
+        assert results == [False]
+    finally:
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_keyframe_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    command = handle_session_command(Sink(), {"op": "keyframe", "keyframe_id": 17})
+    assert command == cmd.LoadKeyframe(17)
+
+
+def test_scene_camera_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        has_pending_model_edits = False
+
+        def submit(self, command):
+            return command
+
+    camera = CameraView()
+    command = handle_session_command(
+        Sink(), {"op": "scene_camera", "camera_id": 7, "camera": camera}
+    )
+    assert command == cmd.SetSceneCamera(7, camera)
+
+
+def test_remote_document_precondition_is_consumed_before_constructing_command():
+    scene = Scene()
+    box = scene.box(name="before")
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        request = {
+            "op": "rename_scene_entity",
+            "object_id": box.object_id,
+            "name": "after",
+            "expected_document": {"id": "old-document"},
+        }
+        rejected = handle_session_command(session, request)
+        assert not rejected.ok and "document changed" in rejected.message
+        assert session.node_by_object_id(box.object_id).name == "before"
+        request["expected_document"] = {
+            "id": session.document_id,
+            "revision": session.document_revision,
+        }
+        assert handle_session_command(session, request).ok
+        assert session.node_by_object_id(box.object_id).name == "after"
+        assert "expected_document" in request
+    finally:
+        session.release()
+
+
+def test_qpos_batch_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    indices = np.array((3, 4, 5, 6), np.intp)
+    values = np.array((1.0, 0.0, 0.0, 0.0), np.float64)
+    command = handle_session_command(
+        Sink(), {"op": "qpos_batch", "indices": indices, "values": values}
+    )
+    assert isinstance(command, cmd.SetQposBatch)
+    assert np.array_equal(command.indices, indices)
+    assert np.array_equal(command.values, values)
+
+
+def test_scene_entity_commands_keep_their_typed_remote_boundary():
+    class Sink:
+        has_pending_model_edits = False
+
+        def submit(self, command):
+            return command
+
+    light = Light(diffuse=np.array([0.2, 0.4, 0.8], np.float32))
+    environment = Environment(ambient=np.array([0.1, 0.2, 0.3], np.float32))
+    material = Material(name="remote", emission=0.4)
+    color = np.array([0.3, 0.5, 0.7, 0.8], np.float32)
+
+    command = handle_session_command(Sink(), {"op": "light", "light_index": 3, "light": light})
+    assert isinstance(command, cmd.SetLight)
+    assert command.light_index == 3
+    assert command.light is light
+
+    command = handle_session_command(Sink(), {"op": "environment", "environment": environment})
+    assert isinstance(command, cmd.SetEnvironment)
+    assert command.environment is environment
+
+    command = handle_session_command(Sink(), {"op": "skybox", "texture": "studio"})
+    assert isinstance(command, cmd.SetSkybox)
+    assert command.texture == "studio"
+
+    command = handle_session_command(
+        Sink(), {"op": "material", "material_index": 2, "material": material}
+    )
+    assert isinstance(command, cmd.SetMaterial)
+    assert command.material_index == 2
+    assert command.material is material
+
+    legacy = handle_session_command(Sink(), {"op": "light", "light_id": 4, "light": light})
+    assert legacy.light_index == 4
+
+    command = handle_session_command(Sink(), {"op": "geometry_color", "node_id": 9, "rgba": color})
+    assert isinstance(command, cmd.SetGeometryColor)
+    assert command.node_id == 9
+    assert np.array_equal(command.rgba, color)
+
+    size = np.array((2.0, 3.0, 0.02), np.float32)
+    command = handle_session_command(Sink(), {"op": "geometry_size", "node_id": 9, "size": size})
+    assert isinstance(command, cmd.SetGeometrySize)
+    assert command.node_id == 9
+    assert np.array_equal(command.size, size)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "joint_properties",
+            "joint_id": 2,
+            "axis": (0.0, 1.0, 0.0),
+            "limited": True,
+            "range": (-0.5, 0.75),
+            "damping": 0.2,
+            "stiffness": 0.3,
+        },
+    )
+    assert isinstance(command, cmd.SetJointProperties)
+    assert command.joint_id == 2
+    assert command.range == (-0.5, 0.75)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "joint_advanced_properties",
+            "joint_id": 2,
+            "group": 3,
+            "armature": 0.1,
+            "friction_loss": 0.2,
+            "reference": 0.3,
+            "spring_reference": 0.4,
+            "margin": 0.01,
+            "limit_solver_reference": (0.02, 1.0),
+            "limit_solver_impedance": (0.9, 0.95, 0.001, 0.5, 2.0),
+            "friction_solver_reference": (0.03, 1.1),
+            "friction_solver_impedance": (0.8, 0.9, 0.002, 0.6, 3.0),
+            "actuator_force_limit_mode": "limited",
+            "actuator_force_range": (-2.0, 3.0),
+            "actuator_gravity_compensation": True,
+        },
+    )
+    assert isinstance(command, cmd.SetJointAdvancedProperties)
+    assert command.joint_id == 2
+    assert command.actuator_force_limit_mode == "limited"
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "site_properties",
+            "node_id": 7,
+            "type": "capsule",
+            "group": 2,
+            "use_from_to": True,
+            "from_to": (0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        },
+    )
+    assert isinstance(command, cmd.SetSiteProperties)
+    assert command.node_id == 7
+    assert command.use_from_to
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "geometry_properties",
+            "node_id": 9,
+            "friction": (1.0, 0.02, 0.003),
+            "collision_type_mask": 3,
+            "collision_affinity_mask": 5,
+            "contact_dimension": 4,
+            "contact_priority": 2,
+            "margin": 0.01,
+            "gap": 0.002,
+            "solver_mix": 0.7,
+        },
+    )
+    assert isinstance(command, cmd.SetGeometryProperties)
+    assert command.node_id == 9
+    assert command.friction == (1.0, 0.02, 0.003)
+    assert command.contact_dimension == 4
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "body_properties",
+            "node_id": 7,
+            "inertia_mode": "diagonal",
+            "mass": 2.0,
+            "inertial_position": (0.0, 0.0, 0.0),
+            "inertial_quaternion": (1.0, 0.0, 0.0, 0.0),
+            "diagonal_inertia": (1.0, 1.5, 2.0),
+            "full_inertia": (1.0, 1.5, 2.0, 0.0, 0.0, 0.0),
+            "gravity_compensation": 0.0,
+            "mocap": False,
+            "sleep_policy": "auto",
+        },
+    )
+    assert isinstance(command, cmd.SetBodyProperties)
+    assert command.node_id == 7
+    assert command.diagonal_inertia == (1.0, 1.5, 2.0)
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "geometry_advanced_properties",
+            "node_id": 8,
+            "visual_group": 2,
+            "mass_mode": "density",
+            "mass": 1.0,
+            "density": 500.0,
+            "inertia_mode": "shell",
+            "fluid_ellipsoid": True,
+            "fluid_coefficients": (0.6, 0.3, 1.2, 0.8, 0.7),
+        },
+    )
+    assert isinstance(command, cmd.SetGeometryAdvancedProperties)
+    assert command.node_id == 8
+    assert command.inertia_mode == "shell"
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "geometry_shape",
+            "node_id": 8,
+            "type": "mesh",
+            "resource_name": "part",
+        },
+    )
+    assert isinstance(command, cmd.SetGeometryShape)
+    assert command.node_id == 8
+    assert command.resource_name == "part"
+
+    command = handle_session_command(
+        Sink(),
+        {
+            "op": "add_scene_object",
+            "shape": MeshShape.BOX,
+            "name": "box",
+            "size": (0.5, 0.5, 0.5),
+            "position": (1.0, 2.0, 3.0),
+            "rotation": np.eye(3, dtype=np.float32),
+            "color": (0.2, 0.4, 0.8, 1.0),
+            "material": material,
+        },
+    )
+    assert isinstance(command, cmd.AddSceneObject)
+    assert command.shape is MeshShape.BOX
+    assert command.name == "box"
+
+
+def test_remote_scene_authoring_publishes_structure_updates():
+    scene = Scene()
+    source = Session(StaticSceneAdapter(scene))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source))
+    publisher.publish_frame(source.frame)
+    remote = Session(RemoteSceneAdapter(port=port))
+    stop = threading.Event()
+
+    def pump():
+        generation = source.structure_generation
+        while not stop.is_set():
+            publisher.pump_commands(lambda message: handle_session_command(source, message))
+            if source.structure_generation != generation:
+                generation = source.structure_generation
+                publisher.publish_structure(snapshot_structure(source))
+                publisher.publish_frame(source.frame)
+            stop.wait(0.002)
+
+    worker = threading.Thread(target=pump)
+    worker.start()
+    try:
+        added = remote.submit(
+            cmd.AddSceneObject(MeshShape.SPHERE, "live sphere", position=(0.0, 0.0, 1.0))
+        )
+        assert added.ok and added.entity_id > 0
+        assert remote.node_by_object_id(added.entity_id).name == "live sphere"
+        assert source.node_by_object_id(added.entity_id).name == "live sphere"
+
+        geometry_node_id = int(remote.source.geom_node[0])
+        assert remote.submit(cmd.SetGeometrySize(geometry_node_id, np.array([0.3, 0.4, 0.5])))
+        duplicate = remote.submit(cmd.DuplicateSceneEntity(added.entity_id))
+        assert duplicate.ok and duplicate.entity_id != added.entity_id
+        assert remote.submit(cmd.RenameSceneEntity(duplicate.entity_id, "remote copy"))
+        assert remote.node_by_object_id(duplicate.entity_id).name == "remote copy"
+        assert remote.submit(cmd.RemoveSceneEntity(duplicate.entity_id))
+
+        light = remote.submit(cmd.AddSceneLight("live light", Light()))
+        camera = remote.submit(cmd.AddSceneCamera("live camera", CameraView()))
+        assert remote.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id).name == "live light"
+        assert remote.node_by_object_id(CAMERA_OBJECT_BASE + camera.entity_id).name == "live camera"
+
+        assert remote.submit(cmd.RemoveSceneObject(added.entity_id))
+        assert remote.submit(cmd.RemoveSceneLight(light.entity_id))
+        assert remote.submit(cmd.RemoveSceneCamera(camera.entity_id))
+        assert remote.node_by_object_id(added.entity_id) is None
+        assert remote.node_by_object_id(LIGHT_OBJECT_BASE + light.entity_id) is None
+        assert remote.node_by_object_id(CAMERA_OBJECT_BASE + camera.entity_id) is None
+        assert source.node_by_object_id(added.entity_id) is None
+    finally:
+        stop.set()
+        worker.join()
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+def test_equality_command_keeps_its_typed_remote_boundary():
+    class Sink:
+        def submit(self, command):
+            return command
+
+    command = handle_session_command(
+        Sink(), {"op": "equality", "constraint_id": 3, "enabled": False}
+    )
+    assert command == cmd.SetEqualityEnabled(3, False)
+
+
+def test_remote_camera_metadata_and_edits_use_the_shared_scene_contract():
+    scene = Scene(camera=CameraView())
+    source_session = Session(StaticSceneAdapter(scene))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(source_session.frame)
+    remote = Session(RemoteSceneAdapter(port=port))
+    stop = threading.Event()
+
+    def pump():
+        while not stop.is_set():
+            publisher.pump_commands(lambda message: handle_session_command(source_session, message))
+            stop.wait(0.002)
+
+    worker = threading.Thread(target=pump)
+    worker.start()
+    try:
+        assert remote.adapter.caps.model_cameras
+        info = remote.cameras[0]
+
+        class NoCameraScan(list):
+            def __iter__(self):
+                raise AssertionError("remote camera lookup scanned all camera metadata")
+
+        with remote.adapter._lock:
+            remote.adapter._structure = replace(
+                remote.adapter._structure,
+                cameras=NoCameraScan(remote.adapter._structure.cameras),
+            )
+        assert remote.camera_view(info.camera_id) is not None
+        edited = CameraView(eye=np.array([4.0, -3.0, 2.0], np.float32))
+        assert remote.submit(cmd.SetSceneCamera(info.camera_id, edited))
+        assert source_session.camera_view(info.camera_id).eye == pytest.approx(edited.eye)
+        assert remote.frame.cameras == (edited,)
+    finally:
+        stop.set()
+        worker.join()
+        remote.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_two_viewers_receive_the_same_latest_frame_independently():
+    scene = Scene()
+    scene.box()
+    source_session = Session(StaticSceneAdapter(scene))
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source_session))
+    publisher.publish_frame(replace(scene.frame, step=1))
+    effect = RemoteSceneAdapter(port=port)
+    debug = RemoteSceneAdapter(port=port)
+    try:
+        publisher.publish_frame(replace(scene.frame, step=8))
+        assert _eventually(lambda: effect.frame(FrameNeeds()).step == 8)
+        assert _eventually(lambda: debug.frame(FrameNeeds()).step == 8)
+    finally:
+        effect.release()
+        debug.release()
+        publisher.close()
+        source_session.release()
+
+
+def test_pause_round_trip_changes_the_source_session():
+    from mojive.adapters.toy import ToyPhysicsAdapter
+
+    source = Session(ToyPhysicsAdapter())
+    port = _port_pair()
+    publisher = SnapshotPublisher(port=port)
+    publisher.publish_structure(snapshot_structure(source))
+    publisher.publish_frame(source.frame)
+    remote = Session(RemoteSceneAdapter(port=port))
+    stop = threading.Event()
+
+    def pump():
+        while not stop.is_set():
+            publisher.pump_commands(lambda message: handle_session_command(source, message))
+            stop.wait(0.002)
+
+    worker = threading.Thread(target=pump)
+    worker.start()
+    try:
+        assert remote.submit(cmd.Pause())
+        assert source.paused
+        assert remote.paused
+    finally:
+        stop.set()
+        worker.join()
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+class _ExternalClock(SceneAdapterBase):
+    caps = AdapterCaps(name="remote-test", simulation=True, external_clock=True)
+
+    def __init__(self):
+        self.steps = 0
+        self.paused = False
+        self.scene = Scene()
+        self.scene.box()
+
+    def scene_source(self):
+        return self.scene.source
+
+    def frame(self, needs):
+        return replace(self.scene.frame, step=42, paused=self.paused)
+
+    def step(self, count=1):
+        self.steps += count
+
+    def set_paused(self, paused):
+        self.paused = bool(paused)
+        return True
+
+
+def test_external_clock_is_not_stepped_or_overwritten_by_render_ticks():
+    adapter = _ExternalClock()
+    session = Session(adapter)
+
+    frame = session.tick(FrameNeeds(), wall_dt=1.0)
+
+    assert adapter.steps == 0
+    assert frame.step == 42
+    assert not session.paused
+    assert session.submit(cmd.Pause())
+    assert adapter.paused
+
+
+def test_failed_explicit_step_is_not_retried_by_the_next_render_tick(monkeypatch):
+    adapter = _ExternalClock()
+    session = Session(adapter)
+    calls = []
+
+    def failed_step(count):
+        calls.append(count)
+        raise RuntimeError("remote step outcome is unknown")
+
+    monkeypatch.setattr(adapter, "step", failed_step)
+    assert session.submit(cmd.Pause()).ok
+    assert session.submit(cmd.Step(3)).ok
+    with pytest.raises(RuntimeError, match="outcome is unknown"):
+        session.tick(FrameNeeds())
+    session.tick(FrameNeeds())
+    assert calls == [3]
+    session.release()
+
+
+def test_remote_negotiates_commands_and_rechecks_after_capability_changes():
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = snapshot_structure(source)
+    publisher.publish_structure(structure)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    try:
+        assert remote.caps.scene_authoring
+        readonly = replace(
+            structure, structure_revision=structure.structure_revision + 1, command_versions=()
+        )
+        publisher.publish_structure(readonly)
+        _eventually(lambda: remote.structure_revision == readonly.structure_revision)
+        assert not remote.caps.scene_authoring
+        assert not remote.caps.write_pose
+        assert not remote.caps.clock_control
+        assert not remote._send("pause").ok
+        assert publisher._commands.empty()
+        mismatch = replace(
+            structure,
+            structure_revision=readonly.structure_revision + 1,
+            command_versions=(("pause", 2),),
+        )
+        publisher.publish_structure(mismatch)
+        _eventually(lambda: remote.structure_revision == mismatch.structure_revision)
+        assert not remote._send("pause").ok
+        assert publisher._commands.empty()
+        assert not handle_session_command(source, {"op": "reset", "operation_version": 2}).ok
+    finally:
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+@pytest.mark.parametrize("revision", [99, True])
+def test_remote_rejects_incompatible_stream_version_at_connection(revision):
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(replace(snapshot_structure(source), protocol_version=revision))
+    try:
+        with pytest.raises(ConnectionError, match=f"Unsupported remote stream version: {revision}"):
+            RemoteSceneAdapter(port=publisher.port, timeout=0.5)
+    finally:
+        publisher.close()
+        source.release()
+
+
+def test_partial_remote_manifest_retains_monitoring_but_withdraws_writeback():
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = replace(
+        snapshot_structure(source),
+        caps=AdapterCaps(name="physics", simulation=True, write_ctrl=True),
+        command_versions=(("pause", 1), ("play", 1), ("ctrl", 1)),
+    )
+    publisher.publish_structure(structure)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    try:
+        assert remote.caps.simulation
+        assert not remote.caps.clock_control
+        assert not remote.caps.write_ctrl
+        invalid = replace(
+            structure,
+            structure_revision=structure.structure_revision + 1,
+            command_versions=(("ctrl", True), ("ctrl_vector", True)),
+        )
+        publisher.publish_structure(invalid)
+        _eventually(lambda: remote.structure_revision == invalid.structure_revision)
+        assert not remote.caps.write_ctrl
+        assert not remote._send("ctrl", index=0, value=1).ok
+        assert publisher._commands.empty()
+        assert not handle_session_command(source, {"op": "raycast"}).ok
+    finally:
+        remote.release()
+        publisher.close()
+        source.release()

@@ -91,6 +91,88 @@ finish. A client-side `timeout` or connection failure can likewise leave the out
 Inspect the current state before retrying a mutation such as `step`; the client never retries a
 command automatically. The next call reconnects after a transport failure.
 
+An EOF cancels requests that have not started, even when no deadline was supplied. Keep both
+directions of the socket open until a response arrives; write-half-close is treated as disconnect.
+Shutdown closes active sockets and drains unstarted viewer requests. Cancellation cannot undo
+an already-running operation. An asynchronous operation retains its admission slot until actual
+completion, including after its client has received `completion_unknown`.
+
+## Work budgets and diagnostics
+
+`mojive.control.rpc.RpcLimits` provides the same immutable configuration for attached and
+standalone servers. All byte limits include the newline delimiter.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `max_request_bytes` | 16 MiB | Maximum encoded request per connection |
+| `max_response_bytes` | 256 MiB | Maximum encoded response |
+| `max_connections` | 16 | Concurrent accepted sockets, including idle clients |
+| `max_inflight_requests` | 128 | Accepted operations not yet completed or cancelled |
+| `max_pending_requests` | 128 | Attached-viewer queue capacity |
+| `max_pending_bytes` | 64 MiB | Sum of encoded sizes still in that queue |
+| `requests_per_pump` | 8 | Maximum queued items processed per viewer frame |
+| `pump_budget_ms` | 2.0 | Elapsed-time budget, checked between handlers |
+
+The pump advances at least one queued item, including cancelled items. It cannot preempt a
+handler: a single expensive operation can exceed the time budget. Synchronous model compilation
+is still such an operation; the queue budget does not make compilation asynchronous. Queue
+limits apply to the attached viewer; headless dispatch serializes through its application lock.
+The unfinished-request limit also covers headless requests waiting for that lock.
+
+Overloaded connections or queues return `busy` without starting the request. Oversized requests
+return `request_too_large` before JSON parsing and close that connection; the remainder is never
+parsed as another request. Rejections before reading a request ID carry `id: null`. `RpcClient`
+recognizes those transport errors and closes the socket, without resending the request.
+
+Oversized responses return `response_too_large` before response bytes are sent. The operation may
+already have completed, so inspect state before repeating a mutation. If even the error envelope
+exceeds the configured response limit, the connection closes. These are **wire-size budgets**,
+not bounds on decoded JSON memory or the temporary string produced by the JSON encoder. Use
+shared-memory capture for large repeated images instead of raising every message budget.
+
+Set server limits explicitly in Python:
+
+```python
+from mojive.control.rpc import RpcLimits
+
+viewer.start_rpc("output/mojive.sock", limits=RpcLimits(max_connections=8, pump_budget_ms=1.5))
+```
+
+For CLI use, put a JSON object such as `{"max_connections": 8, "pump_budget_ms": 1.5}` in a file.
+Omitted fields keep their defaults; unknown fields, invalid counts and non-finite values fail
+before creating the viewer or connecting the client.
+
+```bash
+uv run mojive editor --rpc-socket output/mojive.sock --rpc-limits output/rpc-limits.json
+uv run mojive rpc-serve test_scene --socket output/mojive.sock --limits-file output/rpc-limits.json
+uv run mojive control get_rpc_stats --socket output/mojive.sock --json
+```
+
+`control --limits-file PATH` configures the client's outgoing-request and incoming-response
+limits; it does not change the server. Python clients accept `RpcClient(..., limits=RpcLimits(...))`.
+Existing attached servers retain their limits; passing different limits to `start_rpc` fails.
+Stop that endpoint explicitly before replacing its configuration.
+
+`get_rpc_stats` is a read-only operation in the catalog. It returns the effective limits, current
+queue/connection/inflight counts, rejection and cancellation counters, and the last 256 samples
+of each timing with mean, p50, p95, p99 and maximum. Counters are lifetime values; percentiles are
+rolling-window values. `queue_wait_ms` covers admission to handler start; `handler_ms` covers
+dispatch through actual completion, including asynchronous work and headless lock wait;
+`pump_ms` covers synchronous viewer service work. Cancelled queued items have no handler sample.
+Expiry and cancellation counters can overlap. A stats request observes itself before completion.
+
+To compare input dispatch under a real socket workload:
+
+```bash
+make rpc-benchmark BACKEND=opengl ARGS="--clients 16 --requests 30 --repeats 3"
+```
+
+The benchmark alternates a count-only policy with count-and-time budgets on the same transport.
+It preserves raw request/frame samples, an injected-key dispatch measurement and window captures
+under `output/rpc-benchmark/`. It does not measure OS input latency or GPU completion. Run it
+separately from tests or other benchmarks; compare request completion and throughput alongside
+input tail latency. This is a pump-policy comparison, not a comparison of whole historical servers.
+
 ## Discover operations
 
 `hello` lists recognized `methods`, currently `available_methods`, adapter capabilities, and
@@ -102,7 +184,8 @@ uv run mojive control describe_operations --params '{"scope":"viewport","availab
 ```
 
 Each description includes JSON Schema Draft 2020-12 `input_schema` and `output_schema`, defaults,
-`scope`, `mutates`, `transactional`, requirements, and current `available`/`unavailable_reason`.
+`scope`, `mutates`, `transactional`, `writes_document`, requirements, and current
+`available`/`unavailable_reason`.
 Availability reflects the adapter, pause state, history, and viewer attachment. Refresh it after
 state changes. Input validation rejects missing, unknown, incorrectly typed, and non-finite
 parameters before dispatch. Python clients can call `client.describe_operations(name="edit_scene")`.
@@ -113,12 +196,12 @@ construction, retaining their existing `CommandResult` error format.
 
 | Scope | Common operations |
 |---|---|
-| Service | `hello`, `get_capabilities`, `describe_operations` |
+| Service | `hello`, `get_capabilities`, `describe_operations`, `get_rpc_stats` |
 | Scene queries | `get_scene`, `get_state`, `get_bounds`, `list_objects`, `inspect_object` |
 | Selection | `select_object`, `select_node`, `set_visible`, `set_visual_group` |
 | Simulation | `pause`, `resume`, `step`, `reset`, `set_speed`, `set_keyframe`, `set_qpos`, `set_qvel`, `set_ctrl`, `set_mocap`, `set_state` |
 | Documents | `load`, `reload`, `new_scene`, `open_scene`, `save_scene` |
-| Authoring | `add_scene_object`, `add_scene_camera`, `add_scene_light`, `set_pose`, `set_scene_camera`, `set_geometry_color`, `set_geometry_size`, `rename_scene_entity`, `duplicate_scene_entity`, `remove_scene_entity` |
+| Authoring | `add_scene_object`, `add_scene_camera`, `add_scene_light`, `set_pose`, `set_scale`, `set_scene_camera`, `set_geometry_color`, `set_geometry_size`, `rename_scene_entity`, `duplicate_scene_entity`, `remove_scene_entity` |
 | History | `edit_scene`, `undo`, `redo` |
 | Capture | `get_capture_settings`, `set_capture_camera`, `capture`, `set_render_flag`, `set_visualization_flag`, `load_camera_bookmark` |
 | Viewport | `get_viewport_camera`, `set_viewport_camera`, `capture_viewport`, `get_viewer_settings`, `get_panels`, `set_panel`, `set_interactions`, `set_selection_style`, `set_shadow_quality`, `reset_layout` |
@@ -166,6 +249,33 @@ can produce multiple instances with the same geometry node ID. Instance color an
 remain separate values. `visible` is the local hierarchy flag; `hierarchy_visible` accounts for
 hidden ancestors and does not claim that an object is inside the camera or unoccluded.
 
+`inspect_object.scalable` resolves the chosen target through Session and the adapter's
+`write_scale` capability. A scalable object and its geometry child address the same local
+geometry. Articulated subtrees and unsupported targets are rejected. `set_scale` requires a
+paused session and three positive finite XYZ factors. It multiplies the current local render
+dimensions, preserves position and rotation, and immediately bakes the result. A subsequent
+inspection returns `scale: [1, 1, 1]` and the updated `geometries[].size`; repeating a factor of
+two scales the current dimensions by two again. Overflow and underflow fail without a partial
+edit. Scale participates in `edit_scene`, Undo/Redo, document preconditions, and scene saving.
+
+Read-only inspection uses the currently composed Session: an active editor preview can expose
+unbaked `scale` values and preview dimensions. These previews are not saved until applied.
+Operations marked `writes_document` reject an active UI draft or unfinished edit transaction with
+`pending_edits`. This includes document replacement, saving and Undo/Redo. Apply or discard the
+draft in the viewer before editing remotely; RPC never implicitly commits or clears it.
+Read-only queries, selection and display visibility remain available.
+
+```python
+node = client.call("inspect_object", {"object_id": object_id})
+client.call("set_scale", {
+    "node_id": node["node_id"], "scale": [2, 1, 0.5],
+    "expected_document": node["document"],
+})
+```
+
+Use `mojive operations set_scale --json` to read the installed schema, then pass the same
+parameters through `mojive control set_scale --params-file output/scale.json --json`.
+
 ```python
 scene = client.call("get_scene")
 created = client.call("add_scene_object", {
@@ -185,8 +295,17 @@ client.call("edit_scene", {
 client.call("save_scene", {"path": "output/cargo.mojive.json"})
 ```
 
-`edit_scene` validates all nested operations before starting, commits one undo record, and
-cancels the whole edit on failure. Only operations marked `transactional` are accepted. Parameters
+`edit_scene` validates all nested operations and rechecks the document before starting. It uses
+the same adapter rebuild group and rollback executor as UI Apply, retaining request order and
+one undo record. MuJoCo geometry declaration edits compile the final specification once;
+pose changes that subsequent world-space commands depend on still update physics immediately.
+Successful nested results carry the final committed document revision.
+
+A failure cancels the whole edit and reports the original error. When recovery also fails,
+`rollback_failed` includes `details.rollback_error` and retains the recovery checkpoint;
+inspect and resolve that failure before submitting further edits. Command failures include
+their input `index` and `method`; group finalization failures have no single failing input.
+Only operations marked `transactional` are accepted. Parameters
 are literal values: inspect a newly created entity before referencing its ID in another request.
 Use `undo`/`redo` for authored history; visibility is a Session display override and is outside
 these transactions. Simulation commands and document replacement are also outside transactions.

@@ -128,10 +128,11 @@ enum class DebugPath {
     Sector,
     DragLink,
     ScreenTriangle,
-    Text
+    Text,
+    Triangle
 };
 enum class Occlusion { Depth, Always, Ghost };
-constexpr std::array<uint32_t, 9> debugRecordFloats = {13, 13, 8, 14, 20, 14, 18, 13, 17};
+constexpr std::array<uint32_t, 10> debugRecordFloats = {13, 13, 8, 14, 20, 14, 18, 13, 17, 13};
 struct DebugBatch {
     DebugPath path = DebugPath::Segment;
     Occlusion occlusion = Occlusion::Depth;
@@ -154,7 +155,7 @@ struct OverlayFrame {
     std::vector<std::array<float, 32>> surfaces;
     std::vector<SurfaceBatch> surfaceBatches;
     std::vector<OverlayDraw> gizmos;
-    std::array<std::vector<float>, 9> streams;
+    std::array<std::vector<float>, debugRecordFloats.size()> streams;
     std::vector<DebugBatch> debug;
     Texture glyphAtlas;
 };

@@ -2,8 +2,8 @@
 
 Mojive's custom UI uses curvature ramps for rounded rectangles, playback and tool capsules,
 rounded arrowheads, small rounded Scale handles, Snap, mouse hints, and stroke caps. The geometry lives in
-`python/src/mojive/drawing/curves.py`; ImGui and PNG export consume the same paths. Implicit hollow connectors
-live in `python/src/mojive/drawing/drag_link.py`. The [drawing extension guide](ui-drawing.md) maps API entry
+`python/geometry2d/curves.py`; ImGui and PNG export consume the same paths. Implicit hollow connectors
+live in `python/geometry2d/drag_link.py`. The [drawing extension guide](ui-drawing.md) maps API entry
 points, module responsibilities, coordinates, and verification for new widgets and diagnostics.
 
 ## Native ImGui controls
@@ -17,7 +17,7 @@ uv run --no-sync mojive editor
 ```
 
 The first build needs `uv`, CMake, a C++17 toolchain, and network access. On macOS this includes
-the Xcode command-line tools. `tools/build_imgui.py` downloads the pinned ImGui Bundle
+the Xcode command-line tools. `python/tools/build_imgui.py` downloads the pinned ImGui Bundle
 1.92.900 source archive, checks SHA-256, applies the maintained patch, and builds a local wheel.
 It pins nanobind 2.9.2 because that source release uses its four-argument ndarray export API.
 The source, wheel, and reusable CMake build are under `output/g3-ui/build/`.

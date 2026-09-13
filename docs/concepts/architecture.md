@@ -75,8 +75,9 @@ these contracts.
 
 `control/operations.py` defines public operations once: schemas, capability requirements, command
 construction, and descriptions. `control/schema.py` provides reusable value contracts and cached
-validation. `ControlApplication` coordinates operations against one Session. `control/rpc.py`
-owns protocol envelopes, socket lifetime, deadlines, and viewer-thread queuing. Importing the
+validation. `ControlApplication` coordinates operations against one Session. `control/rpc/`
+separates protocol envelopes, client and server transport, deadlines, bounded diagnostics,
+and viewer-thread scheduling. `RpcLimits` defines admission and per-frame work budgets. Importing the
 RPC client does not initialize graphics, load UI modules, or import the schema validator.
 Native remote authoring messages share the catalog's validation and typed command construction;
 the UI continues to submit typed Session commands. `scene/queries.py` provides world-pose queries
@@ -115,10 +116,13 @@ metadata carries vertical image orientation.
 
 Shared contracts live in `types.py`, `commands.py`, `math3d.py`, and `adapters/base.py`. Render
 code imports shared contracts. Adapter integrations own physics-specific code. UI modules depend
-on session state and protocols. `python/tests/test_layering.py` enforces these boundaries.
+on session state and protocols. `tests/test_layering.py` enforces these boundaries.
 
-For overlays, `drawing/curves.py` owns reusable paths and stroke profiles; `drawing/drag_link.py` owns the
+For overlays, `geometry2d/curves.py` owns reusable paths and stroke profiles; `geometry2d/drag_link.py` owns the
 implicit hollow-connector field and mesh. Both remain independent of UI and backend imports.
-`ui/draw2d.py` defines the drawing protocol and adapts it to ImGui. Widgets own placement and
+`ui/paint_protocol.py` defines the immediate UI contract; `ui/imgui_draw.py` adapts it
+to ImGui. `render/canvas.py` provides the retained Canvas2D API over DebugDraw.
+`geometry2d/` owns CPU path sampling and triangulation; the shared debug pass renders its output.
+Widgets own placement and
 interaction; retained debug layers own identifiers, lifetime, budgets, and stream packing.
 The [UI drawing guide](../how-to/ui-drawing.md) lists extension entry points and examples.

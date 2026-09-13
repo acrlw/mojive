@@ -1,22 +1,27 @@
 # Python 模块地图
 
-`python/src/mojive` 按职责组织实现。根目录保留 `types.py`、`commands.py`、
+源码直接放在仓库的 `python/` 下，与 `cpp/` 并列；安装映射保持 `import mojive`。
+开发安装会在 `output/editable/` 生成延迟导入入口，不复制源码，不在启动时导入 UI。
+`python/` 按职责组织实现，保留 `types.py`、`commands.py`、
 `math3d.py` 等共享契约，以及已发布导入路径的薄兼容入口。修改行为时进入实际实现包，
 不要在兼容入口添加业务逻辑，也不要通过模块别名或重复转发方法隐藏依赖。
 
 | 包 | 负责什么 | 主要入口 |
 |---|---|---|
-| `application/` | 组装 Viewer、选择后端、宿主生命周期、旧 Renderer API | `composition.py`、`backends.py`、`passive.py`、`renderer.py` |
+| `app/` | 组装 Viewer、选择后端、宿主生命周期、旧 Renderer API | `composition.py`、`backends.py`、`passive.py`、`renderer.py` |
 | `scene/` | 场景实体、资源定位、边界与几何查询、文件读写 | `model.py`、`assets.py`、`bounds.py`、`geometry.py`、`io.py`、`workspace.py`、`state.py` |
 | `session/` | 文档状态、选择、编辑事务、播放、结构刷新 | `core.py`、`editing.py`、`playback.py`、`source.py` |
 | `session/dispatch/` | 将类型化命令交给对应的处理函数 | `documents.py`、`transforms.py`、`properties.py`、`assets.py`、`physics.py`、`playback.py` |
-| `control/` | 可发现的操作、参数校验、应用控制、RPC 传输 | `operations.py`、`schema.py`、`application.py`、`rpc.py` |
+| `control/` | 可发现的操作、参数校验、应用控制及预算契约 | `operations.py`、`schema.py`、`application.py`、`contracts.py` |
+| `control/rpc/` | 协议、socket 生命周期、请求调度与统计 | `protocol.py`、`client.py`、`server.py`、`service.py`、`viewer.py`、`stats.py` |
 | `capture/` | 图像与录制契约、共享图像、快照和视频写入 | `types.py`、`shared_image.py`、`recording.py` |
 | `remote/` | 场景快照发布、接收、命令桥接 | `protocol.py`、`publisher.py`、`adapter.py`、`commands.py`、`bridge.py` |
 | `interaction/` | 输入契约、与 UI 无关的 gizmo 几何和命中计算 | `input.py`、`gizmo.py` |
-| `drawing/` | 与绘制后端无关的二维曲线、多边形和 Canvas 契约 | `curves.py`、`polygons.py`、`drag_link.py`、`canvas.py` |
+| `geometry2d/` | 纯二维曲线、轮廓和几何计算，不依赖渲染器 | `curves.py`、`polygons.py`、`drag_link.py` |
+| `render/canvas.py` | Canvas2D 保留式接口，复用 DebugDraw 的 ID、图层、生命周期和 GPU pass | `canvas_geometry.py` 负责有上限的 CPU 路径缓存 |
+| `text/` | UI 字体来源发现 | `sources.py`；世界标签继续使用 `render/text.py` 的现有 glyph atlas |
 | `adapters/` | 场景与物理后端适配 | `base.py`、`mujoco/`、`static/`、`toy/` |
-| `render/` | 渲染契约、后端与离屏渲染 | `backend.py`、`offscreen.py`、`opengl/`、`webgpu/`、`native/` |
+| `render/` | 渲染契约、后端、离屏渲染及场景调试 Canvas | `backend.py`、`offscreen.py`、`canvas.py`、`opengl/`、`webgpu/`、`native/` |
 | `cli/` | 命令行解析及命令实现 | `parser.py`、`inspection.py`、`viewer.py`、`control.py`、`capture.py` |
 | `tools/` | 可执行的诊断、性能测量和验收场景 | 相应 Make target 指向的模块 |
 
@@ -28,12 +33,16 @@
 `core.py` 或 `adapter.py`，功能模块之间通过所有者的明确方法协作。
 
 `Session.submit()` 负责事务和结果处理，随后通过 `session/dispatch/` 的命令表查找处理函数。
+`session/edit_plan.py` 定义带文档版本的计划，`session/edit_batch.py` 共用 UI Apply 与 RPC
+的批量执行策略；`editing.py` 保留历史与恢复检查点的所有权。不要在 UI 或控制层再次实现
+重建循环、Undo 事务或失败回滚。
 处理函数直接操作所属 Session，并在写入边界检查 adapter 能力。新增命令时更新命令契约、
 对应领域的处理函数和路由表；不要恢复一个持续增长的 `isinstance` 分支链。命令子类仍按
 原有匹配顺序解析，未知命令仍返回失败结果。
 
 `control/operations.py` 定义 RPC 与 CLI 共用的操作目录，`schema.py` 负责校验，
-`rpc.py` 仅处理传输和请求调度。导入 RPC 客户端或离线查询操作目录，不能提前创建应用、
+`rpc/` 仅处理传输和请求调度。队列数、字节数、连接数及帧内工作由 `RpcLimits` 约束；
+`stats.py` 只保留计数和固定长度的耗时窗口，不保留请求内容。导入 RPC 客户端或离线查询操作目录，不能提前创建应用、
 加载物理引擎或初始化图形环境。`control/__init__.py` 按需导出应用对象来保持这条边界。
 
 ## UI 中到哪里修改
@@ -45,11 +54,18 @@
 | 输入、相机导航、精确 gizmo 输入 | `ui/app/input.py`、`navigation.py`、`gizmo_input.py` |
 | 菜单、viewport、状态栏、录制 | `ui/app/menus.py`、`viewport.py`、`status.py`、`capture.py` |
 | gizmo 状态、投影、拖拽、范围、辅助线 | `ui/gizmo/core.py`、`projection.py`、`dragging.py`、`joint_ranges.py`、`guides.py` |
-| gizmo 绘制与目标解析 | `ui/gizmo/drawing.py`、`targets.py` |
+| gizmo 绘制与目标解析 | `ui/gizmo/overlay.py`、`targets.py` |
 | Inspector 属性分类 | `ui/panels/inspector/model.py`、`transform.py`、`physics.py`、`geometry.py`、`environment.py` |
 | Inspector 复用字段布局 | `ui/panels/inspector/fields.py` |
 | viewport 胶囊、图标、输入提示、状态信息 | `ui/viewport_widgets/capsules.py`、`glyphs.py`、`hints.py`、`status.py` |
+| 胶囊外壳、选中圆、分隔线与按键框资源 | `ui/viewport_widgets/chrome.py`；位置和颜色不进入几何缓存键，可行性工具共用外壳定义 |
 | 图标设计参数、生产图标、预计算布局 | `ui/icons.py`、`ui/icon_presets.json` |
+| 面板绘制入口 | `PanelContext.painter()` 由 Window 注入；在当前 child/table 内创建，控件通过 `draw=` 接收，不另找全局 Window |
+| 中立绘制协议、ImGui 适配 | `ui/paint_protocol.py`、`ui/imgui_draw.py`；`ui/draw2d.py` 只保留旧导入兼容 |
+| 文字布局、拖拽连线提交 | `ui/text_layout.py`、`ui/drag_link.py` |
+| 生产与设计工具的窗口及 UI 后端装配 | `app/ui/window.py`；工具不需要为纯 UI 预览创建 3D renderer |
+| UI Feasibility 参数、图标审阅、几何实验 | `tools/ui_feasibility/state.py`、`tuning.py`、`icon_library.py`、`geometry.py` |
+| UI Feasibility 面板、导航、启动 | `tools/ui_feasibility/panels.py`、`workspace.py`、`runtime.py` |
 
 私有方法分组之间不重复定义同名方法，不额外增加构造、资源释放或权威状态。
 只有调用者确实需要独立生命周期时，才提取成独立对象。避免仅为了满足行数限制而拆文件；

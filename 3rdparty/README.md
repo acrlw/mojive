@@ -1,5 +1,9 @@
 # Repository-managed dependencies
 
+Python package dependencies are declared in `pyproject.toml` and resolved in `uv.lock`;
+they are not copied into this source tree. Font files retain their own licenses and use the
+existing system/cache discovery policy.
+
 `dependencies.json` is the source-of-truth revision lock. Production dependencies are available
 as repository-managed source; optional comparison dependencies are checksum-locked downloads.
 The C++ build never replaces an edited ImGui tree with a fetched copy.
@@ -11,13 +15,14 @@ The C++ build never replaces an edited ImGui tree with a fetched copy.
 | `glfw/` | Git submodule | Native platform windows and input |
 | `glm/`, `spdlog/` | Git submodules | Private graphics math and native logging |
 | `nanobind/`, `robin-map/` | Git submodules | Python binding support |
+| `libtess2/` | Git submodule | CPU-only contour triangulation for Canvas2D |
 | SDL, pybind11, separate shader tools | Optional locked downloads | Retained comparison experiments, disabled by default |
 
 After cloning, initialize only the top-level submodules:
 
 ```bash
 git submodule update --init --depth 1
-python tools/check_dependencies.py
+python -m mojive.tools.check_dependencies
 ```
 
 Nested upstream submodules are not required: bgfx, bx, bimg and robin-map are supplied through
@@ -36,7 +41,7 @@ product. Optional comparison downloads remain disabled until explicitly requeste
 ## ImGui customization
 
 The initial import is byte-identical to the locked upstream archive. `imguiBaseline.json` records
-all imported files. Check it with `python tools/check_dependencies.py --imgui-baseline`; that
+all imported files. Check it with `python -m mojive.tools.check_dependencies --imgui-baseline`; that
 optional check intentionally fails after a local customization. It is not a requirement to keep
 ImGui unmodified during development.
 
@@ -57,15 +62,22 @@ passes its generated vertices, indices, textures and clip rectangles to the nati
 bgfx does not generate widget geometry. The tracked `imgui/` tree is currently compiled into
 `mojive_imgui` for the standalone native gallery, not the Python Viewer's ImGui extension.
 
-`make setup-imgui` runs `tools/build_imgui.py`, which downloads a pinned ImGui Bundle source
+`make setup-imgui` runs `python/tools/build_imgui.py`, which downloads a pinned ImGui Bundle source
 archive and builds the Mojive wheel. The recipe contains checked patches for bulk geometry
 submission, slider/focus geometry and platform support. Its source/build cache lives under
 `output/g3-ui/build`; it is not an additional dependency to commit. The package version and
 Dear ImGui core version are distinct: the current recipe uses Bundle `1.92.900`, with core
 `1.92.9`, whereas this tracked core baseline is `1.92.9b-docking`.
 
-Shared self-drawn widgets already use continuous-curvature geometry from `curves2d.py` through
-`ui/draw2d.py`. To extend it to standard ImGui widgets globally, change the core draw paths
+`cpp/bindings/ImguiCallbacks.hpp` supplies read-only callback classification for the Python
+ImGui backends. The build recipe copies it into Bundle and includes its content in the build
+signature. Backends distinguish ordinary draws, render-state resets and unsupported callbacks;
+they do not add external renderer insertion markers. Rebuild with `make setup-imgui` after
+changing the header or recipe.
+
+Shared custom widgets use continuous-curvature geometry from `geometry2d/curves.py` through
+the `ui/paint_protocol.py` contract; `ui/imgui_draw.py` adapts that contract to ImGui. To extend it
+to standard ImGui widgets globally, change the core draw paths
 actually compiled into ImGui Bundle and rebuild the wheel. Reuse a reviewed core implementation
 for the native gallery after reconciling the core versions and bindings; changing only this
 tracked tree does not affect the Viewer. Fill, border and focus paths must agree, and real
@@ -124,7 +136,7 @@ compositor exposes no input seat. The source replacement is checked and compiled
 build tree; the submodule stays unchanged. Run `make native-windows` inside a headless Wayland
 compositor when reconciling this patch.
 
-`tools/build_imgui.py` applies the same guard to ImGui Bundle's GLFW and enables both X11 and
+`python/tools/build_imgui.py` applies the same guard to ImGui Bundle's GLFW and enables both X11 and
 Wayland. Its Linux library uses `libmojive_glfw.so.3`, with the package's pyGLFW search path
 updated accordingly. The distinct SONAME prevents a platform-only GLFW already loaded by
 MuJoCo/pyGLFW from satisfying ImGui's dependency while missing its X11 native symbols.
@@ -144,3 +156,14 @@ extension builds those CPU-only sources without a graphics dependency and releas
 while simplifying. Initialize the bgfx submodule even for a renderer-free Python extension
 build. The MIT license is retained upstream and included in platform wheels. The helper returns
 ordinary Mojive mesh data and does not couple consumer renderers to bgfx.
+
+## Canvas2D path topology
+
+`cpp/src/geometry2d/Tessellator.cpp` uses the pinned libtess2 revision for nonzero/evenodd
+fills, holes, self-intersections and external boundary edges. Its SGI Free Software
+License B 2.0 remains in `libtess2/LICENSE.txt` and is included in native wheels.
+Only its C sources are compiled; upstream examples and graphics libraries are not used.
+Coordinates are translated and normalized before conversion to the upstream float type.
+Scratch allocation has an explicit byte limit. A C-only jump boundary handles exhaustion
+because some upstream allocation sites do not check null; all outstanding allocations
+are owned and released by the wrapper, without modifying the pinned dependency.

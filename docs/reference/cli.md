@@ -42,7 +42,7 @@ Open one asset in the standard viewer. The model starts paused unless `--play` i
 
 ```text
 mojive view ASSET [-b ADAPTER] [--paused | --play] [--no-vsync] [--rpc-socket PATH]
-                  [--enable-render FLAG ...]
+                  [--rpc-limits PATH] [--enable-render FLAG ...]
 ```
 
 ### `editor`
@@ -50,11 +50,14 @@ mojive view ASSET [-b ADAPTER] [--paused | --play] [--no-vsync] [--rpc-socket PA
 Open an empty workspace or load one MJCF/URDF asset into the editor.
 
 ```text
-mojive editor [ASSET] [--no-vsync] [--rpc-socket PATH]
+mojive editor [ASSET] [--no-vsync] [--rpc-socket PATH] [--rpc-limits PATH]
 ```
 
 Use the File menu for `.mojive.json` workspaces, additional models, resource directories, and
 portable MJCF export.
+
+`--rpc-limits` requires `--rpc-socket` and reads a JSON object of server request, queue,
+connection and pump budgets. See [RPC work budgets](../how-to/rpc-control.md#work-budgets-and-diagnostics).
 
 ### `canvas`
 
@@ -235,7 +238,7 @@ before applying edits; the running service can have a different version or adapt
 Run a local AF_UNIX scene-control service.
 
 ```text
-mojive rpc-serve ASSET [-b ADAPTER] [--socket PATH]
+mojive rpc-serve ASSET [-b ADAPTER] [--socket PATH] [--limits-file PATH]
 ```
 
 The default socket is `output/mojive.sock`.
@@ -249,7 +252,7 @@ Send one typed RPC method. `--params` must be a JSON object.
 
 ```text
 mojive control METHOD [--params JSON | --params-file FILE]
-                       [--socket PATH] [--timeout SECONDS] [--json]
+                       [--socket PATH] [--timeout SECONDS] [--limits-file PATH] [--json]
 ```
 
 `--json` preserves structured errors with exit status 2. Use `hello`, `get_scene`, and
@@ -259,6 +262,8 @@ mojive control METHOD [--params JSON | --params-file FILE]
 `--params-file` reads UTF-8 JSON. Use `--params-file -` to read stdin. Both inputs require one JSON
 object and reject non-finite numbers before connecting. The default parameters are `{}`.
 Files avoid shell quoting and command-line length limits for multi-operation edits.
+`--limits-file` configures the client's message budgets. It does not change server limits;
+query `get_rpc_stats` to inspect those.
 
 ```bash
 mojive operations edit_scene --json

@@ -22,8 +22,10 @@ auto matrixArray(Matrix value) {
 void bindRender(nb::module_ &);
 #endif
 void bindMeshProcessing(nb::module_ &);
+void bindGeometry2D(nb::module_ &);
 NB_MODULE(_native, module) {
     bindMeshProcessing(module);
+    bindGeometry2D(module);
     module.doc() = "Private Mojive runtime infrastructure; use the compatible Python facade.";
     module.attr("contract_version") = 1;
 #if MOJIVE_HAS_BGFX

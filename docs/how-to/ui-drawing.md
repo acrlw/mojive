@@ -6,23 +6,47 @@ For example commands and the pixel-coordinate debug API, see [Debug drawing](deb
 For radius, smoothing, and native installation, see [G3 UI corners](ui-corners.md).
 For canonical grids, optical sizing, family consistency, and multi-size acceptance, see
 [Design and verify UI icons](ui-icons.md).
+For retained viewport geometry, see [Canvas2D](canvas2d.md).
+
+## Review on the production backend
+
+UI Feasibility and the viewer share window creation in
+`app/ui/window.py`. The probe creates no 3D renderer just to display its panels. Its Icon Library,
+Redesign capsules, and live Keyframes icons use the window painter and production icon geometry,
+including the current padding, stroke, alignment, and shape overrides.
+
+```bash
+make ui-feasibility BACKEND=bgfx ARGS="--ui-scale 1.5 --page geometry --geometry-tab icons"
+```
+
+Use `BACKEND=opengl` or `BACKEND=wgpu` for the other renderers. Direct module invocations accept
+`--renderer`; otherwise they use `MOJIVE_RENDERER`, then OpenGL. Captures use the selected
+window's framebuffer. Use `make ui-icon-concepts` for multi-size icon captures.
+
+The tool lives in `python/tools/ui_feasibility/`. `state.py` owns review parameters;
+`tuning.py` owns controls and export; `icon_library.py` owns family and context specimens;
+`geometry.py` composes experiments; `panels.py` composes panel specimens; `workspace.py` owns
+navigation; `runtime.py` owns window lifetime and the CLI. Import private helpers from their
+owner when extending or testing the tool. Do not restore a monolithic facade or a second icon
+implementation. The existing `python -m mojive.tools.ui_feasibility` entry remains available.
 
 ## Choose the entry point
 
 | Work | Entry point | Responsibility |
 | --- | --- | --- |
-| Draw a widget, icon, or viewport overlay | `mojive.ui.draw2d.Draw2D` | Place shapes, choose colors and drawing order |
-| Implement ImGui submission | `ImguiDraw2D` in the same module | Native bindings, AA, vertex buffers, font access |
-| Add reusable corners, arrows, or stroke caps | `mojive.drawing.curves` | Pure geometry, sampling, local shape caches |
-| Change hollow-origin connectors | `mojive.drawing.drag_link` | Shared implicit field and indexed CPU mesh |
+| Draw a widget, icon, or viewport overlay | `mojive.ui.paint_protocol.Draw2D` | Place shapes, choose colors and drawing order |
+| Obtain a production panel painter | `PanelContext.painter()` | Bind to the current window/child ImGui draw list |
+| Implement ImGui submission | `mojive.ui.imgui_draw.ImguiDraw2D` | Native bindings, AA, vertex buffers, font access |
+| Add reusable corners, arrows, or stroke caps | `mojive.geometry2d.curves` | Pure geometry, sampling, local shape caches |
+| Change hollow-origin connectors | `mojive.geometry2d.drag_link` | Shared implicit field and indexed CPU mesh |
 | Publish retained diagnostics | `mojive.render.debugdraw.Layer` | IDs, lifetime, primitive budgets and packing |
 | Implement a new GPU primitive | `render/opengl/passes/debug.py` and `render/webgpu/passes/debug.py` | Matching packed layout and shaders |
 | Change gizmo interaction or hit regions | `mojive.ui.gizmo` and `mojive.gizmo` | Interaction state and projected handles |
 | Change native ImGui colors, radii, or spacing | `mojive.ui.theme` | Standard ImGui style settings |
-| Maintain bulk drawing bindings or slider/focus fixes | `tools/build_imgui.py` | Minimal source patch and platform wheel build |
+| Maintain bulk drawing bindings or slider/focus fixes | `python/tools/build_imgui.py` | Minimal source patch and platform wheel build |
 
 The published `mojive.curves2d` and `mojive.draglink2d` paths remain compatibility exports.
-`drawing.curves` and `drawing.drag_link` import neither ImGui nor a render backend, UI controller, or physics
+`geometry2d.curves` and `geometry2d.drag_link` import neither ImGui nor a render backend, UI controller, or physics
 adapter. Layering tests enforce that boundary. `Draw2D` implementations submit geometry; reusable
 geometry belongs in the shared modules. A widget does not need to implement triangle packing or
 hold backend objects. Add a specialized helper only when the existing primitive cannot express
@@ -30,12 +54,16 @@ its shape. Avoid copying a production glyph into an example or probe.
 
 ## Draw a UI overlay
 
-Define placement against the protocol. Construct `ImguiDraw2D` only in an active ImGui frame,
-at the panel or viewport drawing boundary, and pass it to the helper.
+Define placement against the protocol. Obtain `ctx.painter()` in a panel, or
+`window.painter(draw_list)` in an active window frame, and pass it to the helper. Resolve it
+after entering the intended child or table scope; never retain a frame's draw list. Shared
+controls such as `search_input` and `segmented_control` accept `draw=ctx.painter()`. They retain
+native IDs and input behavior while icon helpers submit through the same ImGui draw list.
+Standalone reference tools can explicitly construct `ImguiDraw2D` in their active ImGui context.
 
 ```python
-from mojive.drawing.curves import smooth_capsule_points
-from mojive.ui.draw2d import Draw2D
+from mojive.geometry2d.curves import smooth_capsule_points
+from mojive.ui.paint_protocol import Draw2D
 
 
 def draw_direction_badge(draw: Draw2D, origin, scale: float = 1.0, smoothing: float = 0.6):
@@ -194,8 +222,12 @@ and fringe cache keys. Other adapters implement the same rigid placement as
 Omitting `origin` preserves the original window-coordinate behavior. Scaling belongs in the
 authored dimensions so the AA fringe remains one pixel wide.
 
-The CPU hollow connector belongs to `draglink2d.smooth_drag_link_mesh`. UI code calls
-`draw2d.draw_drag_link` for its two colors and placement. Normal Transform and perturbation
+For native ImGui line primitives below one logical unit, `ImguiDraw2D` compensates for ImGui's
+internal width floor by scaling alpha with the authored width. This preserves subpixel coverage;
+it does not change the canonical stroke width, icon padding, or G3 contour.
+
+The CPU hollow connector belongs to `geometry2d.drag_link.smooth_drag_link_mesh`. UI code calls
+`ui.drag_link.draw_drag_link` for its two colors and placement. Normal Transform and perturbation
 dragging publish the corresponding GPU field primitive. Update both shader fields when changing
 the implicit blend, then compare CPU reference boundaries and both GPU backends. Do not replace
 a one-quad path with a dense per-frame CPU solve solely to share its submission mechanism.
@@ -215,14 +247,14 @@ Transform and joint gizmos use this same implementation.
 
 | Change | Focused evidence |
 | --- | --- |
-| Reference profile, bounds, sampling, or cache | `python/tests/test_curves2d.py` |
-| Implicit connector, hole topology, or tessellation | `python/tests/test_draglink2d.py` |
-| Submission, AA, winding, or vertex offsets | `python/tests/test_draw2d.py` |
-| Gizmo appearance and interaction | `python/tests/test_gizmo.py`, `python/tests/gpu/test_gizmo.py`, `make gizmo-gallery` |
-| Radius/smoothing controls | `python/tests/gpu/test_ui_corner_controls.py`, `make ui-corners-gallery` |
+| Reference profile, bounds, sampling, or cache | `tests/test_curves2d.py` |
+| Implicit connector, hole topology, or tessellation | `tests/test_draglink2d.py` |
+| Submission, AA, winding, or vertex offsets | `tests/test_draw2d.py` |
+| Gizmo appearance and interaction | `tests/test_gizmo.py`, `tests/gpu/test_gizmo.py`, `make gizmo-gallery` |
+| Radius/smoothing controls | `tests/gpu/test_ui_corner_controls.py`, `make ui-corners-gallery` |
 | Compact UI icon geometry | family-focused CPU tests, `make ui-diagnostics`, and the [icon design guide](ui-icons.md) |
-| Retained primitives and bridge | `python/tests/test_debugdraw.py`, `python/tests/gpu/test_debugdraw.py`, `examples/debug_draw.py` |
-| Dependency boundaries | `python/tests/test_layering.py` |
+| Retained primitives and bridge | `tests/test_debugdraw.py`, `tests/gpu/test_debugdraw.py`, `examples/debug_draw.py` |
+| Dependency boundaries | `tests/test_layering.py` |
 
 Finish with the applicable gates in the [verification matrix](../guides/testing.md#change-mapping).
 Use `make g3-benchmark` for CPU shape/submission cases and `make ui-frame-profile` for an actual

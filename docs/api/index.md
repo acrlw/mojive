@@ -13,9 +13,10 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `mojive.scene_renderer` | Backend-neutral offscreen rendering | `SceneRenderer` |
 | `mojive.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
 | `mojive.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
-| `mojive.drawing.curves` | Shared sampled paths and stroke profiles | `smooth_rect_points`, `smooth_capsule_points`, `arrow_points`, `capped_polyline_points` |
-| `mojive.drawing.drag_link` | Hollow-connector geometry | `drag_link_field`, `smooth_drag_link_mesh` |
-| `mojive.ui.draw2d` | UI overlay extension protocol | `Draw2D`, `ImguiDraw2D` |
+| `mojive.geometry2d.curves` | Shared sampled paths and stroke profiles | `smooth_rect_points`, `smooth_capsule_points`, `arrow_points`, `capped_polyline_points` |
+| `mojive.geometry2d.drag_link` | Hollow-connector geometry | `drag_link_field`, `smooth_drag_link_mesh` |
+| `mojive.ui.paint_protocol` | Backend-neutral immediate shape protocol | `Draw2D` |
+| `mojive.ui.imgui_draw` | ImGui shape and font adapter | `ImguiDraw2D` |
 | `mojive.canvas2d` | Layered 2D physics and geometry diagnostics | `Canvas2D`, `CanvasLayer2D` |
 | `mojive.capture` | Interactive screenshot and recording contracts | `CaptureSurface`, `RecordingInfo` |
 | `mojive.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
