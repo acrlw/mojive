@@ -9,9 +9,9 @@ keeps an independent camera and render configuration.
 Start the publisher and attach viewers in separate terminals:
 
 ```bash
-uv run python examples/remote_publish.py
-uv run mojive attach --title effect
-uv run mojive attach --title debug --debug-view normal
+uv run --no-sync python examples/remote_publish.py
+uv run --no-sync mojive attach --title effect
+uv run --no-sync mojive attach --title debug --debug-view normal
 ```
 
 ```python
@@ -23,10 +23,10 @@ uv run mojive attach --title debug --debug-view normal
 Create a deterministic snapshot stream:
 
 ```bash
-uv run python examples/record_replay.py \
+uv run --no-sync python examples/record_replay.py \
   --output output/examples/orbit.fvs --frames 300 --fps 60
-uv run mojive replay output/examples/orbit.fvs
-uv run mojive attach
+uv run --no-sync mojive replay output/examples/orbit.fvs
+uv run --no-sync mojive attach
 ```
 
 ```python

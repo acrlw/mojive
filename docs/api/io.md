@@ -6,14 +6,14 @@ the previous `forge-viewer.*` identifiers only to migrate files created before t
 
 ## Mojive scene JSON
 
-::: mojive.scene_io
+::: mojive.scene.io
 
 `mojive.scene` stores one programmatic scene: materials, meshes, textures, objects, environment,
 lights, cameras, and ID allocators. It does not contain model references or simulation state.
 
 ## Composed workspace documents
 
-::: mojive.workspace_io
+::: mojive.scene.workspace
 
 `mojive.workspace` embeds one authored scene and adds MJCF/URDF model references, model root
 transforms, resource search directories, and normalized edited MJCF where needed. Missing model

@@ -1,7 +1,8 @@
 # API map
 
 The public package exports the common scene, rendering, adapter, remote, and recording types from
-`mojive`. Advanced integrations may import the owning module directly.
+`mojive`. The module paths below identify implementation owners. Existing compatibility imports remain
+available, but new integrations can use the owning modules directly.
 
 | Module | Purpose | Primary interfaces |
 |---|---|---|
@@ -10,8 +11,8 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `mojive.commands` | Typed application operations | `Command`, `Query`, scene and simulation commands |
 | `mojive.scene` | Programmatic authored scenes | `Scene`, `SceneObject`, `SceneLight` |
 | `mojive.session` | Application state and routing | `Session`, `PerturbState` |
-| `mojive.scene_renderer` | Backend-neutral offscreen rendering | `SceneRenderer` |
-| `mojive.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
+| `mojive.render.offscreen` | Backend-neutral offscreen rendering | `SceneRenderer` |
+| `mojive.app.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
 | `mojive.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
 | `mojive.geometry2d.curves` | Shared sampled paths and stroke profiles | `smooth_rect_points`, `smooth_capsule_points`, `arrow_points`, `capped_polyline_points` |
 | `mojive.geometry2d.drag_link` | Hollow-connector geometry | `drag_link_field`, `smooth_drag_link_mesh` |
@@ -20,10 +21,10 @@ The public package exports the common scene, rendering, adapter, remote, and rec
 | `mojive.canvas2d` | Layered 2D physics and geometry diagnostics | `Canvas2D`, `CanvasLayer2D` |
 | `mojive.capture` | Interactive screenshot and recording contracts | `CaptureSurface`, `RecordingInfo` |
 | `mojive.remote` | Live structure, frame, and command transport | `SnapshotPublisher`, `RemoteSceneAdapter` |
-| `mojive.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
-| `mojive.control_rpc` | Local process control | `ControlServer`, `ControlService`, `RpcClient` |
+| `mojive.capture.recording` | Video and snapshot streams | `VideoRecorder`, `SnapshotWriter` |
+| `mojive.control.rpc` | Local process control | `ControlServer`, `ControlService`, `RpcClient` |
 | `mojive.control` | Session application operations | `ControlApplication` |
-| `mojive.operations` | Operation discovery and validation | `OPERATIONS`, `Operation` |
+| `mojive.control.operations` | Operation discovery and validation | `OPERATIONS`, `Operation` |
 
 ## Integration paths
 

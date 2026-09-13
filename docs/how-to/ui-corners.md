@@ -81,9 +81,10 @@ Generic stroke caps shorten the adjoining straight segment slightly to preserve 
 tip extent. A very short segment reduces the smoothing fraction to keep the caps from overlapping.
 This guarantees G3 joins to those straight endpoint segments; it does not turn an arbitrary
 input polyline into an analytically smooth centerline.
-Transform rotation-ring caps now use the same reference profile and the gizmo's smoothing value.
-The sampled ring ribbon retains its endpoint-segment approximation; this is distinct from the
-analytic ellipse-offset construction used by the Rotate icon below.
+Open arcs in Transform rotation and Joint gizmos use ordinary circular round caps. They do
+not use the G3 cap profile: screen projection can approach an edge-on degeneracy, and those
+small caps do not benefit from the additional construction. Full circles and ticks retain
+their separate geometry. This policy is independent of the Rotate UI icon below.
 
 Rotate uses exact ellipse offsets. Its caps map the same reference curve through the ellipse's
 arc-length and normal coordinates. This preserves third-order contact with both curved sides

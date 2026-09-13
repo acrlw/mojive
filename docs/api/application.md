@@ -5,16 +5,16 @@ adapter, debug bridge, and editor UI as one owned `Viewer`.
 
 ## Viewer lifecycle and capture
 
-::: mojive.composition
+::: mojive.app.composition
 
 ## Passive MuJoCo viewing
 
-::: mojive.passive
+::: mojive.app.passive
 
 ## Backend discovery
 
-::: mojive.backends
+::: mojive.app.backends
 
 ## Built-in programmatic scenes
 
-::: mojive.demos
+::: mojive.app.demos

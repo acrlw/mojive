@@ -56,14 +56,14 @@ def main(argv: list[str] | None = None) -> int:
                 gs = f"{g:10.3f}" if g is not None else f"{'—':>10}"
                 print(f"  {k:<12}{c:10.3f}{gs}")
         if not gpu:
-            print("\n  GPU timing queries are unavailable; see docs/PLATFORM.md.")
+            print("\n  GPU timing queries are unavailable; see docs/concepts/rendering.md.")
         else:
             zeros = [k for k in keys if gpu.get(k) and statistics.median(gpu[k]) == 0.0]
             if zeros and any(gpu.get(k) and statistics.median(gpu[k]) > 0 for k in keys):
                 print(
                     f"\n  Zero GPU samples: {zeros}. Tile-based deferred rendering may charge "
                     "their work to another open query. Use aggregate GPU time on these devices; "
-                    "see docs/PLATFORM.md."
+                    "see docs/concepts/rendering.md."
                 )
         print(
             "\n  CPU and GPU columns overlap in time; the larger value identifies the bottleneck."

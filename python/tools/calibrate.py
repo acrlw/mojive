@@ -243,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         print("   Result: additive floor + reflectance × reflected color.")
         print("   Implementation: shaders/scene_body.glsl; gate: tests/gpu/test_reflection.py")
 
-    print("\n  Calibration decisions are documented in docs/DECISIONS.md.")
+    print("\n  Calibration decisions are documented in docs/concepts/rendering.md.")
     return 0
 
 

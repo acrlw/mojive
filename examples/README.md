@@ -1,7 +1,7 @@
 # Examples
 
-Run these programs from the repository root after `uv sync --extra mujoco --extra wgpu` or
-`make setup`. Commands below use `uv run` so they work without activating `.venv`.
+Run these programs from the repository root after `make setup`. Commands use
+`uv run --no-sync` to preserve the locally built ImGui wheel and native extension registration.
 
 | Example | Window | Result |
 |---|---:|---|
@@ -30,10 +30,10 @@ The guarded script entry point is required by the passive viewer's spawned displ
 ## Interactive scenes
 
 ```bash
-uv run python examples/programmatic_scene.py
-uv run python examples/custom_adapter.py
-uv run python examples/debug_draw.py
-uv run python examples/canvas2d.py
+uv run --no-sync python examples/programmatic_scene.py
+uv run --no-sync python examples/custom_adapter.py
+uv run --no-sync python examples/debug_draw.py
+uv run --no-sync python examples/canvas2d.py
 ```
 
 Close the application window to end each program. These sources are cross-referenced from the
@@ -42,16 +42,16 @@ user guide and checked during `make docs-check`.
 ## MuJoCo rendering and control
 
 ```bash
-uv run python examples/mujoco_render.py assets/test_scene.xml \
+uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 
-uv run python examples/mujoco_render.py assets/test_scene.xml \
-  --backend wgpu \
+uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
+  --renderer wgpu \
   --output output/examples/render-wgpu
 
-uv run python examples/mujoco_control.py assets/slider_crank.xml --steps 120
+uv run --no-sync python examples/mujoco_control.py assets/slider_crank.xml --steps 120
 
-uv run python examples/multi_camera_render.py assets/showcase.xml \
+uv run --no-sync python examples/multi_camera_render.py assets/showcase.xml \
   --output output/examples/cameras
 ```
 
@@ -64,7 +64,7 @@ used here because it contains named fixed cameras.
 Record a rollout at video FPS without changing the model's physical timestep:
 
 ```bash
-uv run python examples/mujoco_video.py assets/test_scene.xml \
+uv run --no-sync python examples/mujoco_video.py assets/test_scene.xml \
   --frames 90 --fps 30 --label "Policy A" --output output/examples/rollout.mp4
 ```
 
@@ -80,7 +80,7 @@ display-free servers still need working EGL. See [configuration](../docs/referen
 Save an editable workspace:
 
 ```bash
-uv run python examples/compose_scene.py \
+uv run --no-sync python examples/compose_scene.py \
   assets/test_scene.xml assets/test_scene.urdf \
   --spacing 2.5 \
   --output output/examples/workcell.mojive.json
@@ -89,7 +89,7 @@ uv run python examples/compose_scene.py \
 Save the same composition as portable MJCF:
 
 ```bash
-uv run python examples/compose_scene.py \
+uv run --no-sync python examples/compose_scene.py \
   assets/test_scene.xml assets/test_scene.urdf \
   --spacing 2.5 \
   --output output/examples/workcell.xml
@@ -104,12 +104,12 @@ roots for later editing.
 Start the publisher and attach one or more viewers in separate terminals:
 
 ```bash
-uv run python examples/remote_publish.py --host 127.0.0.1 --port 47650 --hz 30
+uv run --no-sync python examples/remote_publish.py --host 127.0.0.1 --port 47650 --hz 30
 ```
 
 ```bash
-uv run mojive attach --host 127.0.0.1 --port 47650 --title effect
-uv run mojive attach --host 127.0.0.1 --port 47650 \
+uv run --no-sync mojive attach --host 127.0.0.1 --port 47650 --title effect
+uv run --no-sync mojive attach --host 127.0.0.1 --port 47650 \
   --title normals --debug-view normal
 ```
 
@@ -119,10 +119,10 @@ viewer resumes from the current frame instead of accumulating latency.
 Create a finite recording, then start replay and attach in separate terminals:
 
 ```bash
-uv run python examples/record_replay.py \
+uv run --no-sync python examples/record_replay.py \
   --output output/examples/orbit.fvs --frames 300 --fps 60
-uv run mojive replay output/examples/orbit.fvs --loop
-uv run mojive attach
+uv run --no-sync mojive replay output/examples/orbit.fvs --loop
+uv run --no-sync mojive attach
 ```
 
 ## Local control
@@ -136,14 +136,14 @@ physics engine or separately running service.
 Start the service:
 
 ```bash
-MOJIVE_BACKEND=wgpu uv run mojive rpc-serve assets/test_scene.xml \
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive rpc-serve assets/test_scene.xml \
   --socket output/mojive.sock
 ```
 
 Run the persistent Python client from another terminal:
 
 ```bash
-uv run python examples/control_client.py \
+uv run --no-sync python examples/control_client.py \
   --socket output/mojive.sock \
   --steps 120 \
   --capture output/examples/rpc.png

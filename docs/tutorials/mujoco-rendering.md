@@ -7,12 +7,13 @@ depth, and segmentation output.
 ## RGB, depth, and segmentation
 
 ```bash
-uv run python examples/mujoco_render.py assets/test_scene.xml \
+uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 ```
 
-This example exposes `--backend opengl|wgpu` for convenience. Library code selects the same backend
-with `MOJIVE_BACKEND`. On Linux, offscreen OpenGL creates an EGL context by default.
+This example exposes `--renderer opengl|wgpu` (`--backend` is its legacy alias).
+Library code also accepts `renderer="bgfx"` with the native build, or selects a default through
+`MOJIVE_RENDERER`. On Linux, offscreen OpenGL creates an EGL context by default.
 If initialization fails, see [context troubleshooting](../reference/configuration.md#render-backend-requirements):
 `MOJIVE_GL=glfw` is an alternative on a desktop, not on a display-free server.
 
@@ -25,7 +26,7 @@ If initialization fails, see [context troubleshooting](../reference/configuratio
 The same renderer can update and render each fixed camera without rebuilding model structure:
 
 ```bash
-uv run python examples/multi_camera_render.py assets/showcase.xml \
+uv run --no-sync python examples/multi_camera_render.py assets/showcase.xml \
   --output output/examples/cameras
 ```
 
@@ -43,11 +44,11 @@ and call `video.append(renderer.render())` at each video sample; frames are stre
 as a growing Python list. No custom FFmpeg pipe is needed in application code.
 
 ```bash
-uv run python examples/mujoco_video.py assets/test_scene.xml \
+uv run --no-sync python examples/mujoco_video.py assets/test_scene.xml \
   --frames 90 --fps 30 --output output/examples/rollout.mp4
 
 # Optional RGB-only subtitle with the actual simulation time:
-uv run python examples/mujoco_video.py assets/test_scene.xml \
+uv run --no-sync python examples/mujoco_video.py assets/test_scene.xml \
   --label "Policy A" --output output/examples/annotated-rollout.mp4
 ```
 
@@ -77,14 +78,12 @@ executable recipe that assigns a root transform to each MJCF/URDF model and save
 `.mojive.json` workspace or portable MJCF. No hand-written `<include>` file is required.
 
 ```bash
-uv run python examples/compose_scene.py assets/test_scene.xml assets/test_scene.urdf \
+uv run --no-sync python examples/compose_scene.py assets/test_scene.xml assets/test_scene.urdf \
   --spacing 2.5 --output output/examples/workcell.xml
-uv run python examples/mujoco_video.py output/examples/workcell.xml \
+uv run --no-sync python examples/mujoco_video.py output/examples/workcell.xml \
   --output output/examples/workcell.mp4
 ```
 
-This assembles and compiles one physical model. It does **not** accept independent running
-`MjModel`/`MjData` pairs as render-only instances, and is not an RL batch renderer. `Renderer`
-still binds one compiled model and accepts data from that model. For independent policy runs,
-render each state with its own compatible renderer and concatenate the RGB images for a
-side-by-side video; that is image composition, not a shared 3D world.
+This assembles and compiles one physical model. `Renderer` binds that compiled model and
+accepts its corresponding `MjData`. For independent models, retain one compatible renderer per
+model; use image composition when arranging their outputs side by side.

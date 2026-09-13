@@ -39,21 +39,11 @@ nav:
       - Extend UI drawing: how-to/ui-drawing.md
       - Canvas2D: how-to/canvas2d.md
       - Design UI icons: how-to/ui-icons.md
-      - WebGPU backend: WGPU_BACKEND_REPORT.md
       - Native renderer probe: guides/native-probe.md
-      - Native Viewer (中文): how-to/native-viewer.zh.md
+      - Native bgfx backend: how-to/native-viewer.md
   - Concepts:
       - Architecture: concepts/architecture.md
-      - Renderer: RENDERER.md
-      - Batch rendering for RL: BATCH_RENDERING.md
-      - Platform support: PLATFORM.md
-      - C++ foundation (中文): plans/cpp-foundation.zh.md
-      - C++ implementation checklist: plans/cpp-implementation.zh.md
-      - C++ dependencies (中文): plans/cpp-dependencies.zh.md
-      - Native renderer acceptance (中文): plans/native-renderer-parity.zh.md
-      - Native resources and runtime (中文): plans/native-resource-runtime.zh.md
-      - Native backend decision (中文): plans/native-backend-decision.zh.md
-      - Native C++ proposal (中文): plans/native-cpp-bgfx.zh.md
+      - Renderer: concepts/rendering.md
   - API reference:
       - API map: api/index.md
       - Public package exports: api/public.md
@@ -65,7 +55,6 @@ nav:
       - Remote and recording: api/remote.md
       - Scene and workspace files: api/io.md
       - Math and persistence: api/utilities.md
-  - Engineering decisions: DECISIONS.md
 hooks:
   - python/tools/docs_hooks.py
 plugins:

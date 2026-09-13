@@ -1,7 +1,9 @@
 # Extend UI drawing
 
-Start with the drawing surface and its state owner. UI widgets receive a `Draw2D`; retained
-diagnostics use a debug `Layer`. Both consume the shared geometry without importing each other.
+Start with the drawing surface and its state owner. UI widgets use ImGui draw lists through
+the `Draw2D` protocol; that name describes the existing UI interface, not a separate rendering
+module. Retained diagnostics use a DebugDraw `Layer` or Canvas2D. Both paths reuse CPU geometry
+without importing each other.
 For example commands and the pixel-coordinate debug API, see [Debug drawing](debug-draw.md).
 For radius, smoothing, and native installation, see [G3 UI corners](ui-corners.md).
 For canonical grids, optical sizing, family consistency, and multi-size acceptance, see
@@ -40,8 +42,8 @@ implementation. The existing `python -m mojive.tools.ui_feasibility` entry remai
 | Add reusable corners, arrows, or stroke caps | `mojive.geometry2d.curves` | Pure geometry, sampling, local shape caches |
 | Change hollow-origin connectors | `mojive.geometry2d.drag_link` | Shared implicit field and indexed CPU mesh |
 | Publish retained diagnostics | `mojive.render.debugdraw.Layer` | IDs, lifetime, primitive budgets and packing |
-| Implement a new GPU primitive | `render/opengl/passes/debug.py` and `render/webgpu/passes/debug.py` | Matching packed layout and shaders |
-| Change gizmo interaction or hit regions | `mojive.ui.gizmo` and `mojive.gizmo` | Interaction state and projected handles |
+| Implement a new GPU primitive | `render/opengl/passes/debug.py`, `render/webgpu/passes/debug.py`, and the native debug pass | Matching packed layout and shaders |
+| Change gizmo interaction or hit regions | `mojive.ui.gizmo` and `mojive.interaction.gizmo` | Interaction state and projected handles |
 | Change native ImGui colors, radii, or spacing | `mojive.ui.theme` | Standard ImGui style settings |
 | Maintain bulk drawing bindings or slider/focus fixes | `python/tools/build_imgui.py` | Minimal source patch and platform wheel build |
 
@@ -143,7 +145,7 @@ controls apply the same alpha to their text, fill, border, and checkmark.
 
 Use `ROW_PADDING_X` and `ROW_PADDING_Y` from `theme` for custom list rows. Rows keep their
 full-width hover background while text and disclosure icons sit inside it. Custom text in
-one row uses `draw2d.text_line_y`, which centers a shared cap-height reference: descenders
+one row uses `ui.text_layout.text_line_y`, which centers a shared cap-height reference: descenders
 must not move individual words off the baseline. Status keys and telemetry use the same
 keycap drawing and `keycap_rounding` proportions.
 

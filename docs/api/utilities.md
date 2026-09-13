@@ -4,18 +4,12 @@
 
 ::: mojive.math3d
 
-## Authored scene documents
-
-::: mojive.scene_io
-
-## Workspace documents and resource repair
-
-::: mojive.workspace_io
+For authored scenes and workspace serialization, see [Scene and workspace files](io.md).
 
 ## Runtime snapshots and camera bookmarks
 
-::: mojive.scene_state
+::: mojive.scene.state
 
 ## Bundled assets
 
-::: mojive.assets
+::: mojive.scene.assets

@@ -40,7 +40,7 @@ Python byte estimate and remain bounded by the record count.
 ## Run the example
 
 ```bash
-uv run python examples/programmatic_scene.py
+uv run --no-sync python examples/programmatic_scene.py
 ```
 
 The scene owns stable geometry and entity metadata. `build_scene()` wraps it with a static scene

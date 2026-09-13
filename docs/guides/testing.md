@@ -305,10 +305,8 @@ of pixels; metric depth p99 on shared visible pixels must stay below 1e-4 world 
 also checks generated texture orientation and classic lighting saturation independently. These
 are functional image checks, with reports and captures under `output/quality-improvements/`.
 
-The scene and material goldens were refreshed on 2026-09-05 after reviewing the earlier classic-lighting
-migration, correcting generated primitive texture coordinates and clamping lighting before
-texture modulation. The corresponding MuJoCo reference comparison retains its separate
-approximate renderer-parity thresholds; it does not promise pixel-identical MuJoCo shading.
+MuJoCo reference comparisons use approximate renderer-parity thresholds; they do not promise
+pixel-identical shading. Review changed baselines using the workflow above.
 
 ## Composed-model editor latency
 
@@ -336,10 +334,28 @@ be compared as if they counted identical passes. Unavailable GPU timers are repo
 separate publisher and receiver processes over loopback without rendering.
 `make g1-worlds-monitor-benchmark` adds completed GPU output and reports both receive-time
 and completed-image age. Run the two backend variants serially with identical mesh quality. See the
-[native Viewer guide](../how-to/native-viewer.zh.md#g1-world) for input data and limitations.
+[native Viewer guide](../how-to/native-viewer.md#independent-world-replay) for input data and limitations.
 
 `make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie ARGS="--gallery"`
 also captures the expanded 700-actuator component table and mouse mapping settings after
 completing its timed operations. `tests/gpu/test_input_mapping.py` exercises changed
 navigation, multi-button acquisition/release, unsupported perturbation, and panel/slider remaps
 through actual windows. Run these with `MOJIVE_RENDERER=opengl`, `wgpu`, and `bgfx` as applicable.
+
+## Startup and documentation captures
+
+```bash
+make startup-profile ARGS="--backend opengl wgpu bgfx --asset joint_gizmo --repeats 3"
+make startup-profile ARGS="--backend opengl --profile --compare-icons"
+make readme-media
+```
+
+Build each requested backend before profiling. Startup trials run in fresh processes and record
+imports, fonts, Session setup, first frame and window presentation separately. Profiling adds
+overhead; keep those samples separate from ordinary timing runs. `--compare-icons` compares
+production presets with dynamic icon fitting. Inspect JSON and images under
+`output/startup-profile/`; do not equate a hidden black window with a presented usable frame.
+
+README media uses isolated settings, the real jointed scene and fixed-size captures. Inspect
+all three files under `output/readme-media/` before delivery. The documentation gate checks
+local links, including the README image paths; the capture command checks identical dimensions.

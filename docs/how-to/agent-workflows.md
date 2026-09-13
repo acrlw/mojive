@@ -24,9 +24,9 @@ startup, methods, capabilities, and timeout behavior.
 Begin with capabilities and the current scene. CLI commands below use `output/mojive.sock`:
 
 ```bash
-uv run mojive control hello --json
-uv run mojive control get_scene --json
-uv run mojive control describe_operations --params '{"name":"edit_scene"}' --json
+uv run --no-sync mojive control hello --json
+uv run --no-sync mojive control get_scene --json
+uv run --no-sync mojive control describe_operations --params '{"name":"edit_scene"}' --json
 ```
 
 For repeated operations, use one `RpcClient`; `examples/control_client.py` is a small starting
@@ -121,11 +121,3 @@ does not establish these behaviors. Run the applicable [verification gates](../g
 for changed decisions or executable behavior. Pure wording changes do not require scene rendering.
 Extend the Skill only for demonstrated gaps, keeping parameter and protocol details in code and
 the relevant reference guide.
-
-This instruction workflow was reviewed on 2026-09-05 against the official
-[GPT-6 Astra guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)
-and [Skill authoring guidance](https://learn.chatgpt.com/docs/build-skills).
-
-Batch rendering remains deferred. Capture and viewport have explicit independent settings;
-transactional authoring applies only to the edits advertised by discovery. The native remote
-transport retains its physics-specific operations; these are not all exposed through local RPC.

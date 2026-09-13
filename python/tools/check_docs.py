@@ -7,6 +7,7 @@ import ast
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from mojive.cli import build_parser
 from mojive.render.backend import DebugView, RenderFlag
@@ -42,6 +43,7 @@ ASSET_REFERENCE = re.compile(
     r"(assets/[A-Za-z0-9_./-]+\.(?:xml|urdf|png|jpg|jpeg|obj|stl|msh|ply))"
 )
 CURRENT_DOCS = (ROOT / "README.md", ROOT / "examples/README.md")
+MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\(([^)\n]+)\)")
 CONFIG_ENV_MODULES = (
     "python/app/composition.py",
     "python/app/renderer.py",
@@ -170,6 +172,19 @@ def stale_usage_errors() -> list[str]:
     return errors
 
 
+def local_link_errors() -> list[str]:
+    """Check repository-relative Markdown links, including README image paths."""
+    errors = []
+    for path in (*CURRENT_DOCS, *sorted((ROOT / "docs").rglob("*.md"))):
+        for reference in MARKDOWN_LINK.findall(path.read_text(encoding="utf-8")):
+            target = urlsplit(reference.strip().strip("<>"))
+            if target.scheme or target.netloc or not target.path:
+                continue
+            if not (path.parent / unquote(target.path)).exists():
+                errors.append(f"{path.relative_to(ROOT)}: missing local link {reference!r}")
+    return errors
+
+
 def main() -> int:
     """Run focused documentation checks without importing graphics dependencies."""
     errors = [error for module in PUBLIC_MODULES for error in public_entry_errors(module)]
@@ -179,6 +194,7 @@ def main() -> int:
     errors.extend(configuration_reference_errors())
     errors.extend(asset_reference_errors())
     errors.extend(stale_usage_errors())
+    errors.extend(local_link_errors())
     if errors:
         print("Documentation checks failed:", file=sys.stderr)
         for error in errors:
@@ -186,7 +202,7 @@ def main() -> int:
         return 1
     print(
         f"Documentation checks passed: {len(PUBLIC_MODULES)} API modules, "
-        "CLI reference, examples, snippets, and asset links"
+        "CLI reference, examples, snippets, asset paths, and local links"
     )
     return 0
 

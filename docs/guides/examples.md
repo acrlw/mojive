@@ -4,7 +4,7 @@ The `examples/` programs are executable API documentation. Tutorial pages embed 
 directly, so the guide and runnable code stay synchronized.
 
 The [runnable examples README](https://github.com/acrlw/mojive/tree/main/examples) contains exact
-commands, required assets, and generated outputs. Commands use `uv run`, so activating `.venv` is
+commands, required assets, and generated outputs. Commands use `uv run --no-sync`, so activating `.venv` is
 not required.
 
 ## Start here
@@ -18,7 +18,7 @@ not required.
 | Publish or record dynamic frames | [Remote viewing and replay](../tutorials/remote-viewing.md) | `SnapshotPublisher`, `SnapshotWriter` |
 | Integrate another physics engine | [Custom scene adapter](../how-to/custom-adapter.md) | `SceneAdapterBase`, `SceneSource`, `SceneFrame` |
 | Add diagnostics and labels | [Debug drawing](../how-to/debug-draw.md) | `DebugDraw`, `Layer`, `Occlusion` |
-| Debug 2D physics and geometry | [2D diagnostic canvas](../how-to/debug-draw.md#2d-physics-and-geometry-diagnostics) | `Canvas2D`, `CanvasLayer2D` |
+| Debug 2D physics and geometry | [2D diagnostic canvas](../how-to/canvas2d.md) | `Canvas2D`, `CanvasLayer2D` |
 | Automate a running process | [Local RPC control](../how-to/rpc-control.md) | `RpcClient`, `ControlService` |
 
 ## Example catalog
