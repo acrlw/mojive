@@ -7,10 +7,10 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from pathlib import Path
 
 from ...log import get_logger
 from ...native import native_module as native_module
+from ...native import native_shader_directory
 
 _lock = threading.RLock()
 _shared = None
@@ -23,14 +23,7 @@ class NativeDevice:
         self.api = native_module()
         if not self.api.has_renderer:
             raise RuntimeError("The native extension was built without a renderer")
-        build = os.environ.get("MOJIVE_NATIVE_BUILD")
-        shaders = os.environ.get("MOJIVE_NATIVE_SHADER_DIR")
-        if not shaders:
-            shaders = (
-                str(Path(build) / "shaders")
-                if build
-                else str(Path(self.api.__file__).parent / "shaders")
-            )
+        shaders = str(native_shader_directory(self.api))
         if wayland is None:
             wayland = (
                 sys.platform.startswith("linux")

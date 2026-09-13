@@ -13,6 +13,22 @@ from pathlib import Path
 _lock = threading.RLock()
 
 
+def native_shader_directory(module) -> Path:
+    """Resolve shaders beside a wheel or inside the loaded editable build."""
+    override = os.environ.get("MOJIVE_NATIVE_SHADER_DIR")
+    if override:
+        return Path(override)
+    build = os.environ.get("MOJIVE_NATIVE_BUILD")
+    if build:
+        return Path(build) / "shaders"
+    package = Path(module.__file__).resolve().parent
+    # Editable installs load <build>/python/mojive/_native directly. Prove
+    # that layout with its CMake cache; never search unrelated build outputs.
+    if package.parent.name == "python" and (package.parent.parent / "CMakeCache.txt").is_file():
+        return package.parent.parent / "shaders"
+    return package / "shaders"
+
+
 def native_module():
     """Load the installed extension or an explicitly selected development build."""
     with _lock:
