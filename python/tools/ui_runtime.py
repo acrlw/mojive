@@ -585,7 +585,8 @@ def _settle(viewer, frames: int = 7) -> None:
 
 
 def _capture_status_spacing(output: Path) -> None:
-    from ..ui import app as app_module
+    from ..ui.app import status as app_module
+    from ..ui.viewport_widgets import ToolHint
 
     viewer = build_scene(Scene(), vsync=False, width=1600, height=600, show_window=False)
     original = app_module.draw_status
@@ -593,6 +594,11 @@ def _capture_status_spacing(output: Path) -> None:
 
     def draw_status(*args, **kwargs):
         # Fix measured rates so visual comparisons cover the same digit boundaries.
+        labels = kwargs["labels"]
+        kwargs["tool_hints"] = (
+            ToolHint("key", "Esc", labels.clear_selection),
+            ToolHint("mouse", "left", labels.orbit),
+        )
         return original(*args, **(kwargs | values))
 
     app_module.draw_status = draw_status

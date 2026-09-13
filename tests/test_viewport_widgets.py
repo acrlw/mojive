@@ -722,7 +722,7 @@ class _RecordedStatus(_MeasuredText):
         self.polylines = []
         self.convex_fills = []
 
-    def text(self, position, color, value):
+    def text(self, position, color, value, *, pixel_snap=True):
         self.texts.append(value)
         self.text_positions.append((position, value))
         self.text_colors.append(color)
@@ -1224,7 +1224,7 @@ def test_modified_mouse_hint_keeps_its_glyph_and_matches_its_measured_width(scal
 
     draw = _RecordedMouse()
     text = []
-    draw.text = lambda _pos, _color, value: text.append(value)
+    draw.text = lambda _pos, _color, value, **_kwargs: text.append(value)
     hint = ToolHint("mouse", "right", "Select loop range", modifier="Shift")
     registry = ToolHintRegistry()
     registry.add("range", hint)
