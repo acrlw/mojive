@@ -2137,6 +2137,13 @@ def draw_icon_label(
 
 
 def _draw_cached_icon(draw, center, size, name, color, accent_color, style):
+    from .icon_draw import ImguiIconDraw
+    from .imgui_draw import ImguiDraw2D
+
+    if isinstance(draw, ImguiDraw2D) and name not in STROKE_SCALE_LOCKED_ICONS:
+        resolved = production_icon_style(name) if style is None else style
+        fringe = min(1.0, size / ICON_GRID * resolved.stroke_width * 0.5)
+        draw = ImguiIconDraw(draw, fringe)
     colors = (color, color if accent_color is None else accent_color)
     for method, before, slot, after, options in _icon_draw_commands(
         name, (float(center[0]), float(center[1])), float(size), style

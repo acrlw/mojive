@@ -311,8 +311,8 @@ def main() -> None:
         )
     if args.icon_stroke is not None and not ICON_MIN_STROKE <= args.icon_stroke <= ICON_MAX_STROKE:
         parser.error(f"--icon-stroke must be between {ICON_MIN_STROKE:g} and {ICON_MAX_STROKE:g}")
-    if not 0.75 <= args.ui_scale <= 4.0:
-        parser.error("--ui-scale must be between 0.75 and 4.0")
+    if not 0.5 <= args.ui_scale <= 4.0:
+        parser.error("--ui-scale must be between 0.5 and 4.0")
     if not 15.0 <= args.fps <= 240.0:
         parser.error("--fps must be between 15 and 240")
     output = args.output.resolve()
