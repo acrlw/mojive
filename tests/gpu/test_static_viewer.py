@@ -193,6 +193,51 @@ def test_status_text_vertices_remain_centered_at_fractional_coordinates(canvas, 
     assert centers == pytest.approx([expected] * 3, abs=1e-4)
 
 
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5))
+@pytest.mark.parametrize("button", ("left", "right", "wheel"))
+def test_mouse_shell_corners_do_not_accumulate_alpha(canvas, monkeypatch, scale, button):
+    from dataclasses import replace
+
+    from mojive.ui.app import status as app_status
+    from mojive.ui.theme import THEME
+    from mojive.ui.viewport_widgets import draw_mouse_hint_glyph
+
+    viewer, _scene = canvas
+    original_status = app_status.draw_status
+    crop_rect = None
+    theme = replace(THEME, text=(1.0, 1.0, 1.0, 0.5), primary=(0.0, 0.0, 0.0, 0.0))
+
+    def draw_status(draw, origin, width, height, *args, **kwargs):
+        nonlocal crop_rect
+        result = original_status(draw, origin, width, height, *args, **kwargs)
+        x, y = origin
+        crop_rect = (x + 60, y, x + 120, y + height)
+        draw.rect_filled(crop_rect[:2], crop_rect[2:], (0.0, 0.0, 0.0, 1.0))
+        draw_mouse_hint_glyph(
+            draw,
+            x + 80.25,
+            y + height * 0.5,
+            button,
+            "",
+            theme,
+            scale,
+            pixel_size=viewer.window.pixels_to_points(1.0),
+        )
+        return result
+
+    monkeypatch.setattr(app_status, "draw_status", draw_status)
+    for _ in range(3):
+        viewer.sync()
+    pixels = snap(viewer)
+    x0, y0, x1, y1 = (round(v * viewer.window.pixel_scale) for v in crop_rect)
+    shell = pixels[y0:y1, x0:x1]
+    # A half-transparent white shell over black cannot exceed one application
+    # of its alpha. Include ImGui's subpixel coverage attenuation below 1 u.
+    maximum = round(255 * 0.5 * min(scale, 1.0))
+    assert shell.max() <= maximum + 1
+    assert shell.max() >= maximum * 0.7
+
+
 def test_retained_canvas_content_suppresses_the_empty_scene_notice(monkeypatch):
     viewer = build_scene(Scene(), vsync=False, width=900, height=620, show_window=False)
     notices: list[str] = []

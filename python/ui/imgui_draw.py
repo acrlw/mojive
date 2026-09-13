@@ -214,9 +214,18 @@ class ImguiDraw2D:
             return
         imgui = self._imgui
         flags = imgui.ImDrawFlags_.closed if closed else imgui.ImDrawFlags_.none
-        self._dl.add_polyline(
-            self._vecs(points), self._stroke_u32(color, width), float(width), flags.value
-        )
+        draw_flags = self._dl.flags
+        if width < 1.0:
+            # Textured AA expands a clamped 1 u stroke to a 3 u strip. Its
+            # inner edge folds over on subpixel corners, blending alpha twice.
+            self._dl.flags &= ~imgui.ImDrawListFlags_.anti_aliased_lines_use_tex.value
+        try:
+            self._dl.add_polyline(
+                self._vecs(points), self._stroke_u32(color, width), float(width), flags.value
+            )
+        finally:
+            if width < 1.0:
+                self._dl.flags = draw_flags
 
     def convex_fill(self, points, color) -> None:
         self._dl.add_convex_poly_filled(_fill_points(points), self._u32(color))

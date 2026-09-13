@@ -598,6 +598,8 @@ def _capture_status_spacing(output: Path) -> None:
         kwargs["tool_hints"] = (
             ToolHint("key", "Esc", labels.clear_selection),
             ToolHint("mouse", "left", labels.orbit),
+            ToolHint("mouse", "right", labels.pan),
+            ToolHint("mouse", "wheel", labels.zoom),
         )
         return original(*args, **(kwargs | values))
 
