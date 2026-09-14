@@ -57,12 +57,18 @@ class VideoRecorder:
         *,
         pixel_format: str = "yuv420p",
         codec: str | None = None,
+        crf: int | None = None,
+        bitrate: int | None = None,
+        preset: str | None = None,
     ) -> None:
         """Configure input dimensions, playback FPS, pixel format, and optional encoder.
 
         ``pixel_format`` accepts ``yuv420p`` (player-compatible default) or
         ``yuv444p`` (full chroma resolution). MP4 defaults to ``libx264``;
-        WMV retains the ``msmpeg4`` encoder. Physics stepping is caller-owned.
+        WMV retains the ``msmpeg4`` encoder. ``crf`` selects H.264 constant quality
+        (0–51, lower is better; default 25). ``bitrate`` selects target bits/s
+        instead; the two modes are exclusive. ``preset`` selects H.264 encoding
+        speed (default medium). Physics stepping is caller-owned.
         """
         self.path = Path(path)
         if len(size) != 2:
@@ -77,6 +83,39 @@ class VideoRecorder:
             raise ValueError("video pixel_format must be yuv420p or yuv444p")
         self.pixel_format = pixel_format
         self.codec = codec or ("msmpeg4" if self.path.suffix.lower() == ".wmv" else "libx264")
+        if crf is not None:
+            try:
+                crf = operator.index(crf)
+            except TypeError as exc:
+                raise ValueError("video crf must be an integer from 0 to 51") from exc
+            if not 0 <= crf <= 51:
+                raise ValueError("video crf must be an integer from 0 to 51")
+        if bitrate is not None:
+            try:
+                bitrate = operator.index(bitrate)
+            except TypeError as exc:
+                raise ValueError("video bitrate must be a positive integer in bits/s") from exc
+            if bitrate <= 0:
+                raise ValueError("video bitrate must be a positive integer in bits/s")
+        if crf is not None and bitrate is not None:
+            raise ValueError("Choose either crf or bitrate for video rate control")
+        if preset is not None and preset not in (
+            "ultrafast",
+            "superfast",
+            "veryfast",
+            "faster",
+            "fast",
+            "medium",
+            "slow",
+            "slower",
+            "veryslow",
+        ):
+            raise ValueError("Unknown H.264 encoding preset")
+        if self.codec != "libx264" and (crf is not None or preset is not None):
+            raise ValueError("crf and preset require the libx264 encoder")
+        self.crf = 25 if crf is None and bitrate is None and self.codec == "libx264" else crf
+        self.bitrate = bitrate
+        self.preset = (preset or "medium") if self.codec == "libx264" else None
         self.encoded_size = tuple(
             value + value % 2 if pixel_format == "yuv420p" else value for value in self.size
         )
@@ -127,8 +166,12 @@ class VideoRecorder:
             "-pix_fmt",
             self.pixel_format,
         ]
-        if self.codec == "libx264":
-            command += ["-crf", "25"]
+        if self.preset is not None:
+            command += ["-preset", self.preset]
+        if self.bitrate is not None:
+            command += ["-b:v", str(self.bitrate)]
+        elif self.crf is not None:
+            command += ["-crf", str(self.crf)]
         elif self.codec == "msmpeg4":
             command += ["-q:v", "16"]
         command.append(str(self.path.resolve()))

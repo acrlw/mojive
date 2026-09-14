@@ -468,7 +468,7 @@ def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(v
         nearest_take_frame(session.state_take_times, 18),
     )
     assert session.state_take_loop == expected
-    assert not session.state_take_loop_enabled
+    assert session.state_take_loop_enabled
     assert (panel._view_start, panel._view_end) == view_range
     np.testing.assert_allclose(session.camera.eye, before.eye)
     drag(
@@ -489,6 +489,17 @@ def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(v
     assert session.state_take_loop is None
     assert not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
     assert (panel._view_start, panel._view_end) == view_range
+
+
+def test_selecting_another_range_reenables_loop_after_manually_disabling_it(viewer):
+    session = viewer.session
+    drag(viewer, timeline_point(viewer, 9), timeline_point(viewer, 18), shift=True)
+    bounds = session.state_take_range
+    assert session.state_take_loop_enabled
+    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-loop"))
+    assert not session.state_take_loop_enabled and session.state_take_range == bounds
+    drag(viewer, timeline_point(viewer, 3), timeline_point(viewer, 6), shift=True)
+    assert session.state_take_loop_enabled and session.state_take_range != bounds
 
 
 @pytest.mark.parametrize("start_frame", (None, 300))

@@ -474,7 +474,7 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     events = []
 
     class Recorder:
-        def __init__(self, path, size, fps):
+        def __init__(self, path, size, fps, **encoding):
             self.path, self.size, self.fps = path, size, fps
             self.frames = 0
             self.closed = False
@@ -795,7 +795,7 @@ def test_video_start_action_follows_first_encoded_frame_and_never_repeats(
     events = []
 
     class Recorder:
-        def __init__(self, path, size, fps):
+        def __init__(self, path, size, fps, **encoding):
             self.size = size
 
         def append(self, frame):
@@ -838,7 +838,7 @@ def test_failed_or_canceled_video_start_does_not_run_an_unrecorded_action(
     events = []
 
     class Recorder:
-        def __init__(self, path, size, fps):
+        def __init__(self, path, size, fps, **encoding):
             self.size = size
 
         def append(self, frame):
@@ -871,3 +871,74 @@ def test_failed_or_canceled_video_start_does_not_run_an_unrecorded_action(
         assert events == ["frame", "Play", "close", "simulation unavailable"]
     else:
         assert "Play" not in events
+
+
+@pytest.mark.parametrize("rate_control", ("quality", "bitrate"))
+def test_encoding_settings_are_frozen_at_start_and_refreshed_for_the_next_video(
+    monkeypatch, tmp_path, rate_control
+):
+    from dataclasses import replace
+
+    from mojive import RecordingConfig
+    from mojive.capture import recording
+
+    encoded = []
+
+    class Recorder:
+        def __init__(self, path, size, fps, **encoding):
+            self.size = size
+            encoded.append(encoding)
+
+        def append(self, frame):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    app = ViewerApp.__new__(ViewerApp)
+    app.recording_config = RecordingConfig(
+        countdown=0,
+        rate_control=rate_control,
+        crf=18,
+        bitrate_mbps=6.5,
+        encoder_preset="fast",
+        pixel_format="yuv444p",
+    )
+    app._surface_image = lambda *args: np.zeros((2, 2, 3), np.uint8)
+    app.session = SimpleNamespace(report_message=lambda *args, **kwargs: None)
+    app.start_recording(tmp_path / "first.mp4")
+    app.set_recording_config(
+        replace(
+            app.recording_config,
+            crf=35,
+            bitrate_mbps=1,
+            encoder_preset="slow",
+            pixel_format="yuv420p",
+        ),
+        persist=False,
+    )
+    app._advance_recording_countdown()
+    app._finish_capture_and_recording(None, 0)
+    assert encoded == [
+        {
+            "crf": 18 if rate_control == "quality" else None,
+            "bitrate": 6_500_000 if rate_control == "bitrate" else None,
+            "preset": "fast",
+            "pixel_format": "yuv444p",
+        }
+    ]
+    assert app.pause_recording() and app.resume_recording()
+    app._finish_capture_and_recording(None, 0)
+    assert len(encoded) == 1
+    app.stop_recording(report=False)
+    app.start_recording(tmp_path / "second.mp4")
+    app._advance_recording_countdown()
+    app._finish_capture_and_recording(None, 0)
+    assert encoded[-1] == {
+        "crf": 35 if rate_control == "quality" else None,
+        "bitrate": 1_000_000 if rate_control == "bitrate" else None,
+        "preset": "slow",
+        "pixel_format": "yuv420p",
+    }
+    app.stop_recording(report=False)

@@ -41,8 +41,9 @@ def tick(viewer, dt=0.08):
 
 
 @pytest.mark.parametrize("surface", (CaptureSurface.SCENE, CaptureSurface.VIEWPORT))
+@pytest.mark.parametrize("rate_control", ("quality", "bitrate"))
 def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
-    viewer, tmp_path, monkeypatch, surface
+    viewer, tmp_path, monkeypatch, surface, rate_control
 ):
     from mojive.capture.recording import VideoRecorder
 
@@ -50,7 +51,17 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     path = tmp_path / "full take with spaces.mp4"
     app._capture_output = lambda *_args: path
     viewer.configure_recording(
-        RecordingConfig(countdown=60, end_hold=0.2, surface=surface, run_simulation=True)
+        RecordingConfig(
+            countdown=60,
+            end_hold=0.2,
+            surface=surface,
+            run_simulation=True,
+            rate_control=rate_control,
+            crf=18,
+            bitrate_mbps=4,
+            encoder_preset="fast",
+            pixel_format="yuv444p",
+        )
     )
     assert session.submit(cmd.SetStateTakePauseAtEnd(False))
     assert session.submit(cmd.SetStateTakeLoop(2, 4))
@@ -72,6 +83,10 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     app._recording_deadline = 0
     tick(viewer)
     assert [cursor for cursor, _ in recorded] == [0]
+    recorder = app._viewport_recorder
+    assert recorder.crf == (18 if rate_control == "quality" else None)
+    assert recorder.bitrate == (4_000_000 if rate_control == "bitrate" else None)
+    assert recorder.preset == "fast" and recorder.pixel_format == "yuv444p"
     for _ in range(3):
         tick(viewer)
     viewer.pause_recording()

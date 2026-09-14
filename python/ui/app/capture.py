@@ -135,6 +135,7 @@ class _Capture:
         self._recording_deadline = time.monotonic() + countdown
         self._viewport_recording_phase = RecordingPhase.COUNTDOWN
         self._recording_run_simulation = config.run_simulation
+        self._active_recording_config = config
         return path
 
     def _advance_recording_countdown(self) -> None:
@@ -479,10 +480,22 @@ class _Capture:
             if self._viewport_recorder is None:
                 from mojive.capture.recording import VideoRecorder
 
+                config = self._active_recording_config
+                h264 = self._viewport_recording_path.suffix.lower() != ".wmv"
                 self._viewport_recorder = VideoRecorder(
                     self._viewport_recording_path,
                     (int(image.shape[1]), int(image.shape[0])),
                     fps=self._viewport_recording_fps,
+                    pixel_format=config.pixel_format,
+                    crf=config.crf
+                    if config.rate_control == "quality" and (h264 or config.crf != 25)
+                    else None,
+                    bitrate=round(config.bitrate_mbps * 1_000_000)
+                    if config.rate_control == "bitrate"
+                    else None,
+                    preset=config.encoder_preset
+                    if h264 or config.encoder_preset != "medium"
+                    else None,
                 )
             elif tuple(self._viewport_recorder.size) != (image.shape[1], image.shape[0]):
                 raise RuntimeError("capture size changed while recording")

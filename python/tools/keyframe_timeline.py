@@ -357,7 +357,19 @@ def capture_transport(viewer, output: Path) -> None:
     )
     assert session.submit(cmd.Pause())
 
-    panel.open = False
+    show_recording_settings(viewer)
+    assert not app.recording_config.run_simulation
+    _click(viewer, _item_center(viewer, "checkbox", "##recording_run_simulation"))
+    assert app.recording_config.run_simulation
+    _save_window_crop(viewer, "Settings", output / "recording-settings.png", padding=0)
+
+
+def show_recording_settings(viewer) -> None:
+    """Place recording preferences in a reproducible, fully visible window."""
+    from mojive import ViewportLayers
+
+    viewer.configure_layers(ViewportLayers(viewport_ui=False))
+    viewer.panels.get("Keyframes").open = False
     viewer.panels.open_panel("Settings")
     viewer.panels.get("Settings").show_category("Recording")
     for _ in range(4):
@@ -373,17 +385,30 @@ def capture_transport(viewer, output: Path) -> None:
             size = imgui.get_main_viewport().work_size
             imgui.set_next_window_pos((20, 160))
             imgui.set_next_window_size(
-                (min(1100 * viewer.window.style_scale, size.x - 40), size.y - 185)
+                (
+                    min(1000 * viewer.window.style_scale, size.x - 40),
+                    min(550 * viewer.window.style_scale, size.y - 185),
+                )
             )
         return begin(settings, *args, **kwargs)
 
     viewer.panels._begin_panel_window = place
     for _ in range(3):
         viewer.sync()
-    assert not app.recording_config.run_simulation
-    _click(viewer, _item_center(viewer, "checkbox", "##recording_run_simulation"))
-    assert app.recording_config.run_simulation
-    _save_window_crop(viewer, "Settings", output / "recording-settings.png", padding=0)
+
+
+def capture_recording_settings(viewer, output: Path) -> None:
+    """Capture both rate-control layouts through the production settings controls."""
+    from mojive import RecordingConfig
+
+    viewer.configure_recording(RecordingConfig())
+    show_recording_settings(viewer)
+    _save_window_crop(viewer, "Settings", output / "recording-quality.png", padding=0)
+    _click(viewer, _item_center(viewer, "begin_combo", "##recording_rate_control"))
+    _click(viewer, _item_center(viewer, "selectable", viewer.app.localizer.text("Target bitrate")))
+    assert viewer.app.recording_config.rate_control == "bitrate"
+    viewer.sync()
+    _save_window_crop(viewer, "Settings", output / "recording-bitrate.png", padding=0)
 
 
 def capture_replay(viewer, output: Path) -> list[dict[str, float]]:
@@ -509,6 +534,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--range-playback", action="store_true", help="Capture range navigation and repeat toggling"
     )
+    parser.add_argument(
+        "--recording-settings",
+        action="store_true",
+        help="Capture video quality and bitrate settings",
+    )
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--language", choices=("en", "zh_CN"), default="en")
     args = parser.parse_args(argv)
@@ -528,6 +558,9 @@ def main(argv: list[str] | None = None) -> int:
         show_window=False,
     ) as viewer:
         viewer.app.set_language(args.language)
+        if args.recording_settings:
+            capture_recording_settings(viewer, args.output)
+            return 0
         populate_take(
             viewer,
             30
@@ -576,8 +609,6 @@ def main(argv: list[str] | None = None) -> int:
         assert session.state_take_loop is not None
         _save_window_crop(viewer, "Keyframes", args.output / "loop-range.png", padding=0)
         bounds = session.state_take_loop
-        assert not session.state_take_loop_enabled
-        _click(viewer, _item_center(viewer, "invisible_button", "##timeline-loop"))
         assert session.state_take_loop_enabled and session.state_take_range == bounds
         assert session.submit(cmd.SeekStateTake(bounds[1] - 1))
         assert session.submit(cmd.PlayStateTake())
