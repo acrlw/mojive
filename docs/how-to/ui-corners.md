@@ -123,6 +123,17 @@ the UI. Shared paths and transformed ImGui vertices use bounded caches.
 
 Translation reuses local capsule and icon geometry. Short-cap fitting evaluates only the
 scalar footprint during its search and samples the final curve once.
+Icon commands are cached by shape, style, and size; screen position and semantic colors
+are applied at submission. ImGui translates the complete submitted vertex range, including
+the antialias fringe, in one native pass. Circular icon frames share a direct annulus mesh
+instead of offsetting, repairing, and triangulating a general closed stroke.
+The Rotate icon's interleaved inner rings retain their subtraction boundaries. Style changes
+test exact intersections only for overlapping edge bounds and classify boundary midpoints
+as a batch; translation never repeats that construction.
+Hinge axis guides join the unchanged arrowhead directly to each visible shaft's circular cap;
+they do not clip a completed arrow and reconstruct its tail.
+Canvas filled rectangles, circles, and ellipses use direct convex fans. Arbitrary polygons
+and paths retain the general compiler so concavity, holes, and fill rules remain correct.
 The patched binding submits a complete outward antialias fringe in one native call; its
 vertices, indices, UVs, and colors match the Python fallback.
 The CPU drag-link fallback builds indexed vertical strips around the hollow origin, including
@@ -135,7 +146,10 @@ contours receive an antialias fringe, including the inward-facing edge of the ho
 Sampled rotation ribbons also use cached strip and cap indices, with linear submission work.
 Their end caps consume the available arc length and remove covered samples instead of refitting
 curvature to every changing endpoint segment. General concave fills remain available for small
-arbitrary contours, but the known rotation-ribbon topology bypasses ear clipping.
+arbitrary contours. Regular rotation ribbons bypass ear clipping; tight projected offsets can
+fold and require exterior repair and triangulation. This repair prunes edge pairs by their
+bounds and tests only reflex vertices inside candidate ears. Static caches do not cover a
+continuously changing camera; `make joint-gizmo-profile` measures that path through the viewer.
 
 These changes remove repeated preparation work without reducing sampling accuracy. G3 paths
 still contain more vertices than simple circular corners, and moving silhouettes still need

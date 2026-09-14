@@ -50,6 +50,41 @@ def test_canvas_camera_fits_bounds_and_uses_canvas_orientation() -> None:
     assert canvas.screen_to_canvas(screen, camera, viewport) == pytest.approx((1.25, -0.5))
 
 
+@pytest.mark.parametrize("shape", ("rectangle", "circle", "ellipse"))
+def test_convex_primitives_fill_directly_and_preserve_transforms(monkeypatch, shape):
+    import mojive.render.canvas_geometry as geometry
+    from mojive.canvas2d import Affine2D
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Known convex primitives must not invoke the general path compiler")
+
+    monkeypatch.setattr(geometry, "compile_fill", unexpected)
+    canvas = Canvas2D(DebugDraw())
+    layer = canvas.layer("convex", depth=0.5)
+    with layer.transformed(Affine2D.translation(4.0, 6.0)):
+        if shape == "rectangle":
+            layer.rectangle("shape", (-2, -1), (2, 1), (1, 0, 0, 0.5), filled=True)
+            area = 8.0
+        elif shape == "circle":
+            layer.circle("shape", (0, 0), 2, (1, 0, 0, 0.5), segments=64, filled=True)
+            area = 64 * np.sin(2 * np.pi / 64) * 2
+        else:
+            layer.ellipse("shape", (0, 0), (2, 1), (1, 0, 0, 0.5), filled=True)
+            area = 64 * np.sin(2 * np.pi / 64)
+    vertices = layer._layer.positions_of(PrimitiveType.TRIANGLE)
+    a, b = vertices[:, 1, :2] - vertices[:, 0, :2], vertices[:, 2, :2] - vertices[:, 0, :2]
+    assert np.abs(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]).sum() / 2 == pytest.approx(area)
+    assert vertices[..., 2] == pytest.approx(0.5)
+    assert (vertices[..., 0].min() + vertices[..., 0].max()) / 2 == pytest.approx(4.0)
+    assert (vertices[..., 1].min() + vertices[..., 1].max()) / 2 == pytest.approx(6.0)
+    before = vertices.copy()
+    with pytest.raises(ValueError, match="finite"):
+        layer.rectangle("shape", (np.nan, 0), (2, 1), (1, 0, 0, 0.5), filled=True)
+    assert layer._layer.positions_of(PrimitiveType.TRIANGLE) == pytest.approx(before)
+    layer.rectangle("shape", (0, 0), (0, 1), (1, 0, 0, 0.5), filled=True)
+    assert layer._layer.count_of(PrimitiveType.TRIANGLE) == 0
+
+
 def test_canvas_rejects_degenerate_basis_and_bounds() -> None:
     with pytest.raises(ValueError, match="axes"):
         Canvas2D(DebugDraw(), x_axis=(0.0, 0.0, 0.0))

@@ -308,6 +308,23 @@ are functional image checks, with reports and captures under `output/quality-imp
 MuJoCo reference comparisons use approximate renderer-parity thresholds; they do not promise
 pixel-identical shading. Review changed baselines using the workflow above.
 
+## Joint gizmo edge views
+
+`make joint-gizmo-profile BACKEND=bgfx` captures a limited hinge from both sides of
+its edge-on fade and measures stationary and continuously changing cameras separately.
+Use the reported link name to reproduce a particular model, for example:
+
+```bash
+make joint-gizmo-profile BACKEND=bgfx ARGS="--asset /path/to/unitree_g1/scene.xml --link left_wrist_roll_link --distance 0.42"
+```
+
+Run this separately from other benchmarks and GPU tests. The default window is hidden,
+VSync is disabled, and layout persistence is disabled. `--visible` enables visible-window
+measurements, which must be reported separately. Frame and overlay times measure CPU/application
+work, not display scanout. Inspect the captures and JSON under `output/joint-gizmo-profile/`.
+The CPU regression also exercises the production ImGui painter and bounds exact contour
+predicates during fading, without relying on machine-dependent timing thresholds.
+
 ## Composed-model editor latency
 
 `make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` creates an empty

@@ -65,7 +65,7 @@ def test_focused_glyph_keeps_every_review_size_inside_hidpi_capture(
     original = icon_library._draw_concept_icon_specimen
 
     def observe(draw, center, size, name, *args, **kwargs):
-        painted.append((center, size, name))
+        painted.append((center, size, name, tuple(imgui.get_io().display_framebuffer_scale)))
         return original(draw, center, size, name, *args, **kwargs)
 
     monkeypatch.setattr(icon_library, "_draw_concept_icon_specimen", observe)
@@ -86,13 +86,14 @@ def test_focused_glyph_keeps_every_review_size_inside_hidpi_capture(
     )
     pixels = np.asarray(Image.open(output))
     height, width = pixels.shape[:2]
-    assert {name for _center, _size, name in painted} == {glyph}
-    assert {size / 2.5 for _center, size, _name in painted} == {14, 24, 56, 112}
-    for (x, y), size, _name in painted[-4:]:
-        half = size * 0.5
-        assert 0 <= x - half < x + half <= width
-        assert 0 <= y - half < y + half <= height
-        region = pixels[int(y - half) : int(y + half), int(x - half) : int(x + half)]
+    assert {name for _center, _size, name, _scale in painted} == {glyph}
+    assert {size / 2.5 for _center, size, _name, _scale in painted} == {14, 24, 56, 112}
+    for (x, y), size, _name, (sx, sy) in painted[-4:]:
+        x, y = x * sx, y * sy
+        half_x, half_y = size * sx * 0.5, size * sy * 0.5
+        assert 0 <= x - half_x < x + half_x <= width
+        assert 0 <= y - half_y < y + half_y <= height
+        region = pixels[int(y - half_y) : int(y + half_y), int(x - half_x) : int(x + half_x)]
         assert region.std() > 20
 
 

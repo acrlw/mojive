@@ -15,6 +15,7 @@ from mojive.geometry2d.curves import (
     CORNER_SMOOTHING,
     arrow_mesh,
     box_handle_points,
+    circular_stroke_mesh,
     polyline_ribbon,
     smooth_line_cap,
     smooth_polygon_corners,
@@ -832,56 +833,6 @@ def _concept_rotate_ring_polygons(
     )
 
 
-@lru_cache(maxsize=128)
-def _circular_stroke_mesh(
-    radius: float,
-    width: float,
-    segments: int = 64,
-) -> tuple[
-    tuple[tuple[float, float], ...],
-    tuple[int, ...],
-    tuple[tuple[float, float], ...],
-    tuple[tuple[float, float], ...],
-]:
-    """Return one hollow circular stroke with explicit outer and inner AA contours."""
-
-    if radius <= 0.0 or width <= 0.0 or width >= radius * 2.0:
-        raise ValueError("circular stroke width must be positive and smaller than its diameter")
-    if segments < 8:
-        raise ValueError("circular stroke requires at least eight segments")
-    outer_radius = radius + width * 0.5
-    inner_radius = radius - width * 0.5
-    outer = tuple(
-        (
-            outer_radius * math.cos(index * math.tau / segments),
-            outer_radius * math.sin(index * math.tau / segments),
-        )
-        for index in range(segments)
-    )
-    inner = tuple(
-        (
-            inner_radius * math.cos(index * math.tau / segments),
-            inner_radius * math.sin(index * math.tau / segments),
-        )
-        for index in range(segments)
-    )
-    vertices = (*outer, *inner)
-    indices = tuple(
-        vertex
-        for index in range(segments)
-        for following in ((index + 1) % segments,)
-        for vertex in (
-            index,
-            following,
-            segments + following,
-            index,
-            segments + following,
-            segments + index,
-        )
-    )
-    return vertices, indices, outer, inner
-
-
 def _draw_tool(p: _Painter, name: str) -> None:
     if name == "tool-move":
         # Restore the original compact arrowhead proportions. The head control
@@ -933,7 +884,7 @@ def _draw_tool(p: _Painter, name: str) -> None:
             ROTATE_FRINGE_MAX,
             rendered_gap * ROTATE_FRINGE_GAP_FRACTION,
         )
-        frame = _circular_stroke_mesh(
+        frame = circular_stroke_mesh(
             10.0 * glyph_scale,
             p.stroke_width * p.stroke_compensation,
         )
@@ -2080,15 +2031,8 @@ class _IconCommands:
 
 
 @lru_cache(maxsize=512)
-def _icon_draw_commands(
-    name: str, center: tuple[float, float], size: float, style: IconStyle | None
-):
-    """Compile each visible placement once; never retain a draw list or actual color.
-
-    The bounded screen-placement cache also avoids transforming the same vertex
-    arrays every frame. Resizing or scrolling produces a new placement; ordinary
-    hover, press and disabled states reuse it with their current semantic colors.
-    """
+def _icon_draw_commands(name: str, size: float, style: IconStyle | None):
+    """Compile local geometry once per shape and size, independent of placement or color."""
 
     if style is None:
         style, layout = _production_icon_layout(name)
@@ -2106,8 +2050,8 @@ def _icon_draw_commands(
     layout_scale, offset, stroke_compensation = layout
     unit_scale = size / ICON_GRID
     adjusted_center = (
-        center[0] + offset[0] * unit_scale,
-        center[1] + offset[1] * unit_scale,
+        offset[0] * unit_scale,
+        offset[1] * unit_scale,
     )
     recording = _IconCommands()
     _draw_concept_icon_raw(
@@ -2125,6 +2069,26 @@ def _icon_draw_commands(
         tuning=style.tuning,
     )
     return tuple(recording.commands)
+
+
+def _place_icon_command(method, before, options, center):
+    """Translate recorded primitives for Draw2D consumers without native vertex transforms."""
+
+    def point(value):
+        return value[0] + center[0], value[1] + center[1]
+
+    if method in {"indexed_fill", "fringed_concave_fill"}:
+        if options.get("origin") is not None:
+            return before, {**options, "origin": point(options["origin"])}
+        options = {
+            key: tuple(map(point, value)) if key in {"outline", "hole"} else value
+            for key, value in options.items()
+        }
+    if method in {"line", "arrow", "rect", "rect_filled"}:
+        return (point(before[0]), point(before[1]), *before[2:]), options
+    if method in {"circle", "circle_filled"}:
+        return (point(before[0]), *before[1:]), options
+    return (tuple(map(point, before[0])), *before[1:]), options
 
 
 def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None) -> None:
@@ -2186,10 +2150,18 @@ def _draw_cached_icon(draw, center, size, name, color, accent_color, style):
         fringe = min(1.0, size / ICON_GRID * resolved.stroke_width * 0.5)
         draw = ImguiIconDraw(draw, fringe)
     colors = (color, color if accent_color is None else accent_color)
-    for method, before, slot, after, options in _icon_draw_commands(
-        name, (float(center[0]), float(center[1])), float(size), style
-    ):
+    native = isinstance(draw, ImguiDraw2D)
+    first = len(draw._dl.vtx_buffer) if native else 0
+    for method, before, slot, after, options in _icon_draw_commands(name, float(size), style):
+        if not native:
+            before, options = _place_icon_command(method, before, options, center)
         getattr(draw, method)(*before, colors[slot], *after, **options)
+    if native:
+        # Include AA vertices in the same native translation. Geometry caches
+        # then survive scrolling, dock resizing, and subpixel timeline motion.
+        draw._imgui.internal.shade_verts_transform_pos(
+            draw._dl, first, len(draw._dl.vtx_buffer), (0.0, 0.0), 1.0, 0.0, draw._vec(center)
+        )
 
 
 def draw_control_icon(draw, center, size: float, kind: str, color) -> None:

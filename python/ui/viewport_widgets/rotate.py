@@ -6,6 +6,8 @@ import math
 from functools import lru_cache
 from itertools import pairwise
 
+import numpy as np
+
 from mojive.geometry2d.curves import (
     CORNER_SMOOTHING,
     polyline_ribbon,
@@ -97,19 +99,27 @@ def _rotate_stroke_outline(
     return _counterclockwise(_remove_ellipse_offset_folds(rounded))
 
 
+def _points_in_polygon(points, polygon):
+    """Classify a batch of boundary midpoints with the same even/odd ray rule."""
+    points, current = np.asarray(points), np.asarray(polygon)
+    previous = np.roll(current, 1, axis=0)
+    x, y = points[:, :1], points[:, 1:]
+    dy = previous[:, 1] - current[:, 1]
+    crossing_x = (
+        np.divide(
+            (previous[:, 0] - current[:, 0]) * (y - current[:, 1]),
+            dy,
+            out=np.zeros((len(points), len(current))),
+            where=dy != 0,
+        )
+        + current[:, 0]
+    )
+    crosses = ((current[:, 1] > y) != (previous[:, 1] > y)) & (x < crossing_x)
+    return np.count_nonzero(crosses, axis=1) % 2 != 0
+
+
 def _point_in_polygon(point, polygon) -> bool:
-    x, y = point
-    inside = False
-    previous = polygon[-1]
-    for current in polygon:
-        if (current[1] > y) != (previous[1] > y):
-            crossing_x = (previous[0] - current[0]) * (y - current[1]) / (
-                previous[1] - current[1]
-            ) + current[0]
-            if x < crossing_x:
-                inside = not inside
-        previous = current
-    return inside
+    return bool(_points_in_polygon((point,), polygon)[0])
 
 
 def _polygon_difference(subject, clip):
@@ -117,34 +127,45 @@ def _polygon_difference(subject, clip):
 
     subject_breaks = [[] for _ in subject]
     clip_breaks = [[] for _ in clip]
-    for subject_index, start in enumerate(subject):
-        end = subject[(subject_index + 1) % len(subject)]
-        for clip_index, clip_start in enumerate(clip):
-            clip_end = clip[(clip_index + 1) % len(clip)]
-            intersection = _segment_intersection(start, end, clip_start, clip_end)
-            if intersection is None:
-                continue
-            amount, clip_amount, point = intersection
-            subject_breaks[subject_index].append((amount, point))
-            clip_breaks[clip_index].append((clip_amount, point))
+    subject_points, clip_points = np.asarray(subject), np.asarray(clip)
+    subject_next, clip_next = np.roll(subject_points, -1, axis=0), np.roll(clip_points, -1, axis=0)
+    subject_lo, subject_hi = (
+        np.minimum(subject_points, subject_next),
+        np.maximum(subject_points, subject_next),
+    )
+    clip_lo, clip_hi = np.minimum(clip_points, clip_next), np.maximum(clip_points, clip_next)
+    candidates = np.all((subject_lo[:, None] <= clip_hi) & (clip_lo <= subject_hi[:, None]), axis=2)
+    for subject_index, clip_index in zip(*np.nonzero(candidates), strict=True):
+        intersection = _segment_intersection(
+            subject[subject_index],
+            subject[(subject_index + 1) % len(subject)],
+            clip[clip_index],
+            clip[(clip_index + 1) % len(clip)],
+        )
+        if intersection is None:
+            continue
+        amount, clip_amount, point = intersection
+        subject_breaks[subject_index].append((amount, point))
+        clip_breaks[clip_index].append((clip_amount, point))
 
     if not any(subject_breaks):
-        return () if _point_in_polygon(subject[0], clip) else (_counterclockwise(subject),)
+        return () if _points_in_polygon((subject[0],), clip)[0] else (_counterclockwise(subject),)
 
     edges = []
 
     def append_boundary(polygon, breaks, other, *, keep_inside: bool, reverse: bool) -> None:
+        parts = []
         for index, start in enumerate(polygon):
             end = polygon[(index + 1) % len(polygon)]
             cuts = [(0.0, start), *breaks[index], (1.0, end)]
             cuts.sort(key=lambda item: item[0])
             for (_, first), (_, second) in pairwise(cuts):
-                midpoint = (
-                    (first[0] + second[0]) * 0.5,
-                    (first[1] + second[1]) * 0.5,
-                )
-                if _point_in_polygon(midpoint, other) != keep_inside:
-                    continue
+                parts.append((first, second))
+        midpoints = np.asarray(parts).mean(axis=1)
+        for (first, second), inside in zip(
+            parts, _points_in_polygon(midpoints, other), strict=True
+        ):
+            if inside == keep_inside:
                 edges.append((second, first) if reverse else (first, second))
 
     # Keep subject edges outside the shell. Shell edges inside the subject are

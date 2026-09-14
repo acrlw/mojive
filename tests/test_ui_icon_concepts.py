@@ -391,6 +391,7 @@ def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> No
     assert style.rotate_ring_cap == "round"
 
     icon_concepts._production_icon_layout.cache_clear()
+    icon_concepts._icon_draw_commands.cache_clear()
     draw_icon(_RecordingDraw(), (10.0, 20.0), 24.0, "panel-clear", (1.0,) * 4)
     first = icon_concepts._production_icon_layout.cache_info()
     draw_icon(_RecordingDraw(), (30.0, 40.0), 24.0, "panel-clear", (0.5,) * 4)
@@ -398,7 +399,8 @@ def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> No
 
     assert first.misses == 1
     assert second.misses == 1
-    assert second.hits == first.hits + 1
+    assert second.hits == first.hits
+    assert icon_concepts._icon_draw_commands.cache_info().hits == 1
 
 
 def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
@@ -1197,6 +1199,20 @@ def test_concept_icon_bounds_and_strokes_scale_as_one_master(name: str) -> None:
 
 @pytest.mark.parametrize("name", [name for _, names in ICON_FAMILIES for _, name in names])
 def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
+    def compare(actual, expected):
+        if isinstance(expected, dict):
+            assert actual.keys() == expected.keys()
+            for key in expected:
+                compare(actual[key], expected[key])
+        elif isinstance(expected, (tuple, list)):
+            assert len(actual) == len(expected)
+            for a, b in zip(actual, expected, strict=True):
+                compare(a, b)
+        elif isinstance(expected, (float, int)):
+            assert actual == pytest.approx(expected, rel=0, abs=1e-10)
+        else:
+            assert actual == expected
+
     class Calls:
         def __init__(self):
             self.calls = []
@@ -1231,7 +1247,7 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
                 tuning=style.tuning,
             )
             draw_icon(actual, center, size, name, foreground, accent_color=accent)
-            assert actual.calls == expected.calls
+            compare(actual.calls, expected.calls)
 
 
 def test_production_presets_match_dynamic_layout_and_visible_metrics():
@@ -1268,7 +1284,7 @@ def test_cold_production_icons_skip_dynamic_fitting(monkeypatch):
     for _family, entries in ICON_FAMILIES:
         for _label, name in entries:
             icon_concepts.production_icon_metrics(name)
-            assert icon_concepts._icon_draw_commands(name, (0.0, 0.0), 24.0, None)
+            assert icon_concepts._icon_draw_commands(name, 24.0, None)
 
 
 @pytest.mark.parametrize("head_scale", (0.65, 1.6, 2.0))

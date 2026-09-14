@@ -6,6 +6,24 @@ import pytest
 from mojive.tools.tool_icons import render_tool_shell_icon
 
 
+@pytest.mark.parametrize("width", (0.8, 1.2, 2.4))
+def test_rotate_style_changes_only_intersect_overlapping_edge_bounds(monkeypatch, width):
+    from mojive.ui.viewport_widgets import rotate
+
+    intersections = 0
+    original = rotate._segment_intersection
+
+    def intersect(*args):
+        nonlocal intersections
+        intersections += 1
+        return original(*args)
+
+    monkeypatch.setattr(rotate, "_segment_intersection", intersect)
+    rotate._rotate_visible_ring_polygons.cache_clear()
+    assert rotate._rotate_visible_ring_polygons(width, 1.0, "round", 0.618)
+    assert intersections < 500
+
+
 @pytest.mark.parametrize(
     ("kind", "space"),
     (("move", "world"), ("frame", "world"), ("frame", "body")),
