@@ -19,7 +19,7 @@ incremental compilation. `make native-python-build` builds without opening a vie
 For scripts using that development build:
 
 ```bash
-export MOJIVE_NATIVE_BUILD="$PWD/output/cpp-build"
+export MOJIVE_NATIVE_BUILD="$PWD/build/native"
 MOJIVE_RENDERER=bgfx uv run --no-sync mojive view joint_types
 ```
 

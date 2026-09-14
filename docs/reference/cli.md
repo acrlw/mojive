@@ -241,7 +241,9 @@ Run a local AF_UNIX scene-control service.
 mojive rpc-serve ASSET [-b ADAPTER] [--socket PATH] [--limits-file PATH]
 ```
 
-The default socket is `output/mojive.sock`.
+The default socket is `$XDG_RUNTIME_DIR/mojive/control.sock`. Without `XDG_RUNTIME_DIR`,
+it is `mojive-<uid>/control.sock` under the system temporary directory. Viewer `--rpc-socket`
+without a path uses this same default; omit the flag to leave viewer RPC disabled.
 
 On macOS, start the service with `MOJIVE_RENDERER=wgpu` when using `capture`; RPC requests run on
 worker threads and the platform OpenGL context path is main-thread-only. Linux can use OpenGL.
@@ -267,7 +269,7 @@ query `get_rpc_stats` to inspect those.
 
 ```bash
 mojive operations edit_scene --json
-mojive control edit_scene --socket output/mojive.sock --params-file output/edit.json --json
+mojive control edit_scene --params-file output/edit.json --json
 printf '%s\n' '{"scope":"scene"}' | mojive control describe_operations --params-file - --json
 ```
 

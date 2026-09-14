@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 
+from mojive.control.rpc.protocol import DEFAULT_SOCKET
 from mojive.render.backend import DebugView, RenderFlag
 
 from .capture import cmd_capture, cmd_keyframes, cmd_probe, cmd_record
@@ -55,7 +56,12 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     startup.add_argument("--paused", dest="paused", action="store_true")
     startup.add_argument("--play", dest="paused", action="store_false")
     sp.add_argument("--no-vsync", action="store_true")
-    sp.add_argument("--rpc-socket", help="Expose this viewer through a local control socket")
+    sp.add_argument(
+        "--rpc-socket",
+        nargs="?",
+        const=str(DEFAULT_SOCKET),
+        help="Expose this viewer through a local control socket (default: user runtime directory)",
+    )
     sp.add_argument("--rpc-limits", help="Read RPC budgets from JSON; requires --rpc-socket")
     sp.set_defaults(func=cmd_view, json=False, paused=True)
 
@@ -67,7 +73,12 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     sp = sub.add_parser("editor", help="Open a model and scene workspace")
     sp.add_argument("asset", nargs="?", help="Optional MJCF or URDF path or asset name")
     sp.add_argument("--no-vsync", action="store_true")
-    sp.add_argument("--rpc-socket", help="Expose this viewer through a local control socket")
+    sp.add_argument(
+        "--rpc-socket",
+        nargs="?",
+        const=str(DEFAULT_SOCKET),
+        help="Expose this viewer through a local control socket (default: user runtime directory)",
+    )
     sp.add_argument("--rpc-limits", help="Read RPC budgets from JSON; requires --rpc-socket")
     sp.set_defaults(func=cmd_editor, json=False)
 
@@ -173,7 +184,7 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     sp.set_defaults(func=cmd_probe, json=False)
 
     sp = with_asset(sub.add_parser("rpc-serve", help="Run the local scene control service"))
-    sp.add_argument("--socket", default="output/mojive.sock")
+    sp.add_argument("--socket", default=str(DEFAULT_SOCKET))
     sp.add_argument("--limits-file", help="Read RPC budgets from a JSON object file")
     sp.set_defaults(func=cmd_rpc_serve, json=False)
 
@@ -184,7 +195,7 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     params.add_argument(
         "--params-file", metavar="FILE", help="Read parameter JSON from a UTF-8 file; - reads stdin"
     )
-    sp.add_argument("--socket", default="output/mojive.sock")
+    sp.add_argument("--socket", default=str(DEFAULT_SOCKET))
     sp.add_argument("--timeout", type=float, default=5.0)
     sp.add_argument("--limits-file", help="Read client request/response byte limits from JSON")
     sp.add_argument("--json", action="store_true")

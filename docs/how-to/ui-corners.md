@@ -21,7 +21,7 @@ The first build needs `uv`, CMake, a C++17 toolchain, and network access. On mac
 the Xcode command-line tools. `python/tools/build_imgui.py` downloads the pinned ImGui Bundle
 1.92.900 source archive, checks SHA-256, applies the maintained patch, and builds a local wheel.
 It pins nanobind 2.9.2 because that source release uses its four-argument ndarray export API.
-The source, wheel, and reusable CMake build are under `output/g3-ui/build/`.
+The source, wheel, and reusable CMake build are under `build/imgui/`.
 Subsequent unchanged builds reuse the wheel for the same Python ABI and host architecture.
 
 Production ImGui controls use ordinary circular corners with a 4.8 px frame radius.

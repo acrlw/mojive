@@ -13,7 +13,7 @@ from pathlib import Path
 def main() -> None:
     """Recompile each wrapper in alternating order, retaining the common kernel."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, default=Path("output/cpp-bindings-build"))
+    parser.add_argument("--build", type=Path, default=Path("build/bindings"))
     parser.add_argument(
         "--output", type=Path, default=Path("output/native-probe/bindings/build-cost.json")
     )

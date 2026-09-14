@@ -74,7 +74,7 @@ def main() -> int:
     parser.add_argument(
         "--prepare", action="store_true", help="Extract Weston 9 packages on Ubuntu 22.04"
     )
-    parser.add_argument("--runtime", type=Path, default=ROOT / "output/wayland-runtime")
+    parser.add_argument("--runtime", type=Path, default=ROOT / "build/wayland")
     parser.add_argument(
         "--weston-prefix", type=Path, help="Weston 9 installation prefix (usr directory)"
     )
@@ -166,7 +166,7 @@ def main() -> int:
         MOJIVE_LANGUAGE="en",
         MOJIVE_WAYLAND_OUTPUT=str(output),
     )
-    env.setdefault("MOJIVE_NATIVE_BUILD", str(ROOT / "output/cpp-build"))
+    env.setdefault("MOJIVE_NATIVE_BUILD", str(ROOT / "build/native"))
     renderers = ("bgfx", "opengl", "wgpu") if args.renderer == "all" else (args.renderer,)
     for renderer in renderers:
         with tempfile.TemporaryDirectory(prefix="mojive-wayland-") as runtime:

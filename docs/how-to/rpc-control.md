@@ -9,15 +9,14 @@ and reconnects after a transport failure.
 Start an editor with an attached endpoint, or attach one to an existing viewer in Python:
 
 ```bash
-uv run --no-sync mojive editor --rpc-socket output/mojive.sock
-uv run --no-sync mojive view assets/test_scene.xml --rpc-socket output/model.sock
+uv run --no-sync mojive editor --rpc-socket
+uv run --no-sync mojive view assets/test_scene.xml --rpc-socket
 ```
 
 For a separate standalone simulation:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive rpc-serve assets/test_scene.xml \
-  --socket output/mojive.sock
+MOJIVE_RENDERER=wgpu uv run --no-sync mojive rpc-serve assets/test_scene.xml
 ```
 
 wgpu is the portable choice for RPC capture on macOS because OpenGL contexts there must be created
@@ -33,7 +32,7 @@ on its UI thread at the start of a frame:
 from mojive import build
 
 viewer = build("assets/test_scene.xml")
-viewer.start_rpc("output/mojive.sock")
+viewer.start_rpc()
 try:
     viewer.run()
 finally:
@@ -47,12 +46,15 @@ For a caller-owned policy loop, use [passive viewing](../tutorials/passive-viewi
 Use a different socket path for each running service. Startup rejects regular files, symlinks, and
 active sockets; it reclaims a stale socket only after the operating system refuses a connection.
 Shutdown removes only the socket entry owned by that service.
+The default is `$XDG_RUNTIME_DIR/mojive/control.sock`, or `mojive-<uid>/control.sock` under the
+system temporary directory when `XDG_RUNTIME_DIR` is unset. These examples are alternatives;
+they share the default endpoint. Pass the same explicit path to both viewer and client when
+running multiple services. Clearing `output/` does not remove the default socket.
 
 ## Run the Python client
 
 ```bash
 uv run --no-sync python examples/control_client.py \
-  --socket output/mojive.sock \
   --steps 120 \
   --capture output/examples/rpc.png
 ```
@@ -64,7 +66,7 @@ uv run --no-sync python examples/control_client.py \
 The command-line client provides the same protocol for scripts and shell automation:
 
 ```bash
-uv run --no-sync mojive control get_state --socket output/mojive.sock --json
+uv run --no-sync mojive control get_state --json
 ```
 
 Pass method parameters as one JSON object:
@@ -135,7 +137,7 @@ Set server limits explicitly in Python:
 ```python
 from mojive.control.rpc import RpcLimits
 
-viewer.start_rpc("output/mojive.sock", limits=RpcLimits(max_connections=8, pump_budget_ms=1.5))
+viewer.start_rpc(limits=RpcLimits(max_connections=8, pump_budget_ms=1.5))
 ```
 
 For CLI use, put a JSON object such as `{"max_connections": 8, "pump_budget_ms": 1.5}` in a file.
@@ -143,9 +145,9 @@ Omitted fields keep their defaults; unknown fields, invalid counts and non-finit
 before creating the viewer or connecting the client.
 
 ```bash
-uv run --no-sync mojive editor --rpc-socket output/mojive.sock --rpc-limits output/rpc-limits.json
-uv run --no-sync mojive rpc-serve test_scene --socket output/mojive.sock --limits-file output/rpc-limits.json
-uv run --no-sync mojive control get_rpc_stats --socket output/mojive.sock --json
+uv run --no-sync mojive editor --rpc-socket --rpc-limits output/rpc-limits.json
+uv run --no-sync mojive rpc-serve test_scene --limits-file output/rpc-limits.json
+uv run --no-sync mojive control get_rpc_stats --json
 ```
 
 `control --limits-file PATH` configures the client's outgoing-request and incoming-response

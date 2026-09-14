@@ -23,11 +23,13 @@ cpp/
   cmake/           Build integration
 3rdparty/          Vendored ImGui and pinned upstream submodules
 examples/          Python usage examples
-output/            Generated builds, captures and reports
+build/             Compiler products and downloaded build/model dependencies
+dist/              Distributable wheels
+output/            Generated captures, recordings and reports; never needed to start Mojive
 ```
 
 The root `pyproject.toml` maps `python/` to the installed `mojive` package. Editable installs
-generate a lazy import entry under `output/editable/`; rerun `uv pip install -e .` after changing
+install a lazy import shim in the environment's `site-packages`; rerun `uv pip install -e .` after changing
 the source layout. Imports never contain `python`,
 `cpp`, `3rdparty`, or a backend library name. C++ headers describe Mojive's contracts rather
 than exposing bgfx handles, ImGui types, or MuJoCo-owned mutable state.
@@ -38,6 +40,18 @@ editable package search path. It does not copy binaries into `python/` or guess 
 loads the new extension. `MOJIVE_NATIVE_BUILD` still selects an explicit alternative for acceptance.
 Reinstall with `make native-editable` after replacing the editable install; use `uv run --no-sync`
 to preserve the locally built ImGui wheel and native registration.
+
+`make clean` removes test and lint caches only. `make clean-output` deletes captures, recordings
+and reports; save anything you want to keep first. It does not affect imports, native modules or
+the default control socket. `make clean-build` removes compiler products and downloaded
+dependencies; rebuild the selected native configuration before starting the viewer again.
+Python source imports still work after removing `build/`, because the editable shim is installed,
+not loaded from a build directory. Local control sockets live in the user runtime directory.
+
+For an existing checkout using `output/cpp-python-build`, run `make cpp-python`, then
+`MOJIVE_NATIVE_EDITABLE_BUILD="$PWD/build/python" uv pip install --no-deps -e .`.
+For the bgfx configuration, run `make native-editable` instead. Verify startup before removing
+the previous build directories. Reconfigure CMake in the new directory; do not move its cache.
 
 ## Python domain packages
 
@@ -193,7 +207,7 @@ installs it in isolation and renders through the public Python API. Local native
 replace the installed Python package; Make selects the extension with `MOJIVE_NATIVE_BUILD`.
 
 The `cpp-*` Make targets build and test C++ code. The `native-*` test targets are also supported.
-Builds are written to `output/cpp-build`, `output/cpp-core-build`, and `output/cpp-bindings-build`,
+Builds are written to `build/native`, `build/core`, `build/bindings`, and `build/python`,
 separately from earlier test results. Renderer selection is handled when creating a viewer or
 renderer instance. SDL is used only when explicitly selected for comparison tests.
 

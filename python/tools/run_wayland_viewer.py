@@ -18,7 +18,7 @@ from .run_wayland_acceptance import ROOT, prepare, stop
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepare", action="store_true")
-    parser.add_argument("--runtime", type=Path, default=ROOT / "output/wayland-runtime")
+    parser.add_argument("--runtime", type=Path, default=ROOT / "build/wayland")
     parser.add_argument("--output", type=Path, default=ROOT / "output/native-wayland-viewer")
     parser.add_argument("--renderer", choices=("bgfx", "opengl", "wgpu"), default="bgfx")
     parser.add_argument("--scene", default="test_scene")
@@ -114,7 +114,7 @@ def main() -> int:
                     MOJIVE_IMGUI_INI=str(Path(runtime) / "imgui.ini"),
                     MOJIVE_SETTINGS=str(Path(runtime) / "settings.json"),
                 )
-                env.setdefault("MOJIVE_NATIVE_BUILD", str(ROOT / "output/cpp-build"))
+                env.setdefault("MOJIVE_NATIVE_BUILD", str(ROOT / "build/native"))
                 viewer_args = args.viewer_args
                 if viewer_args[:1] == ["--"]:
                     viewer_args = viewer_args[1:]

@@ -170,6 +170,9 @@ help:
 		'  make mujoco-model-suite compile, adapt, and render MuJoCo model collections' \
 		'  make adapter-conformance  adapter contract report' \
 		'  make docs              build the API and user guide under output/site' \
+		'  make clean             clear test/lint caches; keep builds and captures' \
+		'  make clean-output      delete generated captures, recordings and reports' \
+		'  make clean-build       delete build dependencies/products; rebuild before use' \
 		'  make docs-check        validate public docs, examples, and the strict site build' \
 		'  make examples-check    validate the runnable examples without opening a window' \
 		'  make docs-serve        serve the documentation locally' \
@@ -748,7 +751,7 @@ reflect:
 
 ## Sparse checkout of one Google DeepMind MuJoCo Menagerie model.
 ROBOT ?= unitree_go2
-MENAGERIE_DIR ?= output/mujoco_menagerie
+MENAGERIE_DIR ?= build/mujoco_menagerie
 robot:
 	@if [ ! -d "$(MENAGERIE_DIR)/.git" ]; then \
 		git clone --depth 1 --filter=blob:none --sparse \
@@ -868,14 +871,22 @@ backends:
 doctor:
 	$(PY) -m mojive.cli doctor $(SCENE) $(ARGS)
 
+.PHONY: clean-output clean-build
+# Default cleanup preserves both the installed runtime and user captures.
 clean:
-	rm -rf out .pytest_cache **/__pycache__
+	rm -rf .pytest_cache .ruff_cache
+
+clean-output:
+	rm -rf output
+
+clean-build:
+	rm -rf build
 
 # Optional native renderer; OpenGL remains the default Python backend.
-NATIVE_BUILD ?= output/cpp-build
+NATIVE_BUILD ?= build/native
 NATIVE_BACKEND ?= bgfx
 NATIVE_OUTPUT ?= output/native-probe/$(NATIVE_BACKEND)
-NATIVE_BINDINGS_BUILD ?= output/cpp-bindings-build
+NATIVE_BINDINGS_BUILD ?= build/bindings
 NATIVE_JOBS ?= 4
 NATIVE_SCENE ?= output/native-probe/humanoids100.mjvp
 NATIVE_FONT_CACHE = $(shell $(PY) -c 'from mojive.ui.fonts import cache_dir; print(cache_dir())')
@@ -889,9 +900,9 @@ native-build:
 
 native-test:
 	$(PY) -m mojive.tools.check_native_layers
-	cmake -S cpp -B output/cpp-core-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF -DMOJIVE_BUILD_PYTHON=OFF
-	cmake --build output/cpp-core-build --parallel $(NATIVE_JOBS)
-	ctest --test-dir output/cpp-core-build --output-on-failure
+	cmake -S cpp -B build/core -G Ninja -DCMAKE_BUILD_TYPE=Release -DMOJIVE_BUILD_BGFX=OFF -DMOJIVE_BUILD_SDL=OFF -DMOJIVE_BUILD_BINDINGS=OFF -DMOJIVE_BUILD_PYTHON=OFF
+	cmake --build build/core --parallel $(NATIVE_JOBS)
+	ctest --test-dir build/core --output-on-failure
 
 native-probe: native-build
 	$(NATIVE_BUILD)/mojive_native_probe $(NATIVE_BUILD)/shaders $(NATIVE_OUTPUT) $(NATIVE_BACKEND)
@@ -943,7 +954,7 @@ cpp-probe: native-probe
 cpp-gallery: native-gallery
 
 # Native extension acceptance; production OpenGL remains the default backend.
-CPP_PYTHON_BUILD ?= output/cpp-python-build
+CPP_PYTHON_BUILD ?= build/python
 CPP_PYTHON_BGFX ?= OFF
 .PHONY: cpp-python cpp-python-test
 .PHONY: native-editable
@@ -1003,11 +1014,11 @@ native-spirv: native-build
 
 .PHONY: native-wheel
 native-wheel: native-python-build
-	MOJIVE_NATIVE_WHEEL_BUILD="$(abspath $(NATIVE_BUILD))" uv build --wheel --python "$(abspath $(PY))" -o output/native-wheel
+	MOJIVE_NATIVE_WHEEL_BUILD="$(abspath $(NATIVE_BUILD))" uv build --wheel --python "$(abspath $(PY))" -o dist
 
 .PHONY: native-wheel-test
 native-wheel-test: native-wheel
-	$(PY) -m mojive.tools.check_native_wheel $$(ls -t output/native-wheel/*.whl | head -1)
+	$(PY) -m mojive.tools.check_native_wheel $$(ls -t dist/*.whl | head -1)
 
 .PHONY: native-model-parity
 native-model-parity: native-python-build

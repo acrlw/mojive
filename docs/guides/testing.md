@@ -138,7 +138,7 @@ in the launching terminal to stop both. Settings are isolated for each launch; l
 invoked; automated agent checks should continue using the headless target below.
 
 On Ubuntu 22.04, `make native-wayland-test` prepares a private Weston 9 environment under
-`output/wayland-runtime/`. It downloads and extracts distribution packages without installing
+`build/wayland/`. It downloads and extracts distribution packages without installing
 them system-wide. Preparation requires `curl`; compilation requires a C compiler, `pkg-config`, and the existing Wayland,
 Pixman, and xkbcommon development headers. A headless EGL compositor owns a virtual input seat;
 the viewer still receives real `wl_pointer`, `wl_keyboard`, and `wl_data_device` events.

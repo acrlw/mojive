@@ -20,7 +20,7 @@ startup, methods, capabilities, and timeout behavior.
 
 ## Inspect and verify an existing scene
 
-Begin with capabilities and the current scene. CLI commands below use `output/mojive.sock`:
+Begin with capabilities and the current scene. CLI commands below use the default user-runtime socket:
 
 ```bash
 uv run --no-sync mojive control hello --json
