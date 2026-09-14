@@ -272,6 +272,11 @@ class RecordingConfig:
     surface: CaptureSurface = CaptureSurface.VIEWPORT
     end_hold: float = 1.0
     run_simulation: bool = False
+    rate_control: str = "quality"
+    crf: int = 25
+    bitrate_mbps: float = 12.0
+    encoder_preset: str = "medium"
+    pixel_format: str = "yuv420p"
 
     @classmethod
     def from_mapping(cls, value: object) -> RecordingConfig:
@@ -287,6 +292,10 @@ class RecordingConfig:
                 return getattr(defaults, name)
             return min(maximum, max(minimum, result))
 
+        def choice(name, values):
+            result = source.get(name, getattr(defaults, name))
+            return result if result in values else getattr(defaults, name)
+
         try:
             surface = CaptureSurface(source.get("surface", defaults.surface))
         except (ValueError, TypeError):
@@ -297,6 +306,11 @@ class RecordingConfig:
             surface=surface,
             end_hold=number("end_hold", 0.0, 60.0),
             run_simulation=source.get("run_simulation") is True,
+            rate_control=choice("rate_control", ("quality", "bitrate")),
+            crf=round(number("crf", 0, 51)),
+            bitrate_mbps=number("bitrate_mbps", 0.1, 500.0),
+            encoder_preset=choice("encoder_preset", ("fast", "medium", "slow")),
+            pixel_format=choice("pixel_format", ("yuv420p", "yuv444p")),
         )
 
 

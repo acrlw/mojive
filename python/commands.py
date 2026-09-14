@@ -160,8 +160,8 @@ class SeekStateTake(Command):
 class SetStateTakeLoop(Command):
     """Set a range and enable repetition; both None clear it and disable repetition.
 
-    Retained for existing callers. Independent controls use SetStateTakeRange
-    and SetStateTakeLoopEnabled instead.
+    Range selection uses this default; SetStateTakeRange and
+    SetStateTakeLoopEnabled also allow independent control.
     """
 
     first_frame: int | None = None

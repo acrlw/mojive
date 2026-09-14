@@ -899,7 +899,7 @@ class KeyframesPanel(Panel):
                     nearest_take_frame(take_times, end),
                 )
                 if first < last:
-                    ctx.submit(cmd.SetStateTakeRange(first, last))
+                    ctx.submit(cmd.SetStateTakeLoop(first, last))
             else:
                 self._view_start, self._view_end, self._view_needs_fit = start, end, False
         if inline[3]:
@@ -1439,7 +1439,7 @@ class KeyframesPanel(Panel):
             if self._pointer_mode == "range" and self._range_preview is not None:
                 first, last = self._range_preview
                 command = (
-                    cmd.SetStateTakeRange(first, last) if first < last else cmd.SetStateTakeRange()
+                    cmd.SetStateTakeLoop(first, last) if first < last else cmd.SetStateTakeRange()
                 )
                 result = ctx.submit(command)
                 self._error = "" if result.ok else result.message

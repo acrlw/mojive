@@ -89,7 +89,9 @@ _PAGE_MIN_WIDTH_PT = 224.0
 _COLUMN_GAP_PT = 8.0
 _CATEGORY_SEARCH_TERMS = {
     "General": ("language", "ui font", "cjk font", "model realtime rebuild apply"),
-    "Recording": ("video capture countdown delay seconds frame rate fps viewport layers",),
+    "Recording": (
+        "video capture countdown delay frame rate fps viewport layers quality crf bitrate encoding chroma",
+    ),
     "Interaction": (
         "gizmo",
         "built-in interactions camera orbit pan dolly fly view cube",
@@ -333,12 +335,16 @@ class SettingsPanel(Panel):
             changed, value = imgui.input_float(
                 "##recording_delay", config.countdown, 1.0, 5.0, "%.1f"
             )
+            imgui.set_item_tooltip(ctx.tr("Set to 0 to start after menus close."))
             if changed:
                 config = replace(config, countdown=value)
                 ctx.set_recording_config(config)
             self._property(ctx.tr("Take end hold (s)"))
             changed, value = imgui.input_float(
                 "##recording_end_hold", config.end_hold, 0.5, 5.0, "%.1f"
+            )
+            imgui.set_item_tooltip(
+                ctx.tr("Take videos stop automatically after holding the final frame.")
             )
             if changed:
                 config = replace(config, end_hold=value)
@@ -359,25 +365,67 @@ class SettingsPanel(Panel):
                         config = replace(config, surface=surfaces[index])
                         ctx.set_recording_config(config)
                 imgui.end_combo()
+            imgui.set_item_tooltip(
+                ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
+            )
             imgui.end_table()
-        imgui.spacing()
-        imgui.text_wrapped(
-            ctx.tr(
-                "Defaults apply to the next recording. Set the countdown to 0 to start after menus close."
+        self._group_heading(ctx.tr("Video encoding"))
+        if self._begin_properties("settings_video_encoding"):
+            self._property(ctx.tr("Rate control"))
+            modes = (("quality", "Quality priority"), ("bitrate", "Target bitrate"))
+            label = next(label for value, label in modes if value == config.rate_control)
+            if imgui.begin_combo("##recording_rate_control", ctx.tr(label)):
+                for value, label in modes:
+                    if imgui.selectable(ctx.tr(label), value == config.rate_control)[0]:
+                        config = replace(config, rate_control=value)
+                        ctx.set_recording_config(config)
+                imgui.end_combo()
+            imgui.set_item_tooltip(ctx.tr("Encoding settings apply to the next recording."))
+            if config.rate_control == "quality":
+                self._property(ctx.tr("Quality (CRF)"))
+                changed, value = imgui.slider_int("##recording_crf", config.crf, 0, 51)
+                imgui.set_item_tooltip(ctx.tr("Lower CRF gives higher quality and larger files."))
+                if changed:
+                    config = replace(config, crf=value)
+                    ctx.set_recording_config(config)
+            else:
+                self._property(ctx.tr("Target bitrate (Mbps)"))
+                changed, value = imgui.input_float(
+                    "##recording_bitrate", config.bitrate_mbps, 1.0, 5.0, "%.1f"
+                )
+                imgui.set_item_tooltip(
+                    ctx.tr("Target average bitrate; actual bitrate varies with the scene.")
+                )
+                if changed:
+                    config = replace(config, bitrate_mbps=value)
+                    ctx.set_recording_config(config)
+            self._property(ctx.tr("Encoding speed"))
+            presets = (("fast", "Fast"), ("medium", "Balanced"), ("slow", "Slow"))
+            label = next(label for value, label in presets if value == config.encoder_preset)
+            if imgui.begin_combo("##recording_preset", ctx.tr(label)):
+                for value, label in presets:
+                    if imgui.selectable(ctx.tr(label), value == config.encoder_preset)[0]:
+                        config = replace(config, encoder_preset=value)
+                        ctx.set_recording_config(config)
+                imgui.end_combo()
+            imgui.set_item_tooltip(
+                ctx.tr(
+                    "Slower encoding spends more CPU time on compression and may slow live recording."
+                )
             )
-        )
-        imgui.spacing()
-        imgui.text_wrapped(
-            ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
-        )
-        imgui.spacing()
-        imgui.text_wrapped(
-            ctx.tr(
-                "Take videos start from the first frame and stop automatically after the end hold."
+            self._property(ctx.tr("Color sampling"))
+            formats = (("yuv420p", "Compatible (4:2:0)"), ("yuv444p", "Full chroma (4:4:4)"))
+            label = next(label for value, label in formats if value == config.pixel_format)
+            if imgui.begin_combo("##recording_pixel_format", ctx.tr(label)):
+                for value, label in formats:
+                    if imgui.selectable(ctx.tr(label), value == config.pixel_format)[0]:
+                        config = replace(config, pixel_format=value)
+                        ctx.set_recording_config(config)
+                imgui.end_combo()
+            imgui.set_item_tooltip(
+                ctx.tr("4:4:4 preserves fine color detail but requires a compatible player.")
             )
-        )
-        if ctx.panels is not None and imgui.button(ctx.tr("Open Layers")):
-            ctx.panels.open_panel("Layers")
+            imgui.end_table()
 
     def _rendering(self, ctx: PanelContext) -> None:
         t = ctx.tr

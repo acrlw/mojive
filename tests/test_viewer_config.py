@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from mojive import (
     THEME,
     CameraInputConfig,
     InputClaim,
     InteractionConfig,
     LayoutConfig,
+    RecordingConfig,
     SelectionInputConfig,
     SelectionStyle,
     Theme,
@@ -16,6 +19,38 @@ from mojive import (
     ViewportOverlayConfig,
 )
 from mojive.app.composition import _viewer_layout_path
+
+
+def test_recording_encoding_defaults_round_trip_and_sanitize_saved_preferences():
+    defaults = RecordingConfig()
+    assert (defaults.rate_control, defaults.crf, defaults.encoder_preset) == (
+        "quality",
+        25,
+        "medium",
+    )
+    assert RecordingConfig.from_mapping({"countdown": 0}).crf == 25
+    config = RecordingConfig(
+        rate_control="bitrate",
+        crf=18,
+        bitrate_mbps=8.5,
+        encoder_preset="fast",
+        pixel_format="yuv444p",
+    )
+    assert RecordingConfig.from_mapping(asdict(config)) == config
+    invalid = RecordingConfig.from_mapping(
+        {
+            "rate_control": "invalid",
+            "crf": -5,
+            "bitrate_mbps": float("nan"),
+            "encoder_preset": ["slow"],
+            "pixel_format": "invalid",
+        }
+    )
+    assert invalid.crf == 0 and invalid.bitrate_mbps == defaults.bitrate_mbps
+    assert invalid.rate_control == "quality" and invalid.encoder_preset == "medium"
+    assert invalid.pixel_format == "yuv420p"
+    clipped = RecordingConfig.from_mapping({"crf": 999, "bitrate_mbps": -1})
+    assert clipped.crf == 51 and clipped.bitrate_mbps == 0.1
 
 
 def test_partial_preference_mapping_uses_documented_defaults() -> None:

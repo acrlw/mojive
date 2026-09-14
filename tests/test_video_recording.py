@@ -35,6 +35,74 @@ def test_video_rejects_unknown_pixel_format(tmp_path):
         VideoRecorder(tmp_path / "bad.mp4", (32, 24), pixel_format="typo")
 
 
+@pytest.mark.parametrize(
+    "options",
+    (
+        {"crf": -1},
+        {"crf": 52},
+        {"crf": 1.5},
+        {"crf": float("nan")},
+        {"bitrate": 0},
+        {"bitrate": -1},
+        {"bitrate": 2.5},
+        {"crf": 20, "bitrate": 1_000_000},
+        {"preset": "unknown"},
+        {"codec": "msmpeg4", "crf": 20},
+        {"codec": "msmpeg4", "preset": "fast"},
+    ),
+)
+def test_invalid_encoding_settings_fail_before_creating_output(tmp_path, options):
+    output = tmp_path / "uncreated/video.mp4"
+    with pytest.raises(ValueError):
+        VideoRecorder(output, (64, 48), **options)
+    assert not output.parent.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "options", ({}, {"crf": 18, "preset": "slow"}, {"bitrate": 2_000_000, "preset": "fast"})
+)
+def test_video_encoding_modes_reach_ffmpeg_and_produce_playable_video(tmp_path, options):
+    path = tmp_path / "configured.mp4"
+    with VideoRecorder(path, (64, 48), fps=12, pixel_format="yuv444p", **options) as video:
+        args = video._process.args
+        assert args[args.index("-preset") + 1] == options.get("preset", "medium")
+        if "bitrate" in options:
+            assert "-crf" not in args
+            assert args[args.index("-b:v") + 1] == str(options["bitrate"])
+        else:
+            assert "-b:v" not in args
+            assert args[args.index("-crf") + 1] == str(options.get("crf", 25))
+        for value in (40, 100, 180):
+            video.append(np.full((48, 64, 3), value, np.uint8))
+    with contextlib.closing(imageio_ffmpeg.read_frames(str(path))) as reader:
+        metadata = next(reader)
+        assert metadata["size"] == (64, 48) and metadata["fps"] == 12
+        frames = [np.frombuffer(frame, np.uint8) for frame in reader]
+    assert len(frames) == 3
+    assert [frame.mean() for frame in frames] == pytest.approx((40, 100, 180), abs=3)
+
+
+@pytest.mark.integration
+def test_lower_crf_preserves_more_detail_in_the_encoded_video(tmp_path):
+    frame = np.random.default_rng(12).integers(0, 256, (96, 128, 3), dtype=np.uint8)
+    errors, sizes = [], []
+    for crf in (12, 38):
+        path = tmp_path / f"quality-{crf}.mp4"
+        with VideoRecorder(
+            path, (128, 96), crf=crf, preset="fast", pixel_format="yuv444p"
+        ) as video:
+            for _ in range(6):
+                video.append(frame)
+        with contextlib.closing(imageio_ffmpeg.read_frames(str(path))) as reader:
+            next(reader)
+            decoded = np.frombuffer(next(reader), np.uint8).reshape(frame.shape)
+        errors.append(np.mean((decoded.astype(float) - frame.astype(float)) ** 2))
+        sizes.append(path.stat().st_size)
+    assert errors[0] < errors[1] * 0.5
+    assert sizes[0] > sizes[1]
+
+
 def test_video_timeout_kills_and_reaps_the_encoder(tmp_path, monkeypatch):
     process = SimpleNamespace(stdin=io.BytesIO(), returncode=None, waits=[], kills=0)
 

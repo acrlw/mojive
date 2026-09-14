@@ -263,6 +263,21 @@ uses wall time, can be canceled with its button or the recording shortcut, and c
 file until a frame is captured. A zero-second delay starts on the next clean frame after menus
 close. The recording rate is independent from display and physics rates.
 
+The **Video encoding** section applies to both live recordings and take exports. **Quality
+priority** uses CRF (0–51; lower values preserve more detail and produce larger files), while
+**Target bitrate** uses an average bitrate in Mbps, not a strict per-frame or file-size limit.
+Only the active mode's value is shown. **Encoding speed** selects Fast, Balanced, or Slow;
+slower encoding spends more CPU time on compression and can slow live recording. **Color
+sampling** selects compatible 4:2:0 or full-resolution 4:4:4 chroma, which requires a compatible
+player. Defaults remain H.264, CRF 25, Balanced, and 4:2:0. Hover over controls for short guidance.
+
+Encoding settings are captured when recording is requested, including its countdown; changes
+apply to the next video, not a paused recording being resumed. Configure them programmatically
+with `viewer.configure_recording(RecordingConfig(crf=18, encoder_preset="fast"))`, or
+`RecordingConfig(rate_control="bitrate", bitrate_mbps=12)`. GUI changes persist as preferences;
+API changes remain instance-local unless `persist=True` is supplied. Capture the native settings
+layouts with `make keyframe-timeline ARGS='--recording-settings --scale 2.5 --language zh_CN'`.
+
 For a completed simulation take, **Keyframes > Export Video** rewinds to its first frame,
 waits for the countdown, records the entire take once, and saves automatically. Recording settings
 set the start delay and final-frame hold (one second by default); the same defaults are available
@@ -382,6 +397,13 @@ another encoder supported by your FFmpeg. Odd input dimensions in `yuv420p` are 
 one pixel on the right/bottom as needed, never scaled. The recorder warns and exposes
 `encoded_size`; `size` remains the required input dimensions. Choose even dimensions for exact
 output dimensions with the compatible default. Not every encoder supports every pixel format.
+
+`VideoRecorder(..., crf=18, preset="slow")` selects H.264 constant-quality encoding. Alternatively,
+`VideoRecorder(..., bitrate=12_000_000, preset="fast")` requests a target average bitrate in
+**bits per second**. CRF and bitrate are mutually exclusive; omitted options retain CRF 25 and
+the `medium` preset for H.264. Explicit `crf` and `preset` require `libx264`; the default WMV
+encoder remains unchanged. These controls use FFmpeg's
+[libx264 rate-control and preset options](https://ffmpeg.org/ffmpeg-codecs.html#libx264_002c-libx264rgb).
 
 Always close the recorder (prefer a `with` block). Empty recordings, write failures, encoder
 errors, and finalization timeouts raise errors instead of reporting success. On failure, a

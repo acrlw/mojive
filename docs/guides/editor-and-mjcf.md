@@ -174,7 +174,8 @@ temporarily pauses it and resumes from the released position. Drag in a track to
 for editing; this selection is separate from the playback range.
 
 Hold **Shift** and drag with the **left mouse button** to select an orange playback range;
-dragging in either direction works. The first/last transport buttons jump to that range's
+dragging in either direction works. Selecting or adjusting a range enables **Loop** by default;
+turn it off afterward to play the range once. The first/last transport buttons jump to that range's
 endpoints. With no range, they jump to the take's endpoints; the first button returns an empty
 timeline to zero. **Loop** only toggles repetition and never clears the range. With Loop off,
 replay pauses at the selected final frame; with Loop on, it includes both endpoint frames and
