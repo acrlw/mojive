@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import os
+import tempfile
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
@@ -12,7 +13,7 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 class PackageBuildHook(BuildHookInterface):
     def initialize(self, version, build_data):
         if self.target_name == "wheel" and version == "editable":
-            self._prepare_editable()
+            self._prepare_editable(build_data)
         selected = os.environ.get("MOJIVE_NATIVE_WHEEL_BUILD")
         if not selected:
             return
@@ -46,7 +47,7 @@ class PackageBuildHook(BuildHookInterface):
             "mojive/native_licenses/stbImageResize.txt"
         )
 
-    def _prepare_editable(self):
+    def _prepare_editable(self, build_data):
         from editables import EditableProject
 
         selected = os.environ.get("MOJIVE_NATIVE_EDITABLE_BUILD")
@@ -56,12 +57,20 @@ class PackageBuildHook(BuildHookInterface):
         project = EditableProject("mojive", self.root)
         project.map_method = "self_replace"
         project.map("mojive", "python")
-        destination = Path(self.root) / "output/editable"
-        destination.mkdir(parents=True, exist_ok=True)
+        build = Path(self.root) / "build"
+        build.mkdir(parents=True, exist_ok=True)
+        self._editable_staging = tempfile.TemporaryDirectory(prefix="editable-", dir=build)
+        destination = Path(self._editable_staging.name)
         for name, content in project.files():
             if name == "mojive.py" and binary is not None:
                 content += f"\nsys.modules[__name__].__path__.append({str(binary.parent)!r})\n"
             (destination / name).write_text(content, encoding="utf-8")
+            # Install the shim itself, never a .pth dependency on temporary build output.
+            build_data["force_include_editable"][str(destination / name)] = name
+
+    def finalize(self, version, build_data, artifact_path):
+        if self.target_name == "wheel" and version == "editable":
+            self._editable_staging.cleanup()
 
     @staticmethod
     def _native_binary(root: Path) -> Path:

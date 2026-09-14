@@ -13,6 +13,31 @@ from mojive import cli
 from mojive.control.rpc import ControlServer, ControlService, RpcClient
 
 
+def test_control_socket_default_and_viewer_opt_in_are_consistent():
+    from mojive.cli.parser import build_parser
+    from mojive.control.rpc import DEFAULT_SOCKET
+
+    parser = build_parser()
+    assert parser.parse_args(["editor"]).rpc_socket is None
+    for command in (["editor"], ["view", "test_scene"]):
+        assert parser.parse_args([*command, "--rpc-socket"]).rpc_socket == str(DEFAULT_SOCKET)
+        assert (
+            parser.parse_args([*command, "--rpc-socket", "custom.sock"]).rpc_socket == "custom.sock"
+        )
+    assert parser.parse_args(["control", "hello"]).socket == str(DEFAULT_SOCKET)
+    assert parser.parse_args(["rpc-serve", "test_scene"]).socket == str(DEFAULT_SOCKET)
+
+
+def test_control_socket_uses_user_runtime_and_user_scoped_temp_fallback(tmp_path, monkeypatch):
+    from mojive.control.rpc import protocol
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
+    assert protocol._default_socket() == tmp_path / "runtime/mojive/control.sock"
+    monkeypatch.delenv("XDG_RUNTIME_DIR")
+    monkeypatch.setattr(protocol.tempfile, "gettempdir", lambda: str(tmp_path))
+    assert protocol._default_socket() == tmp_path / f"mojive-{protocol.os.getuid()}/control.sock"
+
+
 @pytest.mark.parametrize("argument", ["--params", "--params-file"])
 def test_control_accepts_unicode_parameter_sources(argument, tmp_path, monkeypatch, capsys):
     params = {"name": "测试 'quoted' $literal", "position": [1, 2, 3]}

@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import math
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from mojive.control.errors import ControlError as RpcError
 
 PROTOCOL_VERSION = 1
-DEFAULT_SOCKET = Path("output/mojive.sock")
+
+
+def _default_socket() -> Path:
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    directory = (
+        Path(runtime) / "mojive"
+        if runtime
+        else Path(tempfile.gettempdir()) / f"mojive-{os.getuid()}"
+    )
+    return directory / "control.sock"
+
+
+DEFAULT_SOCKET = _default_socket()
 
 
 def _validate_response(response, request_id: int) -> None:

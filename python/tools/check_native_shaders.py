@@ -7,7 +7,7 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, default=Path("output/cpp-build"))
+    parser.add_argument("--build", type=Path, default=Path("build/native"))
     args = parser.parse_args()
     output = args.build / "shaders-spirv"
     output.mkdir(parents=True, exist_ok=True)

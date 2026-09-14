@@ -173,8 +173,8 @@ See [remote viewing and replay](docs/tutorials/remote-viewing.md).
 To control the same viewer through local RPC, run these in separate terminals:
 
 ```bash
-uv run --no-sync mojive view joint_types --rpc-socket output/mojive.sock
-uv run --no-sync mojive control get_state --socket output/mojive.sock --json
+uv run --no-sync mojive view joint_types --rpc-socket
+uv run --no-sync mojive control get_state --json
 ```
 
 `rpc-serve` runs a separate headless scene-control service. The

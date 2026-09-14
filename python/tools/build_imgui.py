@@ -266,7 +266,7 @@ def main() -> None:
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
-    build = ROOT / "output/g3-ui/build"
+    build = ROOT / "build/imgui"
     build.mkdir(parents=True, exist_ok=True)
     archive = build / f"imgui_bundle-{VERSION}.tar.gz"
     if not archive.exists():

@@ -214,7 +214,7 @@ static void conformance(Renderer &renderer, const std::filesystem::path &output)
 }
 int main(int argc, char **argv) {
     try {
-        std::string shaders = argc > 1 ? argv[1] : "output/cpp-build/shaders";
+        std::string shaders = argc > 1 ? argv[1] : "build/native/shaders";
         std::filesystem::path output = argc > 2 ? argv[2] : "output/native-probe";
         std::filesystem::create_directories(output);
         std::string backend = argc > 3 ? argv[3] : "bgfx";

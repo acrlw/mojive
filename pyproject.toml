@@ -44,8 +44,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["python"]
 sources = { "python" = "mojive" }
-# Hatch cannot infer editable imports when a source prefix is renamed.
-dev-mode-dirs = ["output/editable"]
+# Bypass Hatch's prefix-rename detection; the hook installs the lazy package shim.
+dev-mode-dirs = ["."]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "python/tools/build_hook.py"

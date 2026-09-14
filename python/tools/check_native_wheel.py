@@ -14,7 +14,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheel", type=Path)
     args = parser.parse_args()
-    destination = Path("output/native-wheel-install").resolve()
+    destination = Path("build/wheel_install").resolve()
+    Path("output/native-wheel").mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
             "uv",

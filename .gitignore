@@ -1,4 +1,4 @@
-# Generated captures, recordings, downloaded models, and visual reports.
+# Generated captures, recordings, and visual reports. No runtime dependencies.
 output/
 MUJOCO_LOG.TXT
 
