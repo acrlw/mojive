@@ -10,6 +10,10 @@ from typing import Any
 
 import wgpu
 
+from mojive.log import get_logger
+
+log = get_logger("wgpu.timing")
+
 TimestampWriter = Callable[[str], dict[str, Any] | None]
 
 _QUERY_COUNT = 64
@@ -35,6 +39,7 @@ class WgpuTiming:
         self._device = device
         self.active = enabled and wgpu.FeatureName.timestamp_query in device.features
         self.gpu_ms: dict[str, float] = {}
+        self.last_error = ""
         self._query_set: wgpu.GPUQuerySet | None = None
         self._resolve_buffer: wgpu.GPUBuffer | None = None
         self._readbacks: list[wgpu.GPUBuffer] = []
@@ -134,8 +139,14 @@ class WgpuTiming:
                         (name, value) for name, value in totals.items() if name not in invalid
                     )
                     self.gpu_ms = current
-            except Exception:
-                pass
+                    self.last_error = ""
+            except Exception as exc:
+                if not self._released:
+                    self.gpu_ms = {}
+                    message = str(exc) or type(exc).__name__
+                    if message != self.last_error:
+                        log.warning("GPU timing readback failed: {}", message)
+                    self.last_error = message
             finally:
                 if buffer.map_state == wgpu.BufferMapState.mapped:
                     buffer.unmap()
