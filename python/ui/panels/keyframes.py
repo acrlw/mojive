@@ -1184,11 +1184,10 @@ class KeyframesPanel(Panel):
             PointerAction.TIMELINE_CLEAR_RANGE, pointer, press=True
         )
         select_press = bindings.pointer_match(PointerAction.TIMELINE_SCRUB, pointer, press=True)
-        additive = io.key_ctrl or io.key_super
-        if additive and pointer.matches(
-            PointerChord((0,), ("ctrl",) if io.key_ctrl else ("super",)), press=True
-        ):
-            select_press = PointerChord((0,), ("ctrl",) if io.key_ctrl else ("super",))
+        additive = bool(pointer.keys & {"ctrl", "super"})
+        additive_modifier = "ctrl" if "ctrl" in pointer.keys else "super"
+        if additive and pointer.matches(PointerChord((0,), (additive_modifier,)), press=True):
+            select_press = PointerChord((0,), (additive_modifier,))
         load_press = bindings.pointer_match(PointerAction.TIMELINE_LOAD, pointer, press=True)
         if over_timeline and (pan_press or range_press) and not self._pointer_mode:
             self._drag_start_x = mouse_xy[0]

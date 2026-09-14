@@ -908,6 +908,9 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
     previous = viewer.app.recording_config
     images = []
     notices = []
+    viewer.sync()
+    # The module-shared viewer may still show an earlier test's export receipt.
+    viewer.app.output.active_status(now=float("inf"))
 
     class Recorder:
         def __init__(self, path, size, fps, **options):

@@ -27,7 +27,7 @@ def test_public_capture_propagates_save_failure_and_recovers(tmp_path, monkeypat
         assert not failed.exists()
         path = viewer.capture(tmp_path / "capture.png", surface="window")
         with Image.open(path) as image:
-            assert image.size == (800, 600)
+            assert image.size == viewer.window.size_pixels
         directory = tmp_path / "not-a-file.png"
         directory.mkdir()
         with pytest.raises(IsADirectoryError):
