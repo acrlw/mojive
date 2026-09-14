@@ -907,17 +907,26 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
     viewer, _scene = canvas
     previous = viewer.app.recording_config
     images = []
+    notices = []
 
     class Recorder:
-        def __init__(self, path, size, fps):
+        def __init__(self, path, size, fps, **options):
             self.size = size
             assert fps == 60
+            defaults = RecordingConfig()
+            assert options == {
+                "pixel_format": defaults.pixel_format,
+                "crf": defaults.crf,
+                "bitrate": None,
+                "preset": defaults.encoder_preset,
+            }
             assert not imgui.get_current_context().open_popup_stack
 
         def append(self, image):
             assert viewer.recording.phase is RecordingPhase.RECORDING
             assert not imgui.get_current_context().open_popup_stack
             images.append(image.copy())
+            notices.append(viewer.app._status_notice_bounds)
 
         def close(self):
             pass
@@ -934,13 +943,23 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
         assert images
         viewer.stop_recording()
         clean = viewer.capture_array(surface=CaptureSurface.VIEWPORT)
-        # The bottom status line changes from recording to the saved-file notice.
-        # All scene pixels and viewport controls above that line remain unchanged.
+        # File receipts can wrap into multiple rows. Compare above the actual
+        # notice, retaining the scene and transport pixels rather than assuming
+        # every status message is one line tall.
         notice_height = round(
             (imgui.get_text_line_height() + 2 * 14 * viewer.window.style_scale)
             * imgui.get_io().display_framebuffer_scale.y
         )
-        np.testing.assert_array_equal(images[0][:-notice_height], clean[:-notice_height])
+        cutoff = clean.shape[0] - notice_height
+        for bounds in (notices[0], viewer.app._status_notice_bounds):
+            if bounds is not None:
+                border = max(1.0, imgui.get_style().window_border_size)
+                notice_top = (
+                    bounds[1] - viewer.app._viewport_rect[1] - border
+                ) * imgui.get_io().display_framebuffer_scale.y
+                cutoff = min(cutoff, int(notice_top))
+        assert cutoff > clean.shape[0] * 0.5
+        np.testing.assert_array_equal(images[0][:cutoff], clean[:cutoff])
     finally:
         viewer.stop_recording()
         viewer.configure_recording(previous)

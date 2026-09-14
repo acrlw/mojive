@@ -9,19 +9,22 @@ from mojive import PassiveAction, RecordingConfig, ViewerConfig, build
 from mojive.app.passive_input import PassiveInput
 from mojive.tools.keyframe_timeline import show_settings
 from mojive.tools.ui_runtime import _click, _item_center
+from mojive.ui import ToolHint
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 mujoco = pytest.importorskip("mujoco")
 
 
 @pytest.fixture
-def viewer(tmp_path, monkeypatch):
+def viewer(tmp_path, monkeypatch, request):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    width, scale = getattr(request, "param", (1280, 1.0))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
     model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
     with build(
         model=model,
         data=mujoco.MjData(model),
-        width=1280,
+        width=width,
         height=800,
         show_window=False,
         vsync=False,
@@ -112,3 +115,80 @@ def test_passive_status_uses_caller_state_without_changing_clock(
     assert observed[-1]["activity"] == ""
     assert observed[-1]["passive"]
     assert (viewer.session.paused, viewer.session.frame.time) == before
+
+
+@pytest.mark.parametrize("viewer", ((1280, 1.5), (1280, 2.5), (3200, 2.5)), indirect=True)
+@pytest.mark.parametrize("docked", (False, True))
+def test_grouped_scene_hints_reflow_without_duplicating_status(viewer, monkeypatch, docked):
+    from mojive.ui.app import viewport
+    from mojive.ui.viewport_widgets import tool_hint_text, tool_hints_size
+
+    if not docked:
+        for panel in viewer.panels:
+            panel.open = False
+    hints = (
+        ToolHint("keys", label="Horizontal speed", keys=(("D", "+"), ("A", "−"))),
+        ToolHint("keys", label="Vertical speed", keys=(("W", "+"), ("S", "−"))),
+        ToolHint("keys", label="Rotation speed", keys=(("E", "+"), ("Q", "−"))),
+        ToolHint("key", "X", "Zero velocity"),
+        ToolHint("key", "Space", "Pause / resume"),
+    )
+    bridge = PassiveInput(viewer, Queue(maxsize=64))
+    bridge.configure(
+        tuple(PassiveAction(key, key) for key in ("d", "a", "w", "s", "e", "q", "x", "space")),
+        hints=hints,
+        hint_surface="scene",
+    )
+    viewer.set_input_handler(bridge)
+    for _ in range(3):
+        viewer.sync()
+    rows = []
+    original = viewport.draw_scene_tool_hints
+
+    def observe(draw, origin, theme, scale, row, **kwargs):
+        rows.append((origin, row, kwargs["size"]))
+        measured = tool_hints_size(draw, scale, row, padding=True)
+        assert measured == pytest.approx(kwargs["size"], abs=0.01)
+        return original(draw, origin, theme, scale, row, **kwargs)
+
+    monkeypatch.setattr(viewport, "draw_scene_tool_hints", observe)
+    viewer.sync()
+    displayed = tuple(hint.label for _, row, _ in rows for hint in row)
+    if displayed[-1] == "…":
+        assert displayed[:-1] == tuple(hint.label for hint in hints[: len(displayed) - 1])
+        details = []
+        text_wrapped = imgui.text_wrapped
+
+        def observe_details(text):
+            details.append(text)
+            text_wrapped(text)
+
+        monkeypatch.setattr(imgui, "text_wrapped", observe_details)
+        (left, top), _, (row_width, row_height) = rows[-1]
+        imgui.get_io().add_mouse_pos_event(left + row_width * 0.5, top + row_height * 0.5)
+        viewer.sync()
+        assert all(tool_hint_text(hint) in details for hint in hints)
+    else:
+        assert displayed == tuple(hint.label for hint in hints)
+    scene_ids = {hint.hint_id for hint in viewer.tool_hints.resolve(surface="scene")}
+    assert scene_ids.isdisjoint(
+        hint.hint_id for hint in viewer.app._status_tool_hints(loading=False)
+    )
+    x, y, width, height = viewer.app._viewport_rect
+    for (left, top), _, (row_width, row_height) in rows:
+        assert x <= left and left + row_width <= x + width
+        assert y <= top and top + row_height <= y + height
+    assert rows[-1][0][1] + rows[-1][2][1] - rows[0][0][1] <= height * 0.3
+    if docked:
+        return
+    _click(viewer, (x + width * 0.5, y + height * 0.4))
+    io = imgui.get_io()
+    for key, action in ((imgui.Key.d, "d"), (imgui.Key.a, "a")):
+        io.add_key_event(key, True)
+        viewer.sync()
+        io.add_key_event(key, False)
+        viewer.sync()
+        event = bridge.events.get_nowait()
+        assert event.action == action
+        bridge.acknowledge(event)
+    assert viewer.session.frame.time == 0

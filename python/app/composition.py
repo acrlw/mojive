@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import operator
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
     from mojive.adapters.base import SceneAdapter
     from mojive.control.rpc import RpcLimits, ViewerRpcServer
+    from mojive.interaction.input import InputClaim, InputContext
     from mojive.remote.bridge import DebugBridge
     from mojive.render.backend import RenderBackend
     from mojive.render.canvas import Canvas2D
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from mojive.session import Session
     from mojive.ui.app import ViewerApp
     from mojive.ui.theme import Theme
+    from mojive.ui.viewport_widgets import ToolHint, ToolHintRegistry
     from mojive.ui.window import Window
 
 
@@ -97,6 +99,20 @@ class Viewer:
         """Return the runtime panel manager."""
 
         return self.app.panels
+
+    @property
+    def tool_hints(self) -> ToolHintRegistry:
+        """Return the UI-thread registry for individual hints and default visibility."""
+        return self.app.tool_hints
+
+    def configure_tool_hints(self, hints: Sequence[ToolHint], *, surface: str = "status") -> None:
+        """Replace the application hint group without changing input bindings.
+
+        Use surface="scene" for viewport capsules or "status" for inline hints.
+        An empty sequence removes this group; individually registered hints and
+        built-in defaults remain unchanged. Call on the viewer's UI thread.
+        """
+        self.tool_hints.configure(hints, surface=surface)
 
     @property
     def canvas2d(self):
@@ -277,10 +293,17 @@ class Viewer:
         *,
         surface: CaptureSurface | str = CaptureSurface.SCENE,
     ) -> Path:
-        """Capture the next frame, defaulting to the UI-free scene image."""
+        """Save the next frame and return its path, or raise on failure.
 
-        path = self.app.request_capture(output, surface=surface)
+        The default surface is the UI-free scene image. Completion includes file
+        encoding and saving, not just submission of the capture request.
+        """
+
+        surface = CaptureSurface(surface)
+        path = Path(output) if output is not None else self.app._capture_output(surface, ".png")
+        future = self.app.request_capture_async(path, surface=surface)
         self.sync()
+        future.result()
         return path
 
     def capture_array(self, *, surface: CaptureSurface | str = CaptureSurface.SCENE) -> np.ndarray:
@@ -336,13 +359,25 @@ class Viewer:
 
         return self.app.stop_recording(raise_on_error=True)
 
-    def set_input_handler(self, handler) -> None:
-        """Install a per-frame input handler that can claim keys or pointer input."""
+    def set_input_handler(
+        self, handler: Callable[[InputContext], InputClaim | None] | None
+    ) -> None:
+        """Set the UI-thread callback before built-in input handling; None removes it.
+
+        Return an InputClaim to reserve input for this frame, or None to leave it
+        available to Mojive. Do not block this callback with simulation work.
+        """
 
         self.app.set_input_handler(handler)
 
-    def start_rpc(self, socket_path=None, *, limits: RpcLimits | None = None):
-        """Expose this viewer through a local, UI-thread-safe control socket."""
+    def start_rpc(
+        self, socket_path: str | Path | None = None, *, limits: RpcLimits | None = None
+    ) -> ViewerRpcServer:
+        """Return the local control server; its socket_path identifies the endpoint.
+
+        PassiveViewer.start_rpc returns only the path because its server belongs
+        to another process.
+        """
 
         if self._rpc_server is not None:
             if limits is not None and limits != self._rpc_server.service.limits:

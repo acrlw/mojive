@@ -65,6 +65,8 @@ from .hints import mouse_button_geometry as mouse_button_geometry
 from .hints import mouse_hint_colors as mouse_hint_colors
 from .hints import mouse_wheel_geometry as mouse_wheel_geometry
 from .hints import pointer_tool_hint as pointer_tool_hint
+from .hints import scene_tool_hints_layout as scene_tool_hints_layout
+from .hints import tool_hint_text as tool_hint_text
 from .hints import tool_hints_size as tool_hints_size
 from .model import _FRAME_ARROW_CORNER_RADIUS_PT as _FRAME_ARROW_CORNER_RADIUS_PT
 from .model import _FRAME_AXES as _FRAME_AXES

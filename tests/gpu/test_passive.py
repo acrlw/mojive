@@ -51,6 +51,8 @@ def test_existing_model_data_keep_an_external_clock():
 
 
 def test_passive_rates_input_capture_and_shutdown(tmp_path):
+    from mojive.ui import ToolHint
+
     model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
     data = mujoco.MjData(model)
     with launch_passive(
@@ -63,6 +65,10 @@ def test_passive_rates_input_capture_and_shutdown(tmp_path):
         assert viewer.model is model and viewer.data is data
         assert viewer.is_running()
         assert viewer.max_fps == 60
+        viewer.configure_actions((PassiveAction("pause", "space"),))
+        viewer.configure_tool_hints((ToolHint("key", "Space", "Pause"),), surface="scene")
+        viewer.configure_tool_hints((ToolHint("key", "Space", "Resume"),), surface="status")
+        viewer.configure_tool_hints(())
         initial = viewer.stats
         # Display must continue pumping events while the physics owner does no work.
         time.sleep(0.2)

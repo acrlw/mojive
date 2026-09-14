@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 
 from .model import (
     PLAYBACK_CONTROLS,
@@ -25,6 +26,24 @@ class ToolHintRegistry:
     def __init__(self) -> None:
         self._custom: dict[str, dict[str, ToolHint]] = {surface: {} for surface in self._SURFACES}
         self._hidden_defaults: dict[str, set[str]] = {surface: set() for surface in self._SURFACES}
+        self._configured: tuple[ToolHint, ...] = ()
+        self._configured_surface = "status"
+
+    def configure(self, hints: Sequence[ToolHint], *, surface: str = "status") -> None:
+        """Replace the application's hint group, independently of input bindings.
+
+        Moving the group clears its previous surface. An empty sequence removes
+        it; individually registered hints and built-in defaults are preserved.
+        """
+        target = self._surface(surface)
+        values = tuple(hints)
+        if len(values) > 64 or any(not isinstance(hint, ToolHint) for hint in values):
+            raise ValueError("Expected at most 64 ToolHint values")
+        self._configured = tuple(
+            replace(hint, hint_id=hint.hint_id or f"application.hint.{index}")
+            for index, hint in enumerate(values)
+        )
+        self._configured_surface = target
 
     def add(self, hint_id: str, hint: ToolHint, *, surface: str = "status") -> None:
         """Add or replace one custom hint on ``surface``."""
@@ -33,14 +52,7 @@ class ToolHintRegistry:
         key = str(hint_id).strip()
         if not key:
             raise ValueError("tool hint id must not be empty")
-        self._custom[target][key] = ToolHint(
-            hint.kind,
-            hint.control,
-            hint.label,
-            hint.suffix,
-            hint.hint_id or key,
-            hint.modifier,
-        )
+        self._custom[target][key] = replace(hint, hint_id=hint.hint_id or key)
         self._hidden_defaults[target].discard(key)
 
     def remove(self, hint_id: str, *, surface: str = "status") -> None:
@@ -68,7 +80,8 @@ class ToolHintRegistry:
         target = self._surface(surface)
         hidden = self._hidden_defaults[target]
         visible = tuple(hint for hint in defaults if not hint.hint_id or hint.hint_id not in hidden)
-        return visible + tuple(self._custom[target].values())
+        configured = self._configured if target == self._configured_surface else ()
+        return visible + tuple(self._custom[target].values()) + configured
 
     @classmethod
     def _surface(cls, value: str) -> str:

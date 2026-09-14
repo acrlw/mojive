@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Literal
 
 CAPSULE_SMOOTHING = 0.382
 
@@ -108,14 +109,42 @@ DEFAULT_VIEWPORT_LABELS = ViewportLabels()
 
 @dataclass(frozen=True)
 class ToolHint:
-    """One input/meaning pair that can be rendered on any chrome surface."""
+    """An input hint for either chrome surface.
 
-    kind: str
+    ``kind="keys"`` puts ``label`` before alternative ``(key, meaning)`` pairs,
+    for example ``Speed [Up] + / [Down] -``. The whole group stays together.
+    """
+
+    kind: Literal["text", "key", "keys", "mouse", "perturb"]
     control: str = ""
     label: str = ""
     suffix: str = ""
     hint_id: str = ""
     modifier: str = ""
+    keys: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self):
+        if self.kind not in ("text", "key", "keys", "mouse", "perturb"):
+            raise ValueError(f"Unsupported tool hint kind: {self.kind!r}")
+        if any(
+            not isinstance(value, str)
+            for value in (self.control, self.label, self.suffix, self.hint_id, self.modifier)
+        ):
+            raise ValueError("Tool hint text fields must be strings")
+        if self.kind == "keys" and (
+            not isinstance(self.keys, (tuple, list))
+            or not self.keys
+            or any(
+                not isinstance(pair, (tuple, list))
+                or len(pair) != 2
+                or not all(isinstance(value, str) for value in pair)
+                or not pair[0]
+                for pair in self.keys
+            )
+        ):
+            raise ValueError("Grouped key hints need nonempty (key, meaning) pairs")
+        if self.kind == "keys":
+            object.__setattr__(self, "keys", tuple(tuple(pair) for pair in self.keys))
 
 
 @dataclass(frozen=True)

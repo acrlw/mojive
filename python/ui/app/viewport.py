@@ -30,7 +30,6 @@ from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.viewport_widgets import (
     HINT_CHROME_SCALE,
     OVERLAY_CLIP_PADDING,
-    OVERLAY_GEOMETRY,
     PLAYBACK_CHROME_SCALE,
     TOOL_CHROME_SCALE,
     ToolHint,
@@ -38,15 +37,15 @@ from mojive.ui.viewport_widgets import (
     draw_playback,
     draw_scene_tool_hints,
     draw_tool_column,
-    fitting_tool_hints,
     normalized_overlay_position,
     overlay_border_hit,
     playback_size,
     positioned_overlay_rect,
+    scene_tool_hints_layout,
     tool_column_size,
-    tool_hints_size,
     viewport_chrome_scale,
 )
+from mojive.ui.viewport_widgets.hints import _OVERFLOW_HINT, tool_hint_text
 
 from .support import (
     _DEFAULT_INTERACTIONS,
@@ -755,44 +754,43 @@ class _Viewport:
             return
         x, y, width, height = self._viewport_rect
         style_scale = self.window.style_scale
+        available_width = width - 24.0 * style_scale
+        available_height = height * 0.3
+        if available_width <= 0 or available_height <= 0:
+            return
         scale = viewport_chrome_scale(
             style_scale,
             self._viewport_overlay_scale,
             HINT_CHROME_SCALE,
         )
         hint_font_scale = scale / max(style_scale, 1e-6)
+        minimum_scale = scale * 0.75
         imgui.push_font(None, imgui.get_font_size() * hint_font_scale)
         measure = ImguiDraw2D(imgui.get_foreground_draw_list())
-        widget_width, widget_height = tool_hints_size(
-            measure,
-            scale,
-            hints,
-            labels=self._viewport_labels,
-            padding=True,
-        )
+        while True:
+            fitted_scale, rows, sizes = scene_tool_hints_layout(
+                measure,
+                scale,
+                hints,
+                available_width,
+                available_height,
+                labels=self._viewport_labels,
+                min_scale=minimum_scale,
+            )
+            if fitted_scale == scale:
+                break
+            # Font sizes are quantized by the atlas; remeasure the chosen size
+            # before accepting bounds instead of assuming linear glyph advances.
+            imgui.pop_font()
+            imgui.push_font(None, imgui.get_font_size() * fitted_scale / style_scale)
+            scale = fitted_scale
+        if not rows:
+            imgui.pop_font()
+            return
+        row_gap = 6.0 * scale
+        widget_width = max(size[0] for size in sizes)
+        widget_height = sum(size[1] for size in sizes) + row_gap * (len(rows) - 1)
         clip_pad = OVERLAY_CLIP_PADDING * scale
-        if widget_width > width - 24.0 * style_scale:
-            content_width = max(
-                0.0,
-                width - 24.0 * style_scale - 2.0 * OVERLAY_GEOMETRY.hint_padding_x * scale,
-            )
-            hints = fitting_tool_hints(
-                measure,
-                scale,
-                hints,
-                content_width,
-                labels=self._viewport_labels,
-            )
-            if not hints:
-                imgui.pop_font()
-                return
-            widget_width, widget_height = tool_hints_size(
-                measure,
-                scale,
-                hints,
-                labels=self._viewport_labels,
-                padding=True,
-            )
         widget_rect = (
             x + (width - widget_width) * 0.5,
             y + height - widget_height - 16.0 * style_scale,
@@ -825,19 +823,40 @@ class _Viewport:
         visible, _ = imgui.begin(f"{self.localizer.text('Hints')}###viewport_hints", None, flags)
         if visible:
             with _clipped_overlay_draw(self._viewport_rect) as draw:
-                draw_scene_tool_hints(
-                    draw,
-                    (widget_rect[0], widget_rect[1]),
-                    self.theme,
-                    scale,
-                    hints,
-                    labels=self._viewport_labels,
-                    size=(widget_width, widget_height),
-                    pixel_size=self.window.pixels_to_points(1.0),
-                )
+                row_y = widget_rect[1]
+                for row, size in zip(rows, sizes, strict=True):
+                    draw_scene_tool_hints(
+                        draw,
+                        (x + (width - size[0]) * 0.5, row_y),
+                        self.theme,
+                        scale,
+                        row,
+                        labels=self._viewport_labels,
+                        size=size,
+                        pixel_size=self.window.pixels_to_points(1.0),
+                    )
+                    row_y += size[1] + row_gap
         imgui.end()
         imgui.pop_style_var()
         imgui.pop_font()
+
+        if any(_OVERFLOW_HINT in row for row in rows) and imgui.is_mouse_hovering_rect(
+            # The overlay host has ended; its viewport-clipped bounds must not
+            # inherit the unrelated parent window's clip rectangle.
+            imgui.ImVec2(*widget_rect[:2]),
+            imgui.ImVec2(*widget_rect[2:]),
+            False,
+        ):
+            hovered_window = imgui.get_current_context().hovered_window
+            hovered_name = None if hovered_window is None else str(hovered_window.name)
+            if not gs.viewport_input_allowed(True, hovered_name):
+                return
+            imgui.begin_tooltip()
+            imgui.push_text_wrap_pos(min(width, 480.0 * style_scale))
+            for hint in hints:
+                imgui.text_wrapped(tool_hint_text(hint, labels=self._viewport_labels))
+            imgui.pop_text_wrap_pos()
+            imgui.end_tooltip()
 
     def _context_tool_hint_variant(self) -> str:
         """Return the active input grammar independently of its surface."""

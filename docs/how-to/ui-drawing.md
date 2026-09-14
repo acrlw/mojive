@@ -95,6 +95,95 @@ Positive smoothing selects G3 reference transitions. `Draw2D.arrow` has no per-c
 option; that is owned by the adapter. `Layer.arrow_2d` exposes it explicitly. A custom adapter
 can record protocol calls for tests or render them to another surface without creating ImGui.
 
+## Custom hint presentation
+
+`ToolHint` describes an input hint, not a mandatory capsule. Its supported `kind` values are
+`text`, `key`, `keys`, `mouse`, and the legacy `perturb` gesture. Invalid kinds fail at
+construction rather than being interpreted as another gesture. These are display descriptions;
+displaying a key does not bind an action to it.
+
+Both ordinary `Viewer` and `PassiveViewer` expose
+`configure_tool_hints(hints, surface="status")`. Use `surface="scene"` for capsules, or an
+empty sequence to remove the configured application group. Ordinary viewers also expose
+`viewer.tool_hints.add/remove/restore` for individually registered hints and default visibility.
+`draw_tool_hints` and `tool_hints_size` can reuse the existing key and mouse glyphs without
+drawing the capsule shell; `tool_hint_text` provides a plain-text alternative.
+
+An ordinary Viewer can register a custom Panel and paint hints with its own geometry:
+
+```python
+from imgui_bundle import imgui
+from mojive.ui import ToolHint
+from mojive.ui.panels import Panel, PanelContext
+from mojive.ui.viewport_widgets import tool_hint_text
+
+
+class ControlsPanel(Panel):
+    id = "application.controls"
+    name = "Controls"
+    text = tool_hint_text(
+        ToolHint("keys", label="Speed", keys=(("Up", "+"), ("Down", "−")))
+    )
+
+    def draw(self, ctx: PanelContext) -> None:
+        draw = ctx.painter()
+        origin = imgui.get_cursor_screen_pos()
+        scale = ctx.style_scale
+        width, height = draw.text_size(self.text)
+        draw.circle_filled(
+            (origin.x + 5 * scale, origin.y + height * 0.5), 3 * scale, ctx.theme.primary
+        )
+        draw.text((origin.x + 16 * scale, origin.y), ctx.theme.text, self.text)
+        imgui.dummy((width + 16 * scale, height))
+
+
+viewer.configure_tool_hints(())
+viewer.panels.register(ControlsPanel())
+```
+
+The custom panel owns its placement and drawing; this is not an in-place replacement callback
+for Mojive's built-in viewport capsule. There is currently no public capsule-renderer callback
+or general viewport-overlay callback registry. `PanelContext.painter()` gives the current
+frame's Draw2D; never retain it or its draw list between frames. Animate application-owned
+visual state using `ctx.dt`. For interactive custom geometry, submit matching ImGui items or
+reuse shared controls so focus, hit testing and keyboard behavior remain defined. For scene
+input, use `Viewer.set_input_handler` and return an `InputClaim` for consumed input.
+
+For retained screen/world graphics and animated scene annotations, use
+[DebugDraw](debug-draw.md) or [Canvas2D](canvas2d.md). They expose different coordinate and
+lifetime contracts from a panel painter; they are not arbitrary shader hooks.
+
+PassiveViewer accepts serializable hint descriptions, not Panel instances or Python draw
+callbacks. A fully custom display must own its UI code, for example an ordinary Viewer around
+caller-owned `model`/`data`, with the caller yielding regularly to `viewer.sync()`. Long inference
+must not block that UI thread. The built-in passive process remains appropriate when declarative
+controls and standard recording/capture are sufficient.
+
+## Shader extension boundaries
+
+Custom UI animation usually needs drawing and input ownership, not a new shader. Custom
+materials, post-processing, or GPU field effects do require renderer-specific work. Current
+support is source/backend-level, not a portable public shader-plugin API:
+
+| Backend | Existing mechanism | Boundary |
+| --- | --- | --- |
+| OpenGL | `OpenGLBackend(shader_dir=...)`, `ProgramSpec`/`ProgramCache`, fixed-slot pass factories, shader hot reload | Backend-level GLSL integration; `register_pass` rejects new names such as `bloom` and is process-global |
+| WebGPU | WGSL pass implementations and shader hot reload | Fixed backend source locations and pipeline layouts; no public custom-pass registration |
+| bgfx | Compiled shader programs and asynchronous hot reload | Native program layouts and shader build targets must match; not runtime GLSL/WGSL insertion |
+
+`viewer.backend.enable_hot_reload(True)` enables the existing backend reload mechanism;
+it does not create a new material type or insert a render pass. See
+[native reload ownership](../guides/development.md#native-render-diagnostics) for bgfx.
+OpenGL's alternate shader directory is not a `ViewerConfig` option and must contain the
+sources/includes expected by the selected passes. Replacing a built-in pass also entails its
+resource, depth, object-ID, capture, and release contracts. A GLSL implementation does not
+automatically work with WGSL or native bgfx programs.
+
+A future public shader extension would need explicit insertion points, uniform/texture and
+render-product contracts, input ownership, and failure-safe reload/release behavior. Those
+interfaces are not currently provided; applications should not depend on private `_passes`
+mutation as a stable extension API.
+
 ## Reuse geometry and retain clear ownership
 
 Production icons compile their reviewed contours into a bounded cache of Draw2D calls, keyed by

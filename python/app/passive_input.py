@@ -5,8 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from queue import Full
+from typing import TYPE_CHECKING
 
-from mojive.interaction.input import InputClaim, InputContext, normalize_key
+from mojive.interaction.input import InputClaim, InputContext, is_modifier_key, normalize_key
+
+if TYPE_CHECKING:
+    from mojive.ui.viewport_widgets import ToolHint
 
 
 @dataclass(frozen=True)
@@ -33,7 +37,7 @@ class PassiveAction:
             raise ValueError("an action needs a key or a playback control")
         if self.key:
             object.__setattr__(self, "key", normalize_key(self.key))
-            if self.key in ("ctrl", "super", "alt", "shift"):
+            if is_modifier_key(self.key):
                 raise ValueError("a passive action needs a non-modifier key")
 
 
@@ -56,8 +60,15 @@ class PassiveInput:
         self.sequence = 0
         self.keys = frozenset()
         self.claim = None
+        self.hint_surface = "status"
 
-    def configure(self, actions: Sequence[PassiveAction]) -> None:
+    def configure(
+        self,
+        actions: Sequence[PassiveAction],
+        *,
+        hints: Sequence[ToolHint] | None = None,
+        hint_surface: str = "status",
+    ) -> None:
         from mojive.interaction.input import _imgui_keys
         from mojive.ui.viewport_widgets import (
             ToolHint,
@@ -83,10 +94,27 @@ class PassiveInput:
         for action in actions:
             if action.key:
                 _imgui_keys(action.key)
+        if hint_surface not in ("status", "scene"):
+            raise ValueError("hint_surface must be 'status' or 'scene'")
+        if hints is None:
+            hints = tuple(
+                ToolHint(
+                    "key",
+                    action.key.removeprefix("digit_").title(),
+                    action.label or action.name,
+                    hint_id=f"passive.{action.name}",
+                )
+                for action in actions
+                if action.key
+            )
+        else:
+            hints = tuple(hints)
+            if len(hints) > 64 or any(not isinstance(hint, ToolHint) for hint in hints):
+                raise ValueError("Expected at most 64 ToolHint values")
         app = self.viewer.app
         registry = app.viewport_chrome
+        self.configure_hints(hints, surface=hint_surface)
         for action in self.actions:
-            registry.tool_hints.remove(f"passive.{action.name}")
             if action.control:
                 registry.remove("playback", action.control)
         # These four controls are owned by this bridge for the passive window.
@@ -101,10 +129,6 @@ class PassiveInput:
             "step": _step_icon,
         }
         for action in actions:
-            if action.key:
-                label = action.label or action.name
-                key = action.key.removeprefix("digit_").title()
-                registry.tool_hints.add(f"passive.{action.name}", ToolHint("key", key, label))
             if action.control:
                 index = next(
                     i
@@ -121,6 +145,11 @@ class PassiveInput:
                     index=index,
                 )
         self._refresh_controls()
+
+    def configure_hints(self, hints: Sequence[ToolHint], *, surface: str = "status") -> None:
+        """Update presentation without changing actions, pending requests or controls."""
+        self.viewer.app.viewport_chrome.tool_hints.configure(hints, surface=surface)
+        self.hint_surface = surface
 
     def _handler(self, name: str) -> Callable[[], None]:
         return lambda: self.request(name)

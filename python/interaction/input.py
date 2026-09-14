@@ -91,6 +91,14 @@ def _imgui_keys(identifier: str) -> tuple[object, ...]:
     return (key,)
 
 
+def is_modifier_key(identifier: str) -> bool:
+    """Recognize generic, physical and ImGui modifier key names after normalization."""
+    key = normalize_key(identifier)
+    for prefix in ("left_", "right_", "mod_"):
+        key = key.removeprefix(prefix)
+    return key in ("ctrl", "super", "alt", "shift")
+
+
 @dataclass(frozen=True)
 class InputClaim:
     """Input reserved by an embedding application for the current frame.
