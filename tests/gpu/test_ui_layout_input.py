@@ -14,6 +14,16 @@ from mojive.ui.panels.keyframes import timeline_status_hints
 pytestmark = pytest.mark.gpu
 
 
+@pytest.mark.parametrize("scale", (1, 2.5))
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_backend_info_localizes_dynamic_counts_without_overlapping_labels(
+    tmp_path, scale, language
+):
+    from mojive.tools.ui_layout_audit import capture_backend_info
+
+    capture_backend_info(tmp_path, scale, language)
+
+
 @pytest.fixture
 def viewer(tmp_path, monkeypatch):
     monkeypatch.setenv("MOJIVE_UI_SCALE", "1")

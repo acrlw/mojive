@@ -5,7 +5,7 @@ from imgui_bundle import imgui
 
 from mojive import RecordingConfig, ViewerConfig, build
 from mojive.scene.assets import resolve
-from mojive.tools.keyframe_timeline import show_recording_settings
+from mojive.tools.keyframe_timeline import show_settings
 from mojive.tools.ui_runtime import _click, _item_center, _item_rect
 
 pytestmark = pytest.mark.gpu
@@ -28,7 +28,7 @@ def test_encoding_controls_switch_modes_and_persist_without_losing_values(
         config=ViewerConfig(recording=RecordingConfig()),
     ) as viewer:
         viewer.app.set_language(language)
-        show_recording_settings(viewer)
+        show_settings(viewer)
 
         def choose(control, label):
             _click(viewer, _item_center(viewer, "begin_combo", control))

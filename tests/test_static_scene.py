@@ -1188,9 +1188,65 @@ def test_recording_rejects_take_switch_delete_and_second_start():
 
 
 @pytest.mark.parametrize("loop_enabled", (False, True))
+@pytest.mark.parametrize("cursor", (0, 2, 3, 4, 8))
+def test_range_replay_clamps_to_nearest_endpoint_and_preserves_in_range_cursor(
+    loop_enabled, cursor
+):
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeRange(2, 4))
+    assert session.submit(cmd.SetStateTakeLoopEnabled(loop_enabled))
+    assert session.submit(cmd.SeekStateTake(cursor))
+    assert session.submit(cmd.PlayStateTake())
+    expected = min(4, max(2, cursor))
+    assert session.state_take_cursor == expected and adapter.steps == expected
+    assert session.state_take_playhead == pytest.approx(expected * 0.01)
+    session.tick(FrameNeeds.none(), wall_dt=0)
+    assert session.state_take_cursor == expected
+    assert session.state_take_playhead == pytest.approx(expected * 0.01)
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert session.state_take_cursor == (
+        2 if expected == 4 and loop_enabled else min(4, expected + 1)
+    )
+
+
+@pytest.mark.parametrize("last", (4, 10))
+def test_starting_range_replay_clamps_elapsed_time_but_preserves_time_inside_the_range(last):
+    session, _ = _recorded_take()
+    assert session.submit(cmd.SetStateTakePauseAtEnd(False))
+    assert session.submit(cmd.SeekStateTake(3))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
+    assert session.submit(cmd.PauseStateTake())
+    assert session.submit(cmd.SetStateTakeLoop(2, last))
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_playhead == pytest.approx(0.035)
+    assert session.submit(cmd.SetStateTakeRange())
+    assert session.submit(cmd.SetStateTakeLoopEnabled(False))
+    session.tick(FrameNeeds.none(), wall_dt=0.5)
+    assert session.submit(cmd.PauseStateTake())
+    assert session.state_take_playhead > session.state_take_times[-1]
+    assert session.submit(cmd.SetStateTakeLoop(2, last))
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == last
+    assert session.state_take_playhead == pytest.approx(last * 0.01)
+
+
+@pytest.mark.parametrize("cursor, expected", ((0, 2), (3, 3), (8, 4)))
+def test_selecting_a_range_during_replay_clamps_to_the_nearest_endpoint(cursor, expected):
+    session, _ = _recorded_take()
+    assert session.submit(cmd.SeekStateTake(cursor))
+    assert session.submit(cmd.PlayStateTake())
+    assert session.submit(cmd.SetStateTakeLoop(2, 4))
+    session.tick(FrameNeeds.none(), wall_dt=0)
+    assert session.state_take_cursor == expected
+    assert session.state_take_playhead == pytest.approx(expected * 0.01)
+
+
+@pytest.mark.parametrize("loop_enabled", (False, True))
 @pytest.mark.parametrize("pause_at_end", (False, True))
 def test_take_range_selects_playback_bounds_without_changing_repeat(loop_enabled, pause_at_end):
     session, adapter = _recorded_take()
+    assert session.submit(cmd.SeekStateTake(0))
     assert session.submit(cmd.SetStateTakeLoopEnabled(loop_enabled))
     assert session.submit(cmd.SetStateTakePauseAtEnd(pause_at_end))
     assert session.submit(cmd.SetStateTakeRange(2, 4))
@@ -1221,6 +1277,8 @@ def test_repeat_toggle_preserves_range_and_fractional_playhead_and_applies_durin
     assert session.state_take_playhead == pytest.approx(0.04)
     assert session.submit(cmd.SetStateTakeLoopEnabled(True))
     assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 4
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
     assert session.state_take_cursor == 2
 
 
@@ -1270,6 +1328,7 @@ def test_full_take_export_ignores_range_and_repeat_without_changing_either(loop_
 
 def test_take_loop_wraps_inclusively_and_clear_restores_normal_end_behavior():
     session, adapter = _recorded_take()
+    assert session.submit(cmd.SeekStateTake(0))
     assert session.submit(cmd.SetStateTakeLoop(2, 4))
     assert session.submit(cmd.PlayStateTake())
     assert session.state_take_cursor == 2
@@ -1303,7 +1362,7 @@ def test_one_shot_take_replay_preserves_loop_and_fractional_time_across_pause():
     assert not session.state_take_playing
     assert session.state_take_loop == (2, 4)
     assert session.submit(cmd.PlayStateTake())
-    assert session.state_take_cursor == 2
+    assert session.state_take_cursor == 4
     assert session.paused
 
 
@@ -1320,6 +1379,7 @@ def test_take_loop_spanning_last_frame_preserves_speed_and_restores_only_display
 
     monkeypatch.setattr(adapter, "restore_state", observe)
     assert session.submit(cmd.SetStateTakeLoop(8, 10))
+    assert session.submit(cmd.SeekStateTake(8))
     assert session.submit(cmd.PlayStateTake())
     calls.clear()
     assert session.submit(cmd.SetSpeed(2))
@@ -1361,10 +1421,10 @@ def test_take_loop_seek_pause_and_new_recording_preserve_expected_ownership():
     assert not session.state_take_playing
     assert adapter.steps == 8
     assert session.submit(cmd.PlayStateTake())
-    assert session.state_take_cursor == 2
+    assert session.state_take_cursor == 6
     assert session.submit(cmd.PauseStateTake())
     session.tick(FrameNeeds(), wall_dt=1)
-    assert session.state_take_cursor == 2
+    assert session.state_take_cursor == 6
     assert session.submit(cmd.StartStateTakeRecording())
     assert session.state_take_loop is None
     session.tick(FrameNeeds(), wall_dt=0.01)

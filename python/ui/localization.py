@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -676,6 +678,11 @@ _ZH_CN = {
     "Apply Placement": "应用放置",
     "Assign to Selected Geometry": "指定给选中几何体",
     "Backend info": "后端信息",
+    "scene lights": "场景灯光",
+    "shadow casters": "投影灯光",
+    "{active} active, {deferred} deferred": "{active} 个生效，{deferred} 个暂未使用",
+    "{active} active, {used} used by export": "{active} 个生效，导出使用 {used} 个",
+    "{active} active, export-only plan": "{active} 个生效，仅用于导出规划",
     "Body": "本体",
     "Cancel": "取消",
     "Capture Snapshot": "捕获快照",
@@ -1098,6 +1105,17 @@ _ZH_CN = {
     "overdraw": "过度绘制",
     "contact point": "接触点",
 }
+
+
+def render_note_text(value: str, tr: Callable[[str], str]) -> str:
+    """Localize known count summaries without changing backend diagnostic contracts."""
+    if match := re.fullmatch(r"(\d+) active, (\d+) deferred", value):
+        return tr("{active} active, {deferred} deferred").format(active=match[1], deferred=match[2])
+    if match := re.fullmatch(r"(\d+) active, (\d+) used by export", value):
+        return tr("{active} active, {used} used by export").format(active=match[1], used=match[2])
+    if match := re.fullmatch(r"(\d+) active, export-only plan", value):
+        return tr("{active} active, export-only plan").format(active=match[1])
+    return value
 
 
 def settings_path() -> Path:

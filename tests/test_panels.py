@@ -27,7 +27,7 @@ from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimens
 from mojive.session import Session
 from mojive.types import MeshShape
 from mojive.ui.compound_fields import draw_joined_field_frame
-from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language
+from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language, render_note_text
 from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import (
     Panel,
@@ -667,6 +667,25 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
     assert restored.text("Return to Editor Camera") == "返回编辑器相机"
     assert restored.preference("remember_precise_input_choices") is True
     assert restored.preference("precise_gizmo_angle_unit") == "radians"
+
+
+@pytest.mark.parametrize(
+    "source, translated",
+    (
+        ("1 active, 0 deferred", "1 个生效，0 个暂未使用"),
+        ("12 active, 8 deferred", "12 个生效，8 个暂未使用"),
+        ("7 active, 0 used by export", "7 个生效，导出使用 0 个"),
+        ("0 active, export-only plan", "0 个生效，仅用于导出规划"),
+        ("custom backend diagnostic", "custom backend diagnostic"),
+    ),
+)
+def test_render_count_notes_localize_values_and_preserve_backend_diagnostics(source, translated):
+    chinese = Localizer(Language.SIMPLIFIED_CHINESE)
+    english = Localizer(Language.ENGLISH)
+    assert render_note_text(source, chinese.text) == translated
+    assert render_note_text(source, english.text) == source
+    assert chinese.text("scene lights") == "场景灯光"
+    assert chinese.text("shadow casters") == "投影灯光"
 
 
 def test_every_literal_translation_source_has_a_simplified_chinese_entry() -> None:

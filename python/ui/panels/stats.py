@@ -5,6 +5,7 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
+from ..localization import render_note_text
 from . import Panel, PanelContext, begin_kv_table, labeled
 from .plot import Ring
 
@@ -73,7 +74,7 @@ class StatsPanel(Panel):
             imgui.separator()
             if begin_kv_table("stats_notes"):
                 for k, v in stats.notes.items():
-                    labeled(k, v)
+                    labeled(ctx.tr(k), render_note_text(v, ctx.tr))
                 imgui.end_table()
 
     def _update_scale(self, peak: float) -> None:

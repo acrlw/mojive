@@ -356,7 +356,7 @@ class _Playback:
         position = (
             offsets[cursor] + self._state_take_elapsed
             if first <= cursor <= last
-            else offsets[first]
+            else offsets[min(last, max(first, cursor))]
         ) + dt * self._speed
         if looping:
             # Include the last selected frame for one recorded interval, then
