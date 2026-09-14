@@ -169,17 +169,19 @@ def play_state_take(self: Session, c: cmd.PlayStateTake) -> CommandResult:
     if not self._paused and not self._adapter.set_paused(True):
         return CommandResult.bad("physics backend rejected pause before take replay")
     self._paused = True
-    loop = self._take.loop if c.loop else None
-    first, last = loop or (0, len(self._take.frames) - 1)
-    pause_at_end = self._state_take_pause_at_end if c.pause_at_end is None else c.pause_at_end
+    play_range = self._take.play_range if c.loop else None
+    first, last = play_range or (0, len(self._take.frames) - 1)
+    pause_at_end = play_range is not None or (
+        self._state_take_pause_at_end if c.pause_at_end is None else c.pause_at_end
+    )
     previous_index = index = self._take.cursor
     if index < first or index > last or (index == last and pause_at_end):
         index = first
     if not self._restore_state_take_frame(index):
         return CommandResult.bad("Recorded take is incompatible with the current scene")
-    if index != previous_index or c.loop != self._state_take_use_loop:
+    if index != previous_index or c.loop != self._state_take_use_range:
         self._state_take_elapsed = 0.0
-    self._state_take_use_loop = c.loop
+    self._state_take_use_range = c.loop
     self._state_take_end_override = c.pause_at_end
     self._playback_source = "take"
     self._state_take_playing = len(self._take.frames) > 1 or not pause_at_end
@@ -213,19 +215,35 @@ def seek_state_take(self: Session, c: cmd.SeekStateTake) -> CommandResult:
 
 
 def set_state_take_loop(self: Session, c: cmd.SetStateTakeLoop) -> CommandResult:
+    result = set_state_take_range(self, cmd.SetStateTakeRange(c.first_frame, c.last_frame))
+    if result.ok:
+        self._take.loop_enabled = self._take.play_range is not None
+    return result
+
+
+def set_state_take_range(self: Session, c: cmd.SetStateTakeRange) -> CommandResult:
     if c.first_frame is None and c.last_frame is None:
-        self._take.loop = None
-        return CommandResult.good("Cleared take loop range")
+        self._take.play_range = None
+        return CommandResult.good("Cleared take playback range")
     if self._state_take_recording:
-        return CommandResult.bad("Stop recording before selecting a loop range")
+        return CommandResult.bad("Stop recording before selecting a playback range")
     try:
         first, last = operator.index(c.first_frame), operator.index(c.last_frame)
     except TypeError:
-        return CommandResult.bad("Loop endpoints must both be recorded frame indices")
+        return CommandResult.bad("Range endpoints must both be recorded frame indices")
     if not 0 <= first < last < len(self._take.frames):
         return CommandResult.bad("Select at least two frames within the recorded take")
-    self._take.loop = first, last
-    return CommandResult.good(f"Looping take frames {first + 1}–{last + 1}")
+    self._take.play_range = first, last
+    return CommandResult.good(f"Selected take frames {first + 1}–{last + 1}")
+
+
+def set_state_take_loop_enabled(self: Session, c: cmd.SetStateTakeLoopEnabled) -> CommandResult:
+    if self._state_take_recording:
+        return CommandResult.bad("Stop recording before changing repetition")
+    if c.enabled and len(self._take.frames) < 2:
+        return CommandResult.bad("Record at least two frames before enabling repetition")
+    self._take.loop_enabled = bool(c.enabled)
+    return CommandResult.good("")
 
 
 def clear_state_take(self: Session, c: cmd.ClearStateTake) -> CommandResult:

@@ -118,7 +118,7 @@ class Session(_Editing, _Playback, _Source):
         self._state_take_recording = False
         self._state_take_recording_start_frame = 0
         self._state_take_playing = False
-        self._state_take_use_loop = True
+        self._state_take_use_range = True
         self._state_take_pause_at_end = True
         self._state_take_end_override: bool | None = None
         self._state_take_elapsed = 0.0
@@ -320,8 +320,18 @@ class Session(_Editing, _Playback, _Source):
 
     @property
     def state_take_loop(self) -> tuple[int, int] | None:
-        """Return the inclusive replay range, or None when replay stops at the take end."""
-        return self._take.loop
+        """Return the selected playback range (the historical range-only accessor)."""
+        return self.state_take_range
+
+    @property
+    def state_take_range(self) -> tuple[int, int] | None:
+        """Return the inclusive playback range, independently of repetition."""
+        return self._take.play_range
+
+    @property
+    def state_take_loop_enabled(self) -> bool:
+        """Return whether replay repeats its range or, without a range, the whole take."""
+        return self._take.loop_enabled
 
     @property
     def can_step_back(self) -> bool:

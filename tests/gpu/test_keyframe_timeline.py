@@ -10,6 +10,7 @@ from mojive.adapters.base import FrameNeeds
 from mojive.scene.assets import resolve
 from mojive.tools.keyframe_timeline import (
     capture_instability_recovery,
+    capture_range_playback,
     choose_follow,
     drag,
     populate_take,
@@ -419,6 +420,44 @@ def test_first_and_last_buttons_seek_endpoints_while_step_buttons_move_one_frame
         assert session.state_take_cursor == expected
 
 
+@pytest.mark.parametrize("scale", (1.0, 2.5))
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_selected_range_navigation_and_repeat_button_remain_independent(
+    tmp_path, monkeypatch, scale, language
+):
+    from mojive.ui.panels import keyframes
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    buttons = []
+    original = keyframes._command_button
+
+    def observe(item_id, kind, tooltip, *args, **kwargs):
+        buttons.append((item_id, tooltip, kwargs.get("selected", False)))
+        return original(item_id, kind, tooltip, *args, **kwargs)
+
+    monkeypatch.setattr(keyframes, "_command_button", observe)
+    with build(
+        resolve("joint_types"),
+        config=ViewerConfig(threaded_physics=False),
+        paused=True,
+        show_window=False,
+        vsync=False,
+        width=min(3200, round(1800 * scale)),
+        height=min(1800, round(1100 * scale)),
+    ) as viewer:
+        viewer.app.localizer.set_language(language, persist=False)
+        populate_take(viewer, 30)
+        show_timeline(viewer)
+        capture_range_playback(viewer, tmp_path)
+        translate = viewer.app.localizer.text
+        loop = [(label, selected) for name, label, selected in buttons if name == "##timeline-loop"]
+        assert {label for label, _ in loop} == {translate("Loop")}
+        assert {selected for _, selected in loop} == {False, True}
+        assert ("##take-first", translate("Range first frame"), False) in buttons
+        assert ("##take-last", translate("Range last frame"), False) in buttons
+
+
 def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(viewer):
     session, panel = viewer.session, viewer.panels.get("Keyframes")
     before = session.camera
@@ -429,6 +468,7 @@ def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(v
         nearest_take_frame(session.state_take_times, 18),
     )
     assert session.state_take_loop == expected
+    assert not session.state_take_loop_enabled
     assert (panel._view_start, panel._view_end) == view_range
     np.testing.assert_allclose(session.camera.eye, before.eye)
     drag(

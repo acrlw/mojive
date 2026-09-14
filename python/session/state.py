@@ -74,7 +74,8 @@ class _StateTake:
     frames: list[_StateTakeFrame] = field(default_factory=list)
     times: list[float] = field(default_factory=list)
     offsets: list[float] = field(default_factory=list)
-    loop: tuple[int, int] | None = None
+    play_range: tuple[int, int] | None = None
+    loop_enabled: bool = False
     cursor: int = -1
     signature: tuple[tuple[int, ...], ...] | None = None
     size_bytes: int = 0

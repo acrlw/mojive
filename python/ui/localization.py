@@ -880,6 +880,8 @@ _ZH_CN = {
     "Record new take": "录制新片段",
     "Ctrl+click to reveal file": "Ctrl+左键：在文件管理器中显示",
     "First frame": "第一帧",
+    "Range first frame": "范围第一帧",
+    "Range last frame": "范围最后一帧",
     "Previous frame": "上一帧",
     "restore the previous frame; hold to rewind": "恢复上一帧；长按连续回退",
     "Restored previous frame": "已恢复上一帧",

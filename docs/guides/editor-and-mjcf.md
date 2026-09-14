@@ -84,11 +84,11 @@ record. Its arrow restores the full panel, including filters and selection.
 
 The Keyframes toolbar groups the model, take recording, video export, snapshot capture, range,
 loop and recording settings. Transport is embedded in the ruler on wide panels and wraps on narrow
-ones. **Model Keyframes** are persistent model-local keys. **Capture Snapshot** adds an independent,
+ones. **Keyframes** are persistent model-local keys. **Capture Snapshot** adds an independent,
 transient **Snapshots** marker containing all models' physics state (positions, velocities, controls,
 activation and mocap state). Double-click it while paused to restore that state without compilation.
-It does not capture camera navigation or renderer options. **Add Model Keyframe** in the options
-menu writes a persistent key. **Recorded Take** is a separate sequential whole-scene recording.
+It does not capture camera navigation or renderer options. **Add Keyframe** writes a persistent
+key. **Take** is a separate sequential whole-scene recording.
 Snapshot storage is bounded to 1,024 entries and 256 MiB; topology/source replacement invalidates
 old snapshots. Snapshots are not written into MJCF, saved documents, or recorded takes.
 
@@ -166,24 +166,33 @@ The structured Inspector currently covers:
   present unsupported interpolation or property curves. The transport can record an in-memory
   whole-scene simulation take without recompiling MJCF, replay it with its recorded timing, seek its
   first/previous/next/last frames, and promote the current take frame to a persistent model keyframe
-  with **Add Model Keyframe**. A new recording replaces the previous transient take.
+  with **Add Keyframe**. **New Take** creates an independent recording; **Record from Playhead**
+  retains the active take through the playhead and overwrites its later samples.
 
-In **Keyframes**, click or drag the time ruler or empty track space to seek the recorded take.
-Dragging during replay temporarily pauses it and resumes from the released position. Hold
-**Shift** and drag with the **right mouse button** to select an orange loop range; dragging in
-either direction works. Replay includes both selected endpoint frames and repeats that range,
-even with the panel closed. **Clear range**, **Esc** while the timeline is focused, or a
-**Shift + right-click** removes the range. During a range drag, **Esc** cancels the preview and
-keeps the previous range.
+In **Keyframes**, click or drag the time ruler to seek the recorded take. Dragging during replay
+temporarily pauses it and resumes from the released position. Drag in a track to select samples
+for editing; this selection is separate from the playback range.
+
+Hold **Shift** and drag with the **left mouse button** to select an orange playback range;
+dragging in either direction works. The first/last transport buttons jump to that range's
+endpoints. With no range, they jump to the take's endpoints; the first button returns an empty
+timeline to zero. **Loop** only toggles repetition and never clears the range. With Loop off,
+replay pauses at the selected final frame; with Loop on, it includes both endpoint frames and
+returns to the selected first frame. Without a range, Loop repeats the entire take. These policies
+also apply with the panel closed. **Esc** while the timeline is focused or **Shift + right-click**
+clears the range without changing Loop. During a range drag, Esc discards the preview and clears
+any existing range. The **Pause at last frame** preference applies to full-take playback without
+looping; an explicit playback range always stops at its end unless Loop is enabled.
 
 **Follow playhead** defaults to **Page**, which scrolls at the visible edge and places the
 playhead near the left side. **Locked** keeps the playhead at its current screen position while
 time moves beneath it; **Off** leaves the view unchanged. Right-drag pans and turns following
-off, and the wheel zooms. **Space** pauses and resumes the recorded take when a take frame is
-active. These controls use recorded samples without changing the physics or display frame rates.
+off, and the wheel zooms. **Space** pauses and resumes the last explicitly started transport:
+simulation or take replay. Selecting a take does not start simulation. These controls use recorded
+samples without changing the physics or display frame rates.
 
-**Record Take Video** records the completed take from its first frame through its last frame,
-ignoring the selected loop for that recording. **Video Settings** controls the countdown before
+**Export Video** records the completed take from its first frame through its last frame,
+ignoring the playback range and Loop setting for that recording. Recording settings control the countdown before
 playback and the recorded hold on the final frame. The video saves automatically; its path appears
 briefly at the viewport's lower left. Its Output entry offers **Copy path** in the context menu. Pausing the video or pressing **Space**
 pauses both playback and recording. Stop the video before scrubbing or editing take poses.
