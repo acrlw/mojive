@@ -782,3 +782,92 @@ def test_recording_countdown_uses_wall_time_and_waits_for_menu_dismissal(monkeyp
     assert app.stop_recording() is None
     assert not path.exists()
     assert app.recording.phase is RecordingPhase.IDLE
+
+
+@pytest.mark.parametrize("run_simulation", (False, True))
+def test_video_start_action_follows_first_encoded_frame_and_never_repeats(
+    monkeypatch, tmp_path, run_simulation
+):
+    from mojive import RecordingConfig
+    from mojive import commands as cmd
+    from mojive.capture import recording
+
+    events = []
+
+    class Recorder:
+        def __init__(self, path, size, fps):
+            self.size = size
+
+        def append(self, frame):
+            events.append("frame")
+
+        def close(self):
+            events.append("close")
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    app = ViewerApp.__new__(ViewerApp)
+    app.recording_config = RecordingConfig(countdown=0, run_simulation=run_simulation)
+    app._surface_image = lambda *args: np.zeros((2, 2, 3), np.uint8)
+    app.session = SimpleNamespace(
+        submit=lambda command: events.append(type(command).__name__) or cmd.CommandResult.good(""),
+        report_message=lambda *args, **kwargs: None,
+    )
+    app.start_recording(tmp_path / "video.mp4")
+    app._advance_recording_countdown()
+    assert events == []
+    app._finish_capture_and_recording(None, 0)
+    assert events == (["frame", "Play"] if run_simulation else ["frame"])
+    assert app.pause_recording()
+    assert app.resume_recording()
+    app._finish_capture_and_recording(None, 0)
+    assert events[-1] == "frame"
+    assert events.count("Play") == int(run_simulation)
+    app.stop_recording(report=False)
+    assert events[-1] == "close"
+    assert not any(name in events for name in ("Pause", "Reset", "PlayStateTake"))
+
+
+@pytest.mark.parametrize("failure", ("cancel", "encoder", "simulation"))
+def test_failed_or_canceled_video_start_does_not_run_an_unrecorded_action(
+    monkeypatch, tmp_path, failure
+):
+    from mojive import RecordingConfig
+    from mojive import commands as cmd
+    from mojive.capture import recording
+
+    events = []
+
+    class Recorder:
+        def __init__(self, path, size, fps):
+            self.size = size
+
+        def append(self, frame):
+            if failure == "encoder":
+                raise RuntimeError("encoder unavailable")
+            events.append("frame")
+
+        def close(self):
+            events.append("close")
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    app = ViewerApp.__new__(ViewerApp)
+    app.recording_config = RecordingConfig(countdown=0, run_simulation=True)
+    app._surface_image = lambda *args: np.zeros((2, 2, 3), np.uint8)
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    app.session = SimpleNamespace(
+        submit=lambda command: (
+            events.append(type(command).__name__) or cmd.CommandResult.bad("simulation unavailable")
+        ),
+        report_message=lambda message, **kwargs: events.append(message),
+    )
+    app.start_recording(tmp_path / "video.mp4")
+    if failure == "cancel":
+        app.stop_recording(report=False)
+    else:
+        app._advance_recording_countdown()
+        app._finish_capture_and_recording(None, 0)
+    assert not app.recording.active and not app._recording_run_simulation
+    if failure == "simulation":
+        assert events == ["frame", "Play", "close", "simulation unavailable"]
+    else:
+        assert "Play" not in events

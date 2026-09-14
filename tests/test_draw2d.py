@@ -106,7 +106,11 @@ def native_draw():
     from imgui_bundle import imgui
 
     context = imgui.create_context()
-    draw_list = imgui.ImDrawList(imgui.get_draw_list_shared_data())
+    shared = imgui.get_draw_list_shared_data()
+    # NewFrame normally initializes the adaptive circle table. This CPU-only
+    # fixture creates draw lists directly, before any frame or renderer exists.
+    shared.set_circle_tessellation_max_error(imgui.get_style().circle_tessellation_max_error)
+    draw_list = imgui.ImDrawList(shared)
     draw_list._reset_for_new_frame()
     draw_list.flags = (
         imgui.ImDrawListFlags_.anti_aliased_lines.value

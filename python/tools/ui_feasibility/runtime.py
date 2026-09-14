@@ -15,6 +15,7 @@ from mojive.render.selection import render_backend_name
 from mojive.ui.icons import (
     ICON_ALIGNMENT_CHOICES,
     ICON_ALIGNMENT_EDITABLE_ICONS,
+    ICON_FAMILIES,
     ICON_GROUP_BY_SLUG,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_MAX_PADDING,
@@ -22,6 +23,7 @@ from mojive.ui.icons import (
     ICON_MIN_CLEARANCE,
     ICON_MIN_STROKE,
     ICON_ROTATE_RING_CAP,
+    icon_component_group,
 )
 from mojive.ui.window import WindowConfig
 
@@ -57,8 +59,12 @@ def render(
     capsule_outline: str = "Soft white",
     preview_icon_library: bool = False,
     renderer: str | None = None,
+    icon_glyph: str | None = None,
 ) -> None:
     renderer = render_backend_name(renderer)
+    if icon_glyph is not None:
+        initial_page, initial_geometry_tab = "Geometry", "Icon library"
+        initial_icon_group = icon_component_group(icon_glyph)
     window_width, window_height = _probe_window_size(width, height, ui_scale)
     window = create_window(
         WindowConfig(
@@ -83,6 +89,7 @@ def render(
             page=initial_page,
             geometry_tab=initial_geometry_tab,
             icon_library_tab=initial_icon_group,
+            icon_glyph=icon_glyph,
             rotate_ring_cap=initial_rotate_cap,
             capsule_outline=capsule_outline,
             preview_icon_library=preview_icon_library,
@@ -219,6 +226,11 @@ def main() -> None:
         help="Initial family on the concept-only Icon library geometry tab",
     )
     parser.add_argument(
+        "--icon-glyph",
+        choices=tuple(name for _family, icons in ICON_FAMILIES for _label, name in icons),
+        help="Capture one glyph at every review size without an oversized family canvas",
+    )
+    parser.add_argument(
         "--rotate-cap",
         choices=("butt", "round"),
         default=ICON_ROTATE_RING_CAP,
@@ -348,6 +360,7 @@ def main() -> None:
             "workspaces": "Workspaces",
         }[args.geometry_tab],
         initial_icon_group=ICON_GROUP_BY_SLUG[args.icon_group],
+        icon_glyph=args.icon_glyph,
         initial_rotate_cap=args.rotate_cap,
         ui_scale=args.ui_scale,
         interactive_fps=args.fps,

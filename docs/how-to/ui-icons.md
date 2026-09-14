@@ -94,7 +94,7 @@ declared geometric feature per silhouette:
 
 - Previous, Next, More, Keyframe Transport First/Last, and Tool Snap center their complete visible
   axis-aligned box;
-- Playback and Keyframe Transport Reset place the center of the authored circular ring on the slot;
+- Playback Reset places the center of the authored circular ring on the slot;
 - Snapshot, Camera, and Light default to Box alignment and expose a per-glyph Box/Circle selector;
 - all remaining candidates center their sampled minimum enclosing circle.
 
@@ -139,13 +139,23 @@ accepted defaults to `mojive.ui.icons`; runtime consumers and review sheets must
 geometry. The `gap / stroke` control keeps its full 0.25 to 1.00 review range and must not clamp
 production geometry.
 
-Reset and refresh arrows share `icon_reset_head_scale`, exposed as `Head` in both Reset rows.
+Reset and value-restore arrows share `icon_reset_head_scale`, exposed as `Head` in the Playback Reset row.
 It defaults to 1.5 and adjusts the head length, width, neck offset and corner radius together;
 the arc keeps its selected stroke weight and its ring remains centered. The review range is
-0.65–2.0. Both parameter exports include the value, and each Reset row's Default button restores
-it for both rows. Value-restore glyphs also accept `head_scale` and share the production default.
+0.65–2.0. Both parameter exports include the value, and the Reset row's Default button restores
+it. Value-restore glyphs also accept `head_scale` and share the production default.
 `make ui-reset-heads BACKEND=bgfx` compares original and enlarged heads at four UI scales.
 The feasibility CLI also accepts `--reset-head-scale 1.6`.
+
+Keyframe Transport Loop uses two half-turn-related bent arrows, not the Reset contour. Each arrow
+joins its G3 elbow, rounded tail and filled head into one non-overlapping silhouette. The open
+center and opposing horizontal heads communicate repetition; the single circular Reset arrow
+communicates restoring the simulation. Loop uses its own production stroke and padding and does
+not inherit the reset-head slider. Review both at actual sizes with
+`make ui-icon-scales ICON_SCALE_GROUPS='viewport-playback keyframe-transport'`.
+For extreme UI scales, focus one row with `--icon-glyph transport-loop` or
+`--icon-glyph playback-reset` and reduce `--width`/`--height` to fit the display.
+This filters the review rows, not the glyph's rendered size or geometry.
 
 Use the shared G3 curve builders for rounded heads, boxes, and structural corners. In particular,
 `arrow_points`, `box_handle_points`, and `smooth_polygon_corners` preserve continuous curvature at

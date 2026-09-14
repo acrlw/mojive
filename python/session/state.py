@@ -61,6 +61,26 @@ class _StateTakeFrame:
 
 
 @dataclass(frozen=True)
+class StateTakeInfo:
+    """Identity and display name of a transient, scene-wide recording."""
+
+    take_id: int
+    name: str
+
+
+@dataclass
+class _StateTake:
+    info: StateTakeInfo = field(default_factory=lambda: StateTakeInfo(-1, ""))
+    frames: list[_StateTakeFrame] = field(default_factory=list)
+    times: list[float] = field(default_factory=list)
+    offsets: list[float] = field(default_factory=list)
+    loop: tuple[int, int] | None = None
+    cursor: int = -1
+    signature: tuple[tuple[int, ...], ...] | None = None
+    size_bytes: int = 0
+
+
+@dataclass(frozen=True)
 class SceneSnapshotInfo:
     """Lightweight metadata; captured arrays stay private to the owning session."""
 

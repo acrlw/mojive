@@ -324,6 +324,11 @@ class SettingsPanel(Panel):
         if config is None:
             return
         if self._begin_properties("settings_recording"):
+            self._property(ctx.tr("Run simulation when recording starts"))
+            changed, value = imgui.checkbox("##recording_run_simulation", config.run_simulation)
+            if changed:
+                config = replace(config, run_simulation=value)
+                ctx.set_recording_config(config)
             self._property(ctx.tr("Countdown (s)"))
             changed, value = imgui.input_float(
                 "##recording_delay", config.countdown, 1.0, 5.0, "%.1f"

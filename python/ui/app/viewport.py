@@ -511,6 +511,9 @@ class _Viewport:
                     scale,
                     playing=not paused,
                     step_enabled=paused and not take_playing,
+                    toggle_tooltip=self.localizer.text("Run simulation")
+                    if paused and self._take_video is None
+                    else "",
                     previous_enabled=self.session.can_step_back,
                     recording=self.session.state_take_recording or self.recording.active,
                     record_action=(
@@ -529,6 +532,8 @@ class _Viewport:
                         if self.recording.phase is RecordingPhase.COUNTDOWN
                         else "Stop Recording"
                         if self.session.state_take_recording
+                        else "Record from Playhead"
+                        if self._viewport_recording_mode == "take" and self.session.state_take_times
                         else "Record Take"
                         if self._viewport_recording_mode == "take"
                         else "Record Video"
@@ -547,7 +552,7 @@ class _Viewport:
             if action and self.viewport_chrome.dispatch("playback", action):
                 pass
             elif action == "toggle":
-                self._toggle_playback()
+                self._toggle_playback(source="simulation")
             elif action == "step":
                 self.session.submit(cmd.Step(1))
             elif action == "previous":
@@ -562,10 +567,8 @@ class _Viewport:
                         self.stop_recording()
                     else:
                         self.pause_recording()
-                elif self.session.state_take_recording:
-                    self.session.submit(cmd.StopStateTakeRecording())
-                elif self._viewport_recording_mode == "take":
-                    self.session.submit(cmd.StartStateTakeRecording())
+                elif self.session.state_take_recording or self._viewport_recording_mode == "take":
+                    self._toggle_state_take_recording()
                 else:
                     self._toggle_viewport_recording()
             elif action == "recording-options":
@@ -581,9 +584,11 @@ class _Viewport:
                             t(
                                 "Stop Recording"
                                 if self.session.state_take_recording
+                                else "Record from Playhead"
+                                if self.session.state_take_times
                                 else "Record Take"
                             ),
-                            True,
+                            self._take_video is None,
                         )
                     )
                 items.extend(
@@ -600,11 +605,7 @@ class _Viewport:
                 action = action_menu_popup("viewport-recording-options", items)
                 if action == "record-take":
                     self._viewport_recording_mode = "take"
-                    self.session.submit(
-                        cmd.StopStateTakeRecording()
-                        if self.session.state_take_recording
-                        else cmd.StartStateTakeRecording()
-                    )
+                    self._toggle_state_take_recording()
                 elif action == "record-video":
                     self._viewport_recording_mode = "video"
                     self._toggle_viewport_recording()

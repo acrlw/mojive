@@ -15,6 +15,7 @@ from mojive.adapters.base import (
 )
 from mojive.commands import CommandResult
 
+from .simulation import SimulationInstability
 from .state import (
     FRAME_HISTORY_BYTE_LIMIT,
     FRAME_HISTORY_LIMIT,
@@ -23,13 +24,85 @@ from .state import (
     STATE_TAKE_FRAME_LIMIT,
     PerturbState,
     SceneSnapshotInfo,
+    StateTakeInfo,
     _SceneSnapshot,
+    _StateTake,
     _StateTakeFrame,
 )
 
 
 class _Playback:
     """Private playback methods of Session; state belongs to its owner."""
+
+    @property
+    def state_takes(self) -> tuple[StateTakeInfo, ...]:
+        """Return recordings in creation order, including empty takes."""
+        return tuple(take.info for take in self._state_takes.values())
+
+    @property
+    def active_state_take_id(self) -> int:
+        """Return the selected recording's stable identity, or -1."""
+        return self._take.info.take_id
+
+    def _new_state_take(self, name: str = "") -> _StateTake:
+        name = name.strip()
+        if not name:
+            existing = {take.info.name for take in self._state_takes.values()}
+            number = 1
+            while f"Take {number}" in existing:
+                number += 1
+            name = f"Take {number}"
+        self._state_take_serial += 1
+        take = _StateTake(StateTakeInfo(self._state_take_serial, name))
+        self._state_takes[take.info.take_id] = take
+        self._take = take
+        self._state_take_playing = False
+        self._state_take_elapsed = 0.0
+        return take
+
+    def _clear_state_takes(self) -> None:
+        self._state_takes.clear()
+        self._take = _StateTake()
+        self._clear_state_take()
+        self._playback_source = "simulation"
+
+    def _delete_state_take_frames(self, first: int, last: int) -> None:
+        take = self._take
+        take.size_bytes -= sum(
+            self._physics_state_bytes(frame.state) for frame in take.frames[first : last + 1]
+        )
+        del take.frames[first : last + 1]
+        del take.times[first : last + 1]
+        del take.offsets[first : last + 1]
+        if take.offsets:
+            origin = take.offsets[0]
+            take.offsets[:] = [value - origin for value in take.offsets]
+        take.cursor = (
+            take.cursor
+            if take.cursor < first
+            else take.cursor - (last - first + 1)
+            if take.cursor > last
+            else -1
+        )
+        take.loop = None
+        if not take.frames:
+            take.signature = None
+        self._state_take_playing = False
+        self._state_take_elapsed = 0.0
+
+    @staticmethod
+    def _physics_state_is_finite(state: PhysicsState) -> bool:
+        return bool(np.isfinite(state.time)) and all(
+            np.isfinite(values).all()
+            for values in (
+                state.qpos,
+                state.qvel,
+                state.act,
+                state.ctrl,
+                state.mocap_pos,
+                state.mocap_quat,
+            )
+        )
 
     @staticmethod
     def _physics_state_signature(state: PhysicsState) -> tuple[tuple[int, ...], ...]:
@@ -61,6 +134,8 @@ class _Playback:
             state = self._adapter.capture_state()
             if state is None:
                 return CommandResult.bad("Physics backend could not capture a scene snapshot")
+            if not self._physics_state_is_finite(state):
+                return CommandResult.bad("Scene snapshot values must be finite")
             size = self._physics_state_bytes(state)
             if (
                 len(self._scene_snapshots) >= 1024
@@ -98,16 +173,16 @@ class _Playback:
         return result
 
     def _clear_state_take(self) -> None:
-        self._state_take.clear()
-        self._state_take_times.clear()
-        self._state_take_offsets.clear()
-        self._state_take_loop = None
-        self._state_take_cursor = -1
+        self._take.frames.clear()
+        self._take.times.clear()
+        self._take.offsets.clear()
+        self._take.loop = None
+        self._take.cursor = -1
         self._state_take_recording = False
         self._state_take_playing = False
         self._state_take_elapsed = 0.0
-        self._state_take_signature = None
-        self._state_take_bytes = 0
+        self._take.signature = None
+        self._take.size_bytes = 0
         self._state_take_append_error = ""
         self._state_take_limit_reached = False
 
@@ -137,7 +212,7 @@ class _Playback:
 
         if state is None:
             state = self._adapter.capture_state()
-        if state is None:
+        if state is None or not self._physics_state_is_finite(state):
             return False
         signature = self._physics_state_signature(state)
         if self._frame_history_signature not in (None, signature):
@@ -194,7 +269,7 @@ class _Playback:
         self._perturb = PerturbState()
         self._active_keyframe = -1
         self._state_take_playing = False
-        self._state_take_cursor = -1
+        self._take.cursor = -1
         return True
 
     def _append_state_take_frame(self, state: PhysicsState | None = None) -> bool:
@@ -204,10 +279,26 @@ class _Playback:
             self._state_take_append_error = "Physics backend could not capture the current state"
             self._state_take_limit_reached = False
             return False
-        if self._state_take and self._state_take[-1].step == self._step_counter:
+        if not self._physics_state_is_finite(state):
+            self._state_take_append_error = (
+                "State-take recording stopped: state values must be finite"
+            )
+            self._state_take_limit_reached = False
+            return False
+        if (
+            self._take.frames
+            and self._take.frames[-1].step == self._step_counter
+            and state.time == self._take.times[-1]
+        ):
             return True
+        if self._take.times and state.time <= self._take.times[-1]:
+            self._state_take_append_error = (
+                "State-take recording stopped: simulation time did not advance"
+            )
+            self._state_take_limit_reached = False
+            return False
         signature = self._physics_state_signature(state)
-        if self._state_take_signature is not None and signature != self._state_take_signature:
+        if self._take.signature is not None and signature != self._take.signature:
             self._state_take_append_error = (
                 "State-take recording stopped because the scene state changed"
             )
@@ -215,38 +306,36 @@ class _Playback:
             return False
         frame_bytes = self._physics_state_bytes(state)
         if (
-            len(self._state_take) >= STATE_TAKE_FRAME_LIMIT
-            or self._state_take_bytes + frame_bytes > STATE_TAKE_BYTE_LIMIT
+            len(self._take.frames) >= STATE_TAKE_FRAME_LIMIT
+            or self._take.size_bytes + frame_bytes > STATE_TAKE_BYTE_LIMIT
         ):
             self._state_take_append_error = (
                 "State-take recording stopped after reaching its recording limit"
             )
             self._state_take_limit_reached = True
             return False
-        self._state_take_signature = signature
-        self._state_take.append(_StateTakeFrame(self._step_counter, state))
-        self._state_take_times.append(float(state.time))
+        self._take.signature = signature
+        self._take.frames.append(_StateTakeFrame(self._step_counter, deepcopy(state)))
+        self._take.times.append(float(state.time))
         offset = 0.0
-        if self._state_take_offsets:
-            duration = self._state_take_times[-1] - self._state_take_times[-2]
-            if not np.isfinite(duration) or duration <= 1e-9:
-                duration = max(self._adapter.timestep(), 1.0 / 60.0)
-            offset = self._state_take_offsets[-1] + duration
-        self._state_take_offsets.append(offset)
-        self._state_take_cursor = len(self._state_take) - 1
-        self._state_take_bytes += frame_bytes
+        if self._take.offsets:
+            duration = self._take.times[-1] - self._take.times[-2]
+            offset = self._take.offsets[-1] + duration
+        self._take.offsets.append(offset)
+        self._take.cursor = len(self._take.frames) - 1
+        self._take.size_bytes += frame_bytes
         self._state_take_append_error = ""
         self._state_take_limit_reached = False
         return True
 
     def _restore_state_take_frame(self, frame_index: int) -> bool:
         index = int(frame_index)
-        if not 0 <= index < len(self._state_take):
+        if not 0 <= index < len(self._take.frames):
             return False
-        frame = self._state_take[index]
+        frame = self._take.frames[index]
         if not self._adapter.restore_state(frame.state):
             return False
-        self._state_take_cursor = index
+        self._take.cursor = index
         self._step_counter = frame.step
         self._pending_steps = 0
         self._sim_time_credit = 0.0
@@ -255,13 +344,13 @@ class _Playback:
         return True
 
     def _advance_state_take(self, wall_dt: float | None) -> None:
-        if not self._state_take_playing or not self._state_take:
+        if not self._state_take_playing or not self._take.frames:
             return
         dt = self._adapter.timestep() if wall_dt is None else max(0.0, float(wall_dt))
-        offsets = self._state_take_offsets
-        loop = self._state_take_loop if self._state_take_use_loop else None
-        first, last = loop or (0, len(self._state_take) - 1)
-        cursor = self._state_take_cursor
+        offsets = self._take.offsets
+        loop = self._take.loop if self._state_take_use_loop else None
+        first, last = loop or (0, len(self._take.frames) - 1)
+        cursor = self._take.cursor
         position = (
             offsets[cursor] + self._state_take_elapsed
             if first <= cursor <= last
@@ -288,7 +377,12 @@ class _Playback:
                 duration=10.0,
             )
             return
-        if loop is None and index >= last:
+        pause_at_end = (
+            self._state_take_pause_at_end
+            if self._state_take_end_override is None
+            else self._state_take_end_override
+        )
+        if loop is None and index >= last and pause_at_end:
             self._state_take_playing = False
             self._state_take_elapsed = 0.0
 
@@ -298,6 +392,8 @@ class _Playback:
         """Restore a complete physics state while the session is paused."""
         if not self._paused:
             return CommandResult.bad("physics is running; pause to restore a scene snapshot")
+        if not self._physics_state_is_finite(state):
+            return CommandResult.bad("Scene snapshot values must be finite")
         if not self._adapter.restore_state(state):
             return CommandResult.bad("scene snapshot state is incompatible with this model")
         keyframe_id = int(active_keyframe)
@@ -312,7 +408,7 @@ class _Playback:
         self._perturb = PerturbState()
         self._state_take_recording = False
         self._state_take_playing = False
-        self._state_take_cursor = -1
+        self._take.cursor = -1
         self._frame_history_dirty = True
         return CommandResult.good("Scene state restored")
 
@@ -344,8 +440,37 @@ class _Playback:
         self.set_threaded_physics(False)
         self._paused = True
         self._state_take_recording = False
-        self._adapter.set_paused(True)
-        self.report_message(f"Physics worker stopped: {error}", level="error")
+        self._state_take_playing = False
+        self._playback_source = "simulation"
+        self._state_take_elapsed = 0.0
+        self._pending_steps = 0
+        self._sim_time_credit = 0.0
+        self._perturb = PerturbState()
+        self._active_keyframe = -1
+        self._take.cursor = -1
+        self._frame_history_dirty = True
+        self._adapter.clear_perturb()
+        message = f"Physics worker stopped: {error}"
+        if isinstance(error, SimulationInstability):
+            message = str(error)
+            try:
+                self._adapter.reset()
+            except Exception as exc:
+                message += f"; simulation reset failed: {exc}"
+            else:
+                self._step_counter = 0
+                message += "; simulation reset and paused. Recorded takes were preserved."
+        if not self._adapter.set_paused(True):
+            message += "; physics backend rejected pause"
+        self.report_message(message, level="error", duration=10.0)
+
+    def _step_physics(self, count: int) -> None:
+        try:
+            self._adapter.step(count)
+        except SimulationInstability as exc:
+            self._physics_failed(exc)
+        else:
+            self._step_counter += count
 
     def tick(self, needs: FrameNeeds, wall_dt: float | None = None) -> SceneFrame:
         """Advance simulation time and obtain one composed dynamic frame.
@@ -363,6 +488,7 @@ class _Playback:
                     self._resume_physics()
                 else:
                     self._step_counter += self._simulation_driver.suspend()
+                    self._simulation_driver.poll()
             except Exception as exc:
                 self._physics_failed(exc)
         history_enabled = bool(
@@ -386,15 +512,13 @@ class _Playback:
             else:
                 n = max(1, round(self._speed))
             if n:
-                self._adapter.step(n)
-                self._step_counter += n
+                self._step_physics(n)
         elif self._pending_steps > 0:
             count = self._pending_steps
             # A failed external step can have an uncertain outcome; consume the
             # request before dispatch so another render tick cannot retry it.
             self._pending_steps = 0
-            self._adapter.step(count)
-            self._step_counter += count
+            self._step_physics(count)
 
         prepare_frame = getattr(self._adapter, "prepare_frame", None)
         if prepare_frame is not None:
@@ -420,7 +544,7 @@ class _Playback:
             )
         if (
             self._state_take_recording
-            and (not self._state_take or self._state_take[-1].step != self._step_counter)
+            and (not self._take.frames or self._take.frames[-1].step != self._step_counter)
             and not self._append_state_take_frame()
         ):
             self._state_take_recording = False

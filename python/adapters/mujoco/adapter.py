@@ -541,7 +541,9 @@ class MuJoCoAdapter(
     def step(self, count: int = 1) -> None:
         if self.caps.external_clock:
             raise RuntimeError("Physics stepping belongs to the external caller")
-        mujoco.mj_step(self._m, self._d, nstep=max(1, int(count)))
+        from .simulation import step_checked
+
+        step_checked(self._m, self._d, max(1, int(count)))
 
     def timestep(self) -> float:
         return float(self._m.opt.timestep)
@@ -800,7 +802,9 @@ class MuJoCoAdapter(
             (data.mocap_pos, state.mocap_pos),
             (data.mocap_quat, state.mocap_quat),
         )
-        if any(np.shape(dst) != np.shape(src) for dst, src in arrays):
+        if not np.isfinite(state.time) or any(
+            np.shape(dst) != np.shape(src) or not np.isfinite(src).all() for dst, src in arrays
+        ):
             return False
         for dst, src in arrays:
             np.copyto(dst, src)

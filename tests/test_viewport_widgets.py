@@ -930,7 +930,7 @@ def test_status_uses_muted_gray_for_chrome_and_context_hints():
     )
 
     colors_by_text = dict(zip(draw.texts, draw.text_colors, strict=True))
-    assert colors_by_text.pop("Running") == THEME.primary
+    assert colors_by_text.pop("Simulating") == THEME.primary
     assert set(colors_by_text.values()) == {THEME.text_disabled}
     assert draw.lines[0][0][2] == THEME.primary_dim
     assert draw.lines[0][0][3] == pytest.approx(1.0)

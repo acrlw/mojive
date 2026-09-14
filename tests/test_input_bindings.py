@@ -139,3 +139,22 @@ def test_custom_focus_and_timeline_gestures_drive_their_hints():
     assert not bindings.remap_pointer(PointerAction.TIMELINE_PAN, ()).pointer_chords(
         PointerAction.TIMELINE_PAN
     )
+
+
+def test_legacy_timeline_range_default_migrates_without_losing_other_bindings():
+    from mojive.ui.pointer_bindings import PointerAction, PointerChord
+
+    changed = DEFAULT_INPUT_BINDINGS.remap_pointer(PointerAction.ORBIT, ("alt+left",))
+    saved = changed.preferences()
+    saved["pointer"].pop(PointerAction.TIMELINE_CLEAR_RANGE.value)
+    saved["pointer"][PointerAction.TIMELINE_RANGE.value] = ["shift+right"]
+    restored = InputBindings.from_preferences(saved)
+    assert restored.pointer_chords(PointerAction.TIMELINE_RANGE) == (
+        PointerChord.parse("shift+left"),
+    )
+    assert restored.pointer_chords(PointerAction.TIMELINE_CLEAR_RANGE) == (
+        PointerChord.parse("shift+right"),
+    )
+    assert restored.pointer_chords(PointerAction.ORBIT) == changed.pointer_chords(
+        PointerAction.ORBIT
+    )

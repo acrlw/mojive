@@ -58,6 +58,7 @@ class ProbeState:
     geometry_tab: str = "Playback"
     geometry_tab_initialized: bool = False
     icon_library_tab: str = "Overview"
+    icon_glyph: str | None = None
     preview_icon_library: bool = False
     show_playback: bool = True
     show_tool_column: bool = True

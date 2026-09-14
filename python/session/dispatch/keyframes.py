@@ -37,7 +37,7 @@ def load_keyframe(self: Session, c: cmd.LoadKeyframe) -> CommandResult:
     self._perturb = PerturbState()
     self._active_keyframe = i
     self._state_take_playing = False
-    self._state_take_cursor = -1
+    self._take.cursor = -1
     self._frame_history_dirty = True
     return CommandResult.good(f"loaded {self._keyframes[slot].name}")
 
@@ -51,6 +51,10 @@ def add_model_keyframe(self: Session, c: cmd.AddModelKeyframe) -> CommandResult:
     name = str(c.name).strip()
     if not name:
         return CommandResult.bad("Keyframe name cannot be empty")
+    if caps.state_snapshots:
+        state = self._adapter.capture_state()
+        if state is None or not self._physics_state_is_finite(state):
+            return CommandResult.bad("Keyframe values must be finite")
     try:
         keyframe_id = self._adapter.add_model_keyframe(c.model_id, name)
     except Exception as exc:

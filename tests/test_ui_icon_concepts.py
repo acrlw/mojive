@@ -344,7 +344,7 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "playback-more": 2.0,
         "transport-previous": 2.0,
         "transport-next": 2.0,
-        "transport-reset": 1.5,
+        "transport-loop": 1.5,
         "transport-more": 2.0,
         "key-snapshot": 1.25,
         "key-keyframe": 1.5,
@@ -416,7 +416,7 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
         "transport-last",
         "transport-more",
     } == BOX_CENTERED_ICONS
-    assert {"playback-reset", "transport-reset"} == RING_CENTERED_ICONS
+    assert {"playback-reset"} == RING_CENTERED_ICONS
     assert all(
         icon_alignment_anchor(name)
         == (
@@ -569,7 +569,7 @@ def test_reviewed_transport_bars_keep_their_authored_width(
         assert width == pytest.approx(expected_width, abs=1e-6)
 
 
-@pytest.mark.parametrize("name", ("playback-reset", "transport-reset"))
+@pytest.mark.parametrize("name", ("playback-reset",))
 @pytest.mark.parametrize("stroke_width", (ICON_MIN_STROKE, ICON_STROKE, ICON_MAX_STROKE))
 @pytest.mark.parametrize("head_scale", (0.65, 1.0, 1.5, 2.0))
 def test_reset_arc_uses_the_shared_visible_stroke(
@@ -777,7 +777,6 @@ def test_panel_disclosures_use_equilateral_triangles_and_circle_anchors(name: st
             IconTuning(key_fit_arm_length=5.0),
         ),
         ("playback-reset", ICON_TUNING_DEFAULTS, IconTuning(reset_head_scale=1.6)),
-        ("transport-reset", ICON_TUNING_DEFAULTS, IconTuning(reset_head_scale=1.6)),
     ),
 )
 def test_authored_shape_controls_change_geometry_without_breaking_circle_fit(
@@ -797,12 +796,43 @@ def test_authored_shape_controls_change_geometry_without_breaking_circle_fit(
 
 def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
     rotate = _render("tool-rotate", ICON_GRID)
-    reset = _render("transport-reset", ICON_GRID)
+    reset = _render("playback-reset", ICON_GRID)
 
     assert rotate.fills >= 3
     assert not rotate.circles
     assert rotate.indexed_fills
     assert reset.fills == 1
+
+
+@pytest.mark.parametrize("size", (14.0, 24.0, 56.0, 112.0))
+@pytest.mark.parametrize("stroke", (ICON_MIN_STROKE, ICON_STROKE, ICON_MAX_STROKE))
+def test_loop_has_two_seamless_half_turn_arrows_distinct_from_reset(size, stroke):
+    import numpy as np
+
+    from mojive.ui.panels.keyframes import _COMMAND_ICON_NAMES
+
+    draw = _render("transport-loop", size, stroke_width=stroke)
+    assert len(draw.filled_paths) == 2
+    assert not draw.circles and not draw.filled_circles
+    first, second = map(np.asarray, draw.filled_paths)
+    assert second == pytest.approx(-first)
+    assert len(first) > 30
+    assert draw.bounds == pytest.approx(
+        [-draw.bounds[2], -draw.bounds[3], draw.bounds[2], draw.bounds[3]]
+    )
+    assert _COMMAND_ICON_NAMES["loop"] == "transport-loop"
+    assert icon_metrics("transport-loop", stroke_width=stroke).circular_clearance == pytest.approx(
+        ICON_DEFAULT_PADDING,
+        abs=1e-5,
+    )
+    assert _render("playback-reset", size, stroke_width=stroke).fills == 1
+    changed_reset_head = _render(
+        "transport-loop",
+        size,
+        stroke_width=stroke,
+        tuning=IconTuning(reset_head_scale=2.0),
+    )
+    assert changed_reset_head.filled_paths == draw.filled_paths
 
 
 def test_rotate_scales_inner_ring_antialiasing_with_the_rendered_gap() -> None:

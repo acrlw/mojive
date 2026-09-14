@@ -387,12 +387,14 @@ ui-icon-concepts:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
 
 .PHONY: ui-icon-scales
+ICON_SCALES ?= 0.65 1 1.25 1.5
+ICON_SCALE_GROUPS ?= viewport-tools viewport-playback keyframe-transport keyframes
 ui-icon-scales:
-	@set -e; for scale in 0.65 1 1.25 1.5; do \
-		for group in viewport-tools viewport-playback keyframes; do \
+	@set -e; for scale in $(ICON_SCALES); do \
+		for group in $(ICON_SCALE_GROUPS); do \
 			MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
 				--ui-scale $$scale --height 2050 --page geometry --geometry-tab icons \
-				--icon-group $$group -o output/ui-icon-scales/$$group-$$scale.png; \
+				--icon-group $$group -o output/ui-icon-scales/$$group-$$scale.png $(ARGS); \
 		done; \
 	done
 
@@ -402,7 +404,7 @@ ui-reset-heads:
 		for head in 1 1.5 2; do \
 			MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
 				--ui-scale $$scale --height 1850 --page geometry --geometry-tab icons \
-				--icon-group keyframe-transport --reset-head-scale $$head \
+				--icon-group viewport-playback --reset-head-scale $$head \
 				-o output/ui-reset-heads/scale-$$scale-head-$$head.png; \
 		done; \
 	done

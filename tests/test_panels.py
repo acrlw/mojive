@@ -19,9 +19,12 @@ from mojive.adapters.base import (
     NodeType,
     SceneNode,
 )
+from mojive.adapters.static import StaticSceneAdapter
 from mojive.config import PanelConfig
 from mojive.render.backend import RenderFlag, ShadowQuality
+from mojive.scene import Scene
 from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimensions
+from mojive.session import Session
 from mojive.types import MeshShape
 from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language
@@ -824,7 +827,7 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
         }
     )
 
-    app = ViewerApp(SimpleNamespace(), SimpleNamespace())
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), SimpleNamespace())
 
     assert not app.gizmo.remember_precise_input_choices
     assert app._precise_gizmo_preferred_absolute
@@ -850,7 +853,7 @@ def test_viewer_restores_and_persists_shadow_quality(tmp_path, monkeypatch):
             return True
 
     backend = Backend()
-    app = ViewerApp(SimpleNamespace(), backend)
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), backend)
 
     assert backend.quality is ShadowQuality.HIGH
     assert app.set_shadow_quality(ShadowQuality.PERFORMANCE)
@@ -875,7 +878,7 @@ def test_viewer_restores_and_persists_viewport_input_bindings(tmp_path, monkeypa
         }
     )
 
-    app = ViewerApp(SimpleNamespace(), SimpleNamespace())
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), SimpleNamespace())
 
     assert app.input_bindings.key_id(InputAction.FRAME_SCENE) == "g"
     assert app.input_bindings.key_id(InputAction.GIZMO_TRANSLATE) == "f"
@@ -894,7 +897,7 @@ def test_viewer_restores_and_persists_status_metric(tmp_path, monkeypatch):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
     Localizer.load().set_preferences({"status_metric": "steps"})
 
-    app = ViewerApp(SimpleNamespace(), SimpleNamespace())
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), SimpleNamespace())
     assert app._status_metric_mode == "steps"
 
     app._toggle_status_metric()
@@ -904,6 +907,23 @@ def test_viewer_restores_and_persists_status_metric(tmp_path, monkeypatch):
     app.set_language("zh_CN")
     assert app._viewport_labels.snap == "吸附"
     assert app._viewport_labels.type_value == "输入数值"
+
+
+def test_take_end_policy_persists_without_changing_recording_defaults(tmp_path, monkeypatch):
+    from mojive.ui.app import ViewerApp
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    Localizer.load().set_preferences({"take_pause_at_end": False})
+    session = Session(StaticSceneAdapter(Scene()))
+    app = ViewerApp(session, SimpleNamespace())
+    assert not session.state_take_pause_at_end
+    assert not app.recording_config.run_simulation
+    app.set_take_pause_at_end(True)
+    assert session.state_take_pause_at_end
+    assert Localizer.load().preference("take_pause_at_end") is True
+    app.set_take_pause_at_end(False, persist=False)
+    assert not session.state_take_pause_at_end
+    assert Localizer.load().preference("take_pause_at_end") is True
 
 
 @pytest.mark.parametrize("value", ["zh_CN", "zh-CN", "zh_CN.UTF-8", "zh_CN:zh"])
@@ -1145,12 +1165,32 @@ def test_keyframe_timeline_status_hints_replace_the_repeated_help_copy():
     hints = timeline_status_hints(localizer.text)
 
     assert [(hint.kind, hint.control, hint.label) for hint in hints] == [
-        ("mouse", "right", "选择循环范围"),
+        ("mouse", "left", "选择循环范围"),
         ("mouse", "left", "移动播放头"),
         ("mouse", "wheel", "缩放"),
         ("mouse", "right", "平移"),
     ]
     assert hints[0].modifier == "Shift"
+
+
+def test_timeline_status_hints_describe_selection_in_the_hovered_track():
+    hints = timeline_status_hints(str, edit_lane="take")
+    assert [(hint.hint_id, hint.label) for hint in hints[:2]] == [
+        ("keyframes.select", "Select"),
+        ("keyframes.select_all", "Select track"),
+    ]
+    hints = timeline_status_hints(str, edit_lane="model", has_selection=True, has_range=True)
+    assert [hint.hint_id for hint in hints[:5]] == [
+        "keyframes.clear_range_pointer",
+        "keyframes.clear_range",
+        "keyframes.delete",
+        "keyframes.select",
+        "keyframes.select_all",
+    ]
+    assert hints[3].label == "Select"
+    assert [hint.hint_id for hint in hints if hint.control == "Esc"] == ["keyframes.clear_range"]
+    ruler = timeline_status_hints(str, edit_lane="take", over_ruler=True)
+    assert [hint.hint_id for hint in ruler[:2]] == ["keyframes.playhead", "keyframes.select_all"]
 
 
 def test_panel_status_hints_compose_without_duplicate_row_entries():

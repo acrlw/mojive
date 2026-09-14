@@ -277,6 +277,7 @@ def draw_playback(
     record_enabled: bool = False,
     record_action: str = "stop",
     record_tooltip: str = "",
+    toggle_tooltip: str = "",
     enabled: bool = True,
     bindings: InputBindings = DEFAULT_INPUT_BINDINGS,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
@@ -351,7 +352,12 @@ def draw_playback(
                 else name
             )
         _set_viewport_tooltip(
-            record_tooltip if name == "record" and record_tooltip else tooltip, scale
+            record_tooltip
+            if name == "record" and record_tooltip
+            else toggle_tooltip
+            if name == "toggle" and toggle_tooltip
+            else tooltip,
+            scale,
         )
     return result
 

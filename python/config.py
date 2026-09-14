@@ -271,6 +271,7 @@ class RecordingConfig:
     fps: float = 60.0
     surface: CaptureSurface = CaptureSurface.VIEWPORT
     end_hold: float = 1.0
+    run_simulation: bool = False
 
     @classmethod
     def from_mapping(cls, value: object) -> RecordingConfig:
@@ -295,6 +296,7 @@ class RecordingConfig:
             fps=number("fps", 1.0, 240.0),
             surface=surface,
             end_hold=number("end_hold", 0.0, 60.0),
+            run_simulation=source.get("run_simulation") is True,
         )
 
 

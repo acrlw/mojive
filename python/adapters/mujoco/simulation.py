@@ -2,12 +2,41 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 
 import mujoco
 
-from mojive.session.simulation import Snapshot, SnapshotPool
+from mojive.session.simulation import SimulationInstability, Snapshot, SnapshotPool
+
+_NUMERICAL_WARNINGS = tuple(
+    (getattr(mujoco.mjtWarning, f"mjWARN_BAD{name}"), name)
+    for name in ("QPOS", "QVEL", "QACC", "CTRL")
+)
+
+
+def step_checked(model, data, count: int) -> None:
+    """Detect native auto-resets before publishing a discontinuous trajectory."""
+    before = tuple(data.warning[index].number for index, _ in _NUMERICAL_WARNINGS)
+    start = float(data.time)
+    expected = start + count * float(model.opt.timestep)
+    mujoco.mj_step(model, data, nstep=count)
+    for (index, name), number in zip(_NUMERICAL_WARNINGS, before, strict=True):
+        if data.warning[index].number != number:
+            raise SimulationInstability(
+                f"Simulation became unstable: invalid or huge {name} at index "
+                f"{data.warning[index].lastinfo} (time {start:.6g} s)"
+            )
+    # Warning counters can return to the same value after repeated auto-resets.
+    # Compare the whole batch's expected clock as well, not just its endpoints.
+    if not math.isfinite(data.time) or not math.isclose(
+        data.time, expected, rel_tol=1e-10, abs_tol=1e-12
+    ):
+        raise SimulationInstability(
+            f"Simulation became unstable: time changed from {start:.6g} to {data.time:.6g} s "
+            f"instead of {expected:.6g} s"
+        )
 
 
 class MuJoCoSimulation:
@@ -41,6 +70,8 @@ class MuJoCoSimulation:
             if self._closed:
                 raise RuntimeError("Simulation driver is closed")
             if self._error is not None:
+                if isinstance(self._error, SimulationInstability):
+                    raise self._error
                 raise RuntimeError("Physics worker failed") from self._error
             if self._running:
                 return
@@ -71,6 +102,8 @@ class MuJoCoSimulation:
     def poll(self) -> int:
         """Bind the newest completed state without waiting for a physics batch."""
         if self._error is not None:
+            if isinstance(self._error, SimulationInstability):
+                raise self._error
             raise RuntimeError("Physics worker failed") from self._error
         if not self._running or self._pool is None:
             return 0
@@ -137,7 +170,7 @@ class MuJoCoSimulation:
                 self._busy = True
             try:
                 started = time.perf_counter()
-                mujoco.mj_step(self._model, self._data, nstep=count)
+                step_checked(self._model, self._data, count)
                 elapsed = (time.perf_counter() - started) / count
                 # React immediately to a costly step; relax the estimate slowly
                 # so new contacts do not leave edits waiting on oversized batches.

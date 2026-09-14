@@ -22,6 +22,7 @@ class PointerAction(enum.StrEnum):
     TIMELINE_PAN = "timeline.pan"
     TIMELINE_ZOOM = "timeline.zoom"
     TIMELINE_RANGE = "timeline.range"
+    TIMELINE_CLEAR_RANGE = "timeline.clear_range"
     TIMELINE_LOAD = "timeline.load"
     PANEL_FOCUS = "panel.focus"
     NAME_EDIT = "panel.edit_name"
@@ -136,6 +137,7 @@ POINTER_ACTION_NAMES = {
     PointerAction.TIMELINE_PAN: "Timeline pan",
     PointerAction.TIMELINE_ZOOM: "Timeline zoom",
     PointerAction.TIMELINE_RANGE: "Select loop range",
+    PointerAction.TIMELINE_CLEAR_RANGE: "Clear loop range",
     PointerAction.TIMELINE_LOAD: "Load snapshot",
     PointerAction.PANEL_FOCUS: "Focus hierarchy or joint row",
     PointerAction.NAME_EDIT: "Edit entity name",
@@ -176,7 +178,8 @@ DEFAULT_POINTER_BINDINGS = _bindings(
     TIMELINE_SCRUB=("left",),
     TIMELINE_PAN=("right",),
     TIMELINE_ZOOM=("wheel",),
-    TIMELINE_RANGE=("shift+right",),
+    TIMELINE_RANGE=("shift+left",),
+    TIMELINE_CLEAR_RANGE=("shift+right",),
     TIMELINE_LOAD=("left:double",),
     PANEL_FOCUS=("left:double",),
     NAME_EDIT=("left:double",),

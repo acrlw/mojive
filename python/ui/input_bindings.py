@@ -206,6 +206,13 @@ class InputBindings:
                 except ValueError:
                     continue
             candidate = replace(bindings, pointers=tuple(entries.items()))
+            if (
+                PointerAction.TIMELINE_CLEAR_RANGE.value not in pointer_values
+                and pointer_values.get(PointerAction.TIMELINE_RANGE.value) == ["shift+right"]
+            ):
+                # Saved defaults predate the separate loop-clear gesture.
+                entries[PointerAction.TIMELINE_RANGE] = (PointerChord.parse("shift+left"),)
+                candidate = replace(bindings, pointers=tuple(entries.items()))
             try:
                 candidate._validate_pointers()
             except ValueError:
