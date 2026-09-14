@@ -48,6 +48,11 @@ class _Capture:
         if persist:
             self.localizer.set_preferences({"recording": asdict(self.recording_config)})
 
+    def set_take_pause_at_end(self, enabled: bool, *, persist: bool = True) -> None:
+        self.session.submit(cmd.SetStateTakePauseAtEnd(enabled))
+        if persist:
+            self.localizer.set_preferences({"take_pause_at_end": bool(enabled)})
+
     @staticmethod
     def _capture_output(surface: CaptureSurface, suffix: str) -> Path:
         stem = {
@@ -129,6 +134,7 @@ class _Capture:
         self._viewport_record_elapsed = 0.0
         self._recording_deadline = time.monotonic() + countdown
         self._viewport_recording_phase = RecordingPhase.COUNTDOWN
+        self._recording_run_simulation = config.run_simulation
         return path
 
     def _advance_recording_countdown(self) -> None:
@@ -164,6 +170,7 @@ class _Capture:
         if not math.isfinite(end_hold) or end_hold < 0:
             raise ValueError("end hold must be finite and nonnegative")
         path = self.start_recording(output, surface=surface, fps=fps, countdown=countdown)
+        self._recording_run_simulation = False
         result = session.submit(cmd.SeekStateTake(0))
         if not result.ok:
             self.stop_recording(report=False)
@@ -172,6 +179,7 @@ class _Capture:
             len(session.state_take_times),
             session.structure_generation,
             math.ceil(end_hold * self._viewport_recording_fps),
+            take_id=session.active_state_take_id,
         )
         return path
 
@@ -182,6 +190,7 @@ class _Capture:
         session = self.session
         if (
             session.structure_generation != take.structure_generation
+            or session.active_state_take_id != take.take_id
             or len(session.state_take_times) != take.frame_count
             or session.state_take_recording
             or not session.paused
@@ -202,7 +211,7 @@ class _Capture:
         if self._viewport_recording_phase is not RecordingPhase.RECORDING:
             return 0.0
         if not take.started:
-            result = self.session.submit(cmd.PlayStateTake(loop=False))
+            result = self.session.submit(cmd.PlayStateTake(loop=False, pause_at_end=True))
             if not result.ok:
                 self.stop_recording(report=False)
                 self.session.report_message(result.message, level="error")
@@ -272,7 +281,7 @@ class _Capture:
         self._viewport_record_elapsed = 1.0 / self._viewport_recording_fps
         take = getattr(self, "_take_video", None)
         if take is not None and take.started and take.tail_frames is None:
-            result = self.session.submit(cmd.PlayStateTake(loop=False))
+            result = self.session.submit(cmd.PlayStateTake(loop=False, pause_at_end=True))
             if not result.ok:
                 self.stop_recording(report=False)
                 self.session.report_message(result.message, level="error")
@@ -292,6 +301,7 @@ class _Capture:
         self._viewport_recording_path = None
         self._viewport_record_elapsed = 0.0
         self._viewport_recording_phase = RecordingPhase.IDLE
+        self._recording_run_simulation = False
         take, self._take_video = getattr(self, "_take_video", None), None
         if take is not None and self.session.state_take_playing:
             self.session.submit(cmd.PauseStateTake())
@@ -494,6 +504,14 @@ class _Capture:
                 self.stop_recording()
         else:
             self._viewport_record_elapsed -= count * period
+            if self._recording_run_simulation:
+                # Encode the initial pose successfully before starting physics.
+                # This action belongs to the recording start, not every resume.
+                self._recording_run_simulation = False
+                result = self.session.submit(cmd.Play())
+                if not result.ok:
+                    self.stop_recording(report=False)
+                    self.session.report_message(result.message, level="error")
 
     def _toggle_viewport_recording(self) -> None:
         if self.recording.active:
@@ -515,31 +533,33 @@ class _Capture:
     def _stop_viewport_recording(self, *, report: bool = True) -> None:
         self.stop_recording(report=report)
 
-    def _toggle_playback(self) -> None:
+    def _toggle_state_take_recording(self) -> None:
+        self.panels.get("Keyframes").toggle_recording(self._panel_context())
+
+    def _toggle_playback(self, *, source: str | None = None) -> None:
         if getattr(self, "_take_video", None) is not None:
             if self.recording.phase is RecordingPhase.PAUSED:
                 self.resume_recording()
             else:
                 self.pause_recording()
         elif self.session.state_take_recording:
-            self.session.submit(cmd.StopStateTakeRecording())
-        elif self.session.state_take_playing:
-            self.session.submit(cmd.PauseStateTake())
-        elif self.session.paused and self.session.state_take_cursor >= 0:
+            self._toggle_state_take_recording()
+        elif self.session.state_take_playing or not self.session.paused:
+            self.session.submit(cmd.Pause())
+        elif (source or self.session.playback_source) == "take" and self.session.state_take_times:
             self.session.submit(cmd.PlayStateTake())
         else:
-            self.session.submit(cmd.Play() if self.session.paused else cmd.Pause())
+            self.session.submit(cmd.Play())
 
     def _reset_playback(self) -> None:
         if getattr(self, "_take_video", None) is not None:
             self.stop_recording()
         if self.session.state_take_recording:
-            self.session.submit(cmd.StopStateTakeRecording())
-        elif self.session.state_take_cursor >= 0:
-            self.session.submit(cmd.PauseStateTake())
-            loop = getattr(self.session, "state_take_loop", None)
-            self.session.submit(cmd.SeekStateTake(loop[0] if loop else 0))
-        else:
-            if not self.session.paused:
-                self.session.submit(cmd.Pause())
-            self.session.submit(cmd.Reset())
+            self._toggle_state_take_recording()
+            if self.session.state_take_recording:
+                return
+        if (self.session.state_take_playing or not self.session.paused) and not self.session.submit(
+            cmd.Pause()
+        ).ok:
+            return
+        self.session.submit(cmd.Reset())

@@ -84,13 +84,16 @@ class _Status:
                 state = (
                     "static"
                     if not caps.simulation
+                    else "replaying"
+                    if self.session.state_take_playing
                     else "paused"
-                    if self.session.paused and not self.session.state_take_playing
+                    if self.session.paused
                     else "running"
                 )
                 sim_time = float(self.session.frame.time)
                 sim_step = int(self.session.frame.step)
             recording = self.recording
+            panel = self.panels.get(self._status_panel) if not loading else None
             status_layout = draw_status(
                 self.window.painter(),
                 (origin.x, origin.y),
@@ -99,6 +102,9 @@ class _Status:
                 self.theme,
                 scale,
                 selected="",
+                status=panel.status_detail(self.localizer.text)
+                if panel is not None and panel.open
+                else "",
                 state=state,
                 sim_time=sim_time,
                 step=sim_step,

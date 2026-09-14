@@ -49,7 +49,10 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     session, app = viewer.session, viewer.app
     path = tmp_path / "full take with spaces.mp4"
     app._capture_output = lambda *_args: path
-    viewer.configure_recording(RecordingConfig(countdown=60, end_hold=0.2, surface=surface))
+    viewer.configure_recording(
+        RecordingConfig(countdown=60, end_hold=0.2, surface=surface, run_simulation=True)
+    )
+    assert session.submit(cmd.SetStateTakePauseAtEnd(False))
     assert session.submit(cmd.SetStateTakeLoop(2, 4))
     assert session.submit(cmd.SeekStateTake(8))
     recorded = []
@@ -98,6 +101,7 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     assert [cursor for cursor, _ in recorded] == sorted(cursor for cursor, _ in recorded)
     assert session.state_take_loop == (2, 4)
     assert not session.state_take_playing and session.paused
+    assert not session.state_take_pause_at_end
     reader = read_frames(str(path))
     try:
         metadata = next(reader)
@@ -144,6 +148,20 @@ def test_countdown_cancel_and_transport_changes_end_take_video(viewer, tmp_path)
     assert not viewer.recording.active
     assert viewer.session.state_take_cursor == 7
     assert path.exists()
+
+
+def test_switching_to_another_take_with_the_same_frame_count_cancels_export(viewer, tmp_path):
+    session = viewer.session
+    first_id = session.active_state_take_id
+    populate_take(viewer, 12)
+    assert session.active_state_take_id != first_id
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.SelectStateTake(first_id))
+    viewer.start_take_video(tmp_path / "switched.mp4", countdown=60)
+    second_id = session.state_takes[-1].take_id
+    assert session.submit(cmd.SelectStateTake(second_id))
+    tick(viewer)
+    assert not viewer.recording.active
 
 
 def test_closing_video_settings_with_escape_preserves_loop_and_allows_recording(viewer):
@@ -202,3 +220,39 @@ def test_single_frame_take_without_end_hold_saves_one_frame(viewer, tmp_path):
         assert len(list(reader)) == 1
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("run_simulation", (False, True))
+def test_video_recording_start_action_does_not_replay_an_existing_take(
+    viewer, tmp_path, monkeypatch, run_simulation
+):
+    from mojive.capture.recording import VideoRecorder
+
+    session = viewer.session
+    assert session.submit(cmd.SeekStateTake(3))
+    viewer.sync()
+    original = tuple(session.state_take_times)
+    initial_time = session.frame.time
+    encoded = []
+    append = VideoRecorder.append
+
+    def observe(recorder, image):
+        encoded.append((session.paused, session.state_take_playing, session.frame.time))
+        append(recorder, image)
+
+    monkeypatch.setattr(VideoRecorder, "append", observe)
+    viewer.configure_recording(
+        RecordingConfig(countdown=0, run_simulation=run_simulation, surface=CaptureSurface.SCENE)
+    )
+    viewer.start_recording(tmp_path / "interactive.mp4")
+    tick(viewer)
+    assert encoded[0] == (True, False, initial_time)
+    assert session.paused is not run_simulation
+    assert not session.state_take_playing
+    assert viewer.pause_recording()
+    assert session.paused is not run_simulation
+    assert viewer.resume_recording()
+    tick(viewer)
+    viewer.stop_recording()
+    assert session.paused is not run_simulation
+    assert tuple(session.state_take_times) == original

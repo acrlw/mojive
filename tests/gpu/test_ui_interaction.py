@@ -507,12 +507,8 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
     io.add_mouse_pos_event(*point)
     viewer.sync()
     click(viewer, io, point)
-    assert [hint.hint_id for hint in viewer.app._panel_status_hints] == [
-        "keyframes.range",
-        "keyframes.playhead",
-        "keyframes.zoom",
-        "keyframes.pan",
-    ]
+    hints = {hint.hint_id for hint in viewer.app._panel_status_hints}
+    assert {"keyframes.zoom", "keyframes.pan"} <= hints
     before_span = panel._view_end - panel._view_start
     before_scroll = float(window.scroll.y)
 

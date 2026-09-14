@@ -157,28 +157,38 @@ def test_async_model_load_success_finishes_and_notifies(tmp_path) -> None:
 
 def test_global_playback_controls_prioritize_recording_and_take_replay():
     from mojive.ui.app import ViewerApp
+    from mojive.ui.panels import PanelContext
+    from mojive.ui.panels.keyframes import KeyframesPanel
 
-    calls = []
+    session, _ = _recorded_take()
     app = ViewerApp.__new__(ViewerApp)
-    app.session = SimpleNamespace(
-        state_take_recording=True,
-        state_take_playing=False,
-        state_take_cursor=3,
-        paused=False,
-        submit=lambda command: calls.append(command),
-    )
+    app.session = session
+    panel = KeyframesPanel()
+    app.panels = SimpleNamespace(get=lambda name: panel)
+    app._panel_context = lambda: PanelContext(session, None)
+    assert session.submit(cmd.SeekStateTake(3))
+    app._toggle_state_take_recording()
+    assert session.state_take_recording
+    session.tick(FrameNeeds.none(), wall_dt=0.04)
     app._toggle_playback()
-    assert isinstance(calls.pop(), cmd.StopStateTakeRecording)
+    assert not session.state_take_recording and session.paused
+    assert session.state_take_cursor == 3
+    assert panel._take_selection == (3, 4)
 
-    app.session.state_take_recording = False
-    app.session.state_take_playing = True
-    app.session.paused = True
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
     app._toggle_playback()
-    assert isinstance(calls.pop(), cmd.PauseStateTake)
+    assert not session.state_take_playing
+    assert session.playback_source == "take"
+    assert session.state_take_playhead == pytest.approx(0.035)
+    app._toggle_playback()
+    assert session.state_take_playing
+    assert session.state_take_playhead == pytest.approx(0.035)
 
     app._reset_playback()
-    assert isinstance(calls[-2], cmd.PauseStateTake)
-    assert calls[-1] == cmd.SeekStateTake(0)
+    assert session.paused and not session.state_take_playing
+    assert session.state_take_cursor == -1
+    assert session.playback_source == "simulation"
 
 
 def test_async_model_load_failure_clears_following_jobs(tmp_path) -> None:
@@ -937,6 +947,246 @@ def _recorded_take(count=10):
     return session, adapter
 
 
+def test_space_remembers_explicit_transport_not_take_selection_or_cursor():
+    from mojive.ui.app import ViewerApp
+
+    session, adapter = _recorded_take()
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = session
+    original = tuple(session.state_take_times)
+    assert session.submit(cmd.SeekStateTake(2))
+    assert session.playback_source == "simulation"
+    app._toggle_playback()
+    for _ in range(20):
+        session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert not session.paused and not session.state_take_playing
+    assert session.frame.time > original[-1]
+    assert tuple(session.state_take_times) == original
+    app._toggle_playback()
+    assert session.paused
+
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.025)
+    app._toggle_playback()
+    assert session.playback_source == "take"
+    assert session.submit(cmd.SeekStateTake(3))
+    app._toggle_playback()
+    assert session.state_take_playing and session.paused
+    app._toggle_playback(source="simulation")
+    assert not session.state_take_playing
+    app._toggle_playback(source="simulation")
+    assert not session.paused and session.playback_source == "simulation"
+    for _ in range(20):
+        session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert adapter.steps > 10
+    assert tuple(session.state_take_times) == original
+
+
+def test_continuous_take_end_holds_pose_preserves_pause_and_obeys_live_policy_changes():
+    session, adapter = _recorded_take()
+    original = tuple(session.state_take_times)
+    assert session.submit(cmd.SetStateTakePauseAtEnd(False))
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.25)
+    assert session.state_take_playing and session.paused
+    assert session.state_take_playhead == pytest.approx(0.25)
+    assert session.frame.time == original[-1]
+    assert adapter.steps == 10
+    assert session.submit(cmd.Pause())
+    session.tick(FrameNeeds.none(), wall_dt=3)
+    assert session.state_take_playhead == pytest.approx(0.25)
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.1)
+    assert session.state_take_playhead == pytest.approx(0.35)
+    assert tuple(session.state_take_times) == original
+    assert session.submit(cmd.SetStateTakePauseAtEnd(True))
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert not session.state_take_playing
+    assert session.state_take_playhead == original[-1]
+
+
+def test_take_loop_and_export_end_override_are_independent_of_continuous_preference():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakePauseAtEnd(False))
+    assert session.submit(cmd.SetStateTakeLoop(2, 4))
+    assert session.submit(cmd.PlayStateTake())
+    for _ in range(8):
+        session.tick(FrameNeeds.none(), wall_dt=0.1)
+        assert 2 <= session.state_take_cursor <= 4
+        assert session.state_take_playing
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake(loop=False, pause_at_end=True))
+    session.tick(FrameNeeds.none(), wall_dt=1)
+    assert not session.state_take_playing and adapter.steps == 10
+    assert not session.state_take_pause_at_end
+    assert session.state_take_loop == (2, 4)
+
+
+def test_single_frame_take_can_advance_only_the_playhead():
+    session, adapter = _recorded_take(0)
+    assert session.submit(cmd.PlayStateTake())
+    assert not session.state_take_playing
+    assert session.submit(cmd.SetStateTakePauseAtEnd(False))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=1)
+    assert session.state_take_playing and session.state_take_playhead == pytest.approx(1)
+    assert adapter.steps == 0 and session.frame.time == 0
+
+
+def test_multiple_takes_keep_independent_samples_cursors_and_loops():
+    session, adapter = _recorded_take()
+    first_id = session.active_state_take_id
+    first_times = tuple(session.state_take_times)
+    assert session.submit(cmd.SeekStateTake(3))
+    assert session.submit(cmd.SetStateTakeLoop(2, 4))
+    created = session.submit(cmd.CreateStateTake())
+    assert created and session.active_state_take_id == created.entity_id
+    assert not session.state_take_times
+    assert adapter.steps == 3
+    assert session.submit(cmd.StartStateTakeRecording(new_take=False))
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+    second_times = tuple(session.state_take_times)
+    assert len(session.state_takes) == 2
+    assert session.submit(cmd.SelectStateTake(first_id))
+    assert tuple(session.state_take_times) == first_times
+    assert session.state_take_cursor == 3 and session.state_take_loop == (2, 4)
+    assert adapter.steps == 3
+    assert session.submit(cmd.SelectStateTake(created.entity_id))
+    assert tuple(session.state_take_times) == second_times
+    assert session.state_take_loop is None and adapter.steps == 4
+    assert session.submit(cmd.RemoveStateTake(first_id))
+    assert session.active_state_take_id == created.entity_id
+    assert tuple(session.state_take_times) == second_times
+    assert not session.submit(cmd.SelectStateTake(first_id))
+    assert session.submit(cmd.RemoveStateTake(created.entity_id))
+    assert not session.state_takes and not session.state_take_times
+
+
+def test_take_overwrite_restores_playhead_and_preserves_prefix_and_other_takes():
+    session, adapter = _recorded_take()
+    first_id = session.active_state_take_id
+    original = tuple(session.state_take_times)
+    assert session.submit(cmd.StartStateTakeRecording())
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+    second_id = session.active_state_take_id
+    second_times = tuple(session.state_take_times)
+    assert session.submit(cmd.SelectStateTake(first_id))
+    assert session.submit(cmd.StartStateTakeRecording(new_take=False, frame_index=4))
+    assert adapter.steps == 4
+    assert tuple(session.state_take_times) == original[:5]
+    session.tick(FrameNeeds(), wall_dt=0.02)
+    assert session.submit(cmd.StopStateTakeRecording())
+    assert session.state_take_times == pytest.approx((*original[:5], 0.05))
+    assert session.active_state_take_id == first_id
+    assert session.submit(cmd.SelectStateTake(second_id))
+    assert tuple(session.state_take_times) == second_times
+
+
+def test_take_names_reuse_gaps_without_reusing_deleted_identities():
+    session, _ = _recorded_take()
+    first_id = session.active_state_take_id
+    second = session.submit(cmd.CreateStateTake())
+    assert second and [take.name for take in session.state_takes] == ["Take 1", "Take 2"]
+    assert session.submit(cmd.RemoveStateTake(first_id))
+    replacement = session.submit(cmd.CreateStateTake())
+    assert replacement and replacement.entity_id != first_id
+    assert [take.name for take in session.state_takes] == ["Take 2", "Take 1"]
+    assert not session.submit(cmd.SelectStateTake(first_id))
+    assert session.active_state_take_id == replacement.entity_id
+    for take in session.state_takes:
+        assert session.submit(cmd.RemoveStateTake(take.take_id))
+    restarted = session.submit(cmd.CreateStateTake())
+    assert restarted and restarted.entity_id not in (
+        first_id,
+        second.entity_id,
+        replacement.entity_id,
+    )
+    assert session.state_takes[0].name == "Take 1"
+    assert session.submit(cmd.ClearStateTake())
+    assert session.submit(cmd.CreateStateTake())
+    assert [take.name for take in session.state_takes] == ["Take 1", "Take 2"]
+
+
+def test_default_take_names_respect_explicit_names():
+    session = Session(SnapshotToyPhysics())
+    for name in ("Take 1", "Take 3", "Camera study"):
+        assert session.submit(cmd.CreateStateTake(name))
+    assert session.submit(cmd.CreateStateTake())
+    assert session.state_takes[-1].name == "Take 2"
+
+
+def test_take_selection_delete_preserves_sample_times_and_replays_across_gap():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SeekStateTake(8))
+    assert session.submit(cmd.SetStateTakeLoop(2, 7))
+    original = tuple(session.state_take_times)
+    assert session.submit(cmd.DeleteStateTakeFrames(3, 5))
+    assert session.state_take_times == list(original[:3] + original[6:])
+    assert session.state_take_cursor == 5 and adapter.steps == 8
+    assert session.state_take_loop is None
+    assert session.submit(cmd.SeekStateTake(2))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds(), wall_dt=0.035)
+    assert adapter.steps == 2
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert adapter.steps == 6
+    assert session.submit(cmd.DeleteStateTakeFrames(0, len(session.state_take_times) - 1))
+    assert not session.state_take_times and not session.state_take_playing
+    assert len(session.state_takes) == 1
+    assert session.submit(cmd.StartStateTakeRecording(new_take=False))
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+    assert len(session.state_take_times) == 2
+
+
+def test_take_mutation_failures_preserve_recordings_and_selection(monkeypatch):
+    import mojive.session.playback as session_module
+
+    session, adapter = _recorded_take()
+    first_id = session.active_state_take_id
+    original = tuple(session.state_take_times)
+    assert session.submit(cmd.SeekStateTake(7))
+    assert session.submit(cmd.SetStateTakeLoop(2, 5))
+    for command in (
+        cmd.DeleteStateTakeFrames(-1, 3),
+        cmd.DeleteStateTakeFrames(5, 2),
+        cmd.StartStateTakeRecording(new_take=False, frame_index=99),
+    ):
+        assert not session.submit(command)
+        assert tuple(session.state_take_times) == original
+        assert session.state_take_cursor == 7 and session.state_take_loop == (2, 5)
+    monkeypatch.setattr(session_module, "STATE_TAKE_BYTE_LIMIT", 1)
+    assert not session.submit(cmd.StartStateTakeRecording())
+    assert session.active_state_take_id == first_id
+    assert len(session.state_takes) == 1 and tuple(session.state_take_times) == original
+    monkeypatch.setattr(adapter, "set_paused", lambda paused: paused)
+    assert not session.submit(cmd.StartStateTakeRecording(new_take=False, frame_index=2))
+    assert adapter.steps == 7
+    assert tuple(session.state_take_times) == original
+    assert session.state_take_cursor == 7 and session.state_take_loop == (2, 5)
+
+
+def test_recording_rejects_take_switch_delete_and_second_start():
+    session, _ = _recorded_take()
+    first_id = session.active_state_take_id
+    assert session.submit(cmd.StartStateTakeRecording())
+    second_id = session.active_state_take_id
+    for command in (
+        cmd.CreateStateTake(),
+        cmd.SelectStateTake(first_id),
+        cmd.RemoveStateTake(first_id),
+        cmd.DeleteStateTakeFrames(0, 0),
+        cmd.StartStateTakeRecording(),
+    ):
+        assert not session.submit(command)
+        assert session.state_take_recording and session.active_state_take_id == second_id
+    assert len(session.state_takes) == 2
+
+
 def test_take_loop_wraps_inclusively_and_clear_restores_normal_end_behavior():
     session, adapter = _recorded_take()
     assert session.submit(cmd.SetStateTakeLoop(2, 4))
@@ -1002,6 +1252,27 @@ def test_take_loop_spanning_last_frame_preserves_speed_and_restores_only_display
     assert session.state_take_cursor == 8
 
 
+def test_take_playhead_advances_through_gaps_and_resumes_from_the_same_time():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.DeleteStateTakeFrames(2, 8))
+    assert session.submit(cmd.SeekStateTake(1))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.035)
+    assert session.state_take_cursor == 1 and adapter.steps == 1
+    assert session.state_take_playhead == pytest.approx(0.045)
+    assert session.state_take_playing
+    assert session.submit(cmd.PauseStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=1)
+    assert session.state_take_playhead == pytest.approx(0.045)
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.05)
+    assert session.state_take_cursor == 2
+    assert session.state_take_playhead == pytest.approx(0.095)
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert not session.state_take_playing
+    assert session.state_take_playhead == pytest.approx(0.1)
+
+
 def test_take_loop_seek_pause_and_new_recording_preserve_expected_ownership():
     session, adapter = _recorded_take()
     assert session.submit(cmd.SetStateTakeLoop(2, 6))
@@ -1046,6 +1317,52 @@ def test_state_take_stops_at_the_frame_budget(monkeypatch):
     assert len(session.state_take_times) == 2
     assert "recording limit" in session.last_message.lower()
     assert session.last_message_level == "warning"
+
+
+@pytest.mark.parametrize(
+    "field", ("time", "qpos", "qvel", "act", "ctrl", "mocap_pos", "mocap_quat")
+)
+@pytest.mark.parametrize("value", (float("nan"), float("inf")))
+def test_non_finite_states_cannot_enter_take_snapshot_or_history(monkeypatch, field, value):
+    session, adapter = _recorded_take()
+    times = tuple(session.state_take_times)
+    take_id = session.active_state_take_id
+    valid = adapter.capture_state()
+    invalid = replace(valid, **{field: value if field == "time" else np.array([value])})
+    monkeypatch.setattr(adapter, "capture_state", lambda: invalid)
+    assert not session.submit(cmd.StartStateTakeRecording())
+    assert not session.submit(cmd.CaptureSceneSnapshot())
+    assert not session.restore_physics_state(invalid)
+    session.tick(FrameNeeds.none())
+    assert not session.can_step_back
+    assert session.active_state_take_id == take_id
+    assert tuple(session.state_take_times) == times
+    assert not session.scene_snapshots
+    monkeypatch.setattr(adapter, "capture_state", lambda: valid)
+    assert session.submit(cmd.StartStateTakeRecording(new_take=False, frame_index=2))
+
+
+@pytest.mark.parametrize("bad_time", (float("nan"), float("inf"), 0.01, 0.0))
+@pytest.mark.parametrize("stop_command", (False, True))
+def test_recording_rejects_invalid_or_rewound_clock_without_corrupting_take(
+    monkeypatch, bad_time, stop_command
+):
+    adapter = SnapshotToyPhysics()
+    session = Session(adapter)
+    assert session.submit(cmd.StartStateTakeRecording())
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
+    times = tuple(session.state_take_times)
+    state = replace(adapter.capture_state(), time=bad_time)
+    monkeypatch.setattr(adapter, "capture_state", lambda: state)
+    unchanged_stop = stop_command and bad_time == 0.01
+    if stop_command:
+        assert session.submit(cmd.StopStateTakeRecording()).ok == unchanged_stop
+    else:
+        session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert not session.state_take_recording
+    assert tuple(session.state_take_times) == times
+    assert session.last_message_level == ("info" if unchanged_stop else "error")
+    assert session.submit(cmd.SeekStateTake(0))
 
 
 def test_state_take_rejects_a_first_frame_over_the_memory_budget(monkeypatch):

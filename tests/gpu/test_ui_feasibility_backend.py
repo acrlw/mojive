@@ -55,6 +55,47 @@ def test_feasibility_capture_uses_selected_backend(backend_name, monkeypatch, sc
     output.with_suffix(".json").write_text(json.dumps(observed, indent=2))
 
 
+@pytest.mark.parametrize("glyph", ("playback-reset", "transport-loop"))
+def test_focused_glyph_keeps_every_review_size_inside_hidpi_capture(
+    backend_name, monkeypatch, glyph
+):
+    from mojive.tools.ui_feasibility import icon_library
+
+    painted = []
+    original = icon_library._draw_concept_icon_specimen
+
+    def observe(draw, center, size, name, *args, **kwargs):
+        painted.append((center, size, name))
+        return original(draw, center, size, name, *args, **kwargs)
+
+    monkeypatch.setattr(icon_library, "_draw_concept_icon_specimen", observe)
+    output = OUTPUT / f"{backend_name}-{glyph}-2.5.png"
+    render(
+        output,
+        1024,
+        680,
+        interactive=False,
+        initial_page="Workspace",
+        initial_geometry_tab="Playback",
+        initial_icon_group="Overview",
+        initial_rotate_cap="round",
+        ui_scale=2.5,
+        interactive_fps=30,
+        renderer=backend_name,
+        icon_glyph=glyph,
+    )
+    pixels = np.asarray(Image.open(output))
+    height, width = pixels.shape[:2]
+    assert {name for _center, _size, name in painted} == {glyph}
+    assert {size / 2.5 for _center, size, _name in painted} == {14, 24, 56, 112}
+    for (x, y), size, _name in painted[-4:]:
+        half = size * 0.5
+        assert 0 <= x - half < x + half <= width
+        assert 0 <= y - half < y + half <= height
+        region = pixels[int(y - half) : int(y + half), int(x - half) : int(x + half)]
+        assert region.std() > 20
+
+
 def test_live_tuning_reaches_redesign_and_production_panels(backend_name):
     config = WindowConfig(
         width=1600,

@@ -8,6 +8,7 @@ class TakeVideo:
     frame_count: int
     structure_generation: int
     end_hold_frames: int
+    take_id: int = -1
     cursor: int = 0
     playing: bool = False
     started: bool = False

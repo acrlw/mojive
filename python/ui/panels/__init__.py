@@ -106,6 +106,7 @@ class PanelContext:
     set_viewport_layers: Any = None
     recording_config: Any = None
     set_recording_config: Any = None
+    set_take_pause_at_end: Any = None
     recording: Any = None
     take_video_active: bool = False
     start_take_video: Any = None
@@ -179,6 +180,10 @@ class Panel:
 
     def draw(self, ctx: PanelContext) -> None:
         raise NotImplementedError
+
+    def status_detail(self, translate) -> str:
+        """Return compact selection information for the status bar's right side."""
+        return ""
 
     def finish_frame(self, ctx: PanelContext) -> None:
         pass

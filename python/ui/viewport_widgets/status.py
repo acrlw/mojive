@@ -197,7 +197,7 @@ def draw_status(
     pixel_size: float = 1.0,
 ) -> StatusLayout:
     x, y = origin
-    running = state == "running"
+    running = state in {"running", "replaying"}
     recording = recording_phase in {"countdown", "recording", "paused"}
     draw.rect_filled((x, y), (x + width, y + height), (*theme.bg_child[:3], 1.0))
     top_divider_width = 1.0 * scale
@@ -231,7 +231,13 @@ def draw_status(
     )
     cursor += 12.0 * scale
     state_text = (
-        labels.running if running else labels.static if state == "static" else labels.paused
+        labels.replaying
+        if state == "replaying"
+        else labels.running
+        if running
+        else labels.static
+        if state == "static"
+        else labels.paused
     )
     state_width = draw.text_size(state_text)[0]
     if cursor + state_width <= x + width - 12.0 * scale:

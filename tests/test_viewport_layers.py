@@ -55,6 +55,10 @@ def test_recording_and_layer_preferences_validate_persisted_data():
     )
     assert RecordingConfig.from_mapping({"countdown": -1, "fps": 999}).countdown == 0
     assert RecordingConfig.from_mapping({"countdown": -1, "fps": 999}).fps == 240
+    assert not RecordingConfig().run_simulation
+    assert RecordingConfig.from_mapping({"run_simulation": True}).run_simulation
+    for value in (1, "true", "false", None):
+        assert not RecordingConfig.from_mapping({"run_simulation": value}).run_simulation
     assert ViewportLayers.from_mapping(
         {"debug_3d": False, "gizmos": "invalid", "hidden_debug_layers": ["one", "one", None]}
     ) == ViewportLayers(debug_3d=False, hidden_debug_layers=("one",))

@@ -100,6 +100,11 @@ class _Editing:
         was_running = not self._paused and not self._state_take_playing
         self._step_counter += driver.suspend()
         try:
+            driver.poll()
+        except Exception as exc:
+            self._physics_failed(exc)
+            return CommandResult.bad(self.last_message)
+        try:
             return self._submit(command)
         finally:
             self._resume_physics(reset_clock=not was_running)
@@ -318,7 +323,7 @@ class _Editing:
         """Request an editable pause and reset state associated with the old scene."""
 
         self._paused = not self._adapter.caps.simulation or self._adapter.set_paused(True)
-        self._clear_state_take()
+        self._clear_state_takes()
         self._clear_scene_snapshots()
         self._clear_frame_history()
         self._step_counter = 0

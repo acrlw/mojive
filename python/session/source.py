@@ -180,13 +180,15 @@ class _Source:
                 self._selected_node_id = selected.node_id
         elif (selected := self.node(self._selected_node_id)) is None or selected.object_id:
             self._selected_node_id = -1
-        if (self._state_take or self._frame_history) and self._adapter.caps.state_snapshots:
+        if (self._state_takes or self._frame_history) and self._adapter.caps.state_snapshots:
             state = self._adapter.capture_state()
             signature = None if state is None else self._physics_state_signature(state)
-            if self._state_take and signature != self._state_take_signature:
-                self._clear_state_take()
+            if any(
+                take.frames and signature != take.signature for take in self._state_takes.values()
+            ):
+                self._clear_state_takes()
                 self._publish_message(
-                    "Cleared recorded take after the simulation state layout changed",
+                    "Cleared recorded takes after the simulation state layout changed",
                     level="warning",
                     duration=5.0,
                 )

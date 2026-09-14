@@ -75,7 +75,7 @@ BOX_CENTERED_ICONS = frozenset(
         "transport-more",
     )
 )
-RING_CENTERED_ICONS = frozenset(("playback-reset", "transport-reset"))
+RING_CENTERED_ICONS = frozenset(("playback-reset",))
 ICON_ALIGNMENT_CHOICES = ("circle", "box")
 ICON_ALIGNMENT_EDITABLE_ICONS = frozenset(("key-snapshot", "helper-camera", "helper-light"))
 ICON_GLYPH_ALIGNMENT_DEFAULTS = dict.fromkeys(ICON_ALIGNMENT_EDITABLE_ICONS, "box")
@@ -114,7 +114,7 @@ ICON_FAMILIES = (
             ("Pause", "transport-pause"),
             ("Next", "transport-next"),
             ("Last", "transport-last"),
-            ("Reset", "transport-reset"),
+            ("Loop", "transport-loop"),
             ("Record", "transport-record"),
             ("Stop", "transport-stop"),
             ("More", "transport-more"),
@@ -230,7 +230,7 @@ ICON_GLYPH_STROKE_DEFAULTS = {
     "playback-more": 2.0,
     "transport-previous": 2.0,
     "transport-next": 2.0,
-    "transport-reset": 1.5,
+    "transport-loop": 1.5,
     "transport-more": 2.0,
     "key-snapshot": 1.25,
     "key-keyframe": 1.5,
@@ -1063,6 +1063,31 @@ def _draw_tool(p: _Painter, name: str) -> None:
             )
 
 
+@lru_cache(maxsize=512)
+def _loop_arrow_path(width: float) -> tuple[tuple[float, float], ...]:
+    """One bent arrow; its half-turn counterpart completes the repeat cycle."""
+    centerline = smooth_polygon_corners(
+        ((-7.0, 0.8), (-7.0, -4.8), (3.0, -4.8)),
+        3.0,
+        (1,),
+        smoothing=CORNER_SMOOTHING,
+        convex_only=False,
+    )
+    left, right, _ = polyline_ribbon(tuple(map(tuple, centerline)), width)
+    cap = tuple(map(tuple, smooth_line_cap((-7.0, 0.8), (0.0, 1.0), width)))
+    # Join shaft, head and tail into one contour: disabled alpha must not expose seams.
+    outline = (*left[1:], (3.0, -2.0), (7.0, -4.8), (3.0, -7.6), *reversed(right[1:]), *cap)
+    head = len(left) - 1
+    rounded = smooth_polygon_corners(
+        outline,
+        0.42,
+        tuple(range(head - 1, head + 4)),
+        smoothing=CORNER_SMOOTHING,
+        convex_only=False,
+    )
+    return tuple(map(tuple, rounded))
+
+
 def _draw_transport(p: _Painter, name: str) -> None:
     kind = name.removeprefix("transport-").removeprefix("playback-")
     if kind == "play":
@@ -1085,6 +1110,10 @@ def _draw_transport(p: _Painter, name: str) -> None:
         _g3_rect(p, x - 0.75, triangle_min_y, x + 0.75, triangle_max_y, 0.58)
     elif kind == "reset":
         _arc_arrow(p, 6.8, -52.0, 255.0, center=(0.0, 0.47))
+    elif kind == "loop":
+        path = _loop_arrow_path(p.stroke_width * p.stroke_compensation)
+        p.polygon(path)
+        p.polygon(tuple((-x, -y) for x, y in path))
     elif kind == "record":
         p.circle_filled(0.0, 0.0, 4.8 * 0.98)
     elif kind == "stop":

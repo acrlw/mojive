@@ -52,6 +52,7 @@ from .state import (
     SceneSnapshotInfo,
     _DocumentState,
     _SceneSnapshot,
+    _StateTake,
     _StateTakeFrame,
 )
 
@@ -77,6 +78,7 @@ class Session(_Editing, _Playback, _Source):
         self._asset_path = asset_path
         self._paused = not adapter.caps.simulation
         self._speed = 1.0
+        self._playback_source = "simulation"
         self._sim_time_credit = 0.0
         self._selected = 0
         self._selected_node_id = -1
@@ -106,21 +108,20 @@ class Session(_Editing, _Playback, _Source):
         self._sensor_infos: list[SensorInfo] = []
         self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
-        self._state_take: list[_StateTakeFrame] = []
+        self._take = _StateTake()
+        self._state_takes: dict[int, _StateTake] = {}
+        self._state_take_serial = 0
         self._scene_snapshots: dict[int, _SceneSnapshot] = {}
         self._scene_snapshot_info: tuple[SceneSnapshotInfo, ...] = ()
         self._scene_snapshot_serial = 0
         self._scene_snapshot_bytes = 0
-        self._state_take_times: list[float] = []
-        self._state_take_offsets: list[float] = []
-        self._state_take_loop: tuple[int, int] | None = None
-        self._state_take_cursor = -1
         self._state_take_recording = False
+        self._state_take_recording_start_frame = 0
         self._state_take_playing = False
         self._state_take_use_loop = True
+        self._state_take_pause_at_end = True
+        self._state_take_end_override: bool | None = None
         self._state_take_elapsed = 0.0
-        self._state_take_signature: tuple[tuple[int, ...], ...] | None = None
-        self._state_take_bytes = 0
         self._state_take_append_error = ""
         self._state_take_limit_reached = False
         self._frame_history: list[_StateTakeFrame] = []
@@ -275,9 +276,24 @@ class Session(_Editing, _Playback, _Source):
         return self._active_keyframe
 
     @property
+    def playback_source(self) -> str:
+        """Return the last explicitly started transport: simulation or take."""
+        return self._playback_source
+
+    @property
+    def state_take_pause_at_end(self) -> bool:
+        """Return the end policy for ordinary take replay, independent of video export."""
+        return self._state_take_pause_at_end
+
+    @property
     def state_take_recording(self) -> bool:
         """Return whether the editor is recording transient simulation samples."""
         return self._state_take_recording
+
+    @property
+    def state_take_recording_start_frame(self) -> int:
+        """Return the first frame of the most recent recording pass."""
+        return self._state_take_recording_start_frame
 
     @property
     def state_take_playing(self) -> bool:
@@ -287,17 +303,25 @@ class Session(_Editing, _Playback, _Source):
     @property
     def state_take_cursor(self) -> int:
         """Return the current transient take frame, or ``-1`` when no frame is active."""
-        return self._state_take_cursor
+        return self._take.cursor
+
+    @property
+    def state_take_playhead(self) -> float | None:
+        """Return replay time, including elapsed time between surviving samples."""
+        cursor = self._take.cursor
+        if not 0 <= cursor < len(self._take.times):
+            return None
+        return self._take.times[cursor] + self._state_take_elapsed
 
     @property
     def state_take_times(self) -> list[float]:
         """Return recorded simulation times in take order."""
-        return self._state_take_times
+        return self._take.times
 
     @property
     def state_take_loop(self) -> tuple[int, int] | None:
         """Return the inclusive replay range, or None when replay stops at the take end."""
-        return self._state_take_loop
+        return self._take.loop
 
     @property
     def can_step_back(self) -> bool:

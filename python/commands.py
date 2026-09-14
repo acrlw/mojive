@@ -81,7 +81,43 @@ class Reset(Command):
 
 @dataclass(frozen=True)
 class StartStateTakeRecording(Command):
-    """Record a new transient simulation-state take and start simulation playback."""
+    """Record a new take, or retain the active take through ``frame_index`` and overwrite its future.
+
+    With ``new_take=False``, an empty active take records the current scene state.
+    Otherwise recording restores the chosen frame (the current cursor by default).
+    """
+
+    new_take: bool = True
+    frame_index: int | None = None
+
+
+@dataclass(frozen=True)
+class CreateStateTake(Command):
+    """Create and select an empty transient take without changing the scene pose."""
+
+    name: str = ""
+
+
+@dataclass(frozen=True)
+class SelectStateTake(Command):
+    """Select a take and restore its remembered frame when it contains samples."""
+
+    take_id: int
+
+
+@dataclass(frozen=True)
+class RemoveStateTake(Command):
+    """Remove a take; when active, select the most recently created remaining take."""
+
+    take_id: int
+
+
+@dataclass(frozen=True)
+class DeleteStateTakeFrames(Command):
+    """Delete an inclusive frame range, preserving surviving sample times."""
+
+    first_frame: int
+    last_frame: int
 
 
 @dataclass(frozen=True)
@@ -91,9 +127,17 @@ class StopStateTakeRecording(Command):
 
 @dataclass(frozen=True)
 class PlayStateTake(Command):
-    """Replay the take, optionally ignoring the selected loop for one playback."""
+    """Replay the take, optionally overriding its loop and end policy for one playback."""
 
     loop: bool = True
+    pause_at_end: bool | None = None
+
+
+@dataclass(frozen=True)
+class SetStateTakePauseAtEnd(Command):
+    """Choose whether ordinary take replay pauses at its final sample."""
+
+    enabled: bool = True
 
 
 @dataclass(frozen=True)

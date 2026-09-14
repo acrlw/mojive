@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class SimulationInstability(RuntimeError):
+    """Numerical divergence interrupted a physics step; the state needs resetting."""
+
+
 class SimulationDriver(Protocol):
     """Advance owned physics while the caller reads a stable displayed state.
 

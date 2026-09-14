@@ -162,6 +162,9 @@ class ViewerApp(
             if explicit_config
             else self.localizer.preference("recording", {})
         )
+        self.set_take_pause_at_end(
+            self.localizer.preference("take_pause_at_end", True) is not False, persist=False
+        )
         self.camera_tracker = CameraTracker(
             CameraTrackingConfig.from_mapping(
                 asdict(viewer_config.tracking)
@@ -331,6 +334,7 @@ class ViewerApp(
         self._viewport_recording_surface = self.recording_config.surface
         self._viewport_recording_fps = self.recording_config.fps
         self._recording_deadline = 0.0
+        self._recording_run_simulation = False
         self._viewport_recording_frames = 0
         self._viewport_recording_duration = 0.0
         self._take_video: TakeVideo | None = None
@@ -1026,6 +1030,7 @@ class ViewerApp(
             set_viewport_layers=self.set_viewport_layers,
             recording_config=self.recording_config,
             set_recording_config=self.set_recording_config,
+            set_take_pause_at_end=self.set_take_pause_at_end,
             recording=self.recording,
             take_video_active=self._take_video is not None,
             start_take_video=self.start_take_video,
