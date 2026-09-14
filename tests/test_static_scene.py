@@ -491,6 +491,20 @@ def test_session_messages_expose_level_duration_and_revision():
     assert session.last_message_duration is None
 
 
+def test_empty_command_result_preserves_an_unread_export_receipt():
+    session = Session(StaticSceneAdapter(Scene()))
+    session.report_message("Saved video to /tmp/video.mp4", level="success", duration=8.0)
+    revision = session.message_revision
+
+    result = session.submit(cmd.SetStateTakePauseAtEnd(True))
+
+    assert result.ok and not result.message
+    assert session.message_revision == revision
+    assert session.last_message == "Saved video to /tmp/video.mp4"
+    assert session.last_message_level == "success"
+    assert session.last_message_duration == 8.0
+
+
 def test_visibility_edits_reach_the_render_source():
     scene = Scene()
     obj = scene.box(name="visible")

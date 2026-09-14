@@ -29,6 +29,7 @@ class _Capture:
         """Return the current interactive recording state."""
 
         return RecordingInfo(
+            error=getattr(self, "_recording_error", ""),
             phase=getattr(self, "_viewport_recording_phase", RecordingPhase.IDLE),
             surface=getattr(self, "_viewport_recording_surface", CaptureSurface.SCENE),
             path=getattr(self, "_viewport_recording_path", None),
@@ -126,6 +127,7 @@ class _Capture:
                 raise RuntimeError("scene recording is unavailable for this backend")
         path = Path(output) if output is not None else self._capture_output(surface, ".mp4")
         self._viewport_recorder = None
+        self._recording_error = ""
         self._viewport_recording_path = path
         self._viewport_recording_surface = surface
         self._viewport_recording_fps = fps
@@ -134,7 +136,9 @@ class _Capture:
         self._viewport_record_elapsed = 0.0
         self._recording_deadline = time.monotonic() + countdown
         self._viewport_recording_phase = RecordingPhase.COUNTDOWN
-        self._recording_run_simulation = config.run_simulation
+        self._recording_run_simulation = (
+            config.run_simulation and self.session.adapter.caps.clock_control
+        )
         self._active_recording_config = config
         return path
 
@@ -290,10 +294,12 @@ class _Capture:
             take.playing = self.session.state_take_playing
         return True
 
-    def stop_recording(self, *, report: bool = True) -> Path | None:
+    def stop_recording(self, *, report: bool = True, raise_on_error: bool = False) -> Path | None:
         """Finalize the active interactive recording and return its destination."""
 
         if not self.recording.active:
+            if raise_on_error and self.recording.error:
+                raise RuntimeError(self.recording.error)
             return None
         recorder = self._viewport_recorder
         path = self._viewport_recording_path
@@ -313,17 +319,24 @@ class _Capture:
         try:
             recorder.close()
         except Exception as exc:
+            self._recording_error = str(exc)
             if report:
                 self.session.report_message(
                     f"{self.localizer.text('Recording failed')}: {exc}", level="error"
                 )
+            if raise_on_error:
+                raise
             return path
         if report and path is not None:
+            destination = path.resolve()
+            # Interactive export receipts must reach the caller's terminal even
+            # when an embedding application has left runtime logging disabled.
+            print(f"Saved video to {destination}", flush=True)
             self.session.report_message(
-                f"{self.localizer.text('Saved video to')} {path.resolve()}",
+                f"{self.localizer.text('Saved video to')} {destination}",
                 level="success",
                 duration=8.0,
-                copy_text=str(path.resolve()),
+                copy_text=str(destination),
             )
         return path
 
@@ -507,6 +520,9 @@ class _Capture:
             )
         except Exception as exc:
             self.stop_recording(report=False)
+            self._recording_error = str(exc) + (
+                f"; finalization: {self._recording_error}" if self._recording_error else ""
+            )
             self.session.report_message(
                 f"{self.localizer.text('Recording stopped')}: {exc}", level="error"
             )

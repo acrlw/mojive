@@ -12,7 +12,7 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-from mojive import launch_passive
+from mojive import PassiveAction, launch_passive
 from mojive.scene.assets import resolve
 
 
@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--seconds", type=float, default=3)
     parser.add_argument("--renderer", choices=("opengl", "wgpu"))
     parser.add_argument("--hidden", action="store_true")
+    parser.add_argument("--record", action="store_true", help="Record live video during simulation")
     parser.add_argument("--width", type=int, default=1600)
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--output", type=Path, default=Path("output/passive-viewer"))
@@ -53,14 +54,25 @@ def main() -> None:
         height=args.height,
         show_window=not args.hidden,
     ) as viewer:
+        viewer.configure_actions((PassiveAction("pause", "space", "Pause / resume", "toggle"),))
+        viewer.set_status("", paused=False)
+        if args.record:
+            viewer.start_recording(args.output / "live.mp4", surface="window", countdown=0)
+        paused = False
         before = viewer.stats
         started = previous = due = time.perf_counter()
         while viewer.is_running() and time.perf_counter() - started < args.seconds:
+            for event in viewer.poll_events():
+                if event.action == "pause":
+                    paused = not paused
+                    viewer.set_status("", paused=paused)
+                viewer.acknowledge_event(event)
             with viewer.lock():
                 # Replace this vector assignment with policy(observation).
-                data.ctrl[:] = 0.15 * math.sin(data.time * 2.0)
-                mujoco.mj_step(model, data)
-                steps += 1
+                if not paused:
+                    data.ctrl[:] = 0.15 * math.sin(data.time * 2.0)
+                    mujoco.mj_step(model, data)
+                    steps += 1
                 viewer.sync(step=steps)
             now = time.perf_counter()
             gaps.append(now - previous)
@@ -81,6 +93,8 @@ def main() -> None:
             raise RuntimeError("The passive viewer changed the caller's physics clock")
         if idle["rendered_frames"] <= after["rendered_frames"]:
             raise RuntimeError("Display stopped while the physics owner was idle")
+        if args.record:
+            viewer.stop_recording()
     if viewer.is_running():
         raise RuntimeError("The passive viewer did not close")
     report = {

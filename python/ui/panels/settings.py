@@ -327,7 +327,14 @@ class SettingsPanel(Panel):
             return
         if self._begin_properties("settings_recording"):
             self._property(ctx.tr("Run simulation when recording starts"))
-            changed, value = imgui.checkbox("##recording_run_simulation", config.run_simulation)
+            clock_control = ctx.session.adapter.caps.clock_control
+            imgui.begin_disabled(not clock_control)
+            changed, value = imgui.checkbox(
+                "##recording_run_simulation", config.run_simulation and clock_control
+            )
+            imgui.end_disabled()
+            if not clock_control and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                imgui.set_tooltip(ctx.tr("Simulation is controlled by the external application."))
             if changed:
                 config = replace(config, run_simulation=value)
                 ctx.set_recording_config(config)

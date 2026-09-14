@@ -468,7 +468,7 @@ def test_dynamic_popover_title_elides_the_middle() -> None:
     assert "…" in shown
 
 
-def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
+def test_viewport_recording_streams_and_finalizes_frames(monkeypatch, capsys) -> None:
     import mojive.capture.recording as recording
 
     events = []
@@ -522,6 +522,55 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch) -> None:
     assert recorder.closed
     assert app._viewport_recorder is None
     assert events[-1][1] == "success"
+    assert capsys.readouterr().out == f"Saved video to {recorder.path.resolve()}\n"
+
+
+@pytest.mark.parametrize("duration,expected", ((5.0, 3.0), (8.0, 8.0), (10.0, 10.0), (None, None)))
+def test_status_bridge_preserves_extended_and_persistent_message_lifetimes(
+    monkeypatch, duration, expected
+):
+    from mojive.ui.messages import OutputBuffer
+
+    monkeypatch.setattr("mojive.ui.messages.time.monotonic", lambda: 100.0)
+    app = ViewerApp.__new__(ViewerApp)
+    app._seen_message_revision = 0
+    app.output = OutputBuffer()
+    app.viewport_overlays = ViewportOverlayConfig(status_duration=3.0)
+    app.session = SimpleNamespace(
+        message_revision=1,
+        last_message="Saved video to /tmp/video.mp4",
+        last_message_level="success",
+        last_message_duration=duration,
+        last_message_copy_text="/tmp/video.mp4",
+    )
+    app._sync_session_status()
+    app._sync_session_status()
+    assert len(app.output.entries()) == 1
+    message = app.output.entries()[0]
+    assert message.copy_text == "/tmp/video.mp4"
+    assert app.output.active_status(100.0 + (expected or 1000) - 0.01) == message
+    if expected is not None:
+        assert app.output.active_status(100.0 + expected) is None
+    assert app.output.entries() == (message,)
+
+
+def test_failed_video_finalization_never_prints_a_saved_receipt(tmp_path, capsys):
+    app = ViewerApp.__new__(ViewerApp)
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    messages = []
+    app.session = SimpleNamespace(report_message=lambda text, **kwargs: messages.append(text))
+    app.start_recording(tmp_path / "broken.mp4", countdown=0)
+
+    def fail():
+        raise RuntimeError("encoder finalization failed")
+
+    app._viewport_recorder = SimpleNamespace(close=fail)
+    app._viewport_recording_frames = 1
+    with pytest.raises(RuntimeError, match="encoder finalization failed"):
+        app.stop_recording(raise_on_error=True)
+    assert not capsys.readouterr().out
+    assert messages == ["Recording failed: encoder finalization failed"]
+    assert not app.recording.active
 
 
 def test_presented_capture_surface_flips_and_crops_viewport_pixels() -> None:
@@ -785,8 +834,9 @@ def test_recording_countdown_uses_wall_time_and_waits_for_menu_dismissal(monkeyp
 
 
 @pytest.mark.parametrize("run_simulation", (False, True))
+@pytest.mark.parametrize("clock_control", (False, True))
 def test_video_start_action_follows_first_encoded_frame_and_never_repeats(
-    monkeypatch, tmp_path, run_simulation
+    monkeypatch, tmp_path, run_simulation, clock_control
 ):
     from mojive import RecordingConfig
     from mojive import commands as cmd
@@ -809,6 +859,7 @@ def test_video_start_action_follows_first_encoded_frame_and_never_repeats(
     app.recording_config = RecordingConfig(countdown=0, run_simulation=run_simulation)
     app._surface_image = lambda *args: np.zeros((2, 2, 3), np.uint8)
     app.session = SimpleNamespace(
+        adapter=SimpleNamespace(caps=SimpleNamespace(clock_control=clock_control)),
         submit=lambda command: events.append(type(command).__name__) or cmd.CommandResult.good(""),
         report_message=lambda *args, **kwargs: None,
     )
@@ -816,12 +867,12 @@ def test_video_start_action_follows_first_encoded_frame_and_never_repeats(
     app._advance_recording_countdown()
     assert events == []
     app._finish_capture_and_recording(None, 0)
-    assert events == (["frame", "Play"] if run_simulation else ["frame"])
+    assert events == (["frame", "Play"] if run_simulation and clock_control else ["frame"])
     assert app.pause_recording()
     assert app.resume_recording()
     app._finish_capture_and_recording(None, 0)
     assert events[-1] == "frame"
-    assert events.count("Play") == int(run_simulation)
+    assert events.count("Play") == int(run_simulation and clock_control)
     app.stop_recording(report=False)
     assert events[-1] == "close"
     assert not any(name in events for name in ("Pause", "Reset", "PlayStateTake"))
@@ -855,6 +906,7 @@ def test_failed_or_canceled_video_start_does_not_run_an_unrecorded_action(
     app._surface_image = lambda *args: np.zeros((2, 2, 3), np.uint8)
     app.localizer = SimpleNamespace(text=lambda value: value)
     app.session = SimpleNamespace(
+        adapter=SimpleNamespace(caps=SimpleNamespace(clock_control=True)),
         submit=lambda command: (
             events.append(type(command).__name__) or cmd.CommandResult.bad("simulation unavailable")
         ),

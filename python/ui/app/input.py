@@ -66,10 +66,9 @@ class _Input:
             if mouse_pos is not None
             else (float("inf"), float("inf"))
         )
-        status_bounds = getattr(self, "_status_path_bounds", None)
-        status_reveal = bool(
-            (getattr(io, "key_ctrl", False) or getattr(io, "key_super", False))
-            and status_bounds is not None
+        status_bounds = getattr(self, "_status_notice_bounds", None)
+        status_action = bool(
+            status_bounds is not None
             and status_bounds[0] <= cursor[0] <= status_bounds[2]
             and status_bounds[1] <= cursor[1] <= status_bounds[3]
         )
@@ -102,7 +101,7 @@ class _Input:
             or self._consume_scene_pointer_until_release
             or getattr(self, "_overlay_drag_kind", "")
             or overlay_border
-            or status_reveal
+            or status_action
         )
 
     def _poll_input_handler(self) -> None:

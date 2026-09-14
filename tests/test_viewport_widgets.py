@@ -743,6 +743,66 @@ class _RecordedStatus(_MeasuredText):
         return lambda *_args, **_kwargs: None
 
 
+@pytest.mark.parametrize("state", ("external", "running", "paused"))
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_passive_status_keeps_mode_and_reported_state_on_the_left(state, language):
+    from mojive.ui.localization import Localizer, parse_language
+    from mojive.ui.viewport_widgets.capsules import localized_viewport_labels
+
+    labels = localized_viewport_labels(Localizer(parse_language(language)).text)
+    draw = _RecordedStatus()
+    layout = draw_status(
+        draw,
+        (0, 0),
+        1500,
+        28,
+        Theme(),
+        1,
+        selected="",
+        state=state,
+        sim_time=0,
+        step=0,
+        metric_mode="time",
+        backend="OpenGL",
+        dt=0.005,
+        fps=60,
+        passive=True,
+        labels=labels,
+    )
+    state_label = {"external": "", "running": labels.running, "paused": labels.paused}[state]
+    expected = f"{labels.passive} · {state_label}" if state_label else labels.passive
+    assert draw.texts[0] == expected
+    assert "OpenGL" in draw.texts
+    positions = {text: position for position, text in draw.text_positions}
+    assert positions[expected][0] < positions["OpenGL"][0]
+    assert layout.passive_rect is not None
+    assert layout.passive_rect[0] == positions[expected][0]
+    assert layout.passive_rect[2] <= positions["OpenGL"][0]
+
+
+def test_passive_status_preserves_optional_caller_activity():
+    draw = _RecordedStatus()
+    draw_status(
+        draw,
+        (0, 0),
+        900,
+        28,
+        Theme(),
+        1,
+        selected="",
+        state="running",
+        sim_time=0,
+        step=0,
+        metric_mode="time",
+        backend="OpenGL",
+        dt=0.005,
+        fps=60,
+        passive=True,
+        activity="Episode 3",
+    )
+    assert draw.texts[0] == "Passive · Episode 3"
+
+
 def test_status_badges_and_descriptions_share_one_text_baseline():
     from mojive.ui.theme import THEME
 
@@ -817,9 +877,19 @@ def test_status_places_simulation_state_before_selection():
 
 
 @pytest.mark.parametrize("phase", ("recording", "paused", "countdown"))
-def test_status_exposes_recording_controls_and_warning_divider(phase) -> None:
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+@pytest.mark.parametrize(
+    "surface,english,chinese",
+    (("scene", "SCENE", "场景"), ("viewport", "VIEW", "视口"), ("window", "WINDOW", "全窗口")),
+)
+def test_status_exposes_localized_recording_controls(
+    phase, language, surface, english, chinese
+) -> None:
+    from mojive.ui.localization import Localizer, parse_language
     from mojive.ui.theme import THEME
+    from mojive.ui.viewport_widgets.capsules import localized_viewport_labels
 
+    labels = localized_viewport_labels(Localizer(parse_language(language)).text)
     draw = _RecordedStatus()
     layout = draw_status(
         draw,
@@ -839,13 +909,24 @@ def test_status_exposes_recording_controls_and_warning_divider(phase) -> None:
         recording_phase=phase,
         recording_duration=65.2,
         countdown_remaining=2.1,
-        recording_surface="viewport",
+        recording_surface=surface,
+        labels=labels,
+        passive=True,
     )
 
-    assert ("VIEW 3 s" if phase == "countdown" else "VIEW 01:05") in draw.texts
+    surface_label = chinese if language == "zh_CN" else english
+    record_text = f"{surface_label} " + ("3 s" if phase == "countdown" else "01:05")
+    assert record_text in draw.texts
     assert draw.lines[0][0][2] == THEME.warning
     assert (layout.recording_pause_rect is not None) == (phase != "countdown")
     assert layout.recording_stop_rect is not None
+    positions = {text: position for position, text in draw.text_positions}
+    record_x = positions[record_text][0]
+    assert layout.passive_rect[2] < record_x
+    assert record_x + draw.text_size(record_text)[0] < layout.recording_stop_rect[0]
+    for text, (text_x, _) in positions.items():
+        if text == "OpenGL" or text.startswith("Δt"):
+            assert layout.recording_stop_rect[2] < text_x
 
 
 def test_right_aligned_telemetry_has_no_separator_against_empty_space():
@@ -930,7 +1011,7 @@ def test_status_uses_muted_gray_for_chrome_and_context_hints():
     )
 
     colors_by_text = dict(zip(draw.texts, draw.text_colors, strict=True))
-    assert colors_by_text.pop("Simulating") == THEME.primary
+    assert colors_by_text.pop("Running") == THEME.primary
     assert set(colors_by_text.values()) == {THEME.text_disabled}
     assert draw.lines[0][0][2] == THEME.primary_dim
     assert draw.lines[0][0][3] == pytest.approx(1.0)

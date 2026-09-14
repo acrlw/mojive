@@ -83,7 +83,7 @@ class ViewportLabels:
     drag: str = "Drag"
     push: str = "Push"
     twist: str = "Twist"
-    running: str = "Simulating"
+    running: str = "Running"
     replaying: str = "Replaying Take"
     paused: str = "Paused"
     static: str = "Static"
@@ -91,6 +91,11 @@ class ViewportLabels:
     steps: str = "Steps"
     physics: str = "Physics"
     render: str = "Render"
+    passive: str = "Passive"
+    recording_scene: str = "SCENE"
+    recording_viewport: str = "VIEW"
+    recording_window: str = "WINDOW"
+    recording: str = "REC"
     no_selection: str = "No selection"
     clear_selection: str = "Clear selection"
     show_steps: str = "Click to show steps"
@@ -122,6 +127,7 @@ class StatusLayout:
     recording_pause_rect: tuple[float, float, float, float] | None = None
     recording_stop_rect: tuple[float, float, float, float] | None = None
     message_rect: tuple[float, float, float, float] | None = None
+    passive_rect: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)

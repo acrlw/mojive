@@ -87,6 +87,7 @@ class RecordingInfo:
     frames: int = 0
     duration: float = 0.0
     countdown_remaining: float = 0.0
+    error: str = ""
 
     @property
     def active(self) -> bool:
