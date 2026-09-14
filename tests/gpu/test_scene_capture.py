@@ -1,6 +1,7 @@
 """Scene exports must not inherit any displayed editor annotations."""
 
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,6 +14,29 @@ from mojive.tools.scene_entities import acceptance_scene
 from mojive.types import CameraView
 
 pytestmark = pytest.mark.gpu
+
+
+def test_public_capture_propagates_save_failure_and_recovers(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    with build_scene(
+        acceptance_scene(), vsync=False, show_window=False, width=800, height=600
+    ) as viewer:
+        failed = tmp_path / "capture.unsupported"
+        with pytest.raises(ValueError, match="unknown file extension"):
+            viewer.capture(failed, surface="window")
+        assert not failed.exists()
+        path = viewer.capture(tmp_path / "capture.png", surface="window")
+        with Image.open(path) as image:
+            assert image.size == (800, 600)
+        directory = tmp_path / "not-a-file.png"
+        directory.mkdir()
+        with pytest.raises(IsADirectoryError):
+            viewer.capture(directory, surface="window")
+        assert viewer.capture(path, surface="window").is_file()
+        with monkeypatch.context() as local:
+            local.chdir(tmp_path)
+            assert viewer.capture("relative.png", surface="window") == Path("relative.png")
+            assert Path("relative.png").is_file()
 
 
 def test_scene_capture_and_video_exclude_helpers_and_selection(tmp_path, monkeypatch):

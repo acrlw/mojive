@@ -14,6 +14,7 @@ from PIL import Image
 
 from mojive import PassiveAction, launch_passive
 from mojive.scene.assets import resolve
+from mojive.ui import ToolHint
 
 
 def main() -> None:
@@ -54,11 +55,23 @@ def main() -> None:
         height=args.height,
         show_window=not args.hidden,
     ) as viewer:
-        viewer.configure_actions((PassiveAction("pause", "space", "Pause / resume", "toggle"),))
+        viewer.configure_actions(
+            (
+                PassiveAction("pause", "space", "Pause / resume", "toggle"),
+                PassiveAction("increase", "up_arrow", "Increase amplitude"),
+                PassiveAction("decrease", "down_arrow", "Decrease amplitude"),
+            ),
+            hints=(
+                ToolHint("keys", label="Amplitude", keys=(("Up", "+"), ("Down", "−"))),
+                ToolHint("key", "Space", "Pause / resume"),
+            ),
+            hint_surface="scene",
+        )
         viewer.set_status("", paused=False)
         if args.record:
             viewer.start_recording(args.output / "live.mp4", surface="window", countdown=0)
         paused = False
+        amplitude = 0.15
         before = viewer.stats
         started = previous = due = time.perf_counter()
         while viewer.is_running() and time.perf_counter() - started < args.seconds:
@@ -66,11 +79,15 @@ def main() -> None:
                 if event.action == "pause":
                     paused = not paused
                     viewer.set_status("", paused=paused)
+                elif event.action == "increase":
+                    amplitude += 0.05
+                elif event.action == "decrease":
+                    amplitude = max(0.0, amplitude - 0.05)
                 viewer.acknowledge_event(event)
             with viewer.lock():
                 # Replace this vector assignment with policy(observation).
                 if not paused:
-                    data.ctrl[:] = 0.15 * math.sin(data.time * 2.0)
+                    data.ctrl[:] = amplitude * math.sin(data.time * 2.0)
                     mujoco.mj_step(model, data)
                     steps += 1
                 viewer.sync(step=steps)

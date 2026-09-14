@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from functools import lru_cache
 
@@ -33,6 +34,21 @@ from .model import (
 from .rotate import (
     _counterclockwise,
 )
+
+_OVERFLOW_HINT = ToolHint("text", label="…", hint_id="scene.hints.overflow")
+
+
+def tool_hint_text(hint: ToolHint, *, labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS) -> str:
+    """Describe a hint as plain text for alternative presentation and tooltips."""
+    if hint.kind == "text":
+        return hint.label
+    if hint.kind == "keys":
+        prefix = f"{hint.label} " if hint.label else ""
+        return prefix + " / ".join(f"[{key}] {meaning}" for key, meaning in hint.keys)
+    if hint.kind == "perturb":
+        return f"[{hint.control}] + {labels.drag}: {labels.push} / {labels.twist}"
+    modifier = f"[{hint.modifier}] + " if hint.modifier else ""
+    return f"{modifier}[{hint.control}]{hint.suffix} {hint.label}"
 
 
 def _inline_text(draw: Draw2D, x: float, center_y: float, value: str, color) -> float:
@@ -394,6 +410,15 @@ def _tool_hint_width(
     mouse = _mouse_width(draw, scale, text_scale=text_scale)
     if group.kind == "text":
         return text_width(group.label)
+    if group.kind == "keys":
+        return (
+            (text_width(group.label) + input_gap if group.label else 0.0)
+            + sum(
+                _key_width(draw, key, scale, text_scale) + input_gap + text_width(meaning)
+                for key, meaning in group.keys
+            )
+            + (2 * chord + text_width("/")) * (len(group.keys) - 1)
+        )
     if group.kind == "key":
         return (
             _key_width(draw, group.control, scale, text_scale) + input_gap + text_width(group.label)
@@ -500,6 +525,90 @@ def fitting_tool_hints(
     return tuple(fitted)
 
 
+def scene_tool_hints_layout(
+    draw: Draw2D,
+    scale: float,
+    hints: Sequence[ToolHint],
+    max_width: float,
+    max_height: float,
+    *,
+    labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
+    min_scale: float | None = None,
+) -> tuple[float, tuple[tuple[ToolHint, ...], ...], tuple[tuple[float, float], ...]]:
+    """Wrap whole groups and uniformly fit their capsules into the scene budget.
+
+    Text, keys and shell geometry scale together, down to min_scale (75% of
+    scale by default). If the budget still cannot fit all groups, retain a whole
+    prefix plus an ellipsis; callers can show the original hints in a tooltip.
+    """
+    minimum = scale * 0.75 if min_scale is None else min_scale
+    if not all(math.isfinite(value) for value in (scale, minimum, max_width, max_height)):
+        raise ValueError("Hint layout dimensions must be finite")
+    if not 0 < minimum <= scale or min(max_width, max_height) < 0:
+        raise ValueError("Hint scale must be positive and its budget nonnegative")
+    hints = tuple(hints)
+    widths = tuple(_tool_hint_width(draw, scale, hint, labels=labels) for hint in hints)
+    gap = OVERLAY_GEOMETRY.hint_group_gap * scale
+    padding = OVERLAY_GEOMETRY.hint_padding_x * 2.0 * scale
+    row_height = (
+        OVERLAY_GEOMETRY.hint_control_height + 2.0 * OVERLAY_GEOMETRY.hint_padding_y
+    ) * scale
+    row_gap = 6.0 * scale
+
+    def layout(factor, groups=hints, measured=widths):
+        rows = []
+        sizes = []
+        start = 0
+        used = 0.0
+        for index, width in enumerate(measured):
+            if index > start and (used + gap + width + padding) * factor > max_width:
+                rows.append(groups[start:index])
+                sizes.append(((used + padding) * factor, row_height * factor))
+                start = index
+                used = 0.0
+            used += (gap if index > start else 0.0) + width
+        if measured:
+            rows.append(groups[start:])
+            sizes.append(((used + padding) * factor, row_height * factor))
+        height = (row_height * len(rows) + row_gap * max(0, len(rows) - 1)) * factor
+        fits = height <= max_height and all(size[0] <= max_width for size in sizes)
+        return tuple(rows), tuple(sizes), fits
+
+    factor = 1.0
+    rows, sizes, fits = layout(factor)
+    if not fits:
+        floor = minimum / scale
+        if not layout(floor)[2]:
+            overflow_width = _tool_hint_width(draw, scale, _OVERFLOW_HINT, labels=labels)
+
+            def collapsed(count):
+                return layout(
+                    floor, (*hints[:count], _OVERFLOW_HINT), (*widths[:count], overflow_width)
+                )
+
+            if not collapsed(0)[2]:
+                return minimum, (), ()
+            lo, hi = 0, len(hints)
+            while lo + 1 < hi:
+                mid = (lo + hi) // 2
+                if collapsed(mid)[2]:
+                    lo = mid
+                else:
+                    hi = mid
+            rows, sizes, _ = collapsed(lo)
+            return minimum, rows, sizes
+        lo, hi = floor, 1.0
+        for _ in range(12):
+            mid = (lo + hi) * 0.5
+            if layout(mid)[2]:
+                lo = mid
+            else:
+                hi = mid
+        factor = lo
+        rows, sizes, _ = layout(factor)
+    return scale * factor, rows, sizes
+
+
 def draw_tool_hints(
     draw: Draw2D,
     origin,
@@ -563,6 +672,16 @@ def draw_tool_hints(
     for index, group in enumerate(groups):
         if group.kind == "text":
             text(group.label)
+        elif group.kind == "keys":
+            if group.label:
+                text(group.label)
+                cursor += input_gap
+            for key_index, (control, meaning) in enumerate(group.keys):
+                if key_index:
+                    cursor += chord_gap
+                    text("/", theme.text_disabled)
+                    cursor += chord_gap
+                key(control, meaning)
         elif group.kind == "key":
             key(group.control, group.label)
         elif group.kind == "mouse":

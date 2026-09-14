@@ -1287,6 +1287,29 @@ def test_tool_hint_registry_can_extend_and_suppress_defaults_per_surface():
     assert registry.resolve(defaults, surface="scene") == defaults
 
 
+@pytest.mark.parametrize("kind", ("keey", "", "KEY", None))
+def test_invalid_hint_kind_fails_before_rendering(kind):
+    with pytest.raises(ValueError, match="hint kind"):
+        ToolHint(kind, "F", "Focus")
+
+
+@pytest.mark.parametrize("keys", (None, (), ("ab",), (("", "+"),), (("Up", 1),)))
+def test_invalid_grouped_hint_keys_are_rejected(keys):
+    with pytest.raises(ValueError, match="Grouped key hints"):
+        ToolHint("keys", keys=keys)
+
+
+def test_plain_text_hints_can_be_used_without_capsule_drawing():
+    from mojive.ui.viewport_widgets import tool_hint_text
+
+    assert (
+        tool_hint_text(ToolHint("keys", label="Speed", keys=(("Up", "+"), ("Down", "−"))))
+        == "Speed [Up] + / [Down] −"
+    )
+    assert tool_hint_text(ToolHint("key", "F", "Focus")) == "[F] Focus"
+    assert tool_hint_text(ToolHint("text", label="Ready")) == "Ready"
+
+
 def test_tool_hint_fitting_never_draws_a_partial_group():
     draw = _MeasuredText()
     hints = (
@@ -1297,6 +1320,63 @@ def test_tool_hint_fitting_never_draws_a_partial_group():
 
     assert fitting_tool_hints(draw, 1.0, hints, first_width) == hints[:1]
     assert fitting_tool_hints(draw, 1.0, hints, 1.0) == ()
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.5, 2.5))
+@pytest.mark.parametrize("label", ("Speed", "速度", ""))
+def test_grouped_keys_share_one_label_and_match_measured_width(scale, label):
+    from mojive.ui.theme import THEME
+    from mojive.ui.viewport_widgets import scene_tool_hints_layout
+
+    draw = _RecordedStatus()
+    hint = ToolHint("keys", label=label, keys=(("Up", "+"), ("Down", "−")))
+    registry = ToolHintRegistry()
+    registry.add("speed", hint, surface="scene")
+    hints = registry.resolve(surface="scene")
+    assert hints[0].keys == hint.keys
+    width = draw_tool_hints(draw, (10, 15), THEME, scale, hints)
+    assert width == pytest.approx(tool_hints_size(draw, scale, hints)[0])
+    assert draw.texts == ([label] if label else []) + ["Up", "+", "/", "Down", "−"]
+    assert fitting_tool_hints(draw, scale, hints, width - 1) == ()
+    tail = ToolHint("key", "Space", "Pause / resume")
+    padded_width = max(
+        tool_hints_size(draw, scale, (hint,), padding=True)[0] for hint in (*hints, tail)
+    )
+    fitted_scale, rows, _sizes = scene_tool_hints_layout(
+        draw, scale, (*hints, tail), padded_width, 1000
+    )
+    assert fitted_scale == scale
+    assert rows == (hints, (tail,))
+    assert scene_tool_hints_layout(draw, scale, (), width, 1000)[1:] == ((), ())
+
+
+def test_scene_hint_capsules_keep_readable_whole_groups_and_mark_overflow():
+    from mojive.ui.viewport_widgets import scene_tool_hints_layout
+
+    draw = _MeasuredText()
+    hints = tuple(
+        ToolHint("keys", label=label, keys=(("Up", "+"), ("Down", "−")))
+        for label in ("Horizontal speed", "Vertical speed", "Rotation speed")
+    )
+    scale, rows, sizes = scene_tool_hints_layout(draw, 2.5, hints, 240, 70)
+    assert scale == 2.5 * 0.75
+    visible = tuple(hint for row in rows for hint in row)
+    assert visible[-1].label == "…"
+    assert visible[:-1] == hints[: len(visible) - 1]
+    assert max(width for width, _ in sizes) <= 240
+    assert sum(height for _, height in sizes) + 6 * scale * (len(rows) - 1) <= 70
+
+
+def test_extreme_hint_text_and_tiny_budget_never_produce_zero_scale():
+    from mojive.ui.viewport_widgets import scene_tool_hints_layout
+
+    draw = _MeasuredText()
+    hint = ToolHint("key", "F", "X" * 200_000)
+    scale, rows, sizes = scene_tool_hints_layout(draw, 1, (hint,), 300, 80)
+    assert scale == 0.75
+    assert rows[0][0].label == "…"
+    assert 0 < sizes[0][0] <= 300
+    assert scene_tool_hints_layout(draw, 1, (hint,), 1, 1) == (0.75, (), ())
 
 
 @pytest.mark.parametrize("scale", (1.0, 1.5, 2.0))

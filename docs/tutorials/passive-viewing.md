@@ -139,6 +139,53 @@ not retried automatically. Replace bindings only after acknowledging pending req
 nonblocking; configuration, status updates, acknowledgement and capture/recording methods wait
 for a display response. Call those at explicit control boundaries, not on every physics step.
 
+Keys use `InputContext` names: letters (`a`), digits (`8`), `space`, `enter`, `escape`,
+`up_arrow`, `down_arrow`, `left_arrow`, and `right_arrow`, for example. Display labels such as
+`Up` are independent of binding identifiers. Modifier-only actions, including `left_shift`
+and `mod_ctrl`, are rejected because passive actions do not accept modifier chords.
+
+Action hints default to individual keys in the status bar. Group related keys and move them
+to the existing viewport hint capsule without changing input behavior:
+
+```python
+from mojive.ui import ToolHint
+
+viewer.configure_actions(
+    (
+        mojive.PassiveAction("increase", "up_arrow", "Increase speed"),
+        mojive.PassiveAction("decrease", "down_arrow", "Decrease speed"),
+    ),
+    hints=(ToolHint("keys", label="Speed", keys=(("Up", "+"), ("Down", "−"))),),
+    hint_surface="scene",
+)
+```
+
+This displays `Speed [Up] + / [Down] −` with real keycaps. Scene hints wrap at whole-group
+boundaries within 30% of the viewport height. They scale together down to 75% of the requested
+size, then show an ellipsis for overflow; hover the capsule to read the complete hints.
+`hints` replaces the automatic hints; `hints=()` hides
+them while retaining all bindings. Labels remain caller-provided, and viewport UI visibility
+controls whether the scene capsule appears.
+
+Update presentation independently of actions, even while an action awaits acknowledgement:
+
+```python
+viewer.configure_tool_hints(
+    (ToolHint("keys", label="Speed", keys=(("Up", "+"), ("Down", "−"))),),
+    surface="scene",
+)
+viewer.configure_tool_hints(())  # Hide application hints; inputs still work.
+```
+
+Ordinary `Viewer` provides the same method. Moving this configured group to another surface
+removes its previous placement; unrelated individually registered hints remain. Calling
+`configure_actions` again still replaces bindings and resets their hints according to its
+arguments. Hint updates are synchronous display requests, so update changed text at control
+boundaries rather than on every physics step.
+
+For alternative drawing, see [custom hint presentation](../how-to/ui-drawing.md#custom-hint-presentation).
+PassiveViewer sends declarative data, not arbitrary Python draw callbacks, to its display worker.
+
 `is_running()` becomes false when the window closes or its worker exits. `close()` and the
 context manager stop and reap the worker. Startup and explicit capture/control failures raise
 exceptions. `sync()` after close is harmless, allowing the physics loop to continue without

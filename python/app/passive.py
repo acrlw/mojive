@@ -8,10 +8,12 @@ import operator
 import threading
 import time
 import traceback
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from queue import Empty
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -21,6 +23,9 @@ from mojive.config import CameraTrackingConfig, LayoutConfig, RecordingConfig, V
 from mojive.session.rates import StepRate
 
 from .passive_input import PassiveAction, PassiveEvent
+
+if TYPE_CHECKING:
+    from mojive.ui import ToolHint
 
 
 class _Mailbox:
@@ -267,9 +272,32 @@ class PassiveViewer:
         """Wait for encoder finalization and return the saved path, or raise on failure."""
         return self._request("stop_recording")
 
-    def configure_actions(self, actions: tuple[PassiveAction, ...]) -> None:
-        """Bind focused keys and optional toolbar controls to caller-owned requests."""
-        self._request("configure_actions", tuple(actions))
+    def configure_actions(
+        self,
+        actions: tuple[PassiveAction, ...],
+        *,
+        hints: tuple[ToolHint, ...] | None = None,
+        hint_surface: str = "status",
+    ) -> None:
+        """Bind caller-owned actions and optional replacement hints.
+
+        By default each key appears in the status bar. Supply ``hints`` to group
+        related inputs; ``hint_surface="scene"`` uses the viewport hint capsule.
+        An empty tuple hides action hints without disabling their inputs.
+        """
+        self._request(
+            "configure_actions",
+            (tuple(actions), None if hints is None else tuple(hints), hint_surface),
+        )
+
+    def configure_tool_hints(self, hints: Sequence[ToolHint], *, surface: str = "status") -> None:
+        """Replace action hints without rebinding inputs or waiting for pending actions.
+
+        Use surface="scene" for viewport capsules or "status" for inline hints.
+        An empty sequence hides action hints, not the actions themselves. This
+        sends data to the display process; it never executes caller draw callbacks.
+        """
+        self._request("configure_tool_hints", (tuple(hints), surface))
 
     def poll_events(self) -> tuple[PassiveEvent, ...]:
         """Drain available requests without waiting for the display process.
@@ -646,7 +674,11 @@ def _run_viewer(
                     elif operation == "stop_recording":
                         result = viewer.stop_recording()
                     elif operation == "configure_actions":
-                        passive_input.configure(payload)
+                        passive_input.configure(
+                            payload[0], hints=payload[1], hint_surface=payload[2]
+                        )
+                    elif operation == "configure_tool_hints":
+                        passive_input.configure_hints(payload[0], surface=payload[1])
                     elif operation == "acknowledge_event":
                         passive_input.acknowledge(payload[0], error=payload[1])
                     elif operation == "set_status":

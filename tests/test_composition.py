@@ -91,6 +91,21 @@ def test_viewer_run_does_not_destroy_resources_before_the_caller_is_done():
     assert backend.releases == session.releases == bridge.closes == window.closes == 0
 
 
+def test_viewer_hint_configuration_reuses_registry_and_preserves_individual_hints():
+    from mojive.ui import ToolHint, ToolHintRegistry
+
+    viewer, app, *_ = _viewer()
+    app.tool_hints = ToolHintRegistry()
+    viewer.tool_hints.add("extra", ToolHint("text", label="Extra"), surface="scene")
+    viewer.configure_tool_hints((ToolHint("key", "Space", "Pause"),), surface="scene")
+    assert [hint.label for hint in viewer.tool_hints.resolve(surface="scene")] == ["Extra", "Pause"]
+    viewer.configure_tool_hints((ToolHint("key", "Space", "Resume"),))
+    assert [hint.label for hint in viewer.tool_hints.resolve(surface="scene")] == ["Extra"]
+    assert viewer.tool_hints.resolve()[0].label == "Resume"
+    viewer.configure_tool_hints(())
+    assert not viewer.tool_hints.resolve()
+
+
 def test_viewer_exposes_programmatic_gizmo_mode_and_optional_binding() -> None:
     viewer, app, *_ = _viewer()
 

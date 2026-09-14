@@ -497,7 +497,7 @@ def test_capsules_and_narrow_fields_fit_at_fractional_scales(monkeypatch, scale,
         narrow.close()
 
 
-def test_reset_head_slider_updates_both_families_and_restores_default(monkeypatch):
+def test_reset_head_slider_survives_tab_switch_and_restores_default(monkeypatch):
     from mojive.tools.ui_feasibility import icon_library, tuning
 
     rig = Rig(monkeypatch, width=1800, height=1700, scale=0.75)
@@ -570,6 +570,11 @@ def test_reset_head_slider_updates_both_families_and_restores_default(monkeypatc
         assert rig.probe.reset_head_scale == value
         assert rig.probe.icon_tuning().reset_head_scale == value
         rig.save("reset-head-slider.png")
+        # Transport now owns a separate loop glyph; the reset control belongs
+        # to the playback tab, so return before using its recorded item bounds.
+        rig.probe.icon_library_tab = "Viewport playback"
+        for _ in range(3):
+            rig.frame()
         rig.click("reset-default")
         assert rig.probe.reset_head_scale == 1.5
         rig.probe.icon_library_tab = "Viewport playback"

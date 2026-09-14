@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
 
 import numpy as np
 from imgui_bundle import imgui
 
 from mojive.interaction.input import physical_ctrl_super
-from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.paint_protocol import Draw2D
+from mojive.ui.imgui_draw import ImguiDraw2D as ImguiDraw2D
+from mojive.ui.paint_protocol import Draw2D as Draw2D
 
 from ...adapters.base import FrameNeeds
 from ...config import PanelConfig
@@ -30,128 +28,10 @@ from ..controls import (
 )
 from ..input_bindings import DEFAULT_INPUT_BINDINGS
 from ..pointer_bindings import PointerAction
-from ..theme import THEME, Theme
+from ..theme import THEME as THEME
+from ..theme import Theme as Theme
 from ..viewport_widgets import ToolHint, pointer_tool_hint
-
-if TYPE_CHECKING:
-    from ...render.backend import RenderBackend
-    from ...session import Session
-
-
-@dataclass
-class PanelContext:
-    session: Session
-    backend: RenderBackend
-    camera: Any = None
-
-    model_camera_id: int = -1
-    model_camera_view: Any = None
-    select_model_camera: Any = None
-    tracking: Any = None
-    tracking_node_id: int | None = None
-    track_node: Any = None
-    set_camera_tracking: Any = None
-    focus_node: Any = None
-    focus_joint: Any = None
-    request_rename: Any = None
-    request_model_rename: Any = None
-    request_texture_import: Any = None
-    request_geometry_resource_import: Any = None
-    request_model_asset_import: Any = None
-    request_model_asset_replace: Any = None
-    queue_model_edit: Any = None
-    model_keyframe_names: Any = None
-    live_model_updates: bool = False
-    set_live_model_updates: Any = None
-
-    theme: Theme = THEME
-    gizmo: Any = None
-    view_cube: Any = None
-    perturb: Any = None
-    scene_entities: Any = None
-    camera_preview: Any = None
-
-    style_scale: float = 1.0
-
-    viewport_rect: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
-
-    dt: float = 0.0
-
-    info: dict[str, Any] = field(default_factory=dict)
-
-    status: str = ""
-    popup_owned_frame: bool = False
-    # Each panel publishes its available grammar independently of hover.
-    # PanelManager collects it by name; the application selects the clicked panel.
-    status_hints: tuple[Any, ...] = ()
-    status_hints_by_panel: dict[str, tuple[Any, ...]] = field(default_factory=dict)
-
-    panels: Any = None
-
-    language: str = "en"
-    translate: Any = None
-    set_language: Any = None
-    set_shadow_quality: Any = None
-    interactions: Any = None
-    set_interactions: Any = None
-    selection_style: Any = None
-    set_selection_style: Any = None
-    set_precise_input_memory: Any = None
-    set_view_selection_padding: Any = None
-    viewport_overlay_scale: float = 1.0
-    set_viewport_overlay_scale: Any = None
-    viewport_overlays: Any = None
-    set_viewport_overlays: Any = None
-    viewport_layers: Any = None
-    set_viewport_layers: Any = None
-    recording_config: Any = None
-    set_recording_config: Any = None
-    set_take_pause_at_end: Any = None
-    recording: Any = None
-    take_video_active: bool = False
-    start_take_video: Any = None
-    stop_recording: Any = None
-    set_viewport_capsule_scale: Any = None
-    input_bindings: Any = None
-    set_input_binding: Any = None
-    set_pointer_binding: Any = None
-    set_navigation_preset: Any = None
-    input_claim: Any = None
-    reset_input_bindings: Any = None
-    font_report: Any = None
-    output: Any = None
-
-    # Resolve the painter inside the current child/table scope; never retain a draw list.
-    painter: Callable[[], Draw2D] = ImguiDraw2D
-
-    def submit(self, command: Any) -> Any:
-        result = self.session.submit(command)
-        if result.message:
-            self.status = result.message
-        return result
-
-    def submit_model_edit(self, command: Any, completed=None) -> None:
-        """Defer a rebuilding UI edit while retaining the synchronous Session API."""
-        if self.queue_model_edit is not None:
-            self.queue_model_edit(command, completed)
-        else:
-            result = self.submit(command)
-            if completed is not None:
-                completed(result)
-
-    def report(
-        self,
-        message: str,
-        *,
-        level: str = "warning",
-        duration: float | None = 5.0,
-    ) -> None:
-        """Keep a panel diagnostic visible in the shared status channel."""
-        self.status = str(message)
-        self.session.report_message(self.status, level=level, duration=duration)
-
-    def tr(self, value: str) -> str:
-        return self.translate(value) if self.translate is not None else value
+from .context import PanelContext as PanelContext
 
 
 class Panel:
