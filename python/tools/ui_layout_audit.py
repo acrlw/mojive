@@ -521,17 +521,72 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
     return results
 
 
+def capture_backend_info(output: Path, scale: float, language: str) -> list[dict]:
+    """Check localized backend count labels and values in the actual Settings panel."""
+    from ..ui.localization import render_note_text
+    from .keyframe_timeline import show_settings
+
+    folder = output / f"{language}-{scale:g}x"
+    folder.mkdir(parents=True, exist_ok=True)
+    with (
+        patch.dict(
+            os.environ,
+            {"MOJIVE_UI_SCALE": str(scale), "MOJIVE_SETTINGS": str(folder / "settings.json")},
+        ),
+        build(
+            resolve("joint_gizmo"),
+            paused=True,
+            vsync=False,
+            width=min(3200, round(1600 * scale)),
+            height=min(1800, round(1100 * scale)),
+            show_window=False,
+        ) as viewer,
+    ):
+        viewer.app.set_language(language)
+        show_settings(viewer, "Rendering")
+        translate = viewer.app.localizer.text
+        values = {}
+        draw_text = imgui.text_disabled
+
+        def observe(value, *args, **kwargs):
+            result = draw_text(value, *args, **kwargs)
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            values.setdefault(value, []).append(((lo.x, lo.y), (hi.x, hi.y)))
+            return result
+
+        with patch.object(imgui, "text_disabled", observe):
+            viewer.sync()
+        rows = []
+        for name in ("scene lights", "shadow casters"):
+            value = viewer.backend.stats.notes[name]
+            label_lo, label_hi = _item_rect(viewer, "text", translate(name))
+            assert any(
+                label_hi[0] < lo[0] and label_lo[1] < hi[1] and label_hi[1] > lo[1]
+                for lo, hi in values[render_note_text(value, translate)]
+            )
+            if language == "zh_CN":
+                assert translate(name) != name and render_note_text(value, translate) != value
+            rows.append({"name": translate(name), "value": render_note_text(value, translate)})
+        _park_cursor(viewer)
+        _save_window_crop(viewer, "Settings", folder / "backend-info.png", padding=0)
+    return [{"language": language, "scale": scale, "rows": rows}]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run responsive layout acceptance and write an inspectable capture index."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", type=Path, default=Path("output/ui-layout-audit"))
     parser.add_argument("--scales", default="1,1.5")
     parser.add_argument("--languages", default="en,zh_CN")
+    parser.add_argument(
+        "--backend-info", action="store_true", help="Only check backend info labels"
+    )
     args = parser.parse_args(argv)
     results = []
     for scale in map(float, args.scales.split(",")):
         for language in args.languages.split(","):
-            results.extend(capture(args.output, scale, language))
+            capture_case = capture_backend_info if args.backend_info else capture
+            results.extend(capture_case(args.output, scale, language))
     (args.output / "report.json").write_text(json.dumps(results, indent=2) + "\n")
     return 0
 

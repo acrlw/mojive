@@ -177,7 +177,9 @@ Hold **Shift** and drag with the **left mouse button** to select an orange playb
 dragging in either direction works. Selecting or adjusting a range enables **Loop** by default;
 turn it off afterward to play the range once. The first/last transport buttons jump to that range's
 endpoints. With no range, they jump to the take's endpoints; the first button returns an empty
-timeline to zero. **Loop** only toggles repetition and never clears the range. With Loop off,
+timeline to zero. Starting playback preserves a playhead inside the selected range, including
+its endpoints; an outside playhead is clamped to the nearest endpoint before playback starts.
+**Loop** only toggles repetition and never clears the range. With Loop off,
 replay pauses at the selected final frame; with Loop on, it includes both endpoint frames and
 returns to the selected first frame. Without a range, Loop repeats the entire take. These policies
 also apply with the panel closed. **Esc** while the timeline is focused or **Shift + right-click**

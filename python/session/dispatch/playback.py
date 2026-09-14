@@ -175,12 +175,18 @@ def play_state_take(self: Session, c: cmd.PlayStateTake) -> CommandResult:
         self._state_take_pause_at_end if c.pause_at_end is None else c.pause_at_end
     )
     previous_index = index = self._take.cursor
-    if index < first or index > last or (index == last and pause_at_end):
+    if play_range is not None:
+        index = min(last, max(first, index))
+    elif index < first or index > last or (index == last and pause_at_end):
         index = first
     if not self._restore_state_take_frame(index):
         return CommandResult.bad("Recorded take is incompatible with the current scene")
     if index != previous_index or c.loop != self._state_take_use_range:
         self._state_take_elapsed = 0.0
+    if play_range is not None:
+        self._state_take_elapsed = min(
+            self._state_take_elapsed, self._take.times[last] - self._take.times[index]
+        )
     self._state_take_use_range = c.loop
     self._state_take_end_override = c.pause_at_end
     self._playback_source = "take"

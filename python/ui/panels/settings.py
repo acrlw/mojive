@@ -17,7 +17,7 @@ from ..gizmo import (
     DEFAULT_TRANSLATION_SNAP_M,
 )
 from ..input_bindings import InputAction, input_action_name, key_choices
-from ..localization import LANGUAGE_LABELS, Language, parse_language
+from ..localization import LANGUAGE_LABELS, Language, parse_language, render_note_text
 from ..perturb import OUTLINE_CORNER_RADIUS_PT
 from ..pointer_bindings import NAVIGATION_PRESETS, POINTER_ACTION_NAMES, PointerAction
 from ..viewcube import (
@@ -486,7 +486,7 @@ class SettingsPanel(Panel):
             for name in ("scene lights", "shadow casters"):
                 if name in light_notes:
                     self._property(t(name))
-                    imgui.text_disabled(str(light_notes[name]))
+                    imgui.text_disabled(render_note_text(light_notes[name], t))
             imgui.end_table()
 
     def _interaction(self, ctx: PanelContext) -> None:

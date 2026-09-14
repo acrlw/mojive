@@ -281,6 +281,23 @@ def capture_range_playback(viewer, output: Path) -> None:
     bounds = session.state_take_range
     assert bounds is not None and session.state_take_loop_enabled
     first, last = bounds
+    advance = session._advance_state_take
+    try:
+        session._advance_state_take = lambda _dt: advance(0)
+        for cursor, expected, name in (
+            (0, first, "before"),
+            ((first + last) // 2, (first + last) // 2, "inside"),
+            (last, last, "at-end"),
+            (len(times) - 1, last, "after"),
+        ):
+            assert session.submit(cmd.SeekStateTake(cursor))
+            click_button("##take-play-pause")
+            assert session.state_take_cursor == expected and session.state_take_playing
+            assert panel._playhead == times[expected]
+            _save_window_crop(viewer, "Keyframes", output / f"range-start-{name}.png", padding=0)
+            click_button("##take-play-pause")
+    finally:
+        session._advance_state_take = advance
     for button, expected in (("first", first), ("last", last), ("first", first)):
         click_button(f"##take-{button}")
         assert session.state_take_cursor == expected
@@ -357,21 +374,21 @@ def capture_transport(viewer, output: Path) -> None:
     )
     assert session.submit(cmd.Pause())
 
-    show_recording_settings(viewer)
+    show_settings(viewer)
     assert not app.recording_config.run_simulation
     _click(viewer, _item_center(viewer, "checkbox", "##recording_run_simulation"))
     assert app.recording_config.run_simulation
     _save_window_crop(viewer, "Settings", output / "recording-settings.png", padding=0)
 
 
-def show_recording_settings(viewer) -> None:
-    """Place recording preferences in a reproducible, fully visible window."""
+def show_settings(viewer, category: str = "Recording") -> None:
+    """Place preferences in a reproducible, fully visible window."""
     from mojive import ViewportLayers
 
     viewer.configure_layers(ViewportLayers(viewport_ui=False))
     viewer.panels.get("Keyframes").open = False
     viewer.panels.open_panel("Settings")
-    viewer.panels.get("Settings").show_category("Recording")
+    viewer.panels.get("Settings").show_category(category)
     for _ in range(4):
         viewer.sync()
     _activate_panel(viewer, "Settings")
@@ -402,7 +419,7 @@ def capture_recording_settings(viewer, output: Path) -> None:
     from mojive import RecordingConfig
 
     viewer.configure_recording(RecordingConfig())
-    show_recording_settings(viewer)
+    show_settings(viewer)
     _save_window_crop(viewer, "Settings", output / "recording-quality.png", padding=0)
     _click(viewer, _item_center(viewer, "begin_combo", "##recording_rate_control"))
     _click(viewer, _item_center(viewer, "selectable", viewer.app.localizer.text("Target bitrate")))
