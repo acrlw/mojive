@@ -209,11 +209,12 @@ def test_status_changes_between_track_selection_and_ruler_navigation(viewer):
 
 def _key(viewer, key, *, ctrl=False):
     io = imgui.get_io()
-    io.add_key_event(imgui.Key.mod_ctrl, ctrl)
+    modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    io.add_key_event(modifier, ctrl)
     io.add_key_event(key, True)
     viewer.sync()
     io.add_key_event(key, False)
-    io.add_key_event(imgui.Key.mod_ctrl, False)
+    io.add_key_event(modifier, False)
     viewer.sync()
 
 
@@ -316,7 +317,7 @@ def test_track_selection_delete_and_ctrl_a_never_cross_model_and_take_tracks(vie
     assert not session.keyframes
 
 
-def test_model_ctrl_click_and_text_edit_shortcuts_preserve_take_selection_scope(viewer):
+def test_model_additive_click_and_text_edit_shortcuts_preserve_take_selection_scope(viewer):
     session, panel = viewer.session, viewer.panels.get("Keyframes")
     model_id = session.scene_models[0].model_id
     for index in (90, 180):
@@ -326,9 +327,11 @@ def test_model_ctrl_click_and_text_edit_shortcuts_preserve_take_selection_scope(
     keys = tuple(session.keyframes)
     times = tuple(session.state_take_times)
     _click(viewer, timeline_point(viewer, keys[0].time, "model"))
-    imgui.get_io().add_key_event(imgui.Key.mod_ctrl, True)
+    io = imgui.get_io()
+    modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    io.add_key_event(modifier, True)
     _click(viewer, timeline_point(viewer, keys[1].time, "model"))
-    imgui.get_io().add_key_event(imgui.Key.mod_ctrl, False)
+    io.add_key_event(modifier, False)
     viewer.sync()
     assert panel._selected_keyframes == {key.keyframe_id for key in keys}
     _click(viewer, timeline_point(viewer, keys[0].time, "model"))

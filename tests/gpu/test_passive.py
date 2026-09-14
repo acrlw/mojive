@@ -168,6 +168,7 @@ def test_passive_video_lifecycle_uses_display_time_and_finalizes_on_close(tmp_pa
         viewer.configure_actions((PassiveAction("pause", "space", "Pause policy", "toggle"),))
         viewer.set_status("Policy running", paused=False)
         assert viewer.poll_events() == ()
+        height, width = viewer.capture_array(surface="window").shape[:2]
         assert viewer.start_recording(output, surface="window") == output
         deadline = time.monotonic() + 5
         while viewer.recording.frames < 2 and time.monotonic() < deadline:
@@ -200,7 +201,7 @@ def test_passive_video_lifecycle_uses_display_time_and_finalizes_on_close(tmp_pa
     for path in (output, last):
         with contextlib.closing(imageio_ffmpeg.read_frames(str(path))) as frames:
             metadata = next(frames)
-            assert metadata["size"] == (640, 480)
+            assert metadata["size"] == (width, height)
             assert len(list(frames)) > 0
 
 
