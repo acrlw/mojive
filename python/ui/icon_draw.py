@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import math
 from functools import lru_cache
 
 import numpy as np
 
 from mojive.geometry2d.compiler import Contour2D
-from mojive.geometry2d.curves import capped_polyline_points, polyline_ribbon, smooth_rect_points
+from mojive.geometry2d.curves import (
+    capped_polyline_points,
+    circular_stroke_mesh,
+    polyline_ribbon,
+    smooth_rect_points,
+)
 from mojive.geometry2d.mesh import tessellate_contours
 from mojive.geometry2d.polygons import remove_interior_loops, signed_polygon_area
 
@@ -30,17 +34,6 @@ def _closed_stroke(points, width):
         fill_rule="evenodd",
     )
     return tuple(map(tuple, mesh.positions)), tuple(mesh.indices), outer, inner
-
-
-@lru_cache(maxsize=512)
-def _circle_points(center, radius, segments):
-    return tuple(
-        (
-            center[0] + radius * math.cos(i * math.tau / segments),
-            center[1] + radius * math.sin(i * math.tau / segments),
-        )
-        for i in range(segments)
-    )
 
 
 class ImguiIconDraw(ImguiDraw2D):
@@ -84,8 +77,13 @@ class ImguiIconDraw(ImguiDraw2D):
         self.indexed_fill(vertices, indices, color, outline=outline, hole=hole)
 
     def circle(self, center, radius, color, width=1.0, *, segments=0):
-        points = _circle_points(tuple(center), radius, max(64, segments))
-        self.polyline(points, color, width, closed=True)
+        if radius <= 0 or width <= 0:
+            return
+        if width >= radius * 2:
+            self.circle_filled(center, radius + width * 0.5, color, segments=max(64, segments))
+            return
+        vertices, indices, outline, hole = circular_stroke_mesh(radius, width, max(64, segments))
+        self.indexed_fill(vertices, indices, color, outline=outline, hole=hole, origin=center)
 
     def rect(self, lo, hi, color, width=1.0, *, rounding=0.0, smoothing=None):
         if rounding > 0:

@@ -33,11 +33,13 @@ from mojive.render.debugdraw import DebugDraw, Occlusion
 from mojive.types import CameraView
 from mojive.ui.drag_link import draw_drag_link
 from mojive.ui.gizmo import ObjectGizmo, _basis_from_z, _JointRangeState
+from mojive.ui.icon_draw import ImguiIconDraw
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels.keyframes import _draw_command_icon, _rounded_command_icon_path
 from mojive.ui.viewport_widgets import (
     _draw_axis_arrow_glyph,
     _move_glyph_path,
+    _rotate_visible_ring_polygons,
     _rounded_playback_triangle,
     draw_playback_glyph,
     draw_tool_glyph,
@@ -144,7 +146,11 @@ def main():
 
     def command(i):
         reset()
-        _draw_command_icon(draw, (100.0, 100.0), "key-next", (1, 1, 1, 1), 1.0)
+        _draw_command_icon(draw, (100.0 + i * 0.125, 100.0), "key-next", (1, 1, 1, 1), 1.0)
+
+    def circle(i):
+        reset()
+        ImguiIconDraw(draw, 0.75).circle((i * 0.125, 100.0), 10.0, (1.0,) * 4, 1.5)
 
     def drag(i):
         reset()
@@ -216,7 +222,13 @@ def main():
             lambda i: _draw_command_icon(null, (i * 0.125, 100), "key-next", (1, 1, 1, 1), 1),
             1024,
         ),
-        "keyframe_native_static": (command, 1024),
+        "keyframe_native_static": (lambda i: command(0), 1024),
+        "keyframe_native_translated": (command, 1024),
+        "icon_circle_native_translated": (circle, 1024),
+        "rotate_style_dynamic": (
+            lambda i: _rotate_visible_ring_polygons(0.8 + i * 0.01, 1.0, "round"),
+            16,
+        ),
         "plane_translated": (
             lambda i: smooth_affine_corners(
                 ((i * 0.125, 0), (i * 0.125 + 12, 4), (i * 0.125 + 12, 18), (i * 0.125, 14)), 2

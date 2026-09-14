@@ -136,7 +136,7 @@ class CanvasLayer2D:
     ) -> None:
         x0, y0 = np.asarray(lo, np.float32).reshape(2)
         x1, y1 = np.asarray(hi, np.float32).reshape(2)
-        self.polygon(
+        self._convex_polygon(
             ident,
             ((x0, y0), (x1, y0), (x1, y1), (x0, y1)),
             color,
@@ -162,7 +162,24 @@ class CanvasLayer2D:
             self.erase(ident)
             return
         points = _unit_circle(segments) * radius + np.asarray(center, np.float32).reshape(2)
-        self.polygon(ident, points, color, width_px, duration, filled=filled)
+        self._convex_polygon(ident, points, color, width_px, duration, filled=filled)
+
+    def _convex_polygon(self, ident, points, color, width_px, duration, *, filled):
+        """Known convex primitives need only a fan; arbitrary paths keep the fill compiler."""
+        if not filled:
+            self.polyline(ident, points, color, width_px, closed=True, duration=duration)
+            return
+        points = np.asarray(points, np.float32)
+        if points.ndim != 2 or points.shape[1] != 2 or not np.isfinite(points).all():
+            raise ValueError("Polygon points must be finite [N, 2]")
+        triangles = np.empty((max(0, len(points) - 2), 3, 2), np.float32)
+        if len(triangles):
+            triangles[:, 0] = points[0]
+            triangles[:, 1] = points[1:-1]
+            triangles[:, 2] = points[2:]
+            a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+            triangles = triangles[a[:, 0] * b[:, 1] != a[:, 1] * b[:, 0]]
+        self.triangles(ident, triangles, color, duration)
 
     def arrow(
         self, ident: str, a, b, color, width_px: float = 2.0, duration: float = NEVER
@@ -298,7 +315,7 @@ class CanvasLayer2D:
     ):
         """Ellipse radii use canvas units; rotation is in radians."""
         points = ellipse_points(center, radii, 0, math.tau, segments, rotation)[:-1]
-        self.polygon(ident, points, color, width_px, duration, filled=filled)
+        self._convex_polygon(ident, points, color, width_px, duration, filled=filled)
 
     def arc(
         self,

@@ -9,6 +9,29 @@ from mojive.canvas2d import PathBuilder2D
 pytestmark = pytest.mark.gpu
 
 
+@pytest.mark.parametrize("shape", ("rectangle", "circle", "ellipse"))
+def test_convex_canvas_fills_apply_alpha_once_across_fan_edges(backend_name, shape):
+    scene = Scene()
+    with SceneRenderer(
+        scene.source, width=200, height=200, samples=4, renderer=backend_name
+    ) as renderer:
+        canvas = renderer.canvas2d
+        layer = canvas.layer("convex")
+        color = (1, 0, 0, 0.5)
+        if shape == "rectangle":
+            layer.rectangle("shape", (-0.9, -0.8), (0.9, 0.8), color, filled=True)
+        elif shape == "circle":
+            layer.circle("shape", (0, 0), 0.9, color, filled=True)
+        else:
+            layer.ellipse("shape", (0, 0), (0.9, 0.8), color, filled=True)
+        renderer.update(scene.frame, camera=canvas.camera((-1, -1, 1, 1), aspect=1, padding=0))
+        pixels = renderer.render()
+        interior = pixels[60:140, 60:140, 0]
+        assert np.ptp(interior.astype(int)) <= 2
+        assert 120 <= np.median(interior) <= 135
+        assert np.max(pixels[:5, :, :3]) < 3
+
+
 def test_canvas_hole_and_alpha_have_no_internal_triangle_seams(backend_name):
     scene = Scene()
     with SceneRenderer(

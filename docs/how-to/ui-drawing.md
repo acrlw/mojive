@@ -186,11 +186,13 @@ mutation as a stable extension API.
 
 ## Reuse geometry and retain clear ownership
 
-Production icons compile their reviewed contours into a bounded cache of Draw2D calls, keyed by
-glyph, logical size, and placement. Calls retain geometry and color slots, never a draw list,
-ImGui context, theme, or actual interaction color. Hover, press, selection and disabled opacity
-are resolved when replaying the calls. Icon Library tuning shares this path and adds its complete
-style parameters to the key; unchanged previews reuse the same geometry. Do not put UI state into geometry caches.
+Production icons compile their reviewed local contours into a bounded cache of Draw2D calls,
+keyed by glyph and logical size. Calls retain geometry and color slots, never a draw list,
+ImGui context, theme, or actual interaction color. Placement, hover, press, selection and disabled
+opacity are resolved when replaying the calls. ImGui translates the submitted vertices, including
+their AA fringe, in one native pass, so scrolling reuses the same compiled geometry. Icon Library
+tuning shares this path and adds its complete style parameters to the key; unchanged previews reuse
+the same geometry. Do not put UI state into geometry caches.
 `make ui-frame-profile` reports the compilation cache hit/miss counts and timed capsule draws.
 
 Dimension previews similarly reuse their source arrays and node indexes while only size/scale

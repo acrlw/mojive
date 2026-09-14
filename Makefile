@@ -445,6 +445,10 @@ startup-profile:
 ui-frame-profile:
 	$(PY) -m mojive.tools.ui_frame_profile $(ARGS)
 
+.PHONY: joint-gizmo-profile
+joint-gizmo-profile:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.joint_gizmo_profile $(ARGS)
+
 ui-gallery:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page workspace -o output/ui-workspace.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab playback -o output/ui-geometry-playback.png

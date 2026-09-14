@@ -9,8 +9,8 @@ import numpy as np
 from mojive.geometry2d.curves import (
     arc_ribbon_mesh,
     arrow_points,
-    clip_polygon_rect,
     smooth_capsule_points,
+    smooth_line_cap,
 )
 from mojive.interaction.gizmo import (
     ACTIVE_HANDLE_COLOR,
@@ -425,29 +425,13 @@ class _Guides:
             if b < length:
                 points = np.asarray(smooth_capsule_points(a, -half_width, b - a, shaft_width, 0))
             else:
-                # Join a semicircular tail to the existing arrow outline. Clipping a
-                # pre-rounded arrow at its shaft origin would cut that cap in half.
-                cut = a + half_width
-                points = np.asarray(
-                    clip_polygon_rect(shape, (cut, -8 * style_scale, b, 8 * style_scale))
-                )
-                rounded = []
-                for index, point in enumerate(points):
-                    following = points[(index + 1) % len(points)]
-                    rounded.append(point)
-                    if (
-                        abs(point[0] - cut) < 1e-6
-                        and abs(following[0] - cut) < 1e-6
-                        and point[1] * following[1] < 0
-                    ):
-                        angles = np.linspace(np.pi * 0.5, np.pi * 1.5, 17)
-                        if point[1] < 0:
-                            angles = angles[::-1]
-                        rounded.extend(
-                            (cut + half_width * np.cos(t), half_width * np.sin(t))
-                            for t in angles[1:-1]
-                        )
-                points = np.asarray(rounded)
+                # Occlusion ends before the head's support span. Join its
+                # unchanged outline directly to the visible shaft's round tail.
+                head_points = shape[shape[:, 0] > body_end]
+                cap = smooth_line_cap((a + half_width, 0.0), (-1.0, 0.0), shaft_width, smoothing=0)[
+                    ::-1
+                ]
+                points = np.vstack((head_points, cap))
             screen = start + points[:, :1] * direction + points[:, 1:] * side
             polygons.append(tuple(map(tuple, screen.tolist())))
         self._hinge_axis_geometry = _HingeAxisProjection(

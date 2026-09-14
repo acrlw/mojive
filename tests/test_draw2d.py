@@ -124,6 +124,86 @@ def native_draw():
     imgui.destroy_context(context)
 
 
+@pytest.mark.parametrize(
+    "name", ("tool-rotate", "tool-snap", "key-next", "key-follow-locked", "status-info")
+)
+def test_icon_motion_reuses_local_geometry_and_preserves_submitted_vertices(native_draw, name):
+    from mojive.ui.icons import _icon_draw_commands, draw_icon
+
+    _icon_draw_commands.cache_clear()
+    draw_icon(native_draw, (0.0, 0.0), 24.0, name, (1.0, 0.5, 0.2, 0.5))
+    reference = [(v.pos.x, v.pos.y, v.col) for v in native_draw._dl.vtx_buffer]
+    indices = list(native_draw._dl.idx_buffer)
+    origin = (215.25, 360.75)
+    draw_icon(native_draw, origin, 24.0, name, (0.2, 0.5, 1.0, 0.25))
+    vertices = list(native_draw._dl.vtx_buffer)
+    moved = vertices[len(reference) :]
+    assert len(moved) == len(reference)
+    assert np.array([(v.pos.x, v.pos.y) for v in moved]) == pytest.approx(
+        np.array(reference)[:, :2] + origin, abs=4e-5
+    )
+    assert [(v.pos.x, v.pos.y, v.col) for v in vertices[: len(reference)]] == reference
+    assert [i - len(reference) for i in list(native_draw._dl.idx_buffer)[len(indices) :]] == indices
+    assert max(v.col >> 24 for v in moved) == 64
+    assert _icon_draw_commands.cache_info().misses == 1
+
+
+@pytest.mark.parametrize("width", (0.75, 2.0, 20.0, 24.0))
+def test_icon_circle_uses_direct_geometry_with_one_alpha_layer(native_draw, monkeypatch, width):
+    from mojive.ui import icon_draw
+
+    def unexpected(*args):
+        pytest.fail("A circle must not enter generic contour repair or tessellation")
+
+    monkeypatch.setattr(icon_draw, "_closed_stroke", unexpected)
+    draw = icon_draw.ImguiIconDraw(native_draw, min(1.0, width * 0.5))
+    draw.circle((40.0, 40.0), 10.0, (1.0, 0.5, 0.2, 0.5), width)
+    vertices = list(native_draw._dl.vtx_buffer)
+    assert max(v.col >> 24 for v in vertices) == 128
+    assert vertices
+
+
+@pytest.mark.parametrize("style_scale", (1.0, 1.5))
+def test_joint_ring_fade_bounds_contour_repair_work(native_draw, monkeypatch, style_scale):
+    from mojive.geometry2d import curves, polygons
+    from mojive.ui.gizmo import _JointRangeState
+
+    calls = {"segment_intersection": 0, "_triangle_cross": 0}
+
+    def counter(name):
+        original = getattr(polygons, name)
+
+        def counted(*args):
+            calls[name] += 1
+            return original(*args)
+
+        return counted
+
+    for name in calls:
+        monkeypatch.setattr(polygons, name, counter(name))
+    curves._arc_ribbon_shape.cache_clear()
+    polygons.simple_polygon_indices.cache_clear()
+    gizmo = ObjectGizmo("rotate")
+    # G1's wrist roll limits, through the production ImGui drawing adapter.
+    gizmo._joint_range = _JointRangeState("hinge", 0.0, -1.97222, 1.97222)
+    for facing in (0.5, 0.14, 0.12, 0.10, 0.06, -0.12, 0.5):
+        cam = CameraView(
+            eye=np.array((np.sqrt(1 - facing * facing), 0.0, facing)) * 5,
+            target=np.zeros(3),
+            up=np.array((0.0, 1.0, 0.0)),
+            aspect=RECT[2] / RECT[3],
+        )
+        calls.update(dict.fromkeys(calls, 0))
+        before = len(native_draw._dl.vtx_buffer)
+        gizmo._draw_joint_range(native_draw, cam, RECT, style_scale, phase="geometry")
+        after = len(native_draw._dl.vtx_buffer)
+        assert (after > before) == (abs(facing) > 0.08)
+        # Count exact predicates instead of asserting a machine-dependent time.
+        # The old all-pairs repair uses tens of thousands per fading frame.
+        assert calls["segment_intersection"] < 1000
+        assert calls["_triangle_cross"] < 16000
+
+
 @pytest.mark.parametrize("cap", ("butt", "round", "round_start", "round_end"))
 def test_native_line_and_polyline_share_exact_vertices(native_draw, cap):
     draw = native_draw

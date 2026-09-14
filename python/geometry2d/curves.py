@@ -25,6 +25,56 @@ _RAMP_QUADRATURE = tuple(
 )
 
 
+@lru_cache(maxsize=128)
+def circular_stroke_mesh(
+    radius: float,
+    width: float,
+    segments: int = 64,
+) -> tuple[
+    tuple[tuple[float, float], ...],
+    tuple[int, ...],
+    tuple[tuple[float, float], ...],
+    tuple[tuple[float, float], ...],
+]:
+    """Return one hollow circular stroke with explicit outer and inner AA contours."""
+
+    if radius <= 0.0 or width <= 0.0 or width >= radius * 2.0:
+        raise ValueError("circular stroke width must be positive and smaller than its diameter")
+    if segments < 8:
+        raise ValueError("circular stroke requires at least eight segments")
+    outer_radius = radius + width * 0.5
+    inner_radius = radius - width * 0.5
+    outer = tuple(
+        (
+            outer_radius * math.cos(index * math.tau / segments),
+            outer_radius * math.sin(index * math.tau / segments),
+        )
+        for index in range(segments)
+    )
+    inner = tuple(
+        (
+            inner_radius * math.cos(index * math.tau / segments),
+            inner_radius * math.sin(index * math.tau / segments),
+        )
+        for index in range(segments)
+    )
+    vertices = (*outer, *inner)
+    indices = tuple(
+        vertex
+        for index in range(segments)
+        for following in ((index + 1) % segments,)
+        for vertex in (
+            index,
+            following,
+            segments + following,
+            index,
+            segments + following,
+            segments + index,
+        )
+    )
+    return vertices, indices, outer, inner
+
+
 def turn_curvature(distance, angle: float, smoothing: float = CORNER_SMOOTHING):
     """Return tangent angle, curvature and its arc-length derivative at unit peak curvature."""
     phi = abs(float(angle))

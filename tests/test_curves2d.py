@@ -10,6 +10,7 @@ from mojive.geometry2d.curves import (
     CURVE_TOLERANCE,
     _ellipse_advance,
     _ellipse_frame,
+    circular_stroke_mesh,
     clip_polygon_rect,
     smooth_capsule_points,
     smooth_ellipse_stroke,
@@ -19,6 +20,20 @@ from mojive.geometry2d.curves import (
     turn_curvature,
 )
 from tests.curve_assertions import assert_paths_close, distance_to_path
+
+
+@pytest.mark.parametrize("segments", (8, 64, 128))
+@pytest.mark.parametrize("width", (0.75, 2.0, 19.5))
+def test_circular_stroke_has_one_non_overlapping_annulus(segments, width):
+    vertices, indices, outer, inner = circular_stroke_mesh(10.0, width, segments)
+    triangles = np.asarray(vertices)[np.asarray(indices).reshape(-1, 3)]
+    a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+    areas = (a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]) * 0.5
+    assert (areas > 0).all()
+    expected = segments * math.sin(math.tau / segments) * 10.0 * width
+    assert areas.sum() == pytest.approx(expected)
+    assert np.linalg.norm(outer, axis=1) == pytest.approx(10.0 + width / 2)
+    assert np.linalg.norm(inner, axis=1) == pytest.approx(10.0 - width / 2)
 
 
 @pytest.mark.parametrize("angle", (math.pi / 7, math.pi / 2, -math.pi / 2, math.pi))
@@ -412,10 +427,13 @@ def test_arc_strips_cover_boundary_once_without_internal_fringes(sample_count, c
 
 @pytest.mark.parametrize("width", (3.5, 5.25))
 @pytest.mark.parametrize("smoothing", (0.0, CORNER_SMOOTHING))
-def test_perspective_arc_offset_folds_keep_the_exterior_without_alpha_overlap(width, smoothing):
+@pytest.mark.parametrize("sample_count", (33, 129))
+def test_perspective_arc_offset_folds_keep_the_exterior_without_alpha_overlap(
+    width, smoothing, sample_count
+):
     from mojive.geometry2d.curves import arc_ribbon_mesh
 
-    theta = np.linspace(0, np.pi, 33)
+    theta = np.linspace(0, np.pi, sample_count)
     # Rational projection of a nearly edge-on circle: both ends turn back.
     points = np.column_stack((7 * np.sin(theta), 70 * np.cos(theta)))
     points /= (1 - 0.3 * np.sin(theta))[:, None]
@@ -434,9 +452,8 @@ def test_perspective_arc_offset_folds_keep_the_exterior_without_alpha_overlap(wi
     )
     assert areas.min() >= -1e-9
     assert areas.sum() == pytest.approx(abs(boundary_area), abs=1e-7)
-    assert distance_to_path(points[12:21], vertices, closed=True) == pytest.approx(
-        width * 0.5, abs=0.03
-    )
+    middle = points[(sample_count - 1) * 3 // 8 : (sample_count - 1) * 5 // 8 + 1]
+    assert distance_to_path(middle, vertices, closed=True) == pytest.approx(width * 0.5, abs=0.03)
 
 
 def test_zero_smoothing_caps_are_semicircles_without_fitting(monkeypatch):
