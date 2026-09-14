@@ -9,6 +9,7 @@ from .... import math3d as M
 from ....types import CameraView, MeshShape
 from ...backend import RenderFlag
 from ...dependencies import camera_key, flags_key, lifecycle_key, lights_key
+from ...environment import reflection_plane
 from ...scene import RenderScene
 from ..instances import InstanceStore
 from ..lighting import LIGHTS_BYTES, LightUniforms
@@ -130,23 +131,7 @@ class ReflectPass:
                 groups.append(_PlaneGroup(plane, [index], {int(scene.bucket[index])}))
         return groups
 
-    @staticmethod
-    def _plane_equation(scene: RenderScene, index: int) -> tuple[float, float, float, float] | None:
-        transform = np.asarray(scene.transforms[index], np.float64)
-        try:
-            normal = np.linalg.inv(transform[:3, :3]).T @ np.array([0.0, 0.0, 1.0])
-        except np.linalg.LinAlgError:
-            return None
-        length = float(np.linalg.norm(normal))
-        if length < 1e-9:
-            return None
-        normal /= length
-        shape = scene.bucket_keys[int(scene.bucket[index])][0].shape
-        point = transform[:3, 3]
-        if shape is MeshShape.BOX:
-            point = point + transform[:3, 2]
-        d = -float(np.dot(normal, point))
-        return (float(normal[0]), float(normal[1]), float(normal[2]), d)
+    _plane_equation = staticmethod(reflection_plane)
 
     # -- pass-owned reflection metadata -----------------------------------------
 

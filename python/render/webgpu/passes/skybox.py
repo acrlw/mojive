@@ -7,6 +7,7 @@ import wgpu
 
 from ....types import CameraView, ShadingModel
 from ...backend import DebugView, RenderFlag
+from ...environment import classic_skybox_vertices
 from ...scene import RenderScene
 from ..blend import ALPHA_BLEND
 from ..programs import load_wgsl
@@ -213,23 +214,7 @@ class SkyboxPass:
         )
         self._haze_vertex_count = len(vertices)
 
-    @staticmethod
-    def _classic_skybox_vertices(slices: int) -> np.ndarray:
-        """Closed unit cylinder used by MuJoCo's classic skybox display list."""
-        vertices: list[tuple[float, float, float]] = []
-        for index in range(slices):
-            angle0 = 2.0 * np.pi * index / slices
-            angle1 = 2.0 * np.pi * (index + 1) / slices
-            x0, y0 = np.cos(angle0), np.sin(angle0)
-            x1, y1 = np.cos(angle1), np.sin(angle1)
-            lower0 = (x0, y0, -1.0)
-            lower1 = (x1, y1, -1.0)
-            upper0 = (x0, y0, 1.0)
-            upper1 = (x1, y1, 1.0)
-            vertices.extend((lower0, lower1, upper1, lower0, upper1, upper0))
-            vertices.extend(((0.0, 0.0, 1.0), upper0, upper1))
-            vertices.extend(((0.0, 0.0, -1.0), lower1, lower0))
-        return np.asarray(vertices, np.float32)
+    _classic_skybox_vertices = staticmethod(classic_skybox_vertices)
 
     @staticmethod
     def _haze_vertices(slices: int = 64) -> np.ndarray:

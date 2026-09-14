@@ -1,6 +1,6 @@
 """Deterministic scene-light and shadow-slot scheduling."""
 
-from mojive.render.opengl.passes.base import (
+from mojive.render.lighting import (
     LOCAL_SHADOW_SLOTS,
     MAX_SCENE_LIGHTS,
     schedule_lights,
