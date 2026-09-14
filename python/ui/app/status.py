@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from imgui_bundle import imgui
 
 from mojive.capture import RecordingPhase
 from mojive.ui.files import message_path, reveal_path
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.messages import OutputMessage
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import fit_text
 from mojive.ui.viewport_widgets import (
@@ -84,12 +86,16 @@ class _Status:
                 state = (
                     "static"
                     if not caps.simulation
+                    else "external"
+                    if caps.external_clock and not caps.clock_control
                     else "replaying"
                     if self.session.state_take_playing
                     else "paused"
                     if self.session.paused
                     else "running"
                 )
+                if state == "external" and self.external_paused is not None:
+                    state = "paused" if self.external_paused else "running"
                 sim_time = float(self.session.frame.time)
                 sim_step = int(self.session.frame.step)
             recording = self.recording
@@ -116,6 +122,8 @@ class _Status:
                 fps=self._frame_rate.value,
                 physics_hz=self.session.frame.physics_hz,
                 show_physics=self.session.adapter.caps.simulation,
+                passive=self.passive_mode,
+                activity=self.external_status,
                 recording_phase=recording.phase.value,
                 recording_duration=recording.duration,
                 countdown_remaining=recording.countdown_remaining,
@@ -124,6 +132,15 @@ class _Status:
                 labels=self._viewport_labels,
                 pixel_size=self.window.pixels_to_points(1.0),
             )
+            if status_layout.passive_rect is not None:
+                x0, y0, x1, y1 = status_layout.passive_rect
+                imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                imgui.invisible_button("##status_passive", imgui.ImVec2(x1 - x0, y1 - y0))
+                imgui.set_item_tooltip(
+                    self.localizer.text(
+                        "Simulation is driven by the external application. Recording only captures images."
+                    )
+                )
             if status_layout.metric_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.metric_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
@@ -211,42 +228,112 @@ class _Status:
         if revision == self._seen_message_revision:
             return
         self._seen_message_revision = revision
+        duration = self.session.last_message_duration
+        # The preference limits routine notices (up to five seconds), not
+        # explicitly extended export receipts, diagnostics, or persistent messages.
+        if duration is not None and duration <= 5.0:
+            duration = min(duration, self.viewport_overlays.status_duration)
         self.output.publish(
             self.session.last_message,
             level=getattr(self.session, "last_message_level", "info"),
-            duration=self.viewport_overlays.status_duration,
+            duration=duration,
             copy_text=getattr(self.session, "last_message_copy_text", None),
         )
 
     def _draw_viewport_status(self, overlay: ImguiDraw2D) -> None:
         self._status_path_bounds = None
+        self._status_notice_bounds = None
         message = self.output.active_status()
         if message is None:
             return
-        x, y, width, height = self._viewport_rect
-        pad = 14.0 * self.window.style_scale
-        # File reveal is available only over the status text with the shortcut held.
-        text = fit_text(overlay, self.localizer.text(message.text), max(0.0, width - 2 * pad))
-        position = (x + pad, y + height - pad - imgui.get_text_line_height())
-        size = imgui.calc_text_size(text)
         if getattr(self, "_status_path_sequence", None) != message.sequence:
             self._status_path_sequence = message.sequence
             self._status_path = message_path(message.text, message.copy_text)
         path = self._status_path
         if path is not None:
-            self._status_path_bounds = (*position, position[0] + size.x, position[1] + size.y)
-        if path is not None and imgui.is_mouse_hovering_rect(
-            position, (position[0] + size.x, position[1] + size.y)
-        ):
-            imgui.set_tooltip(self.localizer.text("Ctrl+click to reveal file") + "\n" + str(path))
-            io = imgui.get_io()
-            if (io.key_ctrl or io.key_super) and imgui.is_mouse_clicked(0):
-                reveal_path(path)
+            self._draw_file_status(overlay, message, path)
+            return
+        if not self.viewport_layers.viewport_ui:
+            return
+        x, y, width, height = self._viewport_rect
+        pad = 14.0 * self.window.style_scale
+        text = fit_text(overlay, self.localizer.text(message.text), max(0.0, width - 2 * pad))
+        position = (x + pad, y + height - pad - imgui.get_text_line_height())
         overlay.text(
             position,
             (*self.theme.text[:3], 0.55),
             text,
         )
+
+    def _draw_file_status(self, overlay: ImguiDraw2D, message: OutputMessage, path: Path) -> None:
+        """Keep saved filenames and path actions visible without opening Output."""
+        t = self.localizer.text
+        text = t(message.text)
+        for spelling in (message.copy_text, str(path)):
+            if spelling and spelling in text:
+                text = text.replace(spelling, path.name)
+                break
+        scale = self.window.style_scale
+        x, y, width, height = self._viewport_rect
+        padding = 8.0 * scale
+        margin = 14.0 * scale
+        style = imgui.get_style()
+        gap = style.item_spacing.x
+        labels = (t("Open folder"), t("Copy path"))
+        button_widths = tuple(
+            imgui.calc_text_size(label).x + 2 * style.frame_padding.x for label in labels
+        )
+        actions_width = sum(button_widths) + gap
+        available = max(1.0, width - 2 * (margin + padding))
+        text_width = imgui.calc_text_size(text).x
+        inline = text_width + gap + actions_width <= available
+        stack_actions = actions_width > available
+        text = fit_text(
+            overlay, text, available - actions_width - gap if inline else available, middle=True
+        )
+        content_width = imgui.calc_text_size(text).x
+        content_width = (
+            content_width + gap + actions_width if inline else max(content_width, actions_width)
+        )
+        rows = 1 if inline else 3 if stack_actions else 2
+        rows_height = imgui.get_frame_height() * rows + style.item_spacing.y * (rows - 1)
+        flags = (
+            imgui.WindowFlags_.no_decoration
+            | imgui.WindowFlags_.no_docking
+            | imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.no_focus_on_appearing
+            | imgui.WindowFlags_.no_move
+        )
+        imgui.set_next_window_pos((x + margin, y + height - margin), pivot=(0, 1))
+        imgui.set_next_window_size(
+            (min(content_width, available) + 2 * padding, rows_height + 2 * padding)
+        )
+        imgui.push_style_var(imgui.StyleVar_.window_padding, (padding, padding))
+        imgui.push_style_color(imgui.Col_.window_bg, self.theme.bg_child)
+        visible, _ = imgui.begin("##viewport-file-status", None, flags)
+        if visible:
+            pos, size = imgui.get_window_pos(), imgui.get_window_size()
+            self._status_notice_bounds = (pos.x, pos.y, pos.x + size.x, pos.y + size.y)
+            imgui.align_text_to_frame_padding()
+            imgui.text_unformatted(text)
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            self._status_path_bounds = (lo.x, lo.y, hi.x, hi.y)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(t("Ctrl+click to reveal file") + "\n" + str(path))
+                io = imgui.get_io()
+                if (io.key_ctrl or io.key_super) and imgui.is_mouse_clicked(0):
+                    reveal_path(path)
+            if inline:
+                imgui.same_line()
+            if imgui.button(f"{labels[0]}##status-open-folder"):
+                reveal_path(path)
+            if not stack_actions:
+                imgui.same_line()
+            if imgui.button(f"{labels[1]}##status-copy-path"):
+                imgui.set_clipboard_text(str(path))
+        imgui.end()
+        imgui.pop_style_color()
+        imgui.pop_style_var()
 
     def _draw_center_notice(
         self,

@@ -428,8 +428,12 @@ specific local font is required.
 The playback capsule and vertical tool capsule share their thickness. `playback_scale`
 is authoritative when restoring a mapping; `tool_scale` remains a compatibility input
 when `playback_scale` is absent. Changing either capsule through the viewer updates both.
-`viewport_overlays.status_duration` is clamped to 3–5 seconds (default 4) for transient
-messages at the viewport's lower left. The status bar retains running/recording state,
+`viewport_overlays.status_duration` is clamped to 3–5 seconds (default 4) for routine transient
+messages at the viewport's lower left. Explicitly longer or persistent messages retain their
+requested duration; video export receipts remain for 8 seconds. File receipts show the filename
+with **Open folder** and **Copy path** actions even when Output or viewport overlays are hidden.
+Completed video exports also print the absolute destination to the caller's terminal.
+The status bar retains running/recording state,
 contextual input hints, and the existing right-hand metrics.
 
 Selection leaves manipulation tools inactive until the user enables one. G, R and the

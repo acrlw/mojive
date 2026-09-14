@@ -334,7 +334,7 @@ class Viewer:
     def stop_recording(self) -> Path | None:
         """Finalize an active user-driven recording."""
 
-        return self.app.stop_recording()
+        return self.app.stop_recording(raise_on_error=True)
 
     def set_input_handler(self, handler) -> None:
         """Install a per-frame input handler that can claim keys or pointer input."""

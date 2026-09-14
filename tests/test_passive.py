@@ -37,6 +37,8 @@ def test_perturbation_preserves_other_forces_and_clears_after_worker_failure():
     viewer._stop = context.Event()
     viewer._process = context.Process()
     viewer._connection, peer = context.Pipe()
+    viewer._completion, completion_peer = context.Pipe(duplex=False)
+    viewer._events = context.Queue(maxsize=64)
     try:
         data.xfrc_applied[2] = 7
         viewer._force[1] = 3
@@ -66,4 +68,35 @@ def test_perturbation_preserves_other_forces_and_clears_after_worker_failure():
         np.testing.assert_array_equal(data.xfrc_applied[2], 7)
     finally:
         viewer.close()
+        peer.close()
+        completion_peer.close()
+
+
+def _complete_with_large_error(connection):
+    connection.send("encoder failure: " + "x" * 200_000)
+    connection.close()
+
+
+def test_close_drains_large_failure_before_joining_and_reports_it():
+    from types import SimpleNamespace
+
+    context = mp.get_context("spawn")
+    viewer = PassiveViewer.__new__(PassiveViewer)
+    viewer._lock = threading.RLock()
+    viewer._closed = False
+    viewer._stop = context.Event()
+    viewer._completion, child = context.Pipe(duplex=False)
+    viewer._connection, peer = context.Pipe()
+    viewer._events = context.Queue(maxsize=64)
+    viewer._data = SimpleNamespace(xfrc_applied=np.zeros((1, 6)))
+    viewer._applied_force = np.zeros(1, dtype=bool)
+    viewer._process = context.Process(target=_complete_with_large_error, args=(child,))
+    viewer._process.start()
+    child.close()
+    try:
+        with pytest.raises(RuntimeError, match="encoder failure"):
+            viewer.close()
+        assert not viewer._process.is_alive()
+        viewer.close()
+    finally:
         peer.close()

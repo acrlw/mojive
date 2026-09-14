@@ -14,7 +14,7 @@ if TYPE_CHECKING:
         build_scene,
         build_workspace,
     )
-    from mojive.app.passive import PassiveViewer, launch_passive
+    from mojive.app.passive import PassiveAction, PassiveEvent, PassiveViewer, launch_passive
     from mojive.app.renderer import Renderer
     from mojive.capture import CaptureSurface, RecordingInfo, RecordingPhase
     from mojive.capture.recording import SnapshotWriter, VideoRecorder, read_snapshots
@@ -155,7 +155,7 @@ _EXPORT_MODULES = {
         "ViewportOverlayConfig",
     ),
     ".interaction.input": ("InputClaim", "InputContext"),
-    ".app.passive": ("PassiveViewer", "launch_passive"),
+    ".app.passive": ("PassiveAction", "PassiveEvent", "PassiveViewer", "launch_passive"),
     ".capture.shared_image": ("SharedImage",),
     ".capture.recording": ("SnapshotWriter", "VideoRecorder", "read_snapshots"),
     ".remote": ("RemoteSceneAdapter", "SnapshotPublisher"),
@@ -256,6 +256,8 @@ __all__ = [
     "NodeType",
     "Occlusion",
     "PanelConfig",
+    "PassiveAction",
+    "PassiveEvent",
     "PassiveViewer",
     "PhysicsObservation",
     "PhysicsState",

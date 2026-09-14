@@ -176,6 +176,12 @@ class ControlPanel(Panel):
                 toggle_unit=self._toggle_angle_unit,
             )
             imgui.end_disabled()
+            if (
+                ctx.session.adapter.caps.external_clock
+                and not ctx.session.adapter.caps.write_ctrl
+                and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
+            ):
+                imgui.set_tooltip(ctx.tr("Actuators are controlled by the external application."))
             if edit.changed:
                 ctx.submit(cmd.SetCtrl(address, edit.value))
 

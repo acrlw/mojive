@@ -6,7 +6,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mojive import CameraTrackingConfig, CameraView, SharedImage, build, launch_passive
+from mojive import (
+    CameraTrackingConfig,
+    CameraView,
+    PassiveAction,
+    RecordingConfig,
+    RecordingPhase,
+    SharedImage,
+    ViewerConfig,
+    build,
+    launch_passive,
+)
 from mojive import commands as cmd
 from mojive.control.rpc import RpcClient, RpcError
 
@@ -130,3 +140,94 @@ def test_passive_body_tracking_uses_published_pose_without_stepping_physics(tmp_
             viewer.capture_array()
             assert client.call("get_viewport_camera")["target"] == pytest.approx((2, 3, 8))
         assert data.time == 0
+
+
+def test_passive_video_lifecycle_uses_display_time_and_finalizes_on_close(tmp_path):
+    import contextlib
+
+    import imageio_ffmpeg
+
+    model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
+    data = mujoco.MjData(model)
+    output = tmp_path / "policy.mp4"
+    with launch_passive(
+        model,
+        data,
+        width=640,
+        height=480,
+        show_window=False,
+        config=ViewerConfig(recording=RecordingConfig(countdown=0, run_simulation=True)),
+    ) as viewer:
+        viewer.configure_recording(RecordingConfig(fps=20, countdown=0, run_simulation=True))
+        viewer.configure_actions((PassiveAction("pause", "space", "Pause policy", "toggle"),))
+        viewer.set_status("Policy running", paused=False)
+        assert viewer.poll_events() == ()
+        assert viewer.start_recording(output, surface="window") == output
+        deadline = time.monotonic() + 5
+        while viewer.recording.frames < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert viewer.recording.frames >= 2
+        assert data.time == 0  # run_simulation must not touch the caller's clock.
+        assert viewer.pause_recording()
+        paused = viewer.recording
+        assert paused.phase is RecordingPhase.PAUSED
+        for step in range(20):
+            mujoco.mj_step(model, data)
+            viewer.sync(step=step + 1)
+            time.sleep(0.005)
+        assert viewer.recording.frames == paused.frames
+        assert data.time > 0
+        assert viewer.resume_recording()
+        time.sleep(0.12)
+        assert viewer.recording.frames > paused.frames
+        expected = data.time
+        assert viewer.stop_recording() == output
+        assert not viewer.recording.active and not viewer.recording.error
+        assert data.time == expected
+        # Closing the handle also explicitly completes an active encoder.
+        last = tmp_path / "on-close.mp4"
+        viewer.start_recording(last, surface="window", countdown=0)
+        deadline = time.monotonic() + 5
+        while viewer.recording.frames == 0 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert viewer.recording.frames > 0
+    for path in (output, last):
+        with contextlib.closing(imageio_ffmpeg.read_frames(str(path))) as frames:
+            metadata = next(frames)
+            assert metadata["size"] == (640, 480)
+            assert len(list(frames)) > 0
+
+
+def test_passive_reports_async_encoder_failure_and_can_record_again(tmp_path):
+    model = mujoco.MjModel.from_xml_string("<mujoco/>")
+    with launch_passive(
+        model, mujoco.MjData(model), width=640, height=480, show_window=False
+    ) as viewer:
+        viewer.start_recording(tmp_path / "unsupported.extension", countdown=0, surface="window")
+        deadline = time.monotonic() + 5
+        while viewer.recording.active and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert viewer.recording.error
+        with pytest.raises(RuntimeError):
+            viewer.stop_recording()
+        viewer.start_recording(tmp_path / "recovered.mp4", countdown=30, surface="window")
+        assert not viewer.recording.error
+        assert viewer.stop_recording() is None
+
+
+def test_policy_owned_actuators_reject_writes_but_keep_capture_available(tmp_path):
+    model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
+    data = mujoco.MjData(model)
+    data.ctrl[:] = 0.2
+    with launch_passive(
+        model, data, width=640, height=480, show_window=False, control_writeback=False
+    ) as viewer:
+        socket_path = viewer.start_rpc(tmp_path / "policy.sock")
+        with (
+            RpcClient(socket_path, timeout=5) as client,
+            pytest.raises(RpcError, match="write_ctrl"),
+        ):
+            client.set_ctrl(np.full(model.nu, 0.7))
+        viewer.sync()
+        np.testing.assert_array_equal(data.ctrl, 0.2)
+        assert viewer.capture_array().shape[2] == 3

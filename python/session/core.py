@@ -518,7 +518,6 @@ class Session(_Editing, _Playback, _Source):
         self._last_message_copy_text = copy_text
 
     def _record_result(self, result: CommandResult) -> CommandResult:
-        self._last_message = result.message
         if result.message:
             self._publish_message(
                 result.message,

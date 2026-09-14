@@ -186,6 +186,8 @@ def draw_status(
     physics_hz: float | None = None,
     show_physics: bool = False,
     status: str = "",
+    passive: bool = False,
+    activity: str = "",
     status_level: str = "info",
     status_path: bool = False,
     recording_phase: str = "idle",
@@ -223,15 +225,10 @@ def draw_status(
         cursor += 12.0 * scale
 
     state_color = theme.primary if running else theme.text_disabled
-    draw.circle_filled(
-        (cursor + 3.5 * scale, cy),
-        3.5 * scale,
-        state_color,
-        segments=20,
-    )
-    cursor += 12.0 * scale
-    state_text = (
-        labels.replaying
+    state_text = activity or (
+        ""
+        if state == "external"
+        else labels.replaying
         if state == "replaying"
         else labels.running
         if running
@@ -239,8 +236,21 @@ def draw_status(
         if state == "static"
         else labels.paused
     )
+    if passive:
+        state_text = f"{labels.passive} · {state_text}" if state_text else labels.passive
+    passive_rect = None
+    if state_text:
+        draw.circle_filled(
+            (cursor + 3.5 * scale, cy),
+            3.5 * scale,
+            state_color,
+            segments=20,
+        )
+        cursor += 12.0 * scale
     state_width = draw.text_size(state_text)[0]
     if cursor + state_width <= x + width - 12.0 * scale:
+        if passive:
+            passive_rect = (cursor, y, cursor + draw.text_size(labels.passive)[0], y + height)
         cursor += _inline_text(draw, cursor, cy, state_text, state_color)
 
     recording_pause_rect = None
@@ -251,9 +261,11 @@ def draw_status(
         draw.circle_filled((cursor + 3.5 * scale, cy), 3.5 * scale, accent, segments=20)
         cursor += 11.0 * scale
         seconds = max(0, int(recording_duration))
-        surface_label = {"scene": "SCENE", "viewport": "VIEW", "window": "WINDOW"}.get(
-            recording_surface, "REC"
-        )
+        surface_label = {
+            "scene": labels.recording_scene,
+            "viewport": labels.recording_viewport,
+            "window": labels.recording_window,
+        }.get(recording_surface, labels.recording)
         record_text = (
             f"{surface_label} {max(0, math.ceil(countdown_remaining))} s"
             if recording_phase == "countdown"
@@ -458,4 +470,5 @@ def draw_status(
         recording_pause_rect=recording_pause_rect,
         recording_stop_rect=recording_stop_rect,
         message_rect=(status_x, y, status_x + shown_width, y + height) if shown else None,
+        passive_rect=passive_rect,
     )

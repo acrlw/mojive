@@ -20,8 +20,8 @@ from mojive.scene.assets import resolve
 
 from .. import CaptureSurface, RecordingConfig, ViewerConfig, build
 from .. import commands as cmd
-from .keyframe_timeline import populate_take
-from .ui_runtime import _activate_panel, _click, _item_center, _right_click, _save_window_crop
+from .keyframe_timeline import populate_take, show_settings
+from .ui_runtime import _activate_panel, _click, _item_center, _save_window_crop
 
 
 def capture(viewer, path):
@@ -38,16 +38,12 @@ def run(viewer, output):
     session.submit(cmd.SetStateTakeLoop(12, 24))
     session.submit(cmd.SeekStateTake(40))
     t = app.localizer.text
-    _click(viewer, _item_center(viewer, "button", f"{t('Video Settings')}##take-video-settings"))
-    assert imgui.get_current_context().open_popup_stack
-    viewer.sync()
+    show_settings(viewer)
     capture(viewer, output / "settings.png")
-    io = imgui.get_io()
-    io.add_key_event(imgui.Key.escape, True)
-    viewer.sync()
-    io.add_key_event(imgui.Key.escape, False)
-    viewer.sync()
-    assert not imgui.get_current_context().open_popup_stack
+    viewer.panels.get("Settings").open = False
+    viewer.panels.get("Output").open = False
+    viewer.panels.open_panel("Keyframes")
+    _activate_panel(viewer, "Keyframes")
     assert session.state_take_loop == (12, 24)
     capture(viewer, output / "ready.png")
 
@@ -66,7 +62,7 @@ def run(viewer, output):
         append(recorder, image)
 
     with patch.object(VideoRecorder, "append", record):
-        _click(viewer, _item_center(viewer, "button", f"{t('Record Take Video')}##take-video"))
+        _click(viewer, _item_center(viewer, "invisible_button", "##take-video"))
         assert session.state_take_cursor == 0 and not session.state_take_playing, (
             session.state_take_cursor,
             session.state_take_loop,
@@ -96,8 +92,9 @@ def run(viewer, output):
     viewer.sync()
     capture(viewer, output / "saved.png")
     _save_window_crop(viewer, "Status###application_status", output / "saved-status.png", padding=0)
-    point = _item_center(viewer, "invisible_button", "##status_message")
-    _right_click(viewer, point)
+    _save_window_crop(viewer, "##viewport-file-status", output / "saved-notice.png", padding=0)
+    point = _item_center(viewer, "button", f"{t('Copy path')}##status-copy-path")
+    _click(viewer, point)
     assert imgui.get_clipboard_text() == str(video.resolve())
     capture(viewer, output / "copy-path.png")
     reader = read_frames(str(video))

@@ -259,7 +259,10 @@ def _set_viewport_tooltip(text: str, scale: float) -> None:
         imgui.ImVec2(padding_x, padding_y),
     )
     try:
-        imgui.set_item_tooltip(text)
+        if imgui.is_item_hovered(
+            imgui.HoveredFlags_.for_tooltip | imgui.HoveredFlags_.allow_when_disabled
+        ):
+            imgui.set_tooltip(text)
     finally:
         imgui.pop_style_var()
 
@@ -278,6 +281,9 @@ def draw_playback(
     record_action: str = "stop",
     record_tooltip: str = "",
     toggle_tooltip: str = "",
+    clock_enabled: bool = True,
+    clock_disabled_reason: str = "",
+    external_actions: frozenset[str] = frozenset(),
     enabled: bool = True,
     bindings: InputBindings = DEFAULT_INPUT_BINDINGS,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
@@ -288,14 +294,14 @@ def draw_playback(
     x, y = origin
     result = ""
     states = {
-        "toggle": (_pause_icon if playing else _play_icon, playing, True),
-        "previous": (_previous_icon, False, previous_enabled),
-        "step": (_step_icon, False, step_enabled),
-        "reset": (_reset_icon, False, True),
+        "toggle": (_pause_icon if playing else _play_icon, playing, clock_enabled),
+        "previous": (_previous_icon, False, clock_enabled and previous_enabled),
+        "step": (_step_icon, False, clock_enabled and step_enabled),
+        "reset": (_reset_icon, False, clock_enabled),
         "record": (_record_icon, recording, record_enabled),
         "recording-options": (_recording_options_icon, False, True),
         # Preserve custom registries created against the earlier control name.
-        "stop": (_reset_icon, False, True),
+        "stop": (_reset_icon, False, clock_enabled),
     }
     centers = playback_control_centers(control_specs)
     for index, control in enumerate(control_specs):
@@ -310,6 +316,8 @@ def draw_playback(
             )
         name = control.name
         icon, selected, action_enabled = states.get(name, (control.icon, False, True))
+        if name in external_actions:
+            action_enabled = True
         if icon is None:
             continue
         center = (
@@ -352,7 +360,11 @@ def draw_playback(
                 else name
             )
         _set_viewport_tooltip(
-            record_tooltip
+            control.tooltip or clock_disabled_reason
+            if not clock_enabled
+            and name not in external_actions
+            and name in ("toggle", "previous", "step", "reset", "stop")
+            else record_tooltip
             if name == "record" and record_tooltip
             else toggle_tooltip
             if name == "toggle" and toggle_tooltip

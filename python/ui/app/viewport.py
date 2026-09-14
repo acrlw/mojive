@@ -350,8 +350,7 @@ class _Viewport:
                 if self.viewport_layers.viewport_ui:
                     self.view_cube.draw(overlay, self.window.style_scale)
                 self._draw_model_drop_overlay(overlay)
-                if self.viewport_layers.viewport_ui:
-                    self._draw_viewport_status(overlay)
+                self._draw_viewport_status(overlay)
         finally:
             imgui.pop_clip_rect()
         if not session_busy and self.viewport_layers.viewport_ui:
@@ -509,7 +508,12 @@ class _Viewport:
                     (widget_rect[0], widget_rect[1]),
                     self.theme,
                     scale,
-                    playing=not paused,
+                    playing=(
+                        self.external_paused is False
+                        if self.session.adapter.caps.external_clock
+                        and not self.session.adapter.caps.clock_control
+                        else not paused
+                    ),
                     step_enabled=paused and not take_playing,
                     toggle_tooltip=self.localizer.text("Run simulation")
                     if paused and self._take_video is None
@@ -539,12 +543,17 @@ class _Viewport:
                         else "Record Video"
                     ),
                     record_enabled=self.recording.active
+                    or self._viewport_recording_mode == "video"
                     or (
                         self.session.adapter.caps.simulation
                         and self.session.adapter.caps.state_snapshots
                     ),
-                    enabled=not self._scene_input_blocked()
-                    and self.session.adapter.caps.clock_control,
+                    enabled=not self._scene_input_blocked(),
+                    clock_enabled=self.session.adapter.caps.clock_control,
+                    clock_disabled_reason=self.localizer.text(
+                        "Simulation is controlled by the external application."
+                    ),
+                    external_actions=self.external_playback_actions,
                     bindings=self.input_bindings,
                     labels=self._viewport_labels,
                     control_specs=self.viewport_chrome.playback_controls,

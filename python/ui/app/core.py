@@ -327,6 +327,10 @@ class ViewerApp(
             tuple[Path | None, CaptureSurface, Future, np.ndarray | None]
         ] = []
         self._viewport_recording_mode = "video"
+        self.passive_mode = False
+        self.external_status = ""
+        self.external_paused = None
+        self.external_playback_actions = frozenset()
         self._viewport_recorder: Any | None = None
         self._viewport_recording_path: Path | None = None
         self._viewport_record_elapsed = 0.0
@@ -335,6 +339,7 @@ class ViewerApp(
         self._viewport_recording_fps = self.recording_config.fps
         self._recording_deadline = 0.0
         self._recording_run_simulation = False
+        self._recording_error = ""
         self._viewport_recording_frames = 0
         self._viewport_recording_duration = 0.0
         self._take_video: TakeVideo | None = None

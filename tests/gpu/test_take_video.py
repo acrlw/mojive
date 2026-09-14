@@ -2,6 +2,7 @@
 
 import math
 import time
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -146,6 +147,60 @@ def test_button_rewinds_countdown_pause_tail_and_copy_saved_path(
     assert imgui.get_clipboard_text() == str(path.resolve())
     assert app.output.active_status(now=time.monotonic() + 9) is None
     assert status in app.output.entries()
+
+
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+@pytest.mark.parametrize("viewport_ui", (True, False))
+def test_export_receipt_exposes_path_actions_with_output_closed(
+    viewer, tmp_path, monkeypatch, capsys, language, viewport_ui
+):
+    from mojive.ui.app import status as status_module
+
+    app = viewer.app
+    app.set_language(language)
+    viewer.panels.get("Output").open = False
+    viewer.panels.get("Keyframes").open = False
+    viewer.configure_layers(replace(app.viewport_layers, viewport_ui=viewport_ui))
+    viewer.configure_recording(RecordingConfig(countdown=0, end_hold=0))
+    for _ in range(4):
+        viewer.sync()
+    path = tmp_path / "long output directory with spaces" / "another directory" / "舞蹈 take.mp4"
+    viewer.start_take_video(path)
+    for _ in range(100):
+        tick(viewer)
+        if not viewer.recording.active:
+            break
+    assert not viewer.recording.active and path.exists()
+    assert not viewer.recording.error, viewer.recording.error
+    assert capsys.readouterr().out == f"Saved video to {path.resolve()}\n"
+
+    texts = []
+    original = imgui.text_unformatted
+
+    def observe(text):
+        texts.append(text)
+        return original(text)
+
+    monkeypatch.setattr(imgui, "text_unformatted", observe)
+    viewer.sync()
+    viewer.sync()
+    saved = app.output.active_status()
+    assert saved.level == "success"
+    assert saved.copy_text == str(path.resolve())
+    assert app.output.active_status(time.monotonic() + 6) == saved
+    assert any(path.name in text and str(path.parent) not in text for text in texts)
+    revealed = []
+    monkeypatch.setattr(status_module, "reveal_path", revealed.append)
+    selected = viewer.session.selected
+    t = app.localizer.text
+    _click(viewer, _item_center(viewer, "button", f"{t('Copy path')}##status-copy-path"))
+    assert imgui.get_clipboard_text() == str(path.resolve())
+    _click(viewer, _item_center(viewer, "button", f"{t('Open folder')}##status-open-folder"))
+    assert revealed == [path.resolve()]
+    assert viewer.session.selected == selected
+    assert not viewer.panels.get("Output").open
+    assert app.output.active_status(time.monotonic() + 9) is None
+    assert saved in app.output.entries()
 
 
 def test_countdown_cancel_and_transport_changes_end_take_video(viewer, tmp_path):

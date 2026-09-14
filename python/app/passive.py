@@ -11,13 +11,16 @@ import traceback
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+from queue import Empty
 
 import numpy as np
 
-from mojive.capture import CaptureSurface
+from mojive.capture import CaptureSurface, RecordingInfo
 from mojive.capture.shared_image import SharedImage
-from mojive.config import CameraTrackingConfig, LayoutConfig, ViewerConfig
+from mojive.config import CameraTrackingConfig, LayoutConfig, RecordingConfig, ViewerConfig
 from mojive.session.rates import StepRate
+
+from .passive_input import PassiveAction, PassiveEvent
 
 
 class _Mailbox:
@@ -57,7 +60,7 @@ class PassiveViewer:
     owns private copies. Model structure and parameters are fixed at launch.
     """
 
-    def __init__(self, model, data, *, max_fps, timeout, viewer_options):
+    def __init__(self, model, data, *, max_fps, timeout, viewer_options, control_writeback=True):
         import mujoco
 
         if not isinstance(model, mujoco.MjModel):
@@ -70,6 +73,8 @@ class PassiveViewer:
             raise ValueError("max_fps must be finite and positive")
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout must be finite and positive")
+        if not isinstance(control_writeback, bool):
+            raise TypeError("control_writeback must be a bool")
         self._model, self._data = model, data
         self._max_fps = float(max_fps)
         self._timeout = float(timeout)
@@ -90,9 +95,21 @@ class PassiveViewer:
         self._applied_force = np.zeros(model.nbody, dtype=bool)
         self._stop = context.Event()
         self._connection, child = context.Pipe()
+        self._completion, completion_sender = context.Pipe(duplex=False)
+        self._events = context.Queue(maxsize=64)
         self._process = context.Process(
             target=_run_viewer,
-            args=(model, self._mailbox, self._stop, child, self.max_fps, viewer_options),
+            args=(
+                model,
+                self._mailbox,
+                self._stop,
+                child,
+                completion_sender,
+                self._events,
+                self.max_fps,
+                control_writeback,
+                viewer_options,
+            ),
             name="mojive-passive",
             daemon=True,
         )
@@ -101,9 +118,11 @@ class PassiveViewer:
         try:
             self._process.start()
             child.close()
+            completion_sender.close()
             self._receive()
         except BaseException:
             child.close()
+            completion_sender.close()
             self.close()
             raise
 
@@ -199,6 +218,91 @@ class PassiveViewer:
         """Set a CameraTrackingConfig without changing the caller's physics cadence."""
         self._request("configure_tracking", (value, persist))
 
+    @property
+    def recording(self) -> RecordingInfo:
+        """Read video progress; this does not report or change the physics clock."""
+        return self._request("recording")
+
+    def configure_recording(self, value: RecordingConfig, *, persist: bool = False) -> None:
+        """Set video defaults; run_simulation has no effect on caller-owned physics."""
+        self._request("configure_recording", (value, persist))
+
+    def start_recording(
+        self,
+        output: str | Path | None = None,
+        *,
+        surface: CaptureSurface | str | None = None,
+        fps: float | None = None,
+        countdown: float | None = None,
+    ) -> Path:
+        """Schedule live video in the display process without pausing the caller.
+
+        Frames follow display wall time, not every physics step. A zero countdown
+        starts on the next display frame. Stop explicitly to confirm file finalization.
+        """
+        with self._lock:
+            if not self.is_running():
+                raise RuntimeError("The passive viewer is closed")
+            if not self._publish():
+                raise RuntimeError("The display state mailbox is unavailable")
+            return self._request(
+                "start_recording",
+                {
+                    "output": output,
+                    "surface": surface,
+                    "fps": fps,
+                    "countdown": countdown,
+                },
+            )
+
+    def pause_recording(self) -> bool:
+        """Pause video writing only; policy inference and physics keep their owner."""
+        return self._request("pause_recording")
+
+    def resume_recording(self) -> bool:
+        """Resume video writing without changing the external simulation."""
+        return self._request("resume_recording")
+
+    def stop_recording(self) -> Path | None:
+        """Wait for encoder finalization and return the saved path, or raise on failure."""
+        return self._request("stop_recording")
+
+    def configure_actions(self, actions: tuple[PassiveAction, ...]) -> None:
+        """Bind focused keys and optional toolbar controls to caller-owned requests."""
+        self._request("configure_actions", tuple(actions))
+
+    def poll_events(self) -> tuple[PassiveEvent, ...]:
+        """Drain available requests without waiting for the display process.
+
+        Handle them on the simulation owner's thread at an inference/step boundary,
+        then acknowledge each event. Repeated requests for a pending action coalesce.
+        """
+        with self._lock:
+            if self._closed:
+                return ()
+            events = []
+            for _ in range(64):
+                try:
+                    events.append(self._events.get_nowait())
+                except Empty:
+                    break
+            return tuple(events)
+
+    def acknowledge_event(self, event: PassiveEvent, *, error: str | None = None) -> None:
+        """Confirm a handled request, or report its failure without changing physics."""
+        self._request("acknowledge_event", (event, error))
+
+    def set_status(self, text: str, *, paused: bool | None = None) -> None:
+        """Publish caller-reported activity and optional pause state in the status bar.
+
+        This updates presentation only. It never pauses physics or infers policy
+        health from publication rate. Empty text uses the localized Running/Paused
+        label when paused is known, or only Passive when it is unknown.
+        """
+        if not isinstance(text, str) or (paused is not None and not isinstance(paused, bool)):
+            raise TypeError("status requires text and an optional bool paused value")
+        self._request("set_status", (text, paused))
+
     def capture_array(self, *, surface: CaptureSurface | str = CaptureSurface.SCENE) -> np.ndarray:
         """Publish state and wait for one owned RGB capture, without disk I/O."""
         with self._lock:
@@ -252,14 +356,17 @@ class PassiveViewer:
                 raise RuntimeError("The passive viewer is closed")
             try:
                 self._connection.send((operation, payload))
-                return self._receive()
+                return self._receive(
+                    timeout=max(self._timeout, 35.0) if operation == "stop_recording" else None
+                )
             except (EOFError, BrokenPipeError, OSError) as exc:
                 raise RuntimeError("The passive viewer disconnected") from exc
 
-    def _receive(self):
-        deadline = time.monotonic() + self._timeout
+    def _receive(self, *, timeout=None):
+        deadline = time.monotonic() + (self._timeout if timeout is None else timeout)
         while not self._connection.poll(min(0.1, max(0.0, deadline - time.monotonic()))):
-            if not self._process.is_alive():
+            if self._stop.is_set() or not self._process.is_alive():
+                self.close()
                 raise RuntimeError(f"The passive viewer exited (code {self._process.exitcode})")
             if time.monotonic() >= deadline:
                 self.close()
@@ -270,21 +377,56 @@ class PassiveViewer:
         return response.get("result")
 
     def close(self) -> None:
-        """Stop display work and reap its process; safe to call more than once."""
+        """Finalize any video and reap the process; repeated calls are harmless.
+
+        Allow the encoder's 30-second finalization deadline before forced cleanup.
+        A timeout or finalization failure is reported instead of claiming a saved video.
+        """
         with self._lock:
             if self._closed:
                 return
             self._closed = True
             self._stop.set()
-            if self._process.pid is not None:
-                self._process.join(timeout=5.0)
-                if self._process.is_alive():
-                    self._process.terminate()
-                    self._process.join(timeout=5.0)
-            self._connection.close()
-            # Only clear forces actually applied to the caller. The worker may
-            # have exited while holding the mailbox lock.
-            self.data.xfrc_applied[self._applied_force] = 0.0
+            try:
+                if self._process.pid is not None:
+                    deadline = time.monotonic() + 35.0
+                    # Drain completion before joining: an error traceback may
+                    # exceed the pipe buffer and block the sender until read.
+                    while (
+                        self._process.is_alive()
+                        and not self._completion.poll(0.05)
+                        and time.monotonic() < deadline
+                    ):
+                        pass
+                    acknowledged = False
+                    error = None
+                    if self._completion.poll():
+                        try:
+                            error = self._completion.recv()
+                            acknowledged = True
+                        except EOFError:
+                            pass
+                    self._process.join(timeout=max(0.0, deadline - time.monotonic()))
+                    if self._process.is_alive():
+                        self._process.terminate()
+                        self._process.join(timeout=5.0)
+                        raise TimeoutError(
+                            "The passive viewer did not finish shutdown; video completion is unknown"
+                        )
+                    if error:
+                        raise RuntimeError(error)
+                    if not acknowledged or self._process.exitcode != 0:
+                        raise RuntimeError(
+                            f"The passive viewer exited without successful shutdown acknowledgement "
+                            f"(code {self._process.exitcode})"
+                        )
+            finally:
+                self._connection.close()
+                self._completion.close()
+                self._events.close()
+                # Clear only forces actually applied to the caller, even if the
+                # worker died while holding the state mailbox lock.
+                self.data.xfrc_applied[self._applied_force] = 0.0
 
     def __enter__(self) -> PassiveViewer:
         return self
@@ -306,6 +448,7 @@ def launch_passive(
     title: str = "Mojive",
     show_window: bool = True,
     config: ViewerConfig | None = None,
+    control_writeback: bool = True,
 ) -> PassiveViewer:
     """Launch an independently scheduled window for an existing MuJoCo simulation.
 
@@ -314,6 +457,8 @@ def launch_passive(
     not share the physics loop's GIL. Call ``sync()`` after stepping or resetting.
     ``max_fps`` limits display and snapshot publication, never physics stepping.
     Use :func:`mojive.build` for synchronous embedding on an existing UI thread.
+    Set ``control_writeback=False`` when a policy exclusively owns actuator controls.
+    Inspection, camera, recording and physical mouse perturbation remain available.
     """
     config = config or ViewerConfig(layout=LayoutConfig(persistence=False))
     config = replace(
@@ -325,6 +470,7 @@ def launch_passive(
         data,
         max_fps=max_fps,
         timeout=timeout,
+        control_writeback=control_writeback,
         viewer_options={
             "renderer": renderer,
             "width": width,
@@ -338,11 +484,14 @@ def launch_passive(
     )
 
 
-def _run_viewer(model, mailbox, stop, connection, max_fps, options):
+def _run_viewer(
+    model, mailbox, stop, connection, completion, events, max_fps, control_writeback, options
+):
     import mujoco
 
     from mojive.adapters.mujoco import MuJoCoAdapter
     from mojive.app.composition import build_from_adapter
+    from mojive.app.passive_input import PassiveInput
 
     state, ctrl, ctrl_changed, force, force_changed = mailbox.arrays()
 
@@ -396,6 +545,7 @@ def _run_viewer(model, mailbox, stop, connection, max_fps, options):
             super().clear_perturb()
 
     viewer = None
+    worker_error = None
     try:
         adapter = DisplayAdapter(external_clock=True)
         adapter.load_model(model)
@@ -405,6 +555,7 @@ def _run_viewer(model, mailbox, stop, connection, max_fps, options):
             write_pose=False,
             write_qpos=False,
             state_snapshots=False,
+            write_ctrl=control_writeback,
             keyframes=False,
             equality_constraints=False,
             reload=False,
@@ -447,6 +598,9 @@ def _run_viewer(model, mailbox, stop, connection, max_fps, options):
 
         receive_state()
         viewer = build_from_adapter(adapter, **options)
+        viewer.app.passive_mode = True
+        passive_input = PassiveInput(viewer, events)
+        viewer.set_input_handler(passive_input)
         draw()
         connection.send({"result": None})
         period = 1.0 / max_fps
@@ -478,6 +632,25 @@ def _run_viewer(model, mailbox, stop, connection, max_fps, options):
                         viewer.track_body(payload)
                     elif operation == "configure_tracking":
                         viewer.configure_tracking(payload[0], persist=payload[1])
+                    elif operation == "configure_recording":
+                        viewer.configure_recording(payload[0], persist=payload[1])
+                    elif operation == "recording":
+                        result = viewer.recording
+                    elif operation == "start_recording":
+                        receive_state()
+                        result = viewer.start_recording(**payload)
+                    elif operation == "pause_recording":
+                        result = viewer.pause_recording()
+                    elif operation == "resume_recording":
+                        result = viewer.resume_recording()
+                    elif operation == "stop_recording":
+                        result = viewer.stop_recording()
+                    elif operation == "configure_actions":
+                        passive_input.configure(payload)
+                    elif operation == "acknowledge_event":
+                        passive_input.acknowledge(payload[0], error=payload[1])
+                    elif operation == "set_status":
+                        viewer.app.external_status, viewer.app.external_paused = payload
                     elif operation == "stats":
                         with mailbox.lock:
                             result = {
@@ -505,11 +678,26 @@ def _run_viewer(model, mailbox, stop, connection, max_fps, options):
             if now >= due:
                 draw()
                 due = max(due + period, time.monotonic())
+    except KeyboardInterrupt:
+        pass
     except BaseException:
-        with suppress(OSError, EOFError):
-            connection.send({"error": traceback.format_exc()})
+        worker_error = traceback.format_exc()
     finally:
         stop.set()
-        if viewer is not None:
-            viewer.release()
-        connection.close()
+        error = worker_error
+        try:
+            if viewer is not None:
+                viewer.stop_recording()
+        except Exception:
+            error = (
+                f"{error}\nDuring video finalization:\n" if error else ""
+            ) + traceback.format_exc()
+        finally:
+            if viewer is not None:
+                viewer.release()
+            with suppress(OSError):
+                completion.send(error)
+            completion.close()
+            events.cancel_join_thread()
+            events.close()
+            connection.close()

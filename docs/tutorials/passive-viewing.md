@@ -47,6 +47,10 @@ uses actual counter increments over wall time, never the nominal `1 / timestep`.
 physics rate is shown as unknown. Pauses and episode resets restart or settle the measurement
 without negative rates. Render FPS includes slow frames and remains meaningful below 10 FPS.
 Static scenes show only render throughput. Rates are averaged to keep the readout stable.
+The left-hand status starts with **Passive** (**被动模式** in Chinese), separate from the
+rendering backend. Call `set_status("", paused=...)` to show the localized **Running** or
+**Paused** state beside it. Until the caller reports a state, only the mode is shown;
+Mojive does not infer whether policy inference is running from publication rate.
 
 Actuator slider changes apply once at a `sync()` boundary, so a stale display value cannot
 keep overwriting policy output. Mouse perturbation writes the dragged body's `xfrc_applied`,
@@ -56,6 +60,84 @@ The window cannot pause, reset, or step caller-owned physics. Pose and topology 
 disabled for the passive display. Camera navigation and visual inspection remain available.
 `AdapterCaps.clock_control` distinguishes caller-only clock ownership from an externally
 clocked adapter that can forward explicit pause/step commands, such as a remote publisher.
+For policies that exclusively compute `data.ctrl`, pass `control_writeback=False` to
+`launch_passive`. Actuator values stay visible but both UI and RPC writes are rejected at the
+capability boundary. Change high-level velocity commands through caller-owned actions instead;
+an actuator slider cannot override a policy that replaces controls on the next physics step.
+
+## Live video without taking over physics
+
+The playback toolbar's video button, its recording settings, the View → Record menu, and
+Ctrl/Cmd+Shift+R work with passive viewing. Video capture does not require simulation snapshots.
+Take recording and replay remain unavailable: live caller updates must not compete with a
+second owner restoring recorded physics states. Camera and viewport capture remain independent.
+
+```python
+viewer.configure_recording(mojive.RecordingConfig(fps=30, crf=20, countdown=0))
+viewer.start_recording("output/evaluation.mp4", surface="window")
+# Continue the ordinary policy / mj_step / sync loop.
+viewer.pause_recording()    # Stops writing frames, not policy inference.
+viewer.resume_recording()
+path = viewer.stop_recording()  # Returns after the encoder has finalized the file.
+```
+
+`viewer.recording` reports phase, frame count, duration and any asynchronous encoding error.
+`stop_recording()` raises on encoding failure; a new recording clears the previous error.
+Configuration changes apply to the next recording. The “Run simulation when recording starts”
+setting is disabled for caller-owned clocks and has no effect even if previously saved as true.
+Pause/resume controls only change video writing. `close()` also finalizes an active video and
+waits for its completion; shutdown timeout/failure is reported instead of claiming a saved file.
+
+Video samples the displayed scene using wall time. The latest-state mailbox may skip physics
+steps and the recorder may repeat display frames; this is not an exact, deterministic policy
+trace. Record observations, actions and integration states in the caller for step-exact evaluation,
+then replay that separate trace for export. Encoding runs in the display process but still shares
+machine resources; do not equate this separation with a hard real-time guarantee.
+
+## Caller-owned controls and feedback
+
+Use declarative actions instead of a desktop-global keyboard listener. Input is accepted only
+while the viewport is focused, without a modal, active widget or modifier chord. Claimed keys
+are not also consumed by Mojive's tools. Application callbacks are never run in the display process.
+
+```python
+viewer.configure_actions((
+    mojive.PassiveAction("pause_policy", "space", "Pause / resume policy", "toggle"),
+    mojive.PassiveAction("forward", "8", "Increase forward speed"),
+))
+paused = False
+viewer.set_status("", paused=False)
+while viewer.is_running():
+    for event in viewer.poll_events():  # Nonblocking; process at a policy/step boundary.
+        try:
+            if event.action == "pause_policy":
+                paused = not paused
+            elif event.action == "forward":
+                velocity[0] += 0.1
+            viewer.set_status("", paused=paused)
+        except Exception as exc:
+            viewer.acknowledge_event(event, error=str(exc))
+        else:
+            viewer.acknowledge_event(event)
+    if not paused:
+        data.ctrl[:] = policy(observation)
+        mujoco.mj_step(model, data)
+    viewer.sync()
+    # Apply your normal pacing here, including while paused.
+```
+
+The optional `control` binds an existing toolbar button (`toggle`, `reset`, `step`, `previous`).
+Only explicitly bound buttons become available; the adapter's clock commands remain unsupported.
+The caller must reset policy history and recurrent state along with physics when offering reset.
+`set_status(text, paused=...)` updates presentation only. It does not execute or acknowledge an action.
+Empty text uses the standard localized state; optional custom text and action labels are
+supplied by the application in its preferred language.
+
+At most 64 actions can be configured. Each action has at most one outstanding request until
+acknowledgement, so an unattended UI cannot build an unbounded control backlog. Requests are
+not retried automatically. Replace bindings only after acknowledging pending requests. Polling is
+nonblocking; configuration, status updates, acknowledgement and capture/recording methods wait
+for a display response. Call those at explicit control boundaries, not on every physics step.
 
 `is_running()` becomes false when the window closes or its worker exits. `close()` and the
 context manager stop and reap the worker. Startup and explicit capture/control failures raise
@@ -106,6 +188,7 @@ wall-clock scheduling behavior. Adapter integrations can use
 ```bash
 make passive-viewer
 make passive-viewer ARGS='--physics-hz 500 --hidden'
+MOJIVE_LANGUAGE=zh_CN MOJIVE_UI_SCALE=2.5 make passive-viewer ARGS='--record --hidden --width 3200 --height 1800'
 make passive-viewer ARGS='--renderer wgpu --output output/passive-viewer-wgpu --hidden'
 ```
 
