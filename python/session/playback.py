@@ -84,7 +84,7 @@ class _Playback:
             if take.cursor > last
             else -1
         )
-        take.loop = None
+        take.play_range = None
         if not take.frames:
             take.signature = None
         self._state_take_playing = False
@@ -176,7 +176,8 @@ class _Playback:
         self._take.frames.clear()
         self._take.times.clear()
         self._take.offsets.clear()
-        self._take.loop = None
+        self._take.play_range = None
+        self._take.loop_enabled = False
         self._take.cursor = -1
         self._state_take_recording = False
         self._state_take_playing = False
@@ -348,15 +349,16 @@ class _Playback:
             return
         dt = self._adapter.timestep() if wall_dt is None else max(0.0, float(wall_dt))
         offsets = self._take.offsets
-        loop = self._take.loop if self._state_take_use_loop else None
-        first, last = loop or (0, len(self._take.frames) - 1)
+        play_range = self._take.play_range if self._state_take_use_range else None
+        first, last = play_range or (0, len(self._take.frames) - 1)
+        looping = self._state_take_use_range and self._take.loop_enabled and first < last
         cursor = self._take.cursor
         position = (
             offsets[cursor] + self._state_take_elapsed
             if first <= cursor <= last
             else offsets[first]
         ) + dt * self._speed
-        if loop is not None:
+        if looping:
             # Include the last selected frame for one recorded interval, then
             # wrap excess time in one operation even after a long display stall.
             tail = min(last + 1, len(offsets) - 1)
@@ -382,7 +384,7 @@ class _Playback:
             if self._state_take_end_override is None
             else self._state_take_end_override
         )
-        if loop is None and index >= last and pause_at_end:
+        if not looping and index >= last and (play_range is not None or pause_at_end):
             self._state_take_playing = False
             self._state_take_elapsed = 0.0
 

@@ -845,10 +845,10 @@ class KeyframesPanel(Panel):
         scale = ctx.style_scale
         gap = 5 * scale
         recording = ctx.session.state_take_recording
-        loop = ctx.session.state_take_loop
+        play_range = ctx.session.state_take_range
         endpoints = (
-            [take_times[loop[0]], take_times[loop[1]]]
-            if loop
+            [take_times[play_range[0]], take_times[play_range[1]]]
+            if play_range
             else [take_times[0], take_times[-1]]
             if take_times
             else [self._view_start, self._view_end]
@@ -899,7 +899,7 @@ class KeyframesPanel(Panel):
                     nearest_take_frame(take_times, end),
                 )
                 if first < last:
-                    ctx.submit(cmd.SetStateTakeLoop(first, last))
+                    ctx.submit(cmd.SetStateTakeRange(first, last))
             else:
                 self._view_start, self._view_end, self._view_needs_fit = start, end, False
         if inline[3]:
@@ -907,16 +907,14 @@ class KeyframesPanel(Panel):
         if _command_button(
             "##timeline-loop",
             "loop",
-            ctx.tr("Clear range" if loop is not None else "Loop"),
+            ctx.tr("Loop"),
             ctx.theme,
             scale,
-            selected=loop is not None,
+            selected=ctx.session.state_take_loop_enabled,
             draw=ctx.painter(),
             enabled=len(take_times) > 1 and not recording,
         ):
-            ctx.submit(
-                cmd.SetStateTakeLoop() if loop else cmd.SetStateTakeLoop(0, len(take_times) - 1)
-            )
+            ctx.submit(cmd.SetStateTakeLoopEnabled(not ctx.session.state_take_loop_enabled))
         imgui.end_disabled()
 
     def _draw_take_choice(self, ctx, take):
@@ -969,12 +967,20 @@ class KeyframesPanel(Panel):
             bool(take_times) and not ctx.session.state_take_recording and not ctx.take_video_active
         )
         playing = ctx.session.state_take_playing
+        play_range = ctx.session.state_take_range
+        first, last = play_range or (0, max(0, len(take_times) - 1))
+        cursor = ctx.session.state_take_cursor
         actions = (
-            ("first", "first", cmd.SeekStateTake(0), "First frame"),
+            (
+                "first",
+                "first",
+                cmd.SeekStateTake(first),
+                "Range first frame" if play_range else "First frame",
+            ),
             (
                 "previous",
                 "previous",
-                cmd.SeekStateTake(ctx.session.state_take_cursor - 1),
+                cmd.SeekStateTake(min(last, max(first, cursor - 1))),
                 "Previous frame",
             ),
             (
@@ -983,8 +989,13 @@ class KeyframesPanel(Panel):
                 cmd.PauseStateTake() if playing else cmd.PlayStateTake(),
                 "Pause" if playing else "Replay",
             ),
-            ("next", "next", cmd.SeekStateTake(ctx.session.state_take_cursor + 1), "Next frame"),
-            ("last", "last", cmd.SeekStateTake(max(0, len(take_times) - 1)), "Last frame"),
+            ("next", "next", cmd.SeekStateTake(min(last, max(first, cursor + 1))), "Next frame"),
+            (
+                "last",
+                "last",
+                cmd.SeekStateTake(last),
+                "Range last frame" if play_range else "Last frame",
+            ),
         )
         widths = (button_width,) * len(actions) + (time_width,)
         inline = button_row_layout(widths, width, imgui.get_style().item_spacing.x)
@@ -1129,7 +1140,7 @@ class KeyframesPanel(Panel):
             and not ctx.popup_owned_frame
             and (
                 self._pointer_mode in ("range", "select")
-                or ctx.session.state_take_loop is not None
+                or ctx.session.state_take_range is not None
                 or self._take_selection is not None
                 or self._selected_keyframes
             )
@@ -1376,8 +1387,8 @@ class KeyframesPanel(Panel):
             if self._pointer_mode == "range":
                 self._range_preview = None
                 self._pointer_mode = "cancelled"
-            if ctx.session.state_take_loop is not None:
-                ctx.submit(cmd.SetStateTakeLoop())
+            if ctx.session.state_take_range is not None:
+                ctx.submit(cmd.SetStateTakeRange())
             elif (
                 escape
                 and self._pointer_mode != "cancelled"
@@ -1428,7 +1439,7 @@ class KeyframesPanel(Panel):
             if self._pointer_mode == "range" and self._range_preview is not None:
                 first, last = self._range_preview
                 command = (
-                    cmd.SetStateTakeLoop(first, last) if first < last else cmd.SetStateTakeLoop()
+                    cmd.SetStateTakeRange(first, last) if first < last else cmd.SetStateTakeRange()
                 )
                 result = ctx.submit(command)
                 self._error = "" if result.ok else result.message
@@ -1438,7 +1449,7 @@ class KeyframesPanel(Panel):
         self._handle_editor_keys(ctx, keyframes, take_times, editable, timeline_id)
         ctx.status_hints = timeline_status_hints(
             ctx.tr,
-            has_range=ctx.session.state_take_loop is not None,
+            has_range=ctx.session.state_take_range is not None,
             edit_lane=(self._edit_lane if mouse_xy[1] < lo[1] + ruler_height else lane)
             if hovered
             else "",
@@ -1600,7 +1611,7 @@ class KeyframesPanel(Panel):
         row_divider = (marker_y + take_y) * 0.5
         overlay.line((lo[0], row_divider), (hi[0], row_divider), theme.border, 1.0)
 
-        loop = self._range_preview or ctx.session.state_take_loop
+        loop = self._range_preview or ctx.session.state_take_range
         if loop is not None:
             start_x, end_x = (
                 timeline_time_to_x(

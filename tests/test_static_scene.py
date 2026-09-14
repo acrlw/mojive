@@ -1187,6 +1187,87 @@ def test_recording_rejects_take_switch_delete_and_second_start():
     assert len(session.state_takes) == 2
 
 
+@pytest.mark.parametrize("loop_enabled", (False, True))
+@pytest.mark.parametrize("pause_at_end", (False, True))
+def test_take_range_selects_playback_bounds_without_changing_repeat(loop_enabled, pause_at_end):
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeLoopEnabled(loop_enabled))
+    assert session.submit(cmd.SetStateTakePauseAtEnd(pause_at_end))
+    assert session.submit(cmd.SetStateTakeRange(2, 4))
+    assert session.state_take_loop_enabled is loop_enabled
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 2
+    session.tick(FrameNeeds.none(), wall_dt=0.02)
+    assert session.state_take_cursor == 4 and adapter.steps == 4
+    assert session.state_take_playing is loop_enabled
+    session.tick(FrameNeeds.none(), wall_dt=0.01)
+    assert session.state_take_cursor == (2 if loop_enabled else 4)
+    assert session.state_take_range == (2, 4)
+
+
+def test_repeat_toggle_preserves_range_and_fractional_playhead_and_applies_during_replay():
+    session, _ = _recorded_take()
+    assert session.submit(cmd.SetStateTakeRange(2, 4))
+    assert session.submit(cmd.SeekStateTake(3))
+    assert session.submit(cmd.PlayStateTake())
+    session.tick(FrameNeeds.none(), wall_dt=0.005)
+    for enabled in (True, False):
+        assert session.submit(cmd.SetStateTakeLoopEnabled(enabled))
+        assert session.state_take_range == (2, 4)
+        assert session.state_take_playhead == pytest.approx(0.035)
+        assert session.state_take_playing
+    session.tick(FrameNeeds.none(), wall_dt=1)
+    assert not session.state_take_playing
+    assert session.state_take_playhead == pytest.approx(0.04)
+    assert session.submit(cmd.SetStateTakeLoopEnabled(True))
+    assert session.submit(cmd.PlayStateTake())
+    assert session.state_take_cursor == 2
+
+
+def test_clearing_range_keeps_repeat_enabled_and_repeats_the_whole_take():
+    session, _ = _recorded_take()
+    assert session.submit(cmd.SetStateTakeRange(2, 4))
+    assert session.submit(cmd.SetStateTakeLoopEnabled(True))
+    assert session.submit(cmd.SetStateTakeRange())
+    assert session.state_take_range is None and session.state_take_loop_enabled
+    assert session.submit(cmd.PlayStateTake())
+    for _ in range(3):
+        session.tick(FrameNeeds.none(), wall_dt=0.11)
+        assert session.state_take_cursor == 0 and session.state_take_playing
+    assert session.submit(cmd.SetStateTakeLoopEnabled(False))
+    session.tick(FrameNeeds.none(), wall_dt=0.11)
+    assert session.state_take_cursor == 10 and not session.state_take_playing
+
+
+def test_take_range_and_repeat_remain_independent_when_switching_takes():
+    session, _ = _recorded_take()
+    first_id = session.active_state_take_id
+    assert session.submit(cmd.SetStateTakeRange(2, 4))
+    assert session.submit(cmd.SetStateTakeLoopEnabled(True))
+    assert session.submit(cmd.CreateStateTake())
+    assert session.state_take_range is None and not session.state_take_loop_enabled
+    assert session.submit(cmd.SelectStateTake(first_id))
+    assert session.state_take_range == (2, 4) and session.state_take_loop_enabled
+    assert session.submit(cmd.SetStateTakeLoopEnabled(False))
+    assert not session.submit(cmd.SetStateTakeRange(2, 999))
+    assert session.state_take_range == (2, 4) and not session.state_take_loop_enabled
+
+
+@pytest.mark.parametrize("loop_enabled", (False, True))
+def test_full_take_export_ignores_range_and_repeat_without_changing_either(loop_enabled):
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakePauseAtEnd(False))
+    assert session.submit(cmd.SetStateTakeRange(2, 4))
+    assert session.submit(cmd.SetStateTakeLoopEnabled(loop_enabled))
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake(loop=False, pause_at_end=True))
+    session.tick(FrameNeeds.none(), wall_dt=1)
+    assert session.state_take_cursor == 10 and adapter.steps == 10
+    assert not session.state_take_playing
+    assert session.state_take_range == (2, 4)
+    assert session.state_take_loop_enabled is loop_enabled
+
+
 def test_take_loop_wraps_inclusively_and_clear_restores_normal_end_behavior():
     session, adapter = _recorded_take()
     assert session.submit(cmd.SetStateTakeLoop(2, 4))

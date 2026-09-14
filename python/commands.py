@@ -127,7 +127,11 @@ class StopStateTakeRecording(Command):
 
 @dataclass(frozen=True)
 class PlayStateTake(Command):
-    """Replay the take, optionally overriding its loop and end policy for one playback."""
+    """Replay the selected range using its repeat setting.
+
+    ``loop=False`` bypasses both range and repeat for full-take export.
+    ``pause_at_end`` overrides the end policy when no range is selected.
+    """
 
     loop: bool = True
     pause_at_end: bool | None = None
@@ -154,10 +158,29 @@ class SeekStateTake(Command):
 
 @dataclass(frozen=True)
 class SetStateTakeLoop(Command):
-    """Loop an inclusive range of recorded frames; both None clear the range."""
+    """Set a range and enable repetition; both None clear it and disable repetition.
+
+    Retained for existing callers. Independent controls use SetStateTakeRange
+    and SetStateTakeLoopEnabled instead.
+    """
 
     first_frame: int | None = None
     last_frame: int | None = None
+
+
+@dataclass(frozen=True)
+class SetStateTakeRange(Command):
+    """Select an inclusive playback range without changing repetition; both None clear it."""
+
+    first_frame: int | None = None
+    last_frame: int | None = None
+
+
+@dataclass(frozen=True)
+class SetStateTakeLoopEnabled(Command):
+    """Repeat the selected playback range, or the whole take when no range is selected."""
+
+    enabled: bool = True
 
 
 @dataclass(frozen=True)

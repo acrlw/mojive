@@ -263,11 +263,11 @@ uses wall time, can be canceled with its button or the recording shortcut, and c
 file until a frame is captured. A zero-second delay starts on the next clean frame after menus
 close. The recording rate is independent from display and physics rates.
 
-For a completed simulation take, **Keyframes > Record Take Video** rewinds to its first frame,
-waits for the countdown, records the entire take once, and saves automatically. **Video Settings**
-sets the start delay and final-frame hold (one second by default); the same defaults are available
+For a completed simulation take, **Keyframes > Export Video** rewinds to its first frame,
+waits for the countdown, records the entire take once, and saves automatically. Recording settings
+set the start delay and final-frame hold (one second by default); the same defaults are available
 in **Settings > Recording**. The countdown is excluded from the video; the final hold is included.
-The selected loop range remains available for ordinary playback and is ignored for this recording.
+The playback range and independent Loop toggle remain unchanged and are ignored for this recording.
 Pausing the video also pauses take playback and the final hold. Camera and Layers controls remain
 available while recording. Changing the take or scene ends the recording.
 

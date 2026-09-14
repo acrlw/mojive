@@ -262,6 +262,60 @@ def capture_take_editing(viewer, output: Path) -> None:
     _save_active_popup_crop(viewer, output / "take-restarted-menu.png", padding=3)
 
 
+def capture_range_playback(viewer, output: Path) -> None:
+    """Exercise independent range selection, endpoint navigation, and repeat toggling."""
+    session, panel = viewer.session, viewer.panels.get("Keyframes")
+    times = session.state_take_times
+    panel._set_follow_mode("off")
+    panel._view_start, panel._view_end, panel._view_needs_fit = times[0], times[-1], False
+    viewer.sync()
+
+    def click_button(name):
+        _click(viewer, _item_center(viewer, "invisible_button", name))
+        viewer.sync()
+
+    # Reproduce enabling Loop before selecting a range: selection must not repurpose it.
+    click_button("##timeline-loop")
+    assert session.state_take_loop_enabled and session.state_take_range is None
+    drag(viewer, timeline_point(viewer, times[8]), timeline_point(viewer, times[20]), shift=True)
+    bounds = session.state_take_range
+    assert bounds is not None and session.state_take_loop_enabled
+    first, last = bounds
+    for button, expected in (("first", first), ("last", last), ("first", first)):
+        click_button(f"##take-{button}")
+        assert session.state_take_cursor == expected
+    _save_window_crop(viewer, "Keyframes", output / "range-first-frame.png", padding=0)
+
+    click_button("##timeline-loop")
+    assert not session.state_take_loop_enabled and session.state_take_range == bounds
+    click_button("##take-play-pause")
+    assert session.state_take_playing
+    session.tick(FrameNeeds.none(), wall_dt=times[-1] - times[0] + 1)
+    viewer.sync()
+    assert not session.state_take_playing and session.state_take_cursor == last
+    assert panel._playhead == times[last]
+    _save_window_crop(viewer, "Keyframes", output / "range-end-paused.png", padding=0)
+
+    click_button("##timeline-loop")
+    assert session.state_take_loop_enabled and session.state_take_range == bounds
+    assert session.submit(cmd.SeekStateTake(last - 1))
+    assert session.submit(cmd.PlayStateTake())
+    interval = times[last + 1] - times[last]
+    session.tick(FrameNeeds.none(), wall_dt=times[last] - times[last - 1] + interval)
+    assert session.state_take_cursor == first and session.state_take_playing
+    assert session.submit(cmd.PauseStateTake())
+    viewer.sync()
+    _save_window_crop(viewer, "Keyframes", output / "range-loop-wrapped.png", padding=0)
+
+    io = imgui.get_io()
+    _click(viewer, timeline_point(viewer, times[first]))
+    io.add_key_event(imgui.Key.escape, True)
+    viewer.sync()
+    io.add_key_event(imgui.Key.escape, False)
+    viewer.sync()
+    assert session.state_take_range is None and session.state_take_loop_enabled
+
+
 def capture_transport(viewer, output: Path) -> None:
     """Verify explicit transport sources and capture the two compact preferences."""
     session, app = viewer.session, viewer.app
@@ -452,6 +506,9 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Capture independent simulation, replay, and recording controls",
     )
+    parser.add_argument(
+        "--range-playback", action="store_true", help="Capture range navigation and repeat toggling"
+    )
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--language", choices=("en", "zh_CN"), default="en")
     args = parser.parse_args(argv)
@@ -472,8 +529,17 @@ def main(argv: list[str] | None = None) -> int:
     ) as viewer:
         viewer.app.set_language(args.language)
         populate_take(
-            viewer, 30 if args.recovery or args.transport else 900 if args.editing else 3945
+            viewer,
+            30
+            if args.recovery or args.transport or args.range_playback
+            else 900
+            if args.editing
+            else 3945,
         )
+        if args.range_playback:
+            show_timeline(viewer)
+            capture_range_playback(viewer, args.output)
+            return 0
         if args.transport:
             show_timeline(viewer)
             capture_transport(viewer, args.output)
@@ -510,6 +576,9 @@ def main(argv: list[str] | None = None) -> int:
         assert session.state_take_loop is not None
         _save_window_crop(viewer, "Keyframes", args.output / "loop-range.png", padding=0)
         bounds = session.state_take_loop
+        assert not session.state_take_loop_enabled
+        _click(viewer, _item_center(viewer, "invisible_button", "##timeline-loop"))
+        assert session.state_take_loop_enabled and session.state_take_range == bounds
         assert session.submit(cmd.SeekStateTake(bounds[1] - 1))
         assert session.submit(cmd.PlayStateTake())
         session.tick(FrameNeeds(), wall_dt=0.15)
@@ -524,7 +593,8 @@ def main(argv: list[str] | None = None) -> int:
             viewer,
             _item_center(viewer, "invisible_button", "##timeline-loop"),
         )
-        assert session.state_take_loop is None
+        assert not session.state_take_loop_enabled and session.state_take_range == bounds
+        assert session.submit(cmd.SetStateTakeRange())
         assert session.submit(cmd.SeekStateTake(1720))
         viewer.sync()
         panel._view_start, panel._view_end = 45.5, 57.25
