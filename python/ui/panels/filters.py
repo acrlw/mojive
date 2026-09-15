@@ -8,7 +8,7 @@ from functools import lru_cache
 import numpy as np
 from imgui_bundle import imgui
 
-from mojive.geometry2d.curves import CORNER_SMOOTHING, capped_polyline_points, offset_closed_path
+from mojive.geometry2d.curves import CORNER_SMOOTHING, capped_polyline_points, circular_stroke_mesh
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.text_layout import text_line_y
 
@@ -93,23 +93,9 @@ def severity_meshes(size: float, kind: str, smoothing: float = CORNER_SMOOTHING)
     scale = size / _ICON_GRID
     stroke = _FRAME_STROKE * scale
     radius = _FRAME_DIAMETER * scale * 0.5 - stroke * 0.5
-    path = _circle_outline(radius, max(32, math.ceil(size * 2)))
-    outer = tuple(map(tuple, offset_closed_path(path, stroke * 0.5).tolist()))
-    inner = tuple(map(tuple, offset_closed_path(path, -stroke * 0.5).tolist()))
-    count = len(outer)
-    indices = tuple(
-        v
-        for i in range(count)
-        for v in (
-            i,
-            (i + 1) % count,
-            count + i,
-            (i + 1) % count,
-            count + (i + 1) % count,
-            count + i,
-        )
-    )
-    meshes = [(outer + inner, indices, outer, inner)]
+    ring = circular_stroke_mesh(radius, stroke, max(32, math.ceil(size * 2)))
+    inner = ring[3]
+    meshes = [ring]
 
     def solid(points):
         points = tuple(map(tuple, points))

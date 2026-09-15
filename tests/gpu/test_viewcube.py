@@ -7,7 +7,13 @@ import pytest
 
 from mojive.app.ui.window import create_window
 from mojive.tools.viewcube_transitions import capture_orientation, circle_limits, depth_swaps
-from mojive.ui.viewcube import ORIGIN_GAP_PT, ORIGIN_RADIUS_PT, ViewCube, widget_center
+from mojive.ui.viewcube import (
+    ORIGIN_BORDER_PT,
+    ORIGIN_GAP_PT,
+    ORIGIN_RADIUS_PT,
+    ViewCube,
+    widget_center,
+)
 from mojive.ui.window import WindowConfig
 
 pytestmark = pytest.mark.gpu
@@ -35,7 +41,11 @@ def test_transitions_and_transparent_origin_shell(backend_name, scale):
             before, after = [capture_orientation(window, cube, eye, scale)[0] for eye in eyes]
             difference = np.abs(before.astype(int) - after.astype(int))
             assert difference.max() <= 4, (name, scale, difference.max())
-        for background in ((0.2, 0.4, 0.7, 1.0), (0.7, 0.3, 0.15, 1.0)):
+        for background in (
+            (0.2, 0.4, 0.7, 1.0),
+            (0.7, 0.3, 0.15, 1.0),
+            (1.0, 1.0, 1.0, 1.0),
+        ):
             pixels = capture_orientation(window, cube, (1, 1, 0.6), scale, background=background)[0]
             height, width = pixels.shape[:2]
             center = pixels[height // 2 - 1 : height // 2 + 1, width // 2 - 1 : width // 2 + 1, :3]
@@ -47,12 +57,25 @@ def test_transitions_and_transparent_origin_shell(backend_name, scale):
                 )
                 # Exclude both AA fringes; the remaining annulus must expose the
                 # actual background, not a flat-color disk painted over the axes.
-                origin_fringe = min(1.0, ORIGIN_GAP_PT * scale * 0.25)
-                clear = (radius > ORIGIN_RADIUS_PT * scale + origin_fringe + 0.1) & (
+                origin_fringe = min(1.0, ORIGIN_BORDER_PT * scale * 0.5)
+                border_radius = (ORIGIN_RADIUS_PT + ORIGIN_BORDER_PT) * scale
+                clear = (radius > border_radius + origin_fringe + 0.1) & (
                     radius < (ORIGIN_RADIUS_PT + ORIGIN_GAP_PT) * scale - 1.05
                 )
                 assert clear.any()
                 assert np.max(np.abs(pixels[clear].astype(int) - pixels[0, 0].astype(int))) <= 1
+            if background[:3] == (1.0, 1.0, 1.0):
+                # The old white-only disk disappeared here. Inspect only the
+                # center neighborhood, away from the colored spoke ends.
+                radius_px = (ORIGIN_RADIUS_PT + ORIGIN_BORDER_PT) * scale * window.pixel_scale
+                extent = max(2, int(np.ceil(radius_px)))
+                origin = pixels[
+                    height // 2 - extent : height // 2 + extent,
+                    width // 2 - extent : width // 2 + extent,
+                    :3,
+                ]
+                gray = origin.max(axis=-1) - origin.min(axis=-1) <= 2
+                assert np.any(gray & (origin.mean(axis=-1) < 225))
         plain = capture_orientation(window, cube, (1, 1, 0.6), scale)[0]
         hovered = capture_orientation(window, cube, (1, 1, 0.6), scale, hover_origin=True)[0]
         changed_y, changed_x = np.where(np.any(plain != hovered, axis=-1))

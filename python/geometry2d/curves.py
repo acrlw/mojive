@@ -949,20 +949,28 @@ def _arc_ribbon_indices(count: int, end_count: int, start_count: int) -> tuple[i
     return tuple(indices)
 
 
-def offset_closed_path(points, distance: float) -> np.ndarray:
-    """Offset a sampled closed boundary outward, preserving its winding."""
+def _closed_path_miters(points):
+    """Share outward offset vectors between authored strokes and AA fringes."""
     path = np.asarray(points, np.float64).reshape(-1, 2)
     edges = np.roll(path, -1, axis=0) - path
     lengths = np.linalg.norm(edges, axis=1)
     if len(path) < 3 or np.any(lengths < 1e-9):
-        return path.copy()
-    area = np.sum(path[:, 0] * np.roll(path[:, 1], -1) - path[:, 1] * np.roll(path[:, 0], -1))
+        return path, None, 0.0
+    area = 0.5 * float(
+        np.sum(path[:, 0] * np.roll(path[:, 1], -1)) - np.sum(path[:, 1] * np.roll(path[:, 0], -1))
+    )
     normals = (
         math.copysign(1.0, area) * np.column_stack((edges[:, 1], -edges[:, 0])) / lengths[:, None]
     )
     miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
     factors = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
-    return path + distance * miters * factors[:, None]
+    return path, miters * factors[:, None], area
+
+
+def offset_closed_path(points, distance: float) -> np.ndarray:
+    """Offset a sampled closed boundary outward, preserving its winding."""
+    path, miters, _area = _closed_path_miters(points)
+    return path.copy() if miters is None else path + distance * miters
 
 
 def _sample_bezier(control, tolerance: float) -> np.ndarray:
@@ -1162,26 +1170,12 @@ def smooth_ellipse_stroke(
 
 def polygon_fringe(points) -> np.ndarray:
     """Return a one-pixel outward miter ring for either polygon winding."""
-
-    outline = np.asarray(points, np.float64).reshape(-1, 2)
-    if len(outline) < 3:
+    outline, miters, area = _closed_path_miters(points)
+    # Degenerate authored paths retain their offset contract, but must not
+    # emit an antialias ring with no filled interior.
+    if miters is None or abs(area) < 1e-9:
         return np.empty((0, 2), np.float64)
-    edges = np.roll(outline, -1, axis=0) - outline
-    lengths = np.linalg.norm(edges, axis=1)
-    if np.any(lengths < 1e-9):
-        return np.empty((0, 2), np.float64)
-    signed_area = 0.5 * float(
-        np.sum(outline[:, 0] * np.roll(outline[:, 1], -1))
-        - np.sum(outline[:, 1] * np.roll(outline[:, 0], -1))
-    )
-    if abs(signed_area) < 1e-9:
-        return np.empty((0, 2), np.float64)
-    normals = np.column_stack((edges[:, 1], -edges[:, 0])) / lengths[:, None]
-    if signed_area < 0.0:
-        normals *= -1.0
-    miters = (np.roll(normals, 1, axis=0) + normals) * 0.5
-    scale = np.minimum(1.0 / np.maximum(np.sum(miters * miters, axis=1), 1e-4), 100.0)
-    return outline + miters * scale[:, None]
+    return outline + miters
 
 
 @lru_cache(maxsize=128)

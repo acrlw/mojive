@@ -214,6 +214,42 @@ def test_hover_does_not_resize_the_ball():
     assert overlay.outline == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+@pytest.mark.parametrize("hovered", (False, True))
+def test_origin_border_preserves_white_core_and_scales_with_widget(scale, hovered):
+    class Overlay:
+        def __init__(self):
+            self.disks = []
+
+        def indexed_fill(self, points, indices, color, **kwargs):
+            self.disks.append((np.linalg.norm(points, axis=1), color, kwargs))
+
+        def fringed_concave_fill(self, *args, **kwargs):
+            pass
+
+        def centered_label(self, *args, **kwargs):
+            pass
+
+    cube = vc.ViewCube()
+    cube._center = CENTER
+    cube._origin_hovered = hovered
+    cube._balls = [vc.Ball(0, 1.0, (140.0, 100.0), BALL, -0.5)]
+    overlay = Overlay()
+    cube.draw(overlay, scale)
+    border, core = overlay.disks
+    radius = (vc.ORIGIN_HOVER_RADIUS_PT if hovered else vc.ORIGIN_RADIUS_PT) * scale
+    assert core[0] == pytest.approx(radius)
+    assert border[0] == pytest.approx(radius + vc.ORIGIN_BORDER_PT * scale)
+    assert border[1] == vc.ORIGIN_BORDER_COLOR
+    assert core[1] == ((1.0, 1.0, 1.0, 1.0) if hovered else vc.LABEL_FILL)
+    for radii, _color, options in overlay.disks:
+        assert options["origin"] == CENTER
+        assert options["fringe_width"] <= vc.ORIGIN_BORDER_PT * scale * 0.5
+        assert (
+            max(radii) + options["fringe_width"] < (vc.ORIGIN_RADIUS_PT + vc.ORIGIN_GAP_PT) * scale
+        )
+
+
 def test_back_fade_enters_and_leaves_without_a_velocity_step():
     step = 1e-4
     assert 1.0 - vc._back_alpha(vc.BACK_FADE_START + step) < step * 0.01

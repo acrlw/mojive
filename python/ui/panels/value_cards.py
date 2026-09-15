@@ -161,6 +161,7 @@ def value_rail(
         imgui.push_style_var(imgui.StyleVar_.grab_min_size, 10 * scale)
         imgui.set_next_item_width(rail_width)
         changed, current = imgui.slider_float(label, value, lo, hi, "", imgui.SliderFlags_.no_input)
+        disabled = bool(imgui.get_item_flags() & imgui.ItemFlags_.disabled)
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         imgui.pop_style_var()
         imgui.pop_style_color(5)
@@ -186,6 +187,7 @@ def value_rail(
             hovered=hovered,
             pressed=pressed,
             alpha=style.alpha,
+            disabled=disabled,
         )
         if not stacked:
             imgui.same_line()
@@ -326,12 +328,31 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
 
 
 def draw_value_rail(
-    draw, left, right, position, radius, theme, scale, *, hovered=False, pressed=False, alpha=1.0
+    draw,
+    left,
+    right,
+    position,
+    radius,
+    theme,
+    scale,
+    *,
+    hovered=False,
+    pressed=False,
+    alpha=1.0,
+    disabled=False,
 ):
-    """Paint a left-to-value rail with explicit normal, hover and pressed feedback."""
+    """Paint a subdued rail and separate round handle, with opaque disabled colors."""
 
     def color(value):
-        return (*value[:3], value[3] * alpha)
+        opacity = value[3] * alpha
+        if disabled:
+            # Resolve disabled dimming once against the panel surface. The
+            # opaque handle then covers the rail instead of blending it twice.
+            rgb = (
+                b + (c - b) * opacity for c, b in zip(value[:3], theme.bg_window[:3], strict=True)
+            )
+            return (*rgb, 1.0)
+        return (*value[:3], opacity)
 
     fill = theme.primary_bright if pressed else theme.primary if hovered else theme.primary_dim
     knob = theme.text if pressed else theme.primary_bright if hovered else theme.primary
