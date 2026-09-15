@@ -147,6 +147,8 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
 
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     monkeypatch.setenv("MOJIVE_IMGUI_INI", str(tmp_path / "layout.ini"))
+    # This fixed-size window must leave a sampling strip between the two UI hosts.
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     scene = tmp_path / "interactive-haze.xml"
     scene.write_text(
         """

@@ -15,6 +15,7 @@ from mojive.geometry2d.curves import (
     smooth_rect_points,
 )
 from mojive.geometry2d.curves import polygon_fringe as _anti_alias_fringe_outer
+from mojive.geometry2d.polygons import signed_polygon_area
 
 
 @lru_cache(maxsize=512)
@@ -29,10 +30,7 @@ def _cached_imgui_points(points: tuple[tuple[float, float], ...]):
 @lru_cache(maxsize=512)
 def _clockwise_points(points: tuple[tuple[float, float], ...]):
     # ImGui's fill fringe requires clockwise screen winding, including mirrored glyphs.
-    area = sum(
-        a[0] * b[1] - a[1] * b[0] for a, b in zip(points, points[1:] + points[:1], strict=True)
-    )
-    return points if area >= 0.0 else points[::-1]
+    return points if signed_polygon_area(points) >= 0.0 else points[::-1]
 
 
 @lru_cache(maxsize=512)

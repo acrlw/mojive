@@ -3534,28 +3534,14 @@ def test_gizmo_stays_drawn_while_the_camera_is_being_dragged(free_body_viewer):
     assert not any(inter for _, inter in seen_drawn_while_dragging)
 
 
-def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_body_viewer):
+def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(
+    free_body_viewer, monkeypatch
+):
     from imgui_bundle import imgui
 
     import mojive.commands as cmd
     from mojive.interaction.gizmo import GizmoHandle, project
-
-    class Recorder:
-        def __init__(self, inner):
-            self.inner = inner
-            self.lines = []
-
-        def add_line(self, *args):
-            self.lines.append(args)
-            return self.inner.add_line(*args)
-
-        def add_polyline(self, points, color, thickness, flags):
-            if len(points) == 2 and not (flags & imgui.ImDrawFlags_.closed.value):
-                self.lines.append((*points, color, thickness))
-            return self.inner.add_polyline(points, color, thickness, flags)
-
-        def __getattr__(self, name):
-            return getattr(self.inner, name)
+    from mojive.ui.imgui_draw import ImguiDraw2D
 
     v = free_body_viewer
     io = imgui.get_io()
@@ -3583,36 +3569,30 @@ def test_holding_axis_key_uses_the_exact_gizmo_axis_without_a_mouse_click(free_b
     assert v.app.gizmo.keyboard_using
     assert v.app.gizmo.active_handle is GizmoHandle.X
 
-    real = imgui.get_window_draw_list
-    recorders = []
+    real = ImguiDraw2D.line
+    lines = []
 
-    def spy():
-        inner = real()
+    def spy(draw, a, b, *args, **kwargs):
         window = imgui.internal.get_current_window_read()
-        if window is None or not window.name.startswith("Viewport"):
-            return inner
-        recorder = Recorder(inner)
-        recorders.append(recorder)
-        return recorder
+        if window is not None and window.name.startswith("Viewport"):
+            lines.append(np.asarray((a, b), dtype=float))
+        return real(draw, a, b, *args, **kwargs)
 
-    imgui.get_window_draw_list = spy
-    try:
+    # Observe the Python drawing boundary without replacing native ImDrawList objects.
+    with monkeypatch.context() as patch:
+        patch.setattr(ImguiDraw2D, "line", spy)
         v.sync()
-    finally:
-        imgui.get_window_draw_list = real
 
     candidates = []
-    for recorder in recorders:
-        for candidate in recorder.lines:
-            segment = np.array(((candidate[0].x, candidate[0].y), (candidate[1].x, candidate[1].y)))
-            inside = (
-                np.all(segment[:, 0] >= rect[0] - 1.0)
-                and np.all(segment[:, 0] <= rect[0] + rect[2] + 1.0)
-                and np.all(segment[:, 1] >= rect[1] - 1.0)
-                and np.all(segment[:, 1] <= rect[1] + rect[3] + 1.0)
-            )
-            if inside and np.linalg.norm(segment[1] - segment[0]) > min(rect[2], rect[3]):
-                candidates.append(segment)
+    for segment in lines:
+        inside = (
+            np.all(segment[:, 0] >= rect[0] - 1.0)
+            and np.all(segment[:, 0] <= rect[0] + rect[2] + 1.0)
+            and np.all(segment[:, 1] >= rect[1] - 1.0)
+            and np.all(segment[:, 1] <= rect[1] + rect[3] + 1.0)
+        )
+        if inside and np.linalg.norm(segment[1] - segment[0]) > min(rect[2], rect[3]):
+            candidates.append(segment)
     assert candidates
     line = max(candidates, key=lambda segment: np.linalg.norm(segment[1] - segment[0]))
     cam = v.app.camera.view()

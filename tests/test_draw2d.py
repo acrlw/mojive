@@ -26,6 +26,45 @@ from mojive.ui.paint_protocol import Draw2D
 RECT = (0.0, 0.0, 800.0, 600.0)
 
 
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+@pytest.mark.parametrize("fraction", (0.0, 0.5, 1.0))
+@pytest.mark.parametrize("disabled", (False, True))
+def test_value_rail_keeps_a_separate_opaque_handle_when_disabled(scale, fraction, disabled):
+    from mojive.ui.panels.value_cards import draw_value_rail
+    from mojive.ui.theme import THEME
+
+    draw = RecordingDraw2D()
+    position, radius = 100 * scale * fraction, 5 * scale
+    alpha = 0.6 if disabled else 1.0
+    draw_value_rail(
+        draw,
+        (0, 20),
+        (100 * scale, 20),
+        position,
+        radius,
+        THEME,
+        scale,
+        alpha=alpha,
+        disabled=disabled,
+    )
+    name, (center, actual_radius, _color) = draw.calls[-1]
+    assert name == "circle_filled"
+    assert center == (position, 20) and actual_radius == radius
+    source_colors = [THEME.bg_frame]
+    if fraction > 0:
+        source_colors.append(THEME.primary_dim)
+    source_colors.append(THEME.primary)
+    assert len(draw.calls) == len(source_colors)
+    for (_name, args), source in zip(draw.calls, source_colors, strict=True):
+        expected = np.asarray(source[:3])
+        if disabled:
+            background = np.asarray(THEME.bg_window[:3])
+            expected = background + (expected - background) * alpha
+        np.testing.assert_allclose(args[2][:3], expected)
+        assert args[2][3] == 1.0
+    assert all(name == "line" for name, _ in draw.calls[:-1])
+
+
 class RecordingDraw2D:
     """Draw2D fake that records every call as a (name, args) tuple."""
 
@@ -620,12 +659,17 @@ def test_viewcube_submits_balls_back_to_front(scale) -> None:
     overlay = RecordingDraw2D()
     cube.draw(overlay, style_scale=scale)
 
-    outline, _indices, color = overlay.calls[0][1]
+    border, _indices, border_color = overlay.calls[0][1]
+    assert np.linalg.norm(border, axis=1) == pytest.approx(
+        (vc.ORIGIN_RADIUS_PT + vc.ORIGIN_BORDER_PT) * scale
+    )
+    assert border_color == vc.ORIGIN_BORDER_COLOR
+    outline, _indices, color = overlay.calls[1][1]
     radii = np.linalg.norm(outline, axis=1)
     assert radii == pytest.approx(np.full(len(outline), vc.ORIGIN_RADIUS_PT * scale))
     assert radii.min() * 2 >= vc.LINE_PT * scale
     assert color == vc.LABEL_FILL
-    expected: list[str] = ["indexed_fill"]
+    expected: list[str] = ["indexed_fill", "indexed_fill"]
     for ball in cube.balls:  # layout() is already sorted far-to-near
         if ball.alpha <= 0.0:
             continue

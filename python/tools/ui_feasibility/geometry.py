@@ -336,9 +336,14 @@ def _draw_diagnostic_gallery(state, scale):
         draw.text((p.x + size + 10 * scale, p.y), ctx.theme.text, text)
         imgui.dummy(imgui.ImVec2(720 * scale, size + 8 * scale))
     imgui.spacing()
-    imgui.text("Slider states: normal / hover / press")
-    for index, (label, hovered, pressed) in enumerate(
-        (("Normal", False, False), ("Hover", True, False), ("Press", True, True))
+    imgui.text("Slider states: normal / hover / press / disabled")
+    for index, (label, hovered, pressed, disabled) in enumerate(
+        (
+            ("Normal", False, False, False),
+            ("Hover", True, False, False),
+            ("Press", True, True, False),
+            ("Disabled", False, False, True),
+        )
     ):
         if index:
             imgui.same_line()
@@ -355,6 +360,8 @@ def _draw_diagnostic_gallery(state, scale):
             scale,
             hovered=hovered,
             pressed=pressed,
+            alpha=imgui.get_style().disabled_alpha if disabled else 1.0,
+            disabled=disabled,
         )
         imgui.dummy((195 * scale, 30 * scale))
         imgui.end_group()

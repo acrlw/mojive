@@ -290,6 +290,7 @@ GPU_WGPU_FILES += tests/gpu/test_keyframe_timeline.py tests/gpu/test_ui_refineme
 GPU_WGPU_FILES += tests/gpu/test_scene_capture.py
 GPU_WGPU_FILES +=  tests/gpu/test_ui_feasibility_backend.py
 GPU_WGPU_FILES += tests/gpu/test_viewcube.py
+GPU_WGPU_FILES += tests/gpu/test_value_rails.py
 GPU_WGPU_FILES += tests/gpu/test_control_scale.py tests/gpu/test_canvas2d.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.

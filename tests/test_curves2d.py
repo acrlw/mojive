@@ -12,6 +12,8 @@ from mojive.geometry2d.curves import (
     _ellipse_frame,
     circular_stroke_mesh,
     clip_polygon_rect,
+    offset_closed_path,
+    polygon_fringe,
     smooth_capsule_points,
     smooth_ellipse_stroke,
     smooth_line_cap,
@@ -20,6 +22,42 @@ from mojive.geometry2d.curves import (
     turn_curvature,
 )
 from tests.curve_assertions import assert_paths_close, distance_to_path
+
+
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_outline_offsets_and_antialias_fringe_share_winding_and_join_geometry(scale, reverse):
+    rectangle = np.array(((0, 0), (20, 0), (20, 10), (0, 10)), np.float64) * scale
+    expected = np.array(((-1, -1), (1, -1), (1, 1), (-1, 1)), np.float64)
+    if reverse:
+        rectangle, expected = rectangle[::-1], expected[::-1]
+    for origin in ((0, 0), (1536.25, 840.75)):
+        path = rectangle + origin
+        np.testing.assert_allclose(polygon_fringe(path), path + expected, atol=1e-9)
+        for distance in (-0.5, 0.0, 2.0):
+            np.testing.assert_allclose(
+                offset_closed_path(path, distance), path + expected * distance, atol=1e-9
+            )
+    # Concave corners and the G3 neck must use the same miter limit in both paths.
+    from mojive.geometry2d.curves import smooth_lollipop_points
+
+    path = np.asarray(smooth_lollipop_points(40 * scale, 5 * scale, 3 * scale))
+    if reverse:
+        path = path[::-1]
+    np.testing.assert_array_equal(polygon_fringe(path), offset_closed_path(path, 1.0))
+
+
+@pytest.mark.parametrize("points", ((), ((0, 0), (1, 0)), ((0, 0), (1, 0), (1, 0), (0, 1))))
+def test_degenerate_outline_preserves_offset_without_emitting_a_fringe(points):
+    original = np.asarray(points, np.float64).reshape(-1, 2)
+    offset = offset_closed_path(original, 1.0)
+    np.testing.assert_array_equal(offset, original)
+    assert not np.shares_memory(offset, original)
+    assert polygon_fringe(original).shape == (0, 2)
+
+
+def test_collinear_outline_has_no_antialias_fringe():
+    assert polygon_fringe(((0, 0), (1, 0), (2, 0))).shape == (0, 2)
 
 
 @pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))

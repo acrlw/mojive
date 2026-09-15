@@ -65,11 +65,12 @@ def capture_orientation(
 def run(renderer, output):
     output.mkdir(parents=True, exist_ok=True)
     report = {}
-    for scale in (0.65, 1.0, 1.25, 1.5):
+    for scale in (0.65, 1.0, 1.25, 1.5, 2.5):
+        extent = max(180, math.ceil(2 * (RADIUS_PT + BALL_PT + MARGIN_PT) * scale))
         window = create_window(
             WindowConfig(
-                width=180,
-                height=180,
+                width=extent,
+                height=extent,
                 vsync=False,
                 docking=False,
                 ini_path="",
@@ -119,6 +120,7 @@ def run(renderer, output):
                 output / f"origin-hover-{scale}.png"
             )
             for name, background in (
+                ("white", (1.0, 1.0, 1.0, 1.0)),
                 ("blue", (0.2, 0.4, 0.7, 1.0)),
                 ("warm", (0.7, 0.3, 0.15, 1.0)),
             ):

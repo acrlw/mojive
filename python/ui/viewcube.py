@@ -21,6 +21,8 @@ BALL_PT = 9.5
 MARGIN_PT = 10.0
 LINE_PT = 2.0
 ORIGIN_RADIUS_PT = LINE_PT
+ORIGIN_BORDER_PT = LINE_PT * 0.25
+ORIGIN_BORDER_COLOR = (0.65, 0.65, 0.65, 1.0)
 ORIGIN_GAP_PT = LINE_PT
 ORIGIN_HIT_RADIUS_PT = ORIGIN_RADIUS_PT + ORIGIN_GAP_PT * 2.0
 ORIGIN_HOVER_RADIUS_PT = ORIGIN_RADIUS_PT + ORIGIN_GAP_PT * 0.25
@@ -240,6 +242,18 @@ class ViewCube:
         origin_radius = (
             ORIGIN_HOVER_RADIUS_PT if self._origin_hovered else ORIGIN_RADIUS_PT
         ) * style_scale
+        # Keep the white core's radius; the narrow border sits in its clearance
+        # shell so the origin remains visible against a white scene background.
+        border_outline = _origin_outline(origin_radius + ORIGIN_BORDER_PT * style_scale)
+        fringe_width = min(1.0, ORIGIN_BORDER_PT * style_scale * 0.5)
+        overlay.indexed_fill(
+            border_outline,
+            _ORIGIN_INDICES,
+            ORIGIN_BORDER_COLOR,
+            outline=border_outline,
+            origin=self._center,
+            fringe_width=fringe_width,
+        )
         origin_outline = _origin_outline(origin_radius)
         overlay.indexed_fill(
             origin_outline,
@@ -247,7 +261,7 @@ class ViewCube:
             (1.0, 1.0, 1.0, 1.0) if self._origin_hovered else LABEL_FILL,
             outline=origin_outline,
             origin=self._center,
-            fringe_width=min(1.0, ORIGIN_GAP_PT * style_scale * 0.25),
+            fringe_width=fringe_width,
         )
         for b in self._balls:
             if b.alpha <= 0.0:
