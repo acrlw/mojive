@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import math
 import multiprocessing as mp
 import operator
 import threading
 import time
 import traceback
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -85,6 +86,7 @@ class PassiveViewer:
         self._timeout = float(timeout)
         self._lock = threading.RLock()
         self._closed = False
+        self._debug_client = None
         self._next_sync = 0.0
         self._step = 0
         self._step_known = False
@@ -125,6 +127,9 @@ class PassiveViewer:
             child.close()
             completion_sender.close()
             self._receive()
+            from mojive.remote.bridge import DebugClient
+
+            self._debug_client = DebugClient(pid=self._process.pid)
         except BaseException:
             child.close()
             completion_sender.close()
@@ -331,6 +336,43 @@ class PassiveViewer:
             raise TypeError("status requires text and an optional bool paused value")
         self._request("set_status", (text, paused))
 
+    def publish_debug_commands(self, commands: Sequence[Mapping[str, object]]) -> None:
+        """Publish retained debug primitives to the passive display process.
+
+        Commands use the public debug bridge records documented by DebugDraw. Stable
+        ``layer`` and ``id`` values replace existing primitives in place. Publication
+        is asynchronous and does not advance physics or wait for a display frame.
+
+        Args:
+            commands: JSON-compatible debug command mappings.
+
+        Raises:
+            TypeError: If a command is not a mapping or has non-string keys.
+            ValueError: If a command is not finite JSON data.
+            RuntimeError: If the passive viewer is closed.
+        """
+        if isinstance(commands, (str, bytes, Mapping)):
+            raise TypeError("debug commands must be a sequence of mappings")
+        prepared = []
+        for command in commands:
+            if not isinstance(command, Mapping):
+                raise TypeError("each debug command must be a mapping")
+            if any(not isinstance(key, str) for key in command):
+                raise TypeError("debug command keys must be strings")
+            prepared.append(dict(command))
+        try:
+            json.dumps(prepared, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("debug commands must contain finite JSON data") from exc
+
+        with self._lock:
+            if not self.is_running():
+                raise RuntimeError("The passive viewer is closed")
+            if self._debug_client is None:
+                raise RuntimeError("The passive debug bridge is unavailable")
+            for command in prepared:
+                self._debug_client.send(**command)
+
     def capture_array(self, *, surface: CaptureSurface | str = CaptureSurface.SCENE) -> np.ndarray:
         """Publish state and wait for one owned RGB capture, without disk I/O."""
         with self._lock:
@@ -414,6 +456,10 @@ class PassiveViewer:
             if self._closed:
                 return
             self._closed = True
+            debug_client = getattr(self, "_debug_client", None)
+            if debug_client is not None:
+                debug_client.close()
+                self._debug_client = None
             self._stop.set()
             try:
                 if self._process.pid is not None:
@@ -685,6 +731,7 @@ def _run_viewer(
                         viewer.app.external_status, viewer.app.external_paused = payload
                     elif operation == "stats":
                         with mailbox.lock:
+                            debug_stats = viewer.bridge.stats
                             result = {
                                 "rendered_frames": mailbox.rendered.value,
                                 "published_frames": mailbox.sequence.value,
@@ -692,6 +739,14 @@ def _run_viewer(
                                 "displayed_time": mailbox.displayed_time.value,
                                 "physics_hz": viewer.session.frame.physics_hz,
                                 "max_fps": max_fps,
+                                "debug_commands": {
+                                    "applied": debug_stats.applied,
+                                    "dropped": debug_stats.dropped,
+                                    "invalid": debug_stats.invalid,
+                                    "queued": debug_stats.queued,
+                                    "primitives": getattr(viewer.backend.debug, "primitives", 0),
+                                    "notes": list(debug_stats.notes),
+                                },
                             }
                     elif operation == "start_rpc":
                         result = str(viewer.start_rpc(payload).socket_path)

@@ -119,6 +119,43 @@ def test_passive_rates_input_capture_and_shutdown(tmp_path):
     viewer.close()
 
 
+def test_passive_debug_commands_reach_the_display():
+    model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
+    data = mujoco.MjData(model)
+    with launch_passive(model, data, width=640, height=480, show_window=False) as viewer:
+        viewer.set_camera(CameraView(eye=(0.0, -5.0, 2.0), target=(0.0, 0.0, 0.7)))
+        baseline = viewer.capture_array(surface="viewport")
+        baseline_primitives = viewer.stats["debug_commands"]["primitives"]
+        viewer.publish_debug_commands(
+            (
+                {
+                    "op": "arrow",
+                    "layer": "policy.velocity",
+                    "occlusion": "always",
+                    "id": "target",
+                    "a": [-1.5, 0.0, 1.2],
+                    "b": [1.5, 0.0, 1.2],
+                    "color": [0.2, 0.95, 0.3, 1.0],
+                    "width_px": 12.0,
+                },
+            )
+        )
+        deadline = time.monotonic() + 2.0
+        image = baseline
+        while np.array_equal(image, baseline) and time.monotonic() < deadline:
+            time.sleep(0.02)
+            image = viewer.capture_array(surface="viewport")
+
+        debug_stats = viewer.stats["debug_commands"]
+        assert debug_stats["applied"] == 1
+        assert debug_stats["dropped"] == debug_stats["invalid"] == debug_stats["queued"] == 0
+        assert debug_stats["primitives"] == baseline_primitives + 1
+        assert debug_stats["notes"] == []
+        assert not np.array_equal(image, baseline)
+        green = image[..., 1].astype(np.int16) - image[..., 0].astype(np.int16)
+        assert green.max() > 80
+
+
 def test_passive_startup_failure_is_reported_and_reaped():
     model = mujoco.MjModel.from_xml_string("<mujoco/>")
     with pytest.raises(RuntimeError, match="renderer"):

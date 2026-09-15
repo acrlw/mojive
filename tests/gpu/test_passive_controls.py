@@ -1,5 +1,6 @@
 """Real input, recording and status with a caller-owned physics clock."""
 
+from dataclasses import replace
 from queue import Queue
 
 import pytest
@@ -13,6 +14,35 @@ from mojive.ui import ToolHint
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 mujoco = pytest.importorskip("mujoco")
+
+
+@pytest.mark.parametrize("writable", (False, True))
+def test_external_control_capability_gates_native_actuator_slider(viewer, monkeypatch, writable):
+    from mojive import commands as cmd
+
+    viewer.session.submit(cmd.Pause())
+    adapter = viewer.session.adapter
+    monkeypatch.setattr(
+        adapter, "caps", replace(adapter.caps, external_clock=True, write_ctrl=writable)
+    )
+    observed = []
+    slider = imgui.slider_float
+
+    def observe(label, *args, **kwargs):
+        result = slider(label, *args, **kwargs)
+        if label == "##control-actuator-0":
+            observed.append(bool(imgui.get_item_flags() & imgui.ItemFlags_.disabled))
+        return result
+
+    monkeypatch.setattr(imgui, "slider_float", observe)
+    viewer.sync()
+    before = float(viewer.session.frame.ctrl[0])
+    point = _item_center(viewer, "slider_float", "##control-actuator-0")
+    _click(viewer, (point[0] + 20, point[1]))
+    viewer.sync()
+    assert observed and all(value is not writable for value in observed)
+    after = float(viewer.session.frame.ctrl[0])
+    assert (after != before) is writable
 
 
 @pytest.fixture
