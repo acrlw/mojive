@@ -14,6 +14,7 @@ from ..adapters.base import NodeType, SceneNode
 from ..math3d import camera_rotation as camera_rotation
 from ..math3d import direction_basis
 from ..render.debugdraw import Occlusion
+from ..scene.queries import camera_for_node
 from ..types import CameraView, Light, LightType
 from .icons import production_helper_strokes
 from .theme import THEME
@@ -509,12 +510,11 @@ def _direction(value) -> np.ndarray:
 
 
 def _camera_view(session, node):
+    # Preview, picking and helpers must share live poses and authored overrides.
+    if (view := camera_for_node(session, node)) is not None:
+        return view
     index = int(node.camera_index)
     cameras = session.frame.cameras or session.source.cameras
     if 0 <= index < len(cameras):
         return cameras[index]
-    if 0 <= index < len(session.cameras):
-        view = session.camera_view(session.cameras[index].camera_id)
-        if view is not None:
-            return view
     return None

@@ -123,6 +123,8 @@ def _node_local_bounds(
 ) -> CenteredBounds | None:
     """Return the selected geom or body's finite geometry bound in its body frame."""
 
+    if node.type in (NodeType.CAMERA, NodeType.LIGHT):
+        return None
     if source is None or source.instance_count == 0 or node.body_index < 0:
         return None
     if frame.body_xpos is None or frame.body_xmat is None:
@@ -199,6 +201,9 @@ def _node_world_bounds(
 ) -> CenteredBounds | None:
     """Return selected finite geometry bounds without nesting body/geom scans."""
 
+    # Camera/light body indices identify attachments, not geometry ownership.
+    if node.type in (NodeType.CAMERA, NodeType.LIGHT):
+        return None
     if source is None or source.instance_count == 0:
         return None
     if frame.geom_xpos is None or frame.geom_xmat is None:
