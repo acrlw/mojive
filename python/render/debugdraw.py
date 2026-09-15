@@ -48,6 +48,7 @@ class PrimitiveType(enum.IntEnum):
     CYLINDER = 11
     SCREEN_TRIANGLE = 12
     TRIANGLE = 13
+    LIT_TRIANGLE = 14
 
 
 VERTEX_COUNT: dict[PrimitiveType, int] = {
@@ -65,6 +66,7 @@ VERTEX_COUNT: dict[PrimitiveType, int] = {
     PrimitiveType.CYLINDER: 1,
     PrimitiveType.SCREEN_TRIANGLE: 3,
     PrimitiveType.TRIANGLE: 3,
+    PrimitiveType.LIT_TRIANGLE: 3,
 }
 
 
@@ -83,6 +85,7 @@ class DrawPath(enum.StrEnum):
     DRAG_LINK = "drag_link"
     SCREEN_TRIANGLE = "screen_triangle"
     TRIANGLE = "triangle"
+    LIT_TRIANGLE = "lit_triangle"
 
 
 PRIMITIVE_PATH: dict[PrimitiveType, DrawPath] = {
@@ -100,6 +103,7 @@ PRIMITIVE_PATH: dict[PrimitiveType, DrawPath] = {
     PrimitiveType.CYLINDER: DrawPath.SOLID,
     PrimitiveType.SCREEN_TRIANGLE: DrawPath.SCREEN_TRIANGLE,
     PrimitiveType.TRIANGLE: DrawPath.TRIANGLE,
+    PrimitiveType.LIT_TRIANGLE: DrawPath.LIT_TRIANGLE,
 }
 
 PRIMITIVE_MESH: dict[PrimitiveType, MeshKey] = {
@@ -120,6 +124,7 @@ RECORD_FLOATS: dict[DrawPath, int] = {
     DrawPath.STROKE: 14,  # prev/a/b(9) rgba(4) width_px(1)
     # a(3) b(3) core_rgba(4) edge_rgba(4) width/radius/edge_px(3)
     DrawPath.DRAG_LINK: 18,
+    DrawPath.LIT_TRIANGLE: 24,  # XYZ x3, normals x3, RGBA, padding
     DrawPath.TRIANGLE: 13,  # three world XYZ vertices and RGBA
     DrawPath.SCREEN_TRIANGLE: 13,  # three x/y/coverage vertices and RGBA
 }
@@ -142,6 +147,13 @@ ARROW_CORNER_RADIUS_RATIO = ARROW_CORNER_RADIUS_PT / (2.0 * AXIS_SHAFT_HALF_PT)
 
 
 DEFAULT_LIMIT = 500_000
+
+
+def _arrow_vector(value) -> np.ndarray:
+    vector = np.asarray(value, dtype=np.float64)
+    if vector.shape != (3,) or not np.isfinite(vector).all():
+        raise ValueError("arrow vectors must be finite XYZ values")
+    return vector.copy()
 
 
 def _grow(arr: np.ndarray, cap: int) -> np.ndarray:
@@ -170,7 +182,9 @@ class _Store:
         self.primitive_type = primitive_type
         self.verts = VERTEX_COUNT[primitive_type]
         self.count = 0
-        self.triangle_records = np.zeros((0, RECORD_FLOATS[DrawPath.SCREEN_TRIANGLE]), np.float32)
+        self.triangle_records = np.zeros(
+            (0, RECORD_FLOATS[PRIMITIVE_PATH[primitive_type]]), np.float32
+        )
         self.positions = np.zeros((0, self.verts, 3), np.float32)
         self.colors = np.zeros((0, 4), np.float32)
         self.edge_colors = np.zeros((0, 4), np.float32)
@@ -194,12 +208,17 @@ class _Store:
         if need <= self.capacity:
             return
         cap = max(need, self.capacity * 2, 16)
-        if self.primitive_type in (PrimitiveType.SCREEN_TRIANGLE, PrimitiveType.TRIANGLE):
+        if self.primitive_type in (
+            PrimitiveType.SCREEN_TRIANGLE,
+            PrimitiveType.TRIANGLE,
+            PrimitiveType.LIT_TRIANGLE,
+        ):
             # Keep screen meshes in upload order. The public position view still
             # writes through, while packing becomes one contiguous copy.
             self.triangle_records = _grow(self.triangle_records, cap)
             self.positions = self.triangle_records[:, :9].reshape(cap, 3, 3)
-            self.colors = self.triangle_records[:, 9:13]
+            color_offset = 18 if self.primitive_type is PrimitiveType.LIT_TRIANGLE else 9
+            self.colors = self.triangle_records[:, color_offset : color_offset + 4]
             return
         self.positions = _grow(self.positions, cap)
         self.colors = _grow(self.colors, cap)
@@ -217,7 +236,11 @@ class _Store:
         tail = n - (start + count)
         if tail > 0:
             src, dst = slice(start + count, n), slice(start, start + tail)
-            if self.primitive_type in (PrimitiveType.SCREEN_TRIANGLE, PrimitiveType.TRIANGLE):
+            if self.primitive_type in (
+                PrimitiveType.SCREEN_TRIANGLE,
+                PrimitiveType.TRIANGLE,
+                PrimitiveType.LIT_TRIANGLE,
+            ):
                 self.triangle_records[dst] = self.triangle_records[src]
                 self.count = n - count
                 return count + tail
@@ -677,6 +700,128 @@ class Layer:
         """Create or replace a solid arrow transformed into world space."""
         self._solid(PrimitiveType.SOLID_ARROW, ident, transform4x4, color, duration)
 
+    def arrow_3d(
+        self,
+        ident: str,
+        a,
+        b,
+        color,
+        shaft_radius: float = 0.02,
+        *,
+        head_radius: float | None = None,
+        head_length: float | None = None,
+        duration: float = NEVER,
+    ) -> None:
+        """Draw a smooth opaque 3D arrow between world endpoints, without shadows.
+
+        Dimensions are world units. Coincident endpoints erase the arrow.
+        DEPTH uses scene occlusion; ALWAYS uses the gizmo foreground depth range.
+        """
+        a, b = _arrow_vector(a), _arrow_vector(b)
+        length = float(np.linalg.norm(b - a))
+        if length <= 1e-8:
+            self.erase(ident)
+            return
+        z = (b - a) / length
+        reference = np.eye(3)[int(np.argmin(np.abs(z)))]
+        x = np.cross(reference, z)
+        x /= np.linalg.norm(x)
+        basis = np.column_stack((x, np.cross(z, x), z))
+        self._arrow_mesh(
+            ident, a, basis, length, shaft_radius, head_radius, head_length, 0.0, color, duration
+        )
+
+    def arc_arrow_3d(
+        self,
+        ident: str,
+        center,
+        normal,
+        start_direction,
+        sweep: float,
+        color,
+        radius: float = 0.5,
+        shaft_radius: float = 0.02,
+        *,
+        head_radius: float | None = None,
+        head_length: float | None = None,
+        duration: float = NEVER,
+    ) -> None:
+        """Draw a smooth opaque circular 3D arrow; signed sweep is in radians.
+
+        Positive sweep turns by the right-hand rule around normal. The start direction
+        is projected onto the arc plane. Zero sweep erases the retained arrow.
+        Geometry uses world units, smooth lighting, self-depth, and no cast shadows.
+        """
+        center, normal, start = map(_arrow_vector, (center, normal, start_direction))
+        if not math.isfinite(sweep) or abs(sweep) > 2 * math.pi:
+            raise ValueError("sweep must be finite and within [-2*pi, 2*pi]")
+        if not math.isfinite(radius) or radius <= 0:
+            raise ValueError("radius must be finite and positive")
+        if np.linalg.norm(normal) < 1e-8:
+            raise ValueError("normal must be nonzero")
+        normal /= np.linalg.norm(normal)
+        start -= normal * np.dot(start, normal)
+        if np.linalg.norm(start) < 1e-8:
+            raise ValueError("start_direction must have a component in the arc plane")
+        start /= np.linalg.norm(start)
+        if abs(sweep) <= 1e-8:
+            self.erase(ident)
+            return
+        direction = math.copysign(1.0, sweep)
+        basis = np.column_stack((start, direction * np.cross(normal, start), direction * normal))
+        self._arrow_mesh(
+            ident,
+            center,
+            basis,
+            abs(sweep) * radius,
+            shaft_radius,
+            head_radius,
+            head_length,
+            radius,
+            color,
+            duration,
+        )
+
+    def _arrow_mesh(
+        self,
+        ident,
+        position,
+        basis,
+        length,
+        shaft_radius,
+        head_radius,
+        head_length,
+        bend_radius,
+        color,
+        duration,
+    ):
+        from .mesh import arrow_mesh
+
+        head_radius = shaft_radius * 2.8 if head_radius is None else head_radius
+        head_length = min(shaft_radius * 6, length * 0.4) if head_length is None else head_length
+        values = (shaft_radius, head_radius, head_length, duration)
+        if not all(math.isfinite(v) for v in values):
+            raise ValueError("arrow dimensions and duration must be finite")
+        if not 0 < shaft_radius <= head_radius or not 0 < head_length < length:
+            raise ValueError("require 0 < shaft_radius <= head_radius and 0 < head_length < length")
+        if bend_radius and head_radius >= bend_radius:
+            raise ValueError("head_radius must be smaller than the arc radius")
+        rgba = _rgba(color)
+        if not np.isfinite(rgba).all() or rgba[3] != 1.0:
+            raise ValueError("3D arrows require a finite opaque color (alpha=1)")
+        if self.occlusion is Occlusion.GHOST:
+            raise ValueError("3D arrows support depth or always occlusion")
+        mesh = arrow_mesh(length, shaft_radius, head_radius, head_length, bend_radius)
+        indices = mesh.indices.reshape(-1, 3)
+        i = self._alloc(PrimitiveType.LIT_TRIANGLE, ident, len(indices), duration)
+        if i < 0:
+            return
+        st = self._stores[PrimitiveType.LIT_TRIANGLE]
+        records = st.triangle_records[i : i + len(indices)]
+        records[:, :9] = (mesh.positions[indices] @ basis.T + position).reshape(-1, 9)
+        records[:, 9:18] = (mesh.normals[indices] @ basis.T).reshape(-1, 9)
+        records[:, 18:22] = rgba
+
     def solid_double_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid double arrow transformed into world space."""
         self._solid(PrimitiveType.SOLID_DOUBLE_ARROW, ident, transform4x4, color, duration)
@@ -958,6 +1103,14 @@ class DebugDraw:
                 continue
 
             self._batch_solid(frame, occ, layers)
+            self._batch(
+                frame,
+                occ,
+                layers,
+                DrawPath.LIT_TRIANGLE,
+                (PrimitiveType.LIT_TRIANGLE,),
+                self._pack_triangle,
+            )
             self._batch(
                 frame,
                 occ,

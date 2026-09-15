@@ -209,6 +209,36 @@ def _apply_sector(layer: Layer, m: dict) -> None:
     )
 
 
+def _apply_arrow_3d(layer: Layer, m: dict) -> None:
+    layer.arrow_3d(
+        m["id"],
+        m["a"],
+        m["b"],
+        m.get("color", _WHITE),
+        **{k: m[k] for k in ("shaft_radius", "head_radius", "head_length", "duration") if k in m},
+    )
+
+
+def _apply_arc_arrow_3d(layer: Layer, m: dict) -> None:
+    layer.arc_arrow_3d(
+        m["id"],
+        m["center"],
+        m.get("normal", (0, 0, 1)),
+        m["start_direction"],
+        m["sweep"],
+        m.get("color", _WHITE),
+        **{
+            k: m[k]
+            for k in ("radius", "shaft_radius", "head_radius", "head_length", "duration")
+            if k in m
+        },
+    )
+
+
+def _apply_triangles(layer: Layer, m: dict) -> None:
+    layer.triangles(m["id"], m["vertices"], m.get("color", _WHITE), float(m.get("duration", NEVER)))
+
+
 def _apply_text(layer: Layer, m: dict) -> None:
     layer.text(
         m["id"],
@@ -230,6 +260,8 @@ def _apply_clear(layer: Layer, m: dict) -> None:
 
 
 OPS = {
+    "arrow_3d": _apply_arrow_3d,
+    "arc_arrow_3d": _apply_arc_arrow_3d,
     "line": _apply_line,
     "lines": _apply_lines,
     "arrow": _apply_arrow,
@@ -244,6 +276,7 @@ OPS = {
     "solid_arrow": _apply_solid_arrow,
     "solid_double_arrow": _apply_solid_double_arrow,
     "sector": _apply_sector,
+    "triangles": _apply_triangles,
     "text": _apply_text,
     "clear": _apply_clear,
 }

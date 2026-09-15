@@ -204,6 +204,47 @@ def test_no_outline_without_selection(rig):
     assert int(rig.outline_mask(img).sum()) == 0
 
 
+@pytest.mark.parametrize("occlusion", ("depth", "always"))
+def test_selection_outline_covers_debug_arrows_but_stays_below_gizmo(rig, occlusion):
+    from pathlib import Path
+
+    from PIL import Image
+
+    from mojive.interaction.gizmo import GizmoFrame
+    from mojive.render.debugdraw import Occlusion
+
+    boxes = _box()
+    baseline = rig.draw(boxes, selected=SEL)
+    outline = rig.outline_mask(baseline)
+    layer = rig.backend.debug.layer("crossing-arrows", Occlusion(occlusion))
+    layer.arrow_3d("linear", (-0.8, 0, 0.4), (0.8, 0, 0.4), (0, 1, 0, 1), 0.06)
+    layer.arc_arrow_3d(
+        "yaw",
+        (0, 0, 0.4),
+        (0, 0, 1),
+        (1, 0, 0),
+        -1.5 * np.pi,
+        (1, 0, 0, 1),
+        radius=0.43,
+        shaft_radius=0.045,
+    )
+    without_outline = rig.draw(boxes)
+    colored = (without_outline[..., 0] > 128) | (without_outline[..., 1] > 128)
+    assert np.count_nonzero(outline & colored) > 20
+    result = rig.draw(boxes, selected=SEL)
+    np.testing.assert_array_equal(result[outline], baseline[outline])
+
+    # Put the transform handle directly on the right selection edge.
+    rig.backend.set_gizmo(GizmoFrame(position=np.array((0.35, 0, 0.4), np.float32)))
+    with_gizmo = rig.draw(boxes, selected=SEL)
+    assert np.count_nonzero(np.any(with_gizmo[outline] != result[outline], axis=-1)) > 5
+    output = Path("output/outline-debug-order")
+    output.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(without_outline).save(output / f"{rig.backend.caps.name}-{occlusion}-plain.png")
+    Image.fromarray(result).save(output / f"{rig.backend.caps.name}-{occlusion}-selected.png")
+    Image.fromarray(with_gizmo).save(output / f"{rig.backend.caps.name}-{occlusion}-gizmo.png")
+
+
 def test_outline_color_comes_from_the_pass(rig):
     if rig.backend.caps.name == "bgfx":
         pytest.skip("native outline color has no private pass override")

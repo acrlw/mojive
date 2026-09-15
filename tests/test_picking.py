@@ -157,8 +157,8 @@ def test_the_two_passes_register_themselves_under_the_right_names():
     assert reg["id"]().name == "id"
     assert reg["outline"]().name == "outline"
 
-    assert fb.PASS_ORDER.index("outline") < fb.PASS_ORDER.index("debug")
-    assert fb.PASS_ORDER.index("debug") < fb.PASS_ORDER.index("gizmo")
+    assert fb.PASS_ORDER.index("debug") < fb.PASS_ORDER.index("outline")
+    assert fb.PASS_ORDER.index("outline") < fb.PASS_ORDER.index("gizmo")
     assert fb.PASS_ORDER.index("id") > fb.PASS_ORDER.index("opaque")
 
 

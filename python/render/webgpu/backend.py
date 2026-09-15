@@ -1133,13 +1133,12 @@ class WgpuBackend:
             )
             draw_calls += calls
             instances_drawn += drawn
+        # Selection remains readable over diagnostics; transform handles stay above both.
+        draw_calls += self._debug.execute(pass1)
         if outline_buckets:
             draw_calls += self._outline.composite(pass1, target.width, target.height)
-        # Debug primitives and world text draw after the outline composite,
-        # matching opengl's PASS_ORDER (debug between outline and gizmo).
-        draw_calls += self._debug.execute(pass1)
         # The gizmo draws last inside the main pass, matching opengl's
-        # PASS_ORDER (gizmo between debug and present).
+        # PASS_ORDER (gizmo between outline and present).
         draw_calls += self._gizmo.execute(pass1)
         pass1.end()
 

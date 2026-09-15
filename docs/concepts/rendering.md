@@ -60,7 +60,7 @@ scene preparation and revision tracking
          ↓
 requested shadow / reflection / opaque / identity / export passes
          ↓
-skybox / tendons / transparency / outline / debug / gizmo
+skybox / tendons / transparency / debug / outline / gizmo
          ↓
 presentation or image readback
 ```

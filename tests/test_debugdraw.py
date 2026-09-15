@@ -259,8 +259,9 @@ def test_vertex_counts_match_the_spec_table():
         PrimitiveType.CYLINDER: 1,
         PrimitiveType.SCREEN_TRIANGLE: 3,
         PrimitiveType.TRIANGLE: 3,
+        PrimitiveType.LIT_TRIANGLE: 3,
     }
-    assert len(VERTEX_COUNT) == 14
+    assert len(VERTEX_COUNT) == 15
 
 
 def test_closed_polyline_packs_shared_neighbors_for_continuous_joins():
@@ -574,6 +575,26 @@ def test_bridge_rejects_unknown_ops_instead_of_getattr():
     assert br._apply({"op": "set_overlays", "layer": "x", "id": "a"}) is False
     assert br.stats.invalid == 1
     assert "set_overlays" in br.stats.notes[-1]
+
+
+def test_bridge_retains_triangle_mesh_and_preserves_it_on_invalid_update():
+    backend = _Backend()
+    br = DebugBridge(backend)
+    record = {
+        "op": "triangles",
+        "layer": "policy",
+        "id": "arc",
+        "vertices": [[A.tolist(), B.tolist(), C.tolist()]],
+        "color": RED,
+    }
+    assert br.apply_batch([record]) == 1
+    assert br.apply_batch([record]) == 1
+    assert backend.debug.primitives == 1
+    assert br.apply_batch([dict(record, vertices=[[[0, 0, float("nan")]] * 3])]) == 0
+    assert backend.debug.primitives == 1
+    assert backend.debug.build().counts[DrawPath.TRIANGLE] == 1
+    assert br.apply_batch([{"op": "clear", "layer": "policy", "id": "arc"}]) == 1
+    assert backend.debug.primitives == 0
 
 
 def test_bridge_reports_bad_arguments():

@@ -342,3 +342,35 @@ def test_screen_arrows_share_g3_circular_and_sharp_styles(rig):
         assert gray[y - 30, 200] < 10
     assert np.count_nonzero((gray > 10) & (gray < 230)) > 100
     assert not np.array_equal(gray[35:95], gray[120:180])
+
+
+@pytest.mark.parametrize("occlusion", [Occlusion.DEPTH, Occlusion.ALWAYS])
+def test_3d_arrows_have_order_independent_self_depth_and_smooth_shading(rig, occlusion):
+    from mojive.render.debugdraw import PrimitiveType
+
+    layer = rig.backend.debug.layer("arrows3d", occlusion)
+    layer.arc_arrow_3d(
+        "yaw", (0, 0, 0), (0, -1, 0), (1, 0, 0), -2.5, (1, 0, 0, 1), radius=1, shaft_radius=0.06
+    )
+    layer.arrow_3d("linear", (-1.2, 0, 1.0), (1.2, 0, 1.0), (0, 1, 0, 1), 0.05)
+    first = rig.draw()
+    # Reversing every face must not let back faces paint over the front surface.
+    store = layer._stores[PrimitiveType.LIT_TRIANGLE]
+    store.triangle_records[: store.count] = store.triangle_records[: store.count][::-1].copy()
+    second = rig.draw()
+    np.testing.assert_allclose(second, first, atol=1)
+    red = first[..., 0].astype(float)
+    mask = (red > 128) & (first[..., 1] < 5)
+    assert mask.sum() > 150
+    assert np.unique(first[..., 0][mask]).size > 20
+    # Ignore the one-pixel MSAA silhouette, which blends with the changed background.
+    interior = mask.copy()
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            interior &= np.roll(np.roll(mask, dy, axis=0), dx, axis=1)
+    occluded = rig.draw(wall=True)
+    # Foreground annotations use gizmo depth compression; scene occlusion is optional.
+    if occlusion is Occlusion.ALWAYS:
+        np.testing.assert_allclose(occluded[interior], first[interior], atol=1)
+    else:
+        assert np.count_nonzero(np.any(occluded[mask] != first[mask], axis=-1)) > 100
