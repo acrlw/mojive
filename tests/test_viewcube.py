@@ -107,6 +107,35 @@ def test_hit_test_prefers_the_nearer_ball():
     assert vc.hit_test([b, a], (51.0, 50.0)) is a
 
 
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+def test_origin_hit_area_includes_padding_and_clears_when_disabled(scale):
+    cube = vc.ViewCube()
+    rect = (0.0, 0.0, 400.0, 300.0)
+    center = vc.widget_center(rect, scale)
+    view = cam((4.0, -4.0, 3.0))
+    point = (center[0] + (vc.ORIGIN_HIT_RADIUS_PT - 0.1) * scale, center[1])
+    assert cube.update(view, rect, point, scale) is None
+    assert cube.origin_hovered
+    cube.update(view, rect, point, scale, enabled=False)
+    assert not cube.origin_hovered
+    outside = (center[0] + (vc.ORIGIN_HIT_RADIUS_PT + 0.1) * scale, center[1])
+    cube.update(view, rect, outside, scale)
+    assert not cube.origin_hovered
+
+
+@pytest.mark.parametrize("axis", range(3))
+@pytest.mark.parametrize("sign", (-1.0, 1.0))
+def test_aligned_axis_ball_owns_the_center_instead_of_the_origin(axis, sign):
+    cube = vc.ViewCube()
+    rect = (0.0, 0.0, 400.0, 300.0)
+    center = vc.widget_center(rect, 1.0)
+    eye = [0.0, 0.0, 0.0]
+    eye[axis] = sign * 5.0
+    ball = cube.update(cam(eye), rect, center, 1.0)
+    assert ball is not None and (ball.axis, ball.sign) == (axis, sign)
+    assert not cube.origin_hovered
+
+
 def test_back_ball_fades_instead_of_hiding_only_its_label():
     balls = balls_from((5.0, 0.0, 0.0))
     assert find(balls, 0, 1.0).alpha == 1.0
@@ -148,7 +177,7 @@ def test_lollipop_becomes_one_circle_when_the_ball_covers_the_center():
     ball = (CENTER[0] + BALL * 0.5, CENTER[1])
     outline = vc._lollipop_outline(CENTER, ball, BALL, 2.0)
     radii = np.linalg.norm(np.asarray(outline) - ball, axis=1)
-    assert radii == pytest.approx(np.full(24, BALL))
+    assert radii == pytest.approx(np.full(len(outline), BALL))
 
 
 def test_hover_does_not_resize_the_ball():
@@ -157,6 +186,9 @@ def test_hover_does_not_resize_the_ball():
             self.outline = None
 
         def circle_filled(self, *args, **kwargs) -> None:
+            pass
+
+        def indexed_fill(self, *args, **kwargs) -> None:
             pass
 
         def fringed_concave_fill(self, points, _color, *, origin=None) -> None:
@@ -176,8 +208,32 @@ def test_hover_does_not_resize_the_ball():
 
     cube.draw(overlay)
 
-    expected = np.asarray(vc._lollipop_outline(CENTER, ball.screen, BALL, vc.LINE_PT))
+    expected = np.asarray(
+        vc._lollipop_outline(CENTER, ball.screen, BALL, vc.LINE_PT, start_inset=vc.SPOKE_INSET_PT)
+    )
     assert overlay.outline == pytest.approx(expected)
+
+
+def test_back_fade_enters_and_leaves_without_a_velocity_step():
+    step = 1e-4
+    assert 1.0 - vc._back_alpha(vc.BACK_FADE_START + step) < step * 0.01
+    assert vc._back_alpha(vc.BACK_FADE_END - step) < step * 0.01
+    values = [vc._back_alpha(depth) for depth in np.linspace(0.6, 1.0, 101)]
+    assert values == sorted(values, reverse=True)
+
+
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+def test_spoke_tails_clear_the_origin_and_its_transparent_shell(scale):
+    points = np.asarray(
+        vc._lollipop_outline(
+            (0, 0),
+            (vc.RADIUS_PT * scale, 0),
+            vc.BALL_PT * scale,
+            vc.LINE_PT * scale,
+            start_inset=vc.SPOKE_INSET_PT * scale,
+        )
+    )
+    assert points[:, 0].min() == pytest.approx((vc.ORIGIN_RADIUS_PT + vc.ORIGIN_GAP_PT) * scale)
 
 
 def test_negative_label_crossfades_in_when_looking_down_the_negative_axis():

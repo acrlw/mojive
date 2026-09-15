@@ -1543,6 +1543,7 @@ def test_gizmo_draws_each_axis_as_one_unit(viewer):
     viewer.sync()
 
     real = imgui.get_window_draw_list
+    real_transform = imgui.internal.shade_verts_transform_pos
     rec: list[_RecordingDrawList] = []
 
     def spy():
@@ -1553,11 +1554,19 @@ def test_gizmo_draws_each_axis_as_one_unit(viewer):
         rec.append(dl)
         return dl
 
+    def transform(draw_list, *args):
+        # Native helpers require the wrapped ImDrawList, not the recording proxy.
+        if isinstance(draw_list, _RecordingDrawList):
+            draw_list = draw_list._inner
+        return real_transform(draw_list, *args)
+
     imgui.get_window_draw_list = spy
+    imgui.internal.shade_verts_transform_pos = transform
     try:
         viewer.sync()
     finally:
         imgui.get_window_draw_list = real
+        imgui.internal.shade_verts_transform_pos = real_transform
 
     calls = [c for dl in rec for c in dl.calls]
     assert calls

@@ -608,18 +608,24 @@ def test_flat_gizmo_submits_handles_in_painter_order() -> None:
     assert [axis_of(color) for color in arrows] == list(expected_arrows) == [1, 2, 0]
 
 
-def test_viewcube_submits_balls_back_to_front() -> None:
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+def test_viewcube_submits_balls_back_to_front(scale) -> None:
     cube = vc.ViewCube()
     cam = CameraView(
         eye=np.array((4.0, -4.0, 3.0), np.float32),
         target=np.zeros(3, np.float32),
         up=np.array((0.0, 0.0, 1.0), np.float32),
     )
-    cube.update(cam, RECT, cursor=(-1000.0, -1000.0), style_scale=1.0)
+    cube.update(cam, RECT, cursor=(-1000.0, -1000.0), style_scale=scale)
     overlay = RecordingDraw2D()
-    cube.draw(overlay, style_scale=1.0)
+    cube.draw(overlay, style_scale=scale)
 
-    expected: list[str] = []
+    outline, _indices, color = overlay.calls[0][1]
+    radii = np.linalg.norm(outline, axis=1)
+    assert radii == pytest.approx(np.full(len(outline), vc.ORIGIN_RADIUS_PT * scale))
+    assert radii.min() * 2 >= vc.LINE_PT * scale
+    assert color == vc.LABEL_FILL
+    expected: list[str] = ["indexed_fill"]
     for ball in cube.balls:  # layout() is already sorted far-to-near
         if ball.alpha <= 0.0:
             continue

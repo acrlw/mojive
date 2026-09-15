@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from math import cos, sin, tau
 
 import numpy as np
 
@@ -19,6 +20,13 @@ RADIUS_PT = 34.0
 BALL_PT = 9.5
 MARGIN_PT = 10.0
 LINE_PT = 2.0
+ORIGIN_RADIUS_PT = LINE_PT
+ORIGIN_GAP_PT = LINE_PT
+ORIGIN_HIT_RADIUS_PT = ORIGIN_RADIUS_PT + ORIGIN_GAP_PT * 2.0
+ORIGIN_HOVER_RADIUS_PT = ORIGIN_RADIUS_PT + ORIGIN_GAP_PT * 0.25
+SPOKE_INSET_PT = ORIGIN_RADIUS_PT + ORIGIN_GAP_PT + LINE_PT * 0.5
+_ORIGIN_SEGMENTS = 16
+_ORIGIN_INDICES = tuple(vertex for i in range(1, _ORIGIN_SEGMENTS - 1) for vertex in (0, i, i + 1))
 
 
 AXIS_NAMES = ("X", "Y", "Z")
@@ -144,6 +152,7 @@ class ViewCube:
     def __init__(self, selection_padding: float = DEFAULT_SELECTION_PADDING) -> None:
         self._balls: list[Ball] = []
         self._hover: Ball | None = None
+        self._origin_hovered = False
         self._center: tuple[float, float] = (0.0, 0.0)
         self.selection_padding = selection_padding
 
@@ -163,11 +172,23 @@ class ViewCube:
         self._center = widget_center(rect, style_scale)
         self._balls = layout(cam, self._center, RADIUS_PT * style_scale, BALL_PT * style_scale)
         self._hover = hit_test(self._balls, cursor) if enabled else None
+        dx, dy = cursor[0] - self._center[0], cursor[1] - self._center[1]
+        self._origin_hovered = (
+            enabled
+            and self._hover is None
+            and dx * dx + dy * dy <= (ORIGIN_HIT_RADIUS_PT * style_scale) ** 2
+            # A hidden origin must not steal clicks beside an aligned axis ball.
+            and hit_test(self._balls, self._center) is None
+        )
         return self._hover
 
     @property
     def hovered(self) -> Ball | None:
         return self._hover
+
+    @property
+    def origin_hovered(self) -> bool:
+        return self._origin_hovered
 
     def drag(self, camera: OrbitCamera, dx: float, dy: float) -> None:
         camera.orbit(dx, dy)
@@ -214,6 +235,20 @@ class ViewCube:
                 segments=32,
             )
 
+        # Leave the shell transparent by shortening shafts. Draw the origin
+        # below the balls so an axis-aligned endpoint can cover it naturally.
+        origin_radius = (
+            ORIGIN_HOVER_RADIUS_PT if self._origin_hovered else ORIGIN_RADIUS_PT
+        ) * style_scale
+        origin_outline = _origin_outline(origin_radius)
+        overlay.indexed_fill(
+            origin_outline,
+            _ORIGIN_INDICES,
+            (1.0, 1.0, 1.0, 1.0) if self._origin_hovered else LABEL_FILL,
+            outline=origin_outline,
+            origin=self._center,
+            fringe_width=min(1.0, ORIGIN_GAP_PT * style_scale * 0.25),
+        )
         for b in self._balls:
             if b.alpha <= 0.0:
                 continue
@@ -226,7 +261,12 @@ class ViewCube:
             color = (*face, b.alpha)
             if b.positive:
                 outline = _lollipop_outline(
-                    self._center, b.screen, b.radius, LINE_PT * style_scale, smoothing=smoothing
+                    self._center,
+                    b.screen,
+                    b.radius,
+                    LINE_PT * style_scale,
+                    smoothing=smoothing,
+                    start_inset=SPOKE_INSET_PT * style_scale,
                 )
                 overlay.fringed_concave_fill(outline, color)
             else:
@@ -246,8 +286,19 @@ class ViewCube:
                 )
 
 
+@lru_cache(maxsize=32)
+def _origin_outline(radius: float) -> tuple[tuple[float, float], ...]:
+    # Keep the disk fully opaque out to its authored radius, like the shafts.
+    # Native circle AA insets that edge and makes small origins appear thinner.
+    return tuple(
+        (radius * cos(i * tau / _ORIGIN_SEGMENTS), radius * sin(i * tau / _ORIGIN_SEGMENTS))
+        for i in range(_ORIGIN_SEGMENTS)
+    )
+
+
 def _back_alpha(depth: float) -> float:
-    return float(np.clip((BACK_FADE_END - depth) / (BACK_FADE_END - BACK_FADE_START), 0.0, 1.0))
+    t = min(1.0, max(0.0, (BACK_FADE_END - depth) / (BACK_FADE_END - BACK_FADE_START)))
+    return t * t * (3.0 - 2.0 * t)
 
 
 @lru_cache(maxsize=256)
@@ -256,21 +307,22 @@ def _lollipop_outline(
     ball: tuple[float, float],
     radius: float,
     line_width: float,
-    segments: int = 24,
     *,
     smoothing: float = CORNER_SMOOTHING,
+    start_inset: float = 0.0,
 ) -> tuple[tuple[float, float], ...]:
     center_v = np.asarray(center, np.float64)
     ball_v = np.asarray(ball, np.float64)
     direction = ball_v - center_v
     distance = float(np.linalg.norm(direction))
-    if distance <= radius:
-        angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
-        return tuple(tuple(ball_v + radius * np.array((np.cos(a), np.sin(a)))) for a in angles)
-
-    direction /= distance
+    if distance > 0.0:
+        direction /= distance
+    else:
+        direction[:] = (1.0, 0.0)
     side = np.array((-direction[1], direction[0]))
-    local = np.asarray(smooth_lollipop_points(distance, radius, line_width, smoothing))
+    local = np.asarray(
+        smooth_lollipop_points(max(0.0, distance - start_inset), radius, line_width, smoothing)
+    )
     points = ball_v + local[:, :1] * direction + local[:, 1:] * side
     return tuple(map(tuple, points.tolist()))
 

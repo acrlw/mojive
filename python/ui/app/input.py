@@ -353,7 +353,8 @@ class _Input:
             cursor=cursor,
             delta=(float(io.mouse_delta.x), float(io.mouse_delta.y)),
             over_viewport=over_viewport,
-            over_view_cube=over_viewport and hovered_ball is not None,
+            over_view_cube=over_viewport
+            and (hovered_ball is not None or self.view_cube.origin_hovered),
             gizmo_available=self.interactions.gizmo
             and self.selection_style.gizmo
             and self.viewport_layers.gizmos
@@ -386,7 +387,11 @@ class _Input:
         )
 
     def _claim_gesture(self, state: gs.InputState) -> gs.Claim:
-        return self.router.update(state)
+        held = self.router.held
+        claim = self.router.update(state)
+        if claim is gs.Claim.VIEW_CUBE and self.router.held and not held:
+            self._view_cube_origin_pressed = self.view_cube.origin_hovered
+        return claim
 
     def apply_keys(self, keys: Keys) -> None:
         if keys.toggle_pause:

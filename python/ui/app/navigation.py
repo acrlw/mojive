@@ -96,18 +96,31 @@ class _Navigation:
 
         if self.interactions.camera.view_cube and self.router.wants_view_cube():
             ball = self.view_cube.hovered
-
-            if self.router.travel >= CLICK_SLOP_PT and state.delta != (0.0, 0.0):
+            # Include motion arriving with release, before the router records it
+            # as held travel, so a short drag cannot also toggle projection.
+            travel = max(
+                self.router.travel,
+                abs(state.cursor[0] - self.router.press_cursor[0])
+                + abs(state.cursor[1] - self.router.press_cursor[1]),
+            )
+            if travel >= CLICK_SLOP_PT and state.delta != (0.0, 0.0):
                 self._leave_model_camera()
                 self.view_cube.drag(self.camera, *state.delta)
-            elif ball is not None and self.router.released and self.router.travel < CLICK_SLOP_PT:
-                self._leave_model_camera()
-                self.view_cube.click(
-                    self.camera,
-                    ball,
-                    self.camera_out,
-                    focus=self._selected_view_focus(),
-                )
+            elif self.router.released and travel < CLICK_SLOP_PT:
+                if self._view_cube_origin_pressed:
+                    if self.view_cube.origin_hovered and self.backend.caps.orthographic:
+                        if self._model_camera_id >= 0:
+                            self.camera.adopt(self._camera_view(), exact=True)
+                        self._leave_model_camera()
+                        self.camera.set_orthographic(not self.camera.orthographic, animate=True)
+                elif ball is not None:
+                    self._leave_model_camera()
+                    self.view_cube.click(
+                        self.camera,
+                        ball,
+                        self.camera_out,
+                        focus=self._selected_view_focus(),
+                    )
             return
 
         if not self.router.wants_camera():
