@@ -191,6 +191,44 @@ context manager stop and reap the worker. Startup and explicit capture/control f
 exceptions. `sync()` after close is harmless, allowing the physics loop to continue without
 a viewer if desired.
 
+## Live debug drawing
+
+Use `publish_debug_commands()` to annotate caller-owned state without moving rendering into the
+physics process. Commands use the retained DebugDraw bridge records. Reusing a `layer` and `id`
+updates a primitive in place, so velocity arrows and contacts can follow every published state.
+The method is asynchronous and does not advance physics or wait for presentation.
+
+```python
+viewer.publish_debug_commands((
+    {
+        "op": "arrow",
+        "layer": "policy.velocity",
+        "occlusion": "always",
+        "id": "target",
+        "a": root_position.tolist(),
+        "b": (root_position + target_velocity).tolist(),
+        "color": (0.2, 0.95, 0.3, 1.0),
+        "width_px": 5.0,
+    },
+    {
+        "op": "arrow",
+        "layer": "policy.velocity",
+        "occlusion": "always",
+        "id": "actual",
+        "a": root_position.tolist(),
+        "b": (root_position + actual_velocity).tolist(),
+        "color": (1.0, 0.2, 0.15, 1.0),
+        "width_px": 5.0,
+    },
+))
+```
+
+Inputs must be finite JSON-compatible values. The display validates each draw operation and logs
+invalid operation records without interrupting the caller's physics loop. Viewport and window
+captures include these annotations; scene-only captures intentionally use a clean peer renderer.
+See [Debug drawing](../how-to/debug-draw.md) for arrows, labels, occlusion, stable IDs, and explicit
+clearing.
+
 ## Capture without files
 
 `viewer.capture_array()` publishes the current state and returns an owned, top-left RGB

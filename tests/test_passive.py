@@ -2,6 +2,7 @@
 
 import multiprocessing as mp
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -10,6 +11,52 @@ from mojive.app.passive import PassiveViewer, _Mailbox
 
 pytestmark = pytest.mark.physics
 mujoco = pytest.importorskip("mujoco")
+
+
+class _DebugClient:
+    def __init__(self):
+        self.messages = []
+
+    def send(self, **message):
+        self.messages.append(message)
+
+
+def test_debug_commands_validate_before_asynchronous_publication():
+    viewer = PassiveViewer.__new__(PassiveViewer)
+    viewer._lock = threading.RLock()
+    viewer._closed = False
+    viewer._stop = SimpleNamespace(is_set=lambda: False)
+    viewer._process = SimpleNamespace(is_alive=lambda: True)
+    viewer._debug_client = _DebugClient()
+    commands = (
+        {
+            "op": "arrow",
+            "layer": "policy.velocity",
+            "id": "target",
+            "a": [0.0, 0.0, 1.0],
+            "b": [1.0, 0.0, 1.0],
+            "color": [0.2, 0.95, 0.3, 1.0],
+        },
+    )
+
+    viewer.publish_debug_commands(commands)
+
+    assert viewer._debug_client.messages == list(commands)
+    with pytest.raises(ValueError, match="finite JSON"):
+        viewer.publish_debug_commands((commands[0], {"op": "point", "p": [float("nan")] * 3}))
+    assert viewer._debug_client.messages == list(commands)
+
+
+def test_debug_commands_reject_closed_viewer():
+    viewer = PassiveViewer.__new__(PassiveViewer)
+    viewer._lock = threading.RLock()
+    viewer._closed = True
+    viewer._stop = SimpleNamespace(is_set=lambda: True)
+    viewer._process = SimpleNamespace(is_alive=lambda: False)
+    viewer._debug_client = _DebugClient()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        viewer.publish_debug_commands(())
 
 
 def test_perturbation_preserves_other_forces_and_clears_after_worker_failure():
