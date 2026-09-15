@@ -530,6 +530,15 @@ class Window:
                 imgui.DockNodeFlags_.passthru_central_node,
             )
             self._build_default_layout()
+            if self._default_tabs_frame and imgui.get_frame_count() >= self._default_tabs_frame:
+                self._default_tabs_frame = 0
+                for name in ("Joints", "Keyframes"):
+                    window = imgui.internal.find_window_by_name(name)
+                    if window is not None and window.dock_node is not None:
+                        tabs = window.dock_node.tab_bar
+                        if tabs is not None:
+                            tabs.next_selected_tab_id = window.tab_id
+                        imgui.internal.focus_window(window)
 
     def reset_layout(self) -> None:
         """Discard the active docking arrangement and rebuild the product default."""
@@ -560,7 +569,8 @@ class Window:
     _LAYOUT_LEFT = ("Hierarchy", "Assets")
     _LAYOUT_RIGHT_TOP = ("Control", "Joints", "Camera", "Settings", "Sensors")
     _LAYOUT_RIGHT_BOTTOM = ("Inspector", "Layers")
-    _LAYOUT_BOTTOM = ("Stats", "Output", "Keyframes", "Plot", "Help", "Info")
+    _LAYOUT_BOTTOM = ("Keyframes", "Output", "Stats", "Plot", "Help", "Info")
+    _default_tabs_frame = 0
 
     def _build_default_layout(self) -> None:
         if self._layout_done:
@@ -575,15 +585,25 @@ class Window:
             ii.dock_builder_remove_node(root)
 
             ii.dock_builder_add_node(root, imgui.internal.DockNodeFlagsPrivate_.dock_space)
-            ii.dock_builder_set_node_size(root, imgui.get_main_viewport().size)
+            # Startup has no previous work area. Later resets may run from the
+            # menu before this frame's status bar, so use the committed insets.
+            viewport = imgui.get_current_context().viewports[0]
+            work = (
+                viewport.get_build_work_rect()
+                if imgui.get_frame_count() == 1
+                else viewport.get_work_rect()
+            )
+            ii.dock_builder_set_node_size(root, work.get_size())
 
-            _, left, rest = ii.dock_builder_split_node_py(root, imgui.Dir.left, 0.22)
-            _, right, rest = ii.dock_builder_split_node_py(rest, imgui.Dir.right, 0.30)
-            _, bottom, center = ii.dock_builder_split_node_py(rest, imgui.Dir.down, 0.26)
+            # Keep the right inspector column full-height. The timeline spans
+            # both Hierarchy and Viewport, with ratios independent of UI scale.
+            _, right, rest = ii.dock_builder_split_node_py(root, imgui.Dir.right, 0.23)
+            _, bottom, top = ii.dock_builder_split_node_py(rest, imgui.Dir.down, 0.28)
+            _, left, center = ii.dock_builder_split_node_py(top, imgui.Dir.left, 0.23)
             _, right_bottom, right_top = ii.dock_builder_split_node_py(
                 right,
                 imgui.Dir.down,
-                0.50,
+                0.52,
             )
 
             ii.dock_builder_dock_window("Viewport", center)
@@ -596,6 +616,9 @@ class Window:
             for name in self._LAYOUT_BOTTOM:
                 ii.dock_builder_dock_window(name, bottom)
             ii.dock_builder_finish(root)
+            # Native auto-selection runs while the first panel windows appear.
+            # Apply the default tabs once those windows and tab bars exist.
+            self._default_tabs_frame = imgui.get_frame_count() + 1
         except Exception as e:
             log.error("Default dock layout failed; panels will float: {}", e)
 
