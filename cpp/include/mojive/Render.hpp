@@ -129,10 +129,11 @@ enum class DebugPath {
     DragLink,
     ScreenTriangle,
     Text,
-    Triangle
+    Triangle,
+    LitTriangle
 };
 enum class Occlusion { Depth, Always, Ghost };
-constexpr std::array<uint32_t, 10> debugRecordFloats = {13, 13, 8, 14, 20, 14, 18, 13, 17, 13};
+constexpr std::array<uint32_t, 11> debugRecordFloats = {13, 13, 8, 14, 20, 14, 18, 13, 17, 13, 24};
 struct DebugBatch {
     DebugPath path = DebugPath::Segment;
     Occlusion occlusion = Occlusion::Depth;

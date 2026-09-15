@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+from itertools import pairwise
+
 import numpy as np
 
 from mojive.geometry2d.curves import smooth_rect_points
@@ -405,29 +408,66 @@ def _annulus(z: float, inner: float, outer: float, segments: int, *, up: bool):
     return pos, nrm, uv, tri.reshape(-1).astype(np.uint32)
 
 
+def _arrow_parts(
+    start, head_base, tip, shaft_radius, head_radius, *, sections=1, segments=ARROW_SEGMENTS
+):
+    """Shared cylinder/cone/shoulder topology for gizmos and diagnostic arrows."""
+    parts = []
+    zs = np.linspace(start, head_base, sections + 1)
+    for z0, z1 in pairwise(zs):
+        parts.append(_scale_xy(_cylinder_side(z0, z1, segments, 0, 1), shaft_radius))
+    cone = _scale_xy(_cone_side(head_base, tip, segments), head_radius)
+    p, n, uv, idx = cone
+    radial = n[:, :2]
+    radial /= np.linalg.norm(radial, axis=1, keepdims=True)
+    n[:] = np.column_stack((radial, np.full(len(n), head_radius / (tip - head_base))))
+    n /= np.linalg.norm(n, axis=1, keepdims=True)
+    return _merge(
+        *parts,
+        _scale_xy(_cap_disk(start, segments, up=False), shaft_radius),
+        _annulus(head_base, shaft_radius, head_radius, segments, up=False),
+        (p, n, uv, idx),
+    )
+
+
+@lru_cache(maxsize=32)
+def arrow_mesh(
+    length: float,
+    shaft_radius: float,
+    head_radius: float,
+    head_length: float,
+    bend_radius: float = 0.0,
+) -> MeshData:
+    """Smooth, closed arrow along +Z, optionally bent into the XY plane.
+
+    A bent arrow starts at (bend_radius, 0, 0) and turns counterclockwise.
+    Local X points radially outward and local Y becomes world Z.
+    """
+    sections = max(1, int(np.ceil(length / bend_radius * 32))) if bend_radius else 1
+    p, n, uv, idx = _arrow_parts(
+        0, length - head_length, length, shaft_radius, head_radius, sections=sections
+    )
+    if bend_radius:
+        angle = p[:, 2] / bend_radius
+        c, s = np.cos(angle), np.sin(angle)
+        radius = bend_radius + p[:, 0]
+        # Inverse transpose of the bend Jacobian, including varying radius.
+        tangent = n[:, 2] / (1.0 + p[:, 0] / bend_radius)
+        n = np.column_stack((n[:, 0] * c - tangent * s, n[:, 0] * s + tangent * c, n[:, 1]))
+        n /= np.linalg.norm(n, axis=1, keepdims=True)
+        p = np.column_stack((radius * c, radius * s, p[:, 1]))
+        # The bend changes handedness: X radial, Y up, Z tangent.
+        idx = idx.reshape(-1, 3)[:, ::-1].ravel()
+    return _finish(p, n, uv, idx)
+
+
 def _make_gizmo_arrow(edge: float = 0.0) -> MeshData:
     expansion = float(edge) / SIZE_PT
     shaft_radius = AXIS_SHAFT_HALF_PT / SIZE_PT + expansion
     head_radius = AXIS_HEAD_HALF_PT / SIZE_PT + expansion
     head_base = 1.0 - (AXIS_HEAD_LENGTH_PT + float(edge)) / SIZE_PT
-    tip = 1.0 + expansion
-    start = AXIS_START - expansion
-    cone = _scale_xy(_cone_side(head_base, tip, ARROW_SEGMENTS), head_radius)
-    p, n, uv, idx = cone
-    slope = head_radius / (tip - head_base)
-    side = n[:, 2] > 0.0
-    xy = n[side, :2]
-    xy /= np.linalg.norm(xy, axis=1, keepdims=True)
-    n[side] = np.column_stack((xy, np.full(len(xy), slope)))
-    n[side] /= np.linalg.norm(n[side], axis=1, keepdims=True)
-    cone = p, n, uv, idx
     return _finish(
-        *_merge(
-            _scale_xy(_cylinder_side(start, head_base, ARROW_SEGMENTS, 0.0, 1.0), shaft_radius),
-            _scale_xy(_cap_disk(start, ARROW_SEGMENTS, up=False), shaft_radius),
-            _annulus(head_base, shaft_radius, head_radius, ARROW_SEGMENTS, up=False),
-            cone,
-        )
+        *_arrow_parts(AXIS_START - expansion, head_base, 1.0 + expansion, shaft_radius, head_radius)
     )
 
 

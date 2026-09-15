@@ -42,6 +42,7 @@ _UNIFORM_SLOTS = 2
 _UNIFORM_SLOT_BYTES = 256
 
 _VERTICES: dict[DrawPath, int] = {
+    DrawPath.LIT_TRIANGLE: 3,
     DrawPath.TRIANGLE: 3,
     DrawPath.SCREEN_TRIANGLE: 3,
     DrawPath.SEGMENT: 6,
@@ -53,6 +54,7 @@ _VERTICES: dict[DrawPath, int] = {
 }
 
 _ENTRIES: dict[DrawPath, tuple[str, str]] = {
+    DrawPath.LIT_TRIANGLE: ("vs_debug_lit_triangle", "fs_debug_solid"),
     DrawPath.SCREEN_TRIANGLE: ("vs_debug_screen", "fs_debug_line"),
     DrawPath.TRIANGLE: ("vs_debug_triangle", "fs_debug_line"),
     DrawPath.SEGMENT: ("vs_debug_line", "fs_debug_line"),
@@ -78,6 +80,18 @@ def _instanced(path: DrawPath, *attrs: tuple[str, int]) -> dict:
 
 
 _LAYOUTS: dict[DrawPath, list[dict]] = {
+    DrawPath.LIT_TRIANGLE: [
+        _instanced(
+            DrawPath.LIT_TRIANGLE,
+            ("float32x3", 0),
+            ("float32x3", 12),
+            ("float32x3", 24),
+            ("float32x3", 36),
+            ("float32x3", 48),
+            ("float32x3", 60),
+            ("float32x4", 72),
+        )
+    ],
     DrawPath.SCREEN_TRIANGLE: [
         _instanced(
             DrawPath.SCREEN_TRIANGLE,
@@ -203,6 +217,7 @@ class DebugPass:
                 "debug_stroke.wgsl",
                 "debug_point.wgsl",
                 "debug_solid.wgsl",
+                "debug_lit_triangle.wgsl",
                 "debug_sector.wgsl",
                 "debug_drag_link.wgsl",
                 "debug_text.wgsl",
@@ -406,6 +421,9 @@ class DebugPass:
         if pipeline is not None:
             return pipeline
         vs, fs = _ENTRIES[path]
+        lit = path is DrawPath.LIT_TRIANGLE
+        if lit and compare == "always":
+            vs = "vs_debug_lit_foreground"
         pipeline = self._device.create_render_pipeline(
             layout=self._pipeline_layout,
             vertex={
@@ -418,11 +436,15 @@ class DebugPass:
                 "entry_point": fs,
                 "targets": [{"format": "rgba8unorm", "blend": ALPHA_BLEND}],
             },
-            primitive={"topology": "triangle-list", "front_face": "ccw", "cull_mode": "none"},
+            primitive={
+                "topology": "triangle-list",
+                "front_face": "ccw",
+                "cull_mode": "back" if lit else "none",
+            },
             depth_stencil={
                 "format": "depth24plus",
-                "depth_write_enabled": False,
-                "depth_compare": compare,
+                "depth_write_enabled": lit,
+                "depth_compare": "less" if lit else compare,
             },
             multisample={"count": self._samples},
         )

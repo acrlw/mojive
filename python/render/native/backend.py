@@ -38,6 +38,7 @@ _NO_VISUALS.flags.writeable = False
 _DRAW_PATHS = {path: index for index, path in enumerate(DrawPath)}
 # Native stream 8 remains text for packet compatibility.
 _DRAW_PATHS[DrawPath.TRIANGLE] = 9
+_DRAW_PATHS[DrawPath.LIT_TRIANGLE] = 10
 _OCCLUSIONS = {mode: index for index, mode in enumerate(Occlusion)}
 
 

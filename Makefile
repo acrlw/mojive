@@ -5,6 +5,10 @@ RUFF := .venv/bin/ruff
 export PATH := $(abspath .venv/bin):$(PATH)
 .DEFAULT_GOAL := help
 
+.PHONY: debug-draw
+debug-draw:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) examples/debug_draw.py $(ARGS)
+
 .PHONY: recording-layers
 .PHONY: camera-tracking
 .PHONY: keyframe-timeline

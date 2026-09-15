@@ -634,7 +634,7 @@ class BgfxRenderer final : public Renderer {
         auto canonicalProj = columnMajor(camera.projection);
         auto vp = glm::make_mat4(canonicalProj.data()) * glm::make_mat4(view.data());
         float pxScale = 2.f / (camera.projection[5] * target.size.height);
-        const uint32_t vertices[] = {6, 15, 6, 24, 0, 96, 6, 3, 6, 3};
+        const uint32_t vertices[] = {6, 15, 6, 24, 0, 96, 6, 3, 6, 3, 3};
         auto draw = [&](const DebugBatch &batch, bool ghost) {
             if (!batch.count)
                 return;
@@ -643,13 +643,17 @@ class BgfxRenderer final : public Renderer {
                              BGFX_STATE_BLEND_FUNC_SEPARATE(
                                  BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
                                  BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE);
-            if (batch.occlusion != Occlusion::Always)
+            const bool lit = batch.path == DebugPath::LitTriangle;
+            if (lit)
+                state |= BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_CULL_CW;
+            else if (batch.occlusion != Occlusion::Always)
                 state |= ghost ? BGFX_STATE_DEPTH_TEST_GREATER : BGFX_STATE_DEPTH_TEST_LESS;
             if (target.samples > 1 && scene.style.msaa)
                 state |= BGFX_STATE_MSAA;
             const float params[] = {float(target.size.width), float(target.size.height), pxScale,
                                     ghost ? .28f : 1.f};
-            const float depth[] = {bgfx::getCaps()->homogeneousDepth ? 1.f : 0.f, 0, 0, 0};
+            const float depth[] = {bgfx::getCaps()->homogeneousDepth ? 1.f : 0.f,
+                                   lit && batch.occlusion == Occlusion::Always ? 1.f : 0.f, 0, 0};
             bgfx::setUniform(mDebugParams, params);
             bgfx::setUniform(mDebugDepth, depth);
             bgfx::setUniform(mDebugViewProj, &vp[0][0]);
@@ -755,8 +759,8 @@ class BgfxRenderer final : public Renderer {
             replacements.emplace_back(&destination, program(mShaderDirectory, vs, fs));
         };
         try {
-            const char *debugNames[] = {"Line",   "Arrow",    "Point",  "Stroke", "Solid",
-                                        "Sector", "DragLink", "Screen", "Text",   "Triangle"};
+            const char *debugNames[] = {"Line", "Arrow", "Point", "Stroke", "Solid", "Sector",
+                                       "DragLink", "Screen", "Text", "Triangle", "LitTriangle"};
             for (size_t i = 0; i < mDebugPrograms.size(); ++i) {
                 const auto name = std::string("debug") + debugNames[i];
                 stage(mDebugPrograms[i], ("vs_" + name).c_str(), ("fs_" + name).c_str());
@@ -1959,8 +1963,8 @@ class BgfxRenderer final : public Renderer {
                 renderEnvironment(current, t, camera);
                 renderSurfaces(current, t, camera);
                 drawTransparent();
-                renderOutline(current, t, view, projection);
                 renderDebug(current, t, camera, view, projection);
+                renderOutline(current, t, view, projection);
                 renderGizmos(current, t, view, projection);
             }
             t.reflectionKey = reflectionKey;

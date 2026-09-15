@@ -343,8 +343,8 @@ def test_pass_order_is_the_one_the_spec_pins():
         "skybox",
         "tendon",
         "transparent",
-        "outline",
         "debug",
+        "outline",
         "gizmo",
         "present",
     )

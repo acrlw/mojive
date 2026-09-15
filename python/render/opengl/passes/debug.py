@@ -35,6 +35,9 @@ GHOST_ALPHA = 0.28
 
 
 _SPECS = {
+    DrawPath.LIT_TRIANGLE: ProgramSpec(
+        "debug_lit_triangle", "debug_lit_triangle.vert", "debug_solid.frag"
+    ),
     DrawPath.TRIANGLE: ProgramSpec("debug_triangle", "debug_triangle.vert", "debug_line.frag"),
     DrawPath.SCREEN_TRIANGLE: ProgramSpec("debug_screen", "debug_screen.vert", "debug_line.frag"),
     DrawPath.SEGMENT: ProgramSpec("debug_line", "debug_line.vert", "debug_line.frag"),
@@ -66,6 +69,7 @@ _SPECS = {
     ),
 }
 _LAYOUT: dict[DrawPath, str] = {
+    DrawPath.LIT_TRIANGLE: "3f 3f 3f 3f 3f 3f 4f 8x/i",
     DrawPath.TRIANGLE: "3f 3f 3f 4f/i",
     DrawPath.SCREEN_TRIANGLE: "3f 3f 3f 4f/i",
     DrawPath.SEGMENT: "3f 3f 4f 1f 1f 1f/i",
@@ -77,6 +81,15 @@ _LAYOUT: dict[DrawPath, str] = {
     DrawPath.SECTOR: "3f 3f 3f 4f 1f/i",
 }
 _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
+    DrawPath.LIT_TRIANGLE: (
+        ("in_a", 3, 0),
+        ("in_b", 3, 12),
+        ("in_c", 3, 24),
+        ("in_na", 3, 36),
+        ("in_nb", 3, 48),
+        ("in_nc", 3, 60),
+        ("in_color", 4, 72),
+    ),
     DrawPath.SCREEN_TRIANGLE: (
         ("in_a", 3, 0),
         ("in_b", 3, 12),
@@ -135,6 +148,7 @@ _ATTRS: dict[DrawPath, tuple[tuple[str, int, int], ...]] = {
 _ATTRS[DrawPath.TRIANGLE] = _ATTRS[DrawPath.SCREEN_TRIANGLE]
 
 _VERTICES: dict[DrawPath, int] = {
+    DrawPath.LIT_TRIANGLE: 3,
     DrawPath.TRIANGLE: 3,
     DrawPath.SCREEN_TRIANGLE: 3,
     DrawPath.SEGMENT: 6,
@@ -342,8 +356,18 @@ class DebugPass(BasePass):
                 continue
             if "u_alpha" in self._members[b.path]:
                 prog["u_alpha"].value = alpha
+            lit = b.path is DrawPath.LIT_TRIANGLE
+            if lit:
+                ctx.ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
+                ctx.ctx.cull_face = "back"
+                ctx.ctx.front_face = "ccw"
+                ctx.ctx.depth_func = "<"
+                ctx.target.fbo.depth_mask = True
+                prog["u_foreground"].value = b.occlusion is Occlusion.ALWAYS
             self._bind_base(frame, vao, b)
             vao.render(moderngl.TRIANGLES, vertices=_VERTICES.get(b.path, -1), instances=b.count)
+            if lit:
+                self._state(ctx, b.occlusion is not Occlusion.ALWAYS, ">" if alpha < 1 else "<")
             self.draw_calls += 1
             ctx.draw_calls += 1
 

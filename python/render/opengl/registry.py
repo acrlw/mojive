@@ -14,8 +14,8 @@ PASS_ORDER: tuple[str, ...] = (
     "skybox",
     "tendon",
     "transparent",
-    "outline",
     "debug",
+    "outline",
     "gizmo",
     "present",
 )
