@@ -273,6 +273,56 @@ def test_selected_camera_frustum_uses_preview_aspect() -> None:
     assert np.unique(np.abs(near[:, 1])) == pytest.approx([1.0])
 
 
+@pytest.mark.physics
+@pytest.mark.parametrize("diagnostics", (False, True))
+def test_camera_helpers_follow_a_moving_body_without_viewing_the_camera(diagnostics) -> None:
+    mujoco = pytest.importorskip("mujoco")
+    from mojive.adapters.mujoco import MuJoCoAdapter
+
+    adapter = MuJoCoAdapter(external_clock=True)
+    adapter.load_model(
+        mujoco.MjModel.from_xml_string("""
+        <mujoco><worldbody><body pos="0 0 1">
+          <freejoint/><geom type="sphere" size="0.1"/>
+          <camera name="head_camera" mode="fixed" pos="-0.4 0 0.8"/>
+        </body></worldbody></mujoco>
+    """)
+    )
+    try:
+        session = Session(adapter)
+        node = next(node for node in session.nodes if node.type is NodeType.CAMERA)
+        original_eye = session.source.cameras[node.camera_index].eye.copy()
+        editor = CameraView(
+            eye=np.array((1.0, -6.0, 3.0), np.float32),
+            target=np.array((1.0, 0.0, 1.0), np.float32),
+            aspect=1.25,
+        )
+        rect = (0.0, 0.0, 1000.0, 800.0)
+        helpers = SceneEntityHelpers()
+        backend = SimpleNamespace(debug=DebugDraw())
+        assert session.submit(cmd.Select(node.object_id))
+        helpers.publish(backend, session, editor, rect[3], 1.0)
+
+        adapter.data.qpos[0] += 2.0
+        adapter.data.qpos[3:7] = (np.cos(np.pi / 8), 0.0, 0.0, np.sin(np.pi / 8))
+        mujoco.mj_forward(adapter.model, adapter.data)
+        session.tick(FrameNeeds(poses=True, diagnostics=diagnostics))
+        assert session.source.cameras[node.camera_index].eye == pytest.approx(original_eye)
+        current_eye = adapter.data.cam_xpos[node.camera_index].copy()
+        old_cursor, current_cursor = project(editor, [original_eye, current_eye], rect)[:, :2]
+        assert helpers.pick(session, editor, rect, tuple(current_cursor), 1.0) == node.object_id
+        assert helpers.pick(session, editor, rect, tuple(old_cursor), 1.0) == 0
+
+        helpers.publish(backend, session, editor, rect[3], 1.0)
+        store = backend.debug.layer(HELPER_LAYER)._stores[PrimitiveType.LINE]
+        view = session.camera_view(session.cameras[node.camera_index].camera_id)
+        assert view.eye == pytest.approx(current_eye)
+        starts, ends = camera_frustum_segments(view)
+        assert store.positions[: store.count] == pytest.approx(np.stack((starts, ends), axis=1))
+    finally:
+        adapter.release()
+
+
 def test_view_through_camera_hides_editor_helpers() -> None:
     scene = Scene()
     camera_id = scene.add_camera(

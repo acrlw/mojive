@@ -1,6 +1,7 @@
 """Native controls and displayed-pose tracking in both rendering backends."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -12,6 +13,70 @@ from mojive.tools.camera_tracking import exercise_controls
 from mojive.types import CameraView
 
 pytestmark = pytest.mark.gpu
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize("name", ("world_camera", "body_camera", "world_light", "body_light"))
+@pytest.mark.parametrize("entrypoint", ("hierarchy", "viewport"))
+def test_double_click_focuses_camera_and_light_positions(
+    tmp_path, monkeypatch, backend_name, name, entrypoint
+):
+    mujoco = pytest.importorskip("mujoco")
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.app.composition import build_from_adapter
+    from mojive.interaction.gizmo import project
+    from mojive.scene.queries import node_world_pose
+    from mojive.tools.camera_tracking import click
+    from mojive.tools.ui_runtime import _item_center
+    from mojive.ui.camera import FOCUS_DURATION
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
+    adapter = MuJoCoAdapter(external_clock=True)
+    adapter.load_model(
+        mujoco.MjModel.from_xml_string("""
+        <mujoco><worldbody>
+          <geom type="box" size="6 4 .1" pos="0 0 -.1"/>
+          <camera name="world_camera" pos="-2 -1 2"/>
+          <light name="world_light" pos="-2 1 3"/>
+          <body pos="0 0 1"><freejoint/>
+            <geom type="box" size=".3 .2 .4" pos="1 0 0"/>
+            <camera name="body_camera" pos="-.4 -.5 .8"/>
+            <light name="body_light" pos=".4 .5 1.8"/>
+          </body>
+        </worldbody></mujoco>
+    """)
+    )
+    with build_from_adapter(
+        adapter, vsync=False, width=1440, height=1000, show_window=False
+    ) as viewer:
+        for _ in range(4):
+            viewer.sync()
+        adapter.data.qpos[0] += 2.0
+        mujoco.mj_forward(adapter.model, adapter.data)
+        viewer.set_camera(CameraView(eye=(6, -9, 6), target=(0, 0, 1)))
+        viewer.sync()
+        node = next(node for node in viewer.session.nodes if node.name == name)
+        expected, _ = node_world_pose(viewer.session, node)
+        if entrypoint == "hierarchy":
+            viewer.panels.get("Hierarchy")._filter = name
+            for _ in range(3):
+                viewer.sync()
+            cursor = _item_center(viewer, "invisible_button", f"##hierarchy-node-{node.node_id}")
+        else:
+            cursor = project(viewer.session.camera, [expected], viewer.app._viewport_rect)[0, :2]
+            assert viewer.app._pick_at(tuple(cursor)) == node.object_id
+        click(viewer, cursor)
+        click(viewer, cursor)
+        assert viewer.session.selected == node.object_id
+        assert viewer.app.camera.animating
+        viewer.app.camera.advance(FOCUS_DURATION, viewer.app.camera_out)
+        assert viewer.app.camera.pivot == pytest.approx(expected, abs=1e-5)
+        viewer.sync()
+        assert viewer.app._model_camera_id == -1
+        output = Path("output/camera-helpers")
+        output.mkdir(parents=True, exist_ok=True)
+        viewer.capture(output / f"focus-{backend_name}-{name}-{entrypoint}.png", surface="viewport")
 
 
 @pytest.mark.parametrize("scale,language", [(1, "en"), (1.5, "zh_CN")])

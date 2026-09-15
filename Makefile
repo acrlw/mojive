@@ -23,6 +23,11 @@ keyframe-timeline:
 camera-tracking:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
 
+.PHONY: camera-helpers
+## Capture double-click focus on moving and world-attached cameras and lights.
+camera-helpers:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m "gpu and physics" tests/gpu/test_camera_tracking.py -k double_click
+
 recording-layers:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.recording_layers $(ARGS)
 

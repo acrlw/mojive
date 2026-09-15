@@ -5,9 +5,9 @@ from dataclasses import replace
 import numpy as np
 
 from mojive import Scene
-from mojive.adapters.base import FrameNeeds
+from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.scene.bounds import SceneBounds
+from mojive.scene.bounds import SceneBounds, _node_local_bounds, _node_world_bounds
 from mojive.session import Session
 from mojive.types import Bounds, CenteredBounds, InstancePoseSource, MeshData, MeshUpdate
 
@@ -219,3 +219,16 @@ def test_selected_bounds_filter_current_metadata_without_stale_membership():
     # Missing optional mappings use instance indices, as before.
     source.geom_source = np.zeros(0, np.int32)
     check(16)
+
+
+def test_camera_and_light_attachments_do_not_inherit_body_geometry_bounds():
+    scene = Scene()
+    obj = scene.box(position=(3, 0, 1), size=(1, 2, 3))
+    session = Session(StaticSceneAdapter(scene))
+    node = session.node_by_object_id(obj.object_id)
+    assert session.node_local_bounds(node.node_id) is not None
+    assert session.node_world_bounds(node.node_id) is not None
+    for kind in (NodeType.CAMERA, NodeType.LIGHT):
+        attachment = replace(node, type=kind)
+        assert _node_local_bounds(session.source, session.frame, attachment) is None
+        assert _node_world_bounds(session.source, session.frame, attachment, session.nodes) is None
