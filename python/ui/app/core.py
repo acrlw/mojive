@@ -218,6 +218,7 @@ class ViewerApp(
         except (TypeError, ValueError):
             selection_padding = DEFAULT_SELECTION_PADDING
         self.view_cube = ViewCube(selection_padding)
+        self._view_cube_origin_pressed = False
         self.perturb = PerturbController()
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()

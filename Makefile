@@ -289,6 +289,7 @@ GPU_WGPU_FILES += tests/gpu/test_camera_tracking.py tests/gpu/test_input_mapping
 GPU_WGPU_FILES += tests/gpu/test_keyframe_timeline.py tests/gpu/test_ui_refinement.py tests/gpu/test_ui_redesign.py tests/gpu/test_take_video.py tests/gpu/test_ui_corner_controls.py
 GPU_WGPU_FILES += tests/gpu/test_scene_capture.py
 GPU_WGPU_FILES +=  tests/gpu/test_ui_feasibility_backend.py
+GPU_WGPU_FILES += tests/gpu/test_viewcube.py
 GPU_WGPU_FILES += tests/gpu/test_control_scale.py tests/gpu/test_canvas2d.py
 ## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
 ## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
@@ -1044,6 +1045,10 @@ native-window-benchmark: native-python-build
 .PHONY: native-ui-parity
 native-ui-parity: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.native_ui_parity $(ARGS)
+
+.PHONY: viewcube-transitions
+viewcube-transitions:
+	$(PY) -m mojive.tools.viewcube_transitions --renderer $(BACKEND) $(ARGS)
 
 .PHONY: native-load-benchmark
 native-load-benchmark: native-python-build

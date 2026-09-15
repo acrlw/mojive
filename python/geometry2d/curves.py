@@ -1025,6 +1025,10 @@ def smooth_lollipop_points(
     tolerance: float = CURVE_TOLERANCE,
 ) -> tuple[tuple[float, float], ...]:
     """Join a round-capped shaft to a circle with G3 neck transitions when smoothing is positive."""
+    if distance <= radius:
+        # Use the same circular samples as the vanishing neck, without its
+        # coincident closing vertex or a zero-width cap.
+        return tuple(map(tuple, _lollipop_head(radius, 0.0, 0.0, 0.0, tolerance)[:-1].tolist()))
     # Foreshortening can hide the shaft inside its head. Fade the whole neck
     # into the circle limit instead of popping a full-width end cap away.
     visible = min(1.0, max(0.0, distance - radius) / width)
@@ -1039,7 +1043,18 @@ def smooth_lollipop_points(
         smoothing=smoothing,
         max_inset=max(0.0, distance + head[0, 0]) * 0.4,
     )
-    return tuple(map(tuple, np.vstack((cap[0], head, cap[:0:-1])).tolist()))
+    points = np.vstack((cap[0], head, cap[:0:-1]))
+    if visible < 1.0:
+        # Let the tiny cap's normals approach the circle too. Shrinking only
+        # its positions leaves a finite AA spike at the disappearing tip.
+        blend = visible * visible * (3.0 - 2.0 * visible)
+        points *= blend + (1.0 - blend) * radius / np.linalg.norm(points, axis=1)[:, None]
+        # A shrinking Bezier bridge can sample coincident endpoints. Keep the
+        # fill and its AA contour identical, as for fitted short capsules.
+        minimum_edge = min(tolerance * 0.01, max(1.0, radius) * 1e-7)
+        keep = np.linalg.norm(points - np.roll(points, 1, axis=0), axis=1) > minimum_edge
+        points = points[keep]
+    return tuple(map(tuple, points.tolist()))
 
 
 def clip_polygon_rect(points, bounds) -> tuple[tuple[float, float], ...]:

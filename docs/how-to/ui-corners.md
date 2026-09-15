@@ -93,7 +93,18 @@ while the offsets remain regular. The three rings keep their cyclic occlusion. K
 are intentional visibility cuts, not joins between one continuous closed curve. Oversized
 knockout masks retain a conservative miter envelope when an ellipse offset would become singular.
 View gizmo shafts use seventh-degree Bezier transitions whose first three derivatives match
-the straight shaft and circular head. The neck contracts as the head covers its shaft.
+the straight shaft and circular head. A white origin disk has a diameter of twice the shaft
+width. Its antialias fringe extends outward and uses at most a quarter of the surrounding gap,
+preserving the solid core and transparent separation at small UI scales.
+The rounded tails stop one shaft width away from its edge, leaving a transparent shell without
+mask geometry. The dot draws below the endpoints so aligned balls cover it naturally.
+Hover brightens and slightly enlarges only the white disk, without a tooltip or full-widget
+backdrop. Its padded hit area yields to visible axis balls and is disabled when the origin is
+covered. Clicking the origin switches perspective/orthographic projection on release; dragging
+orbits the view and never triggers the click action on release.
+The neck and its normals approach the same sampled circle as the head covers its shaft;
+coincident samples are removed before fill and AA submission.
+Back endpoints and their labels fade with zero slope at both ends of the transition.
 Transform and perturbation drag links blend the hollow origin, connector, and solid target
 with an implicit union whose blend polynomial matches three derivatives at each limit.
 Regular level contours therefore retain G3 contact. OpenGL and WebGPU evaluate the same field

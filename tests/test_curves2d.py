@@ -22,6 +22,20 @@ from mojive.geometry2d.curves import (
 from tests.curve_assertions import assert_paths_close, distance_to_path
 
 
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+@pytest.mark.parametrize("extension", (-1.0, 0.0, 1e-9, 1e-6, 1e-3, 1.0))
+def test_lollipop_circle_limit_keeps_a_valid_antialias_contour(scale, extension):
+    from mojive.geometry2d.curves import polygon_fringe, smooth_lollipop_points
+
+    radius = 9.5 * scale
+    points = np.asarray(smooth_lollipop_points(radius + extension, radius, 2 * scale))
+    assert np.isfinite(points).all()
+    assert np.min(np.linalg.norm(points - np.roll(points, 1, axis=0), axis=1)) > 1e-9
+    assert polygon_fringe(points).shape == points.shape
+    if extension <= 0:
+        assert np.linalg.norm(points, axis=1) == pytest.approx(radius)
+
+
 @pytest.mark.parametrize("segments", (8, 64, 128))
 @pytest.mark.parametrize("width", (0.75, 2.0, 19.5))
 def test_circular_stroke_has_one_non_overlapping_annulus(segments, width):

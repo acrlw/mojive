@@ -277,6 +277,17 @@ horizontal axis endpoints, checks that moving labels retain fractional positions
 axis balls, and compares English/CJK glyphs, rounded outlines and multiple line widths at 100%
 and 150% UI scale. Review the PNG comparisons and axis animation under `output/native-ui-parity/`.
 
+`make viewcube-transitions BACKEND=bgfx` captures an orbit, all axis depth ties, and the shrinking
+shaft's circle limit at 65%, 100%, 125%, and 150% UI scale. Inspect the paired PNGs and animation under
+`output/viewcube-transitions/`. Its CPU timings cover widget update and draw submission, excluding
+readback and presentation; run it separately from other tests or benchmarks. The GPU regression
+also checks 65% and 250% UI scale and bounds pixel changes at depth ties and the shrinking shaft's
+circle limit. It verifies that the white origin's surrounding shell reveals the scene background.
+The `origin-hover-*.png` pairs show idle and hovered origins; only the white disk should change.
+The same GPU test file exercises origin clicks, held input, drag/release cancellation, axis
+occlusion, input gates, and projection switching from scene cameras through the composed viewer
+with a static scene adapter.
+
 ## MuJoCo model corpus
 
 `make mujoco-model-suite` compiles, adapts, and renders the XML files under the configured model
