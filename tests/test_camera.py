@@ -876,3 +876,121 @@ def test_scene_camera_transition_handles_opposite_views_roll_and_intrinsics(orth
     final = transition.advance(target, 0.3)
     assert final is target and not transition.active
     np.testing.assert_allclose(final.proj_matrix(), target.proj_matrix())
+
+
+@pytest.mark.parametrize("aspect", [0.5, 1.5, 3.0])
+@pytest.mark.parametrize("projection", ["perspective", "orthographic", "calibrated"])
+def test_focus_bounds_fits_viewport_and_retains_roll_and_lens(aspect, projection):
+    from dataclasses import replace
+    from itertools import product
+
+    from mojive.interaction.gizmo import project
+
+    view = CameraView(
+        eye=np.array((12.0, -8.0, 7.0)),
+        target=np.zeros(3),
+        up=np.array((0.2, 0.3, 1)),
+        aspect=aspect,
+        orthographic=projection == "orthographic",
+        ortho_height=12,
+    )
+    if projection == "calibrated":
+        view = replace(
+            view,
+            focal_length=np.array((0.9, 1.3)),
+            sensor_size=np.array((aspect, 1.0)),
+            principal_offset=np.array((0.12, -0.09)),
+        )
+    camera = OrbitCamera()
+    camera.adopt(view, exact=True)
+    sink = RecordingSink()
+    center, half = np.array((0.5, -0.3, 0.7)), np.array((0.6, 0.2, 0.35))
+    corners = center + np.array(list(product((-1, 1), repeat=3))) * half
+    rect = (0, 0, 800 * aspect, 800)
+    camera.focus_bounds(center, half, sink)
+    assert camera.view().view_matrix() == pytest.approx(view.view_matrix())
+    for _ in range(36):
+        camera.advance(FOCUS_DURATION / 36, sink)
+        current = camera.view()
+        assert current.view_matrix()[:3, :3] == pytest.approx(view.view_matrix()[:3, :3], abs=1e-6)
+        if projection == "calibrated":
+            assert current.focal_length == pytest.approx(view.focal_length)
+            assert current.principal_offset == pytest.approx(view.principal_offset)
+        pixels = project(current, corners, rect)[:, :2]
+        assert np.all(pixels >= -1e-3)
+        assert np.all(pixels <= np.array(rect[2:]) + 1e-3)
+    final = camera.view()
+    assert project(final, [center], rect)[0, :2] == pytest.approx((400 * aspect, 400), abs=1e-3)
+    pixels = project(final, corners, rect)[:, :2]
+    extent = np.max(np.abs(pixels / np.array(rect[2:]) * 2 - 1))
+    assert extent == pytest.approx(1 / 1.15, abs=2e-5)
+    # The fitted box lies between the actual clip planes as well as inside the image.
+    homogeneous = np.column_stack((corners, np.ones(8)))
+    clip = homogeneous @ (final.proj_matrix() @ final.view_matrix()).T
+    assert np.all(np.abs(clip[:, :3]) <= clip[:, 3, None] + 1e-5)
+
+
+def test_focus_bounds_retargeting_is_continuous_and_manual_pan_cancels_it():
+    camera = OrbitCamera(distance=6, aspect=1.5)
+    sink = RecordingSink()
+    camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink)
+    camera.advance(0.12, sink)
+    before = camera.view()
+    camera.focus_bounds((1, 1, 0), (0.4, 0.2, 0.2), sink)
+    assert camera.view().eye == pytest.approx(before.eye)
+    assert camera.view().target == pytest.approx(before.target)
+    camera.pan(10, 5, 800)
+    assert not camera.animating
+    after = camera.view()
+    camera.advance(FOCUS_DURATION, sink)
+    assert camera.view().eye == pytest.approx(after.eye)
+
+
+def test_focus_bounds_starts_and_finishes_with_zero_velocity():
+    camera = OrbitCamera(distance=6, aspect=1.5)
+    sink = RecordingSink()
+    start = camera.view().eye
+    camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink)
+    epsilon = FOCUS_DURATION * 1e-5
+    camera.advance(epsilon, sink)
+    first = camera.view().eye.copy()
+    camera.advance(FOCUS_DURATION - 2 * epsilon, sink)
+    penultimate = camera.view().eye.copy()
+    camera.advance(epsilon, sink)
+    end = camera.view().eye
+    travel = np.linalg.norm(end - start)
+    assert np.linalg.norm(first - start) / travel < 1e-7
+    assert np.linalg.norm(end - penultimate) / travel < 1e-7
+
+
+def test_focus_bounds_translate_retains_the_animation_path():
+    sink = RecordingSink()
+    cameras = [OrbitCamera(distance=6, aspect=1.5) for _ in range(2)]
+    delta = np.array((0.5, 0.7, 1.0))
+    for camera in cameras:
+        camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink)
+        camera.advance(0.1, sink)
+    cameras[1].translate(delta)
+    for _ in range(30):
+        for camera in cameras:
+            camera.advance(0.01, sink)
+        assert cameras[1].view().eye == pytest.approx(cameras[0].view().eye + delta)
+        assert cameras[1].view().target == pytest.approx(cameras[0].view().target + delta)
+
+
+@pytest.mark.parametrize("orthographic", [False, True])
+def test_focus_bounds_screen_motion_uses_smoothstep_even_for_large_zoom(orthographic):
+    from mojive.interaction.gizmo import project
+
+    camera = OrbitCamera(distance=6, aspect=1.5, orthographic=orthographic, ortho_height=6)
+    center = np.array((2.0, -1.5, 1.0))
+    rect = (0, 0, 1200, 800)
+    initial_pixel = project(camera.view(), [center], rect)[0, :2]
+    sink = RecordingSink()
+    camera.focus_bounds(center, (0.03, 0.03, 0.03), sink)
+    for index in range(1, 5):
+        camera.advance(FOCUS_DURATION / 4, sink)
+        progress = index / 4
+        eased = progress * progress * (3 - 2 * progress)
+        expected = initial_pixel * (1 - eased) + np.array((600, 400)) * eased
+        assert project(camera.view(), [center], rect)[0, :2] == pytest.approx(expected, abs=1e-3)

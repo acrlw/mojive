@@ -166,8 +166,6 @@ class _Viewport:
         if double_clicked and selection.focus_on_double_click:
             node = self.session.node_by_object_id(object_id)
             if node is not None:
-                if self._request_node_joint_focus(node):
-                    return
                 self.request_node_focus(node.node_id)
         if object_id > 0 or selection.clear_on_empty:
             self.session.submit(cmd.Select(object_id))

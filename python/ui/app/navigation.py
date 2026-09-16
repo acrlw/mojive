@@ -592,41 +592,30 @@ class _Navigation:
             return
 
         bounds = self.session.node_world_bounds(node.node_id)
-        if bounds is None and node.type in (NodeType.WORLD, NodeType.ENVIRONMENT):
-            bounds = self.session.bounds()
-        if bounds is not None:
-            lo_or_center = np.asarray(bounds[0], np.float64).reshape(3)
-            hi_or_half = np.asarray(bounds[1], np.float64).reshape(3)
-            if node.type in (NodeType.WORLD, NodeType.ENVIRONMENT):
-                center = (lo_or_center + hi_or_half) * 0.5
-                radius = float(np.linalg.norm(hi_or_half - lo_or_center) * 0.5)
-            else:
-                center = lo_or_center
-                radius = float(np.linalg.norm(hi_or_half))
+        if node.type in (NodeType.WORLD, NodeType.ENVIRONMENT):
+            lo, hi = (np.asarray(value, np.float64) for value in self.session.bounds())
+            center, half = (lo + hi) * 0.5, (hi - lo) * 0.5
+        elif bounds is not None:
+            center, half = bounds
         else:
             center, _rotation = self._node_pose(node)
             lo, hi = self.session.bounds()
             radius = float(
                 np.linalg.norm(np.asarray(hi, np.float64) - np.asarray(lo, np.float64)) * 0.025
             )
+            half = np.full(3, radius / np.sqrt(3))
         center = np.asarray(center, np.float64).reshape(3)
-        if not np.isfinite(center).all() or not np.isfinite(radius) or radius <= 1e-6:
+        half = np.asarray(half, np.float64).reshape(3)
+        if not np.isfinite(center).all() or not np.isfinite(half).all():
             return
 
         current_view = self._camera_view()
-        eye_offset = np.asarray(current_view.eye, np.float64).reshape(3) - center
-        eye_direction = elevated_focus_view_direction(
-            eye_offset,
-            camera_basis(current_view)[0],
-        )
-        if self._model_camera_id >= 0:
-            self.camera.adopt(current_view)
         self._leave_model_camera()
+        self.camera.adopt(current_view, exact=True)
         self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
-        self.camera.focus_target(
+        self.camera.focus_bounds(
             center,
-            radius,
-            eye_direction,
+            half,
             self.camera_out,
             animate=True,
         )
