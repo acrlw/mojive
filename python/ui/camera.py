@@ -78,7 +78,7 @@ def _ease_out_cubic(t: float) -> float:
 
 
 def _smoothstep(t: float) -> float:
-    """Cubic ease-in/out with zero velocity at both projection endpoints."""
+    """Cubic ease-in/out with zero velocity at both endpoints."""
 
     t = min(1.0, max(0.0, t))
     return t * t * (3.0 - 2.0 * t)
@@ -248,6 +248,8 @@ class _Anim:
     ortho_height: float
     elapsed: float = 0.0
     duration: float = FRAME_DURATION
+    view: CameraView | None = None
+    focus_start_span: float = 0.0
 
 
 @dataclass
@@ -566,8 +568,12 @@ class OrbitCamera:
                 target=self._exact_view.target + delta,
             )
         if self._anim is not None and self._anim_start is not None:
-            self._anim.pivot += delta
-            self._anim_start.pivot += delta
+            for state in (self._anim, self._anim_start):
+                state.pivot = state.pivot + delta
+                if state.view is not None:
+                    state.view = replace(
+                        state.view, eye=state.view.eye + delta, target=state.view.target + delta
+                    )
         self._dirty = True
 
     def _touch(self) -> None:
@@ -715,6 +721,81 @@ class OrbitCamera:
         self._apply_goal(goal, animate=animate, easing=_ease_out_quart)
         return self.publish(sink)
 
+    def focus_bounds(
+        self,
+        center,
+        half_extents,
+        sink: CameraSink,
+        *,
+        margin: float = FRAME_MARGIN,
+        animate: bool = True,
+    ) -> CameraView:
+        """Center world bounds along a straight eye path, retaining the displayed orientation."""
+        center = np.asarray(center, np.float64).reshape(3)
+        half = np.abs(np.asarray(half_extents, np.float64).reshape(3))
+        if not np.isfinite(center).all() or not np.isfinite(half).all():
+            return self.publish(sink)
+        start = self.view()
+        right, up, forward = camera_basis(start)
+        backward = -forward
+        padding = max(1.0, float(margin))
+        perspective = replace(start, orthographic=False, orthographic_blend=None).proj_matrix()
+        horizontal = perspective[0, 0] * right + perspective[0, 2] * backward
+        vertical = perspective[1, 1] * up + perspective[1, 2] * backward
+        # The support of an AABB in direction v is abs(v) @ half. These four
+        # frustum-plane inequalities fit all eight corners without an iterative solver.
+        distance = max(
+            MIN_DISTANCE,
+            *(
+                float(np.abs(backward + sign * padding * axis) @ half)
+                for axis in (horizontal, vertical)
+                for sign in (-1, 1)
+            ),
+            float(np.abs(backward) @ half) + MIN_DISTANCE,
+        )
+        height = max(
+            MIN_DISTANCE,
+            2 * padding * float(np.abs(up) @ half),
+            2 * padding * float(np.abs(right) @ half) / max(start.aspect, 1e-3),
+        )
+        target = center.copy()
+        if not start.orthographic:
+            # Keep calibrated lenses intact while centering on the viewport's
+            # center ray, which need not coincide with the optical axis.
+            target -= distance * (
+                right * perspective[0, 2] / perspective[0, 0]
+                + up * perspective[1, 2] / perspective[1, 1]
+            )
+            height = 2 * distance * float(np.tan(start.fov_y * 0.5))
+        depth = float(np.abs(backward) @ half)
+        self.near = min(start.near, max(MIN_NEAR, (distance - depth) * 0.25))
+        self.far = max(start.far, (distance + depth) * 2)
+        view = replace(
+            start,
+            eye=target + backward * distance,
+            target=target,
+            near=self.near,
+            far=self.far,
+            ortho_height=height,
+            orthographic_blend=None,
+        )
+        goal = _Anim(
+            pivot=target,
+            distance=distance,
+            yaw=self.yaw,
+            pitch=self.pitch,
+            ortho_height=height,
+            duration=FOCUS_DURATION,
+            view=view,
+            focus_start_span=(
+                start.ortho_height
+                if start.orthographic
+                else float(np.dot(center - start.eye, forward))
+            ),
+        )
+        self._apply_goal(goal, animate=animate, easing=_smoothstep)
+        return self.publish(sink)
+
     def focus_target(
         self,
         center,
@@ -776,6 +857,14 @@ class OrbitCamera:
         animate: bool,
         easing: Callable[[float], float] = _ease_out_quad,
     ) -> None:
+        start_view = self.view() if goal.view is not None else None
+        if goal.view is not None:
+            start_view = replace(
+                start_view,
+                eye=np.asarray(start_view.eye, np.float64),
+                target=np.asarray(start_view.target, np.float64),
+            )
+            self._stop_anim()
         if animate:
             goal.yaw = self.yaw + _wrap_deg(goal.yaw - self.yaw)
             self._anim_start = _Anim(
@@ -784,6 +873,7 @@ class OrbitCamera:
                 yaw=float(self._yaw),
                 pitch=float(self._pitch),
                 ortho_height=float(self.ortho_height),
+                view=start_view,
             )
             self._anim = goal
             self._anim_easing = easing
@@ -795,6 +885,10 @@ class OrbitCamera:
             self._pitch = goal.pitch
             self.ortho_height = goal.ortho_height
         self._touch()
+        if goal.view is not None:
+            self._exact_view = (
+                replace(start_view, near=self.near, far=self.far) if animate else goal.view
+            )
 
     @property
     def animating(self) -> bool:
@@ -806,18 +900,39 @@ class OrbitCamera:
         if anim is not None and start is not None:
             anim.elapsed += max(0.0, float(dt))
             t = self._anim_easing(anim.elapsed / max(anim.duration, 1e-6))
+            if anim.view is not None and anim.focus_start_span > MIN_DISTANCE:
+                # Reparameterize the same straight path in screen space so a large
+                # dolly does not save most visible motion for the final few frames.
+                end_span = anim.ortho_height if anim.view.orthographic else anim.distance
+                t = t * anim.focus_start_span / (end_span * (1 - t) + anim.focus_start_span * t)
             self.pivot = start.pivot + (anim.pivot - start.pivot) * t
 
-            self._distance = float(
-                np.exp(
-                    np.log(max(start.distance, MIN_DISTANCE)) * (1.0 - t)
-                    + np.log(max(anim.distance, MIN_DISTANCE)) * t
+            if anim.view is not None:
+                # Linear distance and pivot interpolation share the same parameter.
+                # With fixed orientation this is a straight eye path; a target inside
+                # both endpoint frusta stays inside throughout the transition.
+                self._distance = start.distance + (anim.distance - start.distance) * t
+            else:
+                self._distance = float(
+                    np.exp(
+                        np.log(max(start.distance, MIN_DISTANCE)) * (1.0 - t)
+                        + np.log(max(anim.distance, MIN_DISTANCE)) * t
+                    )
                 )
-            )
             self._yaw = start.yaw + (anim.yaw - start.yaw) * t
             self._pitch = start.pitch + (anim.pitch - start.pitch) * t
             self.ortho_height = start.ortho_height + (anim.ortho_height - start.ortho_height) * t
             self._touch()
+            if anim.view is not None and start.view is not None:
+                self._exact_view = replace(
+                    anim.view,
+                    eye=start.view.eye * (1 - t) + anim.view.eye * t,
+                    target=self.pivot.copy(),
+                    ortho_height=self.ortho_height,
+                    orthographic_blend=(
+                        start.view.projection_blend() * (1 - t) + anim.view.projection_blend() * t
+                    ),
+                )
             if anim.elapsed >= anim.duration:
                 self._anim = None
                 self._anim_start = None

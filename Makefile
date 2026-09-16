@@ -28,6 +28,12 @@ timeline-profile:
 camera-tracking:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
 
+.PHONY: camera-focus
+## Capture ordinary object focus and verify dedicated joint/camera/light focus.
+camera-focus:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_camera_tracking.py -k double_click
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_interaction.py -k double_clicking_joint_and_hierarchy
+
 .PHONY: camera-helpers
 ## Capture double-click focus on moving and world-attached cameras and lights.
 camera-helpers:

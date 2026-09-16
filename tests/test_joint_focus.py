@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from itertools import product
 from types import SimpleNamespace
 
 import numpy as np
@@ -269,28 +270,34 @@ def test_vertical_slide_focus_uses_iso_elevation_instead_of_a_level_view() -> No
     assert app.camera.pitch == pytest.approx(30.0)
 
 
-def test_hierarchy_node_focus_preserves_azimuth_at_iso_elevation() -> None:
+@pytest.mark.parametrize("node_type", (NodeType.GEOM, NodeType.WORLD, NodeType.ENVIRONMENT))
+@pytest.mark.parametrize("model_camera", (False, True))
+def test_node_focus_keeps_visible_bounds_in_frame_and_preserves_orientation(
+    node_type, model_camera
+) -> None:
     node = SceneNode(
         node_id=12,
         name="forearm",
-        type=NodeType.GEOM,
+        type=node_type,
         body_index=1,
         geom_index=0,
     )
-    center = np.array((1.0, 2.0, 0.0))
-    half = np.array((0.1, 0.2, 0.3))
+    center = np.array((2.0, -1.5, 1.0))
+    half = np.full(3, 0.3 / np.sqrt(3))
     session = SimpleNamespace(
         node=lambda node_id: node if node_id == node.node_id else None,
-        node_world_bounds=lambda _node_id: (center, half),
-        bounds=lambda: (np.full(3, -2.0), np.full(3, 2.0)),
+        node_world_bounds=lambda _node_id: (
+            (center, half) if node_type is NodeType.GEOM else (np.zeros(3), np.ones(3))
+        ),
+        bounds=lambda: (center - half, center + half),
     )
     app = object.__new__(ViewerApp)
     app._camera_transition = None
     app.session = session
-    app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)
+    app.camera = OrbitCamera(distance=6.0, yaw=0.0, pitch=0.0, aspect=1.5)
     app.camera_out = _CameraSink()
     app._viewport_rect = (0.0, 0.0, 1200.0, 800.0)
-    app._model_camera_id = -1
+    app._model_camera_id = 7 if model_camera else -1
     app._model_camera_view = None
     app._model_camera_projection_target = None
     app._pending_joint_focus_id = None
@@ -298,15 +305,30 @@ def test_hierarchy_node_focus_preserves_azimuth_at_iso_elevation() -> None:
 
     assert app.request_node_focus(node.node_id)
     app.session.camera = app.camera.view()
-    app._apply_pending_node_focus()
-    app.camera.advance(FOCUS_DURATION, app.camera_out)
+    from mojive.interaction.gizmo import project
 
-    horizontal = np.array((2.0, -2.0, 0.0)) / np.sqrt(8.0)
-    expected_direction = horizontal * np.cos(np.deg2rad(30.0)) + np.array((0.0, 0.0, 0.5))
+    corners = center + np.array(list(product((-1, 1), repeat=3))) * half
+    initial_eye = app.camera.view().eye.copy()
+    initial_direction = app.camera.view().forward()
+    app._apply_pending_node_focus()
+    previous_error = float("inf")
+    eyes = []
+    for _ in range(37):
+        view = app.camera.view()
+        pixels = project(view, corners, app._viewport_rect)[:, :2]
+        assert np.all(pixels >= 0)
+        assert np.all(pixels <= (1200, 800))
+        error = np.linalg.norm(project(view, [center], app._viewport_rect)[0, :2] - (600, 400))
+        assert error <= previous_error + 1e-3
+        previous_error = error
+        assert view.forward() == pytest.approx(initial_direction, abs=1e-6)
+        eyes.append(view.eye)
+        app.camera.advance(FOCUS_DURATION / 36, app.camera_out)
     assert app.camera.pivot == pytest.approx(center)
-    assert app.camera.direction() == pytest.approx(expected_direction)
-    expected_distance, _height = app.camera._framing_distance(np.linalg.norm(half), 1.15)
-    assert app.camera.distance == pytest.approx(expected_distance)
+    assert previous_error < 1e-3
+    # Fixed orientation and coordinated zoom produce a straight eye path.
+    travel = app.camera.view().eye - initial_eye
+    assert np.cross(np.asarray(eyes) - initial_eye, travel) == pytest.approx(0, abs=2e-5)
 
 
 def test_hierarchy_camera_focus_uses_the_camera_world_position() -> None:
@@ -412,7 +434,7 @@ def test_viewport_double_click_requires_two_complete_short_left_clicks() -> None
     )
     app._pick_at = lambda _cursor: 9
     focused = []
-    app._request_node_joint_focus = lambda candidate: focused.append(candidate) or True
+    app.request_node_focus = lambda node_id: focused.append(node_id) or True
     app._last_viewport_click = None
 
     down = InputState(left=True, over_viewport=True, cursor=(100.0, 80.0))
@@ -425,10 +447,10 @@ def test_viewport_double_click_requires_two_complete_short_left_clicks() -> None
     app.router.released = True
     app._poll_pick(up)
 
-    assert focused == [node]
+    assert focused == [node.node_id]
 
 
-def test_viewport_double_click_falls_back_to_generic_node_focus() -> None:
+def test_viewport_double_click_uses_the_same_node_focus_as_hierarchy() -> None:
     app = object.__new__(ViewerApp)
     app._camera_transition = None
     app.router = SimpleNamespace(
@@ -445,7 +467,6 @@ def test_viewport_double_click_falls_back_to_generic_node_focus() -> None:
         submit=submitted.append,
     )
     app._pick_at = lambda _cursor: node.object_id
-    app._request_node_joint_focus = lambda _candidate: False
     focused = []
     app.request_node_focus = lambda node_id: focused.append(node_id) or True
     app._last_viewport_click = (time.monotonic(), (100.0, 80.0), node.object_id)
@@ -473,7 +494,7 @@ def test_viewport_camera_drag_breaks_a_pending_double_click() -> None:
     )
     app._pick_at = lambda _cursor: 9
     focused = []
-    app._request_node_joint_focus = lambda candidate: focused.append(candidate) or True
+    app.request_node_focus = lambda node_id: focused.append(node_id) or True
     app._last_viewport_click = None
     down = InputState(left=True, over_viewport=True, cursor=(100.0, 80.0))
     up = InputState(over_viewport=True, cursor=(100.0, 80.0))
