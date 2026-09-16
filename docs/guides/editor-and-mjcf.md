@@ -33,8 +33,9 @@ or an individual attached model.
 The MuJoCo panel exposes the loaded engine's integrator, friction cone, Jacobian,
 solver, algorithmic parameters, physical parameters, contact overrides, and enable/disable
 flags. Numeric fields accept scientific notation; vectors use space-separated components.
-Group headings, parameter names, and choices retain their English engine terminology in
-every UI language. Hover a group heading or field label for its explanation.
+Group headings and parameter labels follow the UI language; choices such as Euler, RK4,
+and Newton, and technical names such as Jacobian, CCD, and SDF retain their original spelling.
+Hover a group heading or field label for its explanation.
 Press Enter or leave a field to apply it. A checked **Disable flags** item disables the
 named feature; a checked **Enable flags** item enables it. Contact override values take
 effect when **Enable flags > Contact override** is checked. Disabled actuator groups
