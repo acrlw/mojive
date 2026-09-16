@@ -463,6 +463,15 @@ local links, including the README image paths; the capture command checks identi
 
 ## Dense timeline and recording lifecycle
 
+`make editor-profile ARGS="--asset /path/to/model.xml --frames 90"` profiles idle frames,
+camera orbit, visibility and color edits in a production viewer. Use `BACKEND=wgpu` for WebGPU.
+Each case separates uninstrumented wall/thread CPU timings, inclusive stage timers and cProfile
+attribution. Nested stages must not be summed. OpenGL drain measures outstanding GPU work;
+other backends include color readback, so those values are not directly comparable GPU times.
+GPU pass timestamps are included when available. Reports, profiles and a final window capture
+go under `output/editor-profile/`. Run timed workloads separately from other checks, and preserve
+backend, framebuffer scale, asset and window dimensions when comparing versions.
+
 `make timeline-benchmark ARGS="--editable --markers 20000"` uses real MuJoCo presets
 and measures held drag, area selection, and release separately from static browsing. Edit completion
 is measured after queued work finishes and the model's new keyframe time is verified. Marker-only
