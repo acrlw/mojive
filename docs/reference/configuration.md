@@ -315,7 +315,7 @@ acceptance, including representative images under `output/recording-layers/`.
 
 `viewer.record(...)` remains the deterministic fixed-frame, UI-free rollout API. The
 `start_recording` lifecycle is for user-driven or automated editor demonstrations. The current
-phase (`idle`, `countdown`, `recording`, or `paused`), remaining countdown seconds, surface,
+phase (`idle`, `countdown`, `recording`, `paused`, or `finalizing`), remaining countdown seconds, surface,
 output path, frame count, and duration are available through `viewer.recording`.
 Changing the window or viewport dimensions while recording a UI surface stops that recording
 with an explicit error instead of silently stretching or cropping frames.
@@ -386,6 +386,20 @@ See the [native backend guide](../how-to/native-viewer.md) for setup and platfor
 Use `mojive backends` for adapter availability and `mojive probe` for OpenGL capability details.
 
 ## Video encoding
+
+Interactive recording copies captured RGB frames into two reusable buffers and writes them to
+FFmpeg on one worker. The queue adds `2 × width × height × 3` bytes (about 38.4 MB at 3200×2000),
+preserves frame order, and drains on stop. It absorbs short encoder stalls; if both buffers are
+occupied, capture waits rather than dropping frames. GPU readback still has a cost. The first
+image is also written on the worker; automatic simulation start waits for its success. Encoder
+failures are reported even while recording is paused. A write or finalization that makes no
+progress for 30 seconds aborts the encoder and reports failure.
+
+Stopping through the UI enters `finalizing`: the viewer remains usable while accepted frames
+drain, and a saved receipt appears only after successful completion. Keep calling `viewer.sync()`
+while `viewer.recording.active` to observe that completion. A new recording cannot start while
+one is finalizing. `viewer.stop_recording()` and viewer shutdown wait for file completion.
+Offline take export and direct `VideoRecorder` calls remain synchronous.
 
 `VideoRecorder` streams frames through FFmpeg. `imageio-ffmpeg` is a normal Mojive dependency
 and supplies executable discovery. If the executable is missing, reinstall that dependency or

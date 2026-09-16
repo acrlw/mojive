@@ -461,6 +461,18 @@ startup-profile:
 ui-frame-profile:
 	$(PY) -m mojive.tools.ui_frame_profile $(ARGS)
 
+.PHONY: hierarchy-benchmark
+hierarchy-benchmark:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.hierarchy_benchmark $(ARGS)
+
+.PHONY: timeline-benchmark
+timeline-benchmark:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.timeline_benchmark $(ARGS)
+
+.PHONY: recording-benchmark
+recording-benchmark:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.recording_benchmark $(ARGS)
+
 .PHONY: joint-gizmo-profile
 joint-gizmo-profile:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.joint_gizmo_profile $(ARGS)
