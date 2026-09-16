@@ -73,6 +73,24 @@ def test_render_layer_does_not_import_ui():
     assert not bad
 
 
+def test_gizmo_does_not_import_inspector_panels():
+    bad = {
+        str(path.relative_to(SRC)): sorted(hits)
+        for path in _files("ui/gizmo")
+        if (hits := _hits(_imports(path), "mojive.ui.panels"))
+    }
+    assert not bad
+
+
+def test_timeline_queries_and_editor_policy_do_not_depend_on_ui_panels():
+    for name in ("interaction/timeline.py", "interaction/timeline_edit.py", "ui/edit_policy.py"):
+        imports = _imports(SRC / name)
+        assert not any(
+            _hits(imports, prefix)
+            for prefix in ("mojive.ui.panels", "imgui_bundle", "mojive.session", "mojive.adapters")
+        )
+
+
 def test_ui_layer_does_not_import_concrete_backend():
     """UI modules depend on render contracts instead of backend internals."""
 
@@ -110,6 +128,8 @@ def test_shared_vocabulary_is_dependency_free():
         "moderngl",
         "glfw",
         "imgui",
+        "imgui_bundle",
+        "wgpu",
     )
     bad = {}
     for name in ("types.py", "math3d.py", "commands.py"):
@@ -148,9 +168,28 @@ def test_adapters_do_not_import_render_internals():
 
     bad = {}
     for path in _files("adapters"):
-        hit = _hits(_imports(path), "mojive.render.opengl")
+        hit = _hits(_imports(path), "mojive.render")
         if hit:
             bad[str(path.relative_to(SRC))] = sorted(hit)
+    assert not bad
+
+
+def test_session_state_does_not_depend_on_ui_or_concrete_physics_adapters():
+    """Document state and commands remain usable by headless third-party adapters."""
+    forbidden = (
+        "mojive.ui",
+        "mojive.app",
+        "mojive.adapters.mujoco",
+        "mojive.adapters.mujoco_adapter",
+        "mujoco",
+        "glfw",
+        "imgui_bundle",
+    )
+    bad = {}
+    for path in _files("session"):
+        hits = {hit for prefix in forbidden for hit in _hits(_imports(path), prefix)}
+        if hits:
+            bad[str(path.relative_to(SRC))] = sorted(hits)
     assert not bad
 
 

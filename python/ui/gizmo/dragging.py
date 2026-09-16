@@ -38,7 +38,7 @@ from mojive.interaction.gizmo import (
 )
 from mojive.scene.geometry import geometry_size_from_dimensions
 from mojive.types import CameraView
-from mojive.ui.panels.inspector import gizmo_refusal_reason
+from mojive.ui.edit_policy import gizmo_refusal_reason
 
 if TYPE_CHECKING:
     from mojive.session import Session

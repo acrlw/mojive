@@ -130,7 +130,7 @@ def capture_take_editing(viewer, output: Path) -> None:
     panel._view_needs_fit = False
     choose_follow(viewer, "off")
     drag(viewer, timeline_point(viewer, 10, "take"), timeline_point(viewer, 15, "take"))
-    bounds = panel._take_selection
+    bounds = panel._editor.take_selection
     assert bounds is not None
     _save_window_crop(
         viewer,
@@ -190,7 +190,7 @@ def capture_take_editing(viewer, output: Path) -> None:
     assert second_id != first_id and len(session.state_takes) == 2
     for _ in range(3):
         viewer.sync()
-    assert panel._take_selection == (0, len(session.state_take_times) - 1)
+    assert panel._editor.take_selection == (0, len(session.state_take_times) - 1)
     assert panel._playhead == session.state_take_times[0]
     _save_window_crop(viewer, "Keyframes", output / "recorded-range.png", padding=0)
     _save_window_crop(
@@ -236,7 +236,7 @@ def capture_take_editing(viewer, output: Path) -> None:
         max_height=300 * viewer.window.style_scale,
     )
     drag(viewer, timeline_point(viewer, 2, "model"), timeline_point(viewer, 8, "model"))
-    assert len(panel._selected_keyframes) == 2
+    assert len(panel._editor.selected_keyframes) == 2
     _save_window_crop(
         viewer,
         "Keyframes",
@@ -503,7 +503,7 @@ def capture_instability_recovery(viewer, output: Path) -> None:
     drag(
         viewer, timeline_point(viewer, before[2], "take"), timeline_point(viewer, before[5], "take")
     )
-    assert panel._take_selection is not None
+    assert panel._editor.take_selection is not None
     for key, ctrl in ((imgui.Key.a, True), (imgui.Key.delete, False)):
         io = imgui.get_io()
         io.add_key_event(imgui.Key.mod_ctrl, ctrl)

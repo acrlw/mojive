@@ -199,6 +199,7 @@ class CameraPreview:
         if self._backend is not None:
             self._backend.release()
             self._backend = None
+        self._source_generation = -1
         self._image = None
 
     def _ensure_backend(self, main_backend: Any, size: tuple[int, int]) -> Any:
