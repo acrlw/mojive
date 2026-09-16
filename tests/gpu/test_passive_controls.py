@@ -35,8 +35,9 @@ def test_external_control_capability_gates_native_actuator_slider(viewer, monkey
         return result
 
     monkeypatch.setattr(imgui, "slider_float", observe)
+    for _ in range(3):
+        viewer.sync()
     _activate_panel(viewer, "Control")
-    viewer.sync()
     before = float(viewer.session.frame.ctrl[0])
     point = _item_center(viewer, "slider_float", "##control-actuator-0")
     _click(viewer, (point[0] + 20, point[1]))

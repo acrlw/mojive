@@ -10,6 +10,8 @@
 | 包 | 负责什么 | 主要入口 |
 |---|---|---|
 | `app/` | 组装 Viewer、选择后端、宿主生命周期、旧 Renderer API | `composition.py`、`backends.py`、`passive.py`、`renderer.py` |
+| `app/mujoco_viewer/` | MuJoCo Viewer 兼容签名、UI 线程、显式状态同步和显示转换 | `launch.py`、`handle.py`、`state.py`、`visuals.py`；公开入口 `mojive.viewer` |
+| `app/mujoco_visuals.py` | MuJoCo 相机、显示标志与标签模式到 Mojive 的共享转换 | Renderer 和 Viewer 共同依赖此模块，Viewer 不再借用离屏产品的私有函数 |
 | `scene/` | 场景实体、资源定位、边界与几何查询、文件读写 | `model.py`、`assets.py`、`bounds.py`、`geometry.py`、`io.py`、`workspace.py`、`state.py` |
 | `session/` | 文档状态、选择、编辑事务、播放、结构刷新 | `core.py`、`editing.py`、`playback.py`、`source.py` |
 | `session/dispatch/` | 将类型化命令交给对应的处理函数 | `documents.py`、`transforms.py`、`properties.py`、`assets.py`、`physics.py`、`playback.py` |
@@ -52,6 +54,11 @@
 |---|---|
 | 主循环、初始化、退出 | `ui/app/core.py` |
 | 模型加载、编辑预览、资源选择 | `ui/app/loading.py`、`model_edits.py`、`resource_dialogs.py` |
+| 时间线面板装配 | `ui/panels/keyframes.py`；只组合编辑器、工具栏、轨道与属性视图 |
+| 时间线编辑状态、选择、拖动与命令 | `ui/keyframe_editor/controller.py`；不依赖 ImGui、PanelContext、renderer 或 ViewerApp |
+| 时间线工具栏、轨道与属性呈现 | `ui/keyframe_editor/toolbar.py`、`track.py`、`properties.py`；显式接收同一个 TimelineEditor，不通过 mixin 共享隐含状态 |
+| viewport 图像区域和朝向 | `ui/viewport_surface.py`；不处理 gizmo、物理、Session 或选择 |
+| gizmo 规范化输入分发 | `ui/gizmo/input.py`；接收已判定的输入所有权，向宿主返回精确输入请求 |
 | 输入、相机导航、精确 gizmo 输入 | `ui/app/input.py`、`navigation.py`、`gizmo_input.py` |
 | 菜单、viewport、状态栏、录制 | `ui/app/menus.py`、`viewport.py`、`status.py`、`capture.py` |
 | gizmo 状态、投影、拖拽、范围、辅助线 | `ui/gizmo/core.py`、`projection.py`、`dragging.py`、`joint_ranges.py`、`guides.py` |

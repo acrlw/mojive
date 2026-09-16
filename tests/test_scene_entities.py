@@ -33,6 +33,19 @@ from mojive.ui.scene_entities import (
 )
 
 
+def test_static_light_composition_reuses_authored_values_and_observes_edits():
+    scene = Scene()
+    light = scene.add_light("key", Light())
+    session = Session(StaticSceneAdapter(scene))
+    for _ in range(5):
+        assert session.tick(FrameNeeds.none(), wall_dt=0).lights is scene.source.lights
+    light.set(replace(light.value, intensity=3.0, position=np.array([1, 2, 3], np.float32)))
+    frame = session.tick(FrameNeeds.none(), wall_dt=0)
+    assert frame.lights is scene.source.lights
+    assert frame.lights.lights[0].intensity == 3.0
+    np.testing.assert_array_equal(frame.lights.lights[0].position, [1, 2, 3])
+
+
 def test_perspective_frustum_uses_camera_projection_planes() -> None:
     view = CameraView(
         eye=np.zeros(3, np.float32),
@@ -642,3 +655,25 @@ def test_light_gizmo_converts_world_pose_to_parent_body_frame() -> None:
     command = _set_light_from_world(session, node, world_position, world_rotation)
     assert command.light.position == pytest.approx((1.0, 0.0, 0.0), abs=1e-6)
     assert command.light.direction == pytest.approx((0.0, 0.0, -1.0), abs=1e-6)
+
+
+def test_disabled_helper_layer_skips_geometry_and_clears_retained_output(monkeypatch):
+    scene = Scene()
+    scene.add_camera("camera", CameraView())
+    session = Session(StaticSceneAdapter(scene))
+    backend = SimpleNamespace(debug=DebugDraw())
+    helpers = SceneEntityHelpers()
+    try:
+        helpers.publish(backend, session, CameraView(), 600, 1, enabled=False)
+        assert backend.debug.layers() == ()
+        helpers.publish(backend, session, CameraView(), 600, 1)
+        assert backend.debug.primitives > 0
+
+        def unexpected(*args):
+            raise AssertionError("Disabled helpers must not prepare geometry")
+
+        monkeypatch.setattr(helpers, "_refresh_nodes", unexpected)
+        helpers.publish(backend, session, CameraView(), 600, 1, enabled=False)
+        assert backend.debug.primitives == 0
+    finally:
+        session.release()

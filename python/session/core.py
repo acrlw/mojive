@@ -48,8 +48,8 @@ from .keyframes import ModelKeyframeCatalog
 from .playback import _Playback
 from .source import _Source
 from .state import (
-    AuthoredSceneOverlay,
     PerturbState,
+    SceneOverrides,
     SceneSnapshotInfo,
     _DocumentState,
     _SceneSnapshot,
@@ -62,7 +62,7 @@ class Session(_Editing, _Playback, _Source):
     """Own viewer state and route typed commands to one scene adapter.
 
     The session separates UI and renderer code from physics-specific methods. It
-    tracks selection, pause and step state, authored overrides, edit history, and
+    tracks selection, pause and step state, scene overrides, edit history, and
     stable-structure generations while the adapter owns simulation data.
     """
 
@@ -95,7 +95,7 @@ class Session(_Editing, _Playback, _Source):
         self._preview_generation = 0
         self._mesh_bounds_cache: _MeshBoundsCache = {}
         self._scene_bounds: SceneBounds | None = None
-        self._authored = AuthoredSceneOverlay()
+        self._scene_overrides = SceneOverrides()
         self._nodes: list[SceneNode] = []
         self._by_node_id: dict[int, SceneNode] = {}
         self._by_object_id: dict[int, SceneNode] = {}
@@ -263,7 +263,7 @@ class Session(_Editing, _Playback, _Source):
 
     @property
     def cameras(self) -> list[CameraInfo]:
-        """Return selectable model and authored camera metadata."""
+        """Return selectable model and scene camera metadata."""
         return self._cameras
 
     @property
@@ -380,9 +380,14 @@ class Session(_Editing, _Playback, _Source):
         return self._camera
 
     @property
-    def authored_overlay(self) -> AuthoredSceneOverlay:
-        """Return Mojive-authored overrides layered over adapter structure."""
-        return self._authored
+    def scene_overrides(self) -> SceneOverrides:
+        """Return retained camera, light and appearance edits over the adapter scene."""
+        return self._scene_overrides
+
+    @property
+    def authored_overlay(self) -> SceneOverrides:
+        """Compatibility name for :attr:`scene_overrides`."""
+        return self.scene_overrides
 
     @property
     def scene_models(self) -> tuple[SceneModelInfo, ...]:
@@ -553,7 +558,7 @@ class Session(_Editing, _Playback, _Source):
 
     @property
     def document_revision(self) -> int:
-        """Return the authored revision represented by the current undo history state."""
+        """Return the document revision represented by the current undo history state."""
         return self._document_revision
 
     @property

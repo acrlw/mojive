@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
 from mojive import commands as cmd
-from mojive.adapters.base import AdapterCaps, FrameNeeds, SceneAdapterBase
+from mojive.adapters.base import (
+    AdapterCaps,
+    FrameNeeds,
+    SceneAdapter,
+    SceneAdapterBase,
+    SceneInspection,
+)
 from mojive.adapters.conformance import check_adapter, check_scene_provider
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
@@ -16,6 +24,50 @@ from mojive.session import Session
 from mojive.types import Light, LightSet
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("simulation", [False, True])
+def test_read_only_inspection_does_not_require_editing_or_simulation_stubs(simulation):
+    scene = Scene()
+    scene.box()
+    source = StaticSceneAdapter(scene)
+
+    class Inspector:
+        caps = AdapterCaps(name="inspection", simulation=simulation)
+
+        def __getattr__(self, name):
+            if name in {
+                "structure_revision",
+                "scene_source",
+                "frame",
+                "release",
+                "nodes",
+                "joints",
+                "actuators",
+                "cameras",
+                "keyframes",
+                "sensors",
+                "equality_constraints",
+                "camera_view",
+                "visual_groups",
+                "raycast",
+                "camera_hint",
+                "timestep",
+                "scene_models",
+            }:
+                return getattr(source, name)
+            raise AttributeError(name)
+
+    inspector = Inspector()
+    assert isinstance(inspector, SceneInspection)
+    assert not isinstance(inspector, SceneAdapter)
+    report = check_adapter(inspector)
+    if simulation:
+        required = next(check for check in report.checks if check.name == "editor runtime methods")
+        assert not required.ok
+        assert all(name in required.detail for name in ("step", "reset", "set_paused"))
+    else:
+        assert report.ok, [check for check in report.checks if not check.ok]
 
 
 def test_toy_is_a_real_available_backend_and_passes_the_shared_contract():
@@ -60,6 +112,18 @@ def test_conformance_report_names_a_broken_instance_column():
 
     failed = {check.name for check in report.checks if not check.ok}
     assert "instance columns" in failed
+
+
+def test_conformance_rejects_a_cycle_in_node_parents():
+    scene = Scene()
+    scene.box()
+    source = scene.source
+    source.nodes[0].parent = source.nodes[-1].node_id
+    source.nodes[-1].parent = source.nodes[0].node_id
+    report = check_adapter(StaticSceneAdapter(scene))
+    graph = next(check for check in report.checks if check.name == "node graph")
+    assert not graph.ok
+    assert "cycle" in graph.detail
 
 
 def test_conformance_requires_every_light_to_be_an_entity():
@@ -119,7 +183,6 @@ def test_minimal_editor_adapter_can_inherit_all_unadvertised_defaults():
 
 
 def test_claimed_write_capability_reports_inherited_unsupported_methods():
-    from dataclasses import replace
 
     adapter = StaticSceneAdapter(Scene())
     adapter.caps = replace(adapter.caps, write_qpos=True)
@@ -131,7 +194,6 @@ def test_claimed_write_capability_reports_inherited_unsupported_methods():
 
 
 def test_external_clock_does_not_require_internal_stepping():
-    from dataclasses import replace
 
     adapter = StaticSceneAdapter(Scene())
     adapter.caps = replace(adapter.caps, simulation=True, external_clock=True, clock_control=False)

@@ -595,7 +595,7 @@ class _Physics:
             )
             imgui.set_item_tooltip(
                 ctx.tr(
-                    "Auto enables the limit when a valid range is authored; "
+                    "Auto enables the limit when a valid range is configured; "
                     "unlimited ignores the range"
                 )
             )

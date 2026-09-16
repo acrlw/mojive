@@ -14,6 +14,14 @@ from mojive.ui.panels.keyframes import timeline_status_hints
 pytestmark = pytest.mark.gpu
 
 
+def test_scene_drags_keep_capture_when_crossing_viewport_overlays(tmp_path, monkeypatch):
+    from mojive.tools.ui_runtime import _capture_gesture_ownership
+
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    _capture_gesture_ownership(tmp_path)
+
+
 @pytest.mark.parametrize("scale", (1, 2.5))
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
 def test_backend_info_localizes_dynamic_counts_without_overlapping_labels(
@@ -40,6 +48,51 @@ def viewer(tmp_path, monkeypatch):
 def _camera_state(viewer):
     view = viewer.app._camera_view()
     return np.concatenate((view.eye, view.target, [view.fov_y]))
+
+
+@pytest.mark.parametrize("scale", (1, 1.5))
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_saved_file_receipt_keeps_pending_edit_buttons_accessible(
+    tmp_path, monkeypatch, scale, language
+):
+    from mojive.session.model_edits import model_edit_scope
+    from mojive.tools.ui_runtime import _click, _item_center, _settle
+
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    monkeypatch.setenv("MOJIVE_LANGUAGE", language)
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    with build(
+        resolve("joint_gizmo"), paused=True, vsync=False, show_window=False, width=1280, height=900
+    ) as viewer:
+        _settle(viewer, 8)
+        node = next(n for n in viewer.session.nodes if n.source_editable and n.geom_index >= 0)
+        with model_edit_scope(viewer.session, viewer.app._intercept_model_edit):
+            assert viewer.session.submit(cmd.RenameModelElement(node.node_id, "pending_entity"))
+        _settle(viewer, 2)
+        path = tmp_path / "saved-recording-with-a-long-filename.mp4"
+        path.touch()
+        viewer.app.output.publish(
+            f"Saved video to {path} · File copied to clipboard", duration=None, copy_text=str(path)
+        )
+        _settle(viewer, 3)
+        pending = imgui.internal.find_window_by_name("###pending_model_edits")
+        receipt = viewer.app._status_notice_bounds
+        assert receipt is not None
+        assert pending.pos.y + pending.size.y < receipt[1]
+        discard = _item_center(
+            viewer, "button", viewer.app.localizer.text("Discard") + "##discard_model_edits"
+        )
+        _click(
+            viewer,
+            _item_center(
+                viewer,
+                "button",
+                viewer.app.localizer.text("Copy path") + "##status-copy-path",
+            ),
+        )
+        assert imgui.get_clipboard_text() == str(path)
+        _click(viewer, discard)
+        assert not viewer.app.model_edits.active
 
 
 @pytest.mark.parametrize(
@@ -304,17 +357,17 @@ def test_timeline_right_drag_and_wheel_have_distinct_effects(viewer):
     window = imgui.internal.find_window_by_name("Keyframes")
     point = (lo[0] + (hi[0] - lo[0]) * 0.65, min(lo[1] + 35, window.inner_clip_rect.max.y - 4))
     camera_before = _camera_state(viewer)
-    initial = (panel._view_start, panel._view_end)
+    initial = (panel.editor.view_start, panel.editor.view_end)
     _drag(viewer, point, (60.0, 0.0), button=1)
-    assert panel._view_start < initial[0]
-    assert panel._view_end - panel._view_start == pytest.approx(initial[1] - initial[0])
+    assert panel.editor.view_start < initial[0]
+    assert panel.editor.view_end - panel.editor.view_start == pytest.approx(initial[1] - initial[0])
     np.testing.assert_allclose(_camera_state(viewer), camera_before, atol=1e-7)
-    span = panel._view_end - panel._view_start
+    span = panel.editor.view_end - panel.editor.view_start
     imgui.get_io().add_mouse_pos_event(*point)
     viewer.sync()
     imgui.get_io().add_mouse_wheel_event(0.0, 1.0)
     viewer.sync()
-    assert panel._view_end - panel._view_start < span
+    assert panel.editor.view_end - panel.editor.view_start < span
     hints = {hint.hint_id: hint for hint in timeline_status_hints(str)}
     assert hints["keyframes.pan"].control == "right"
     assert hints["keyframes.zoom"].control == "wheel"

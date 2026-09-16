@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from mojive import commands as cmd
+from mojive import math3d
 from mojive.config import InteractionConfig, SelectionStyle
 from mojive.control.errors import ControlError
 from mojive.control.schema import (
@@ -126,8 +127,12 @@ def _command_factory(kind):
             )
         if "rotation" in values:
             values["rotation"] = _rotation(values["rotation"])
-        if "position" in values:
-            values["position"] = np.asarray(values["position"], np.float32)
+        for name in ("position", "size"):
+            if name in values:
+                try:
+                    values[name] = math3d.as_finite_float32(values[name])
+                except ValueError as error:
+                    raise ControlError("invalid_params", f"{name}: {error}") from error
         if "camera" in values and not isinstance(values["camera"], CameraView):
             values["camera"] = camera_value(values["camera"])
         if "light" in values and not isinstance(values["light"], Light):

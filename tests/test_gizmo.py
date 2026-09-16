@@ -4891,3 +4891,56 @@ def test_joint_basis_preserves_published_axis_and_is_right_handed(axis, read_onl
         np.testing.assert_allclose(basis[:, 2], np.asarray(axis) / np.linalg.norm(axis))
     else:
         np.testing.assert_array_equal(basis, np.eye(3))
+
+
+@pytest.mark.parametrize("interruption", ["blocked", "disabled", "release"])
+def test_normalized_gizmo_input_keeps_keyboard_ownership_until_interruption(interruption):
+    from dataclasses import replace
+
+    from mojive.ui.gestures import InputState
+    from mojive.ui.gizmo.input import GizmoInput, update_gizmo_input
+
+    session, node = session_at()
+    gizmo = ObjectGizmo()
+    cam = camera()
+    start = np.array((143.0, 411.0))
+    axis = project(cam, (np.zeros(3), np.array((1.0, 0.0, 0.0))), RECT)[:, :2]
+    direction = axis[1] - axis[0]
+    direction /= np.linalg.norm(direction)
+    event = GizmoInput(InputState(cursor=tuple(start), over_viewport=True), axis=0)
+    try:
+        update_gizmo_input(gizmo, session, cam, RECT, event)
+        assert gizmo.keyboard_using
+        # A held gesture remains owned when the cursor leaves the viewport.
+        moved = replace(event, state=InputState(cursor=tuple(start + direction * 36)))
+        update_gizmo_input(gizmo, session, cam, RECT, moved)
+        position = np.asarray(session.frame.body_xpos[node.body_index]).copy()
+        assert position[0] > 0.1
+        stopped = replace(
+            moved,
+            enabled=interruption != "disabled",
+            axis=-1 if interruption == "release" else 0,
+            state=replace(moved.state, blocked=interruption == "blocked"),
+        )
+        update_gizmo_input(gizmo, session, cam, RECT, stopped)
+        assert not gizmo.using
+        assert session.frame.body_xpos[node.body_index] == pytest.approx(position)
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize("state", ["outside", "pointer"])
+def test_keyboard_gizmo_does_not_steal_an_existing_pointer_gesture(state):
+    from mojive.ui.gestures import InputState
+    from mojive.ui.gizmo.input import GizmoInput, update_gizmo_input
+
+    session, _ = session_at()
+    gizmo = ObjectGizmo()
+    try:
+        event = GizmoInput(
+            InputState(over_viewport=state != "outside", left=state == "pointer"), axis=0
+        )
+        update_gizmo_input(gizmo, session, camera(), RECT, event)
+        assert not gizmo.using
+    finally:
+        session.release()

@@ -8,6 +8,7 @@ import wgpu
 from ...types import TextureData, TextureType
 from ..texture import mip_chain as _mip_chain
 from ..texture import srgb_to_linear_u8 as _srgb_to_linear_u8
+from .mipmaps import MipmapGenerator
 
 _BYTES_PER_CHANNEL = {1: (wgpu.TextureFormat.r8unorm, 1), 2: (wgpu.TextureFormat.rg8unorm, 2)}
 
@@ -22,6 +23,7 @@ class TextureStore:
         self._white: wgpu.GPUTextureView | None = None
         self._white_cube: wgpu.GPUTextureView | None = None
         self._black_cube: wgpu.GPUTextureView | None = None
+        self._mipmaps: MipmapGenerator | None = None
         self.revision = 0
         # Albedo anisotropy is evaluated in the shared shader footprint. Keep
         # the underlying sampler trilinear so drivers do not filter it twice.
@@ -108,44 +110,42 @@ class TextureStore:
         )
 
     def _upload(self, data: TextureData) -> wgpu.GPUTextureView:
-        pixels = np.ascontiguousarray(data.pixels)
-        h, w, comps = pixels.shape
-        fmt, bpp, linearize = self._format_for(comps, data.srgb)
-        if comps == 3:
-            alpha = np.full((h, w, 1), 255, np.uint8)
-            pixels = np.concatenate([pixels, alpha], axis=2)
-        if linearize:
-            pixels = np.ascontiguousarray(_srgb_to_linear_u8(pixels))
-        levels = _mip_chain(pixels[None], srgb=data.srgb and not linearize)
-        tex = self._device.create_texture(
-            size=(w, h, 1),
-            format=fmt,
-            usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
-            mip_level_count=len(levels),
-        )
-        for mip_level, level in enumerate(levels):
-            self._write_payload(tex, level, bpp, mip_level)
-        return tex.create_view()
+        return self._upload_pixels(data.pixels[None], data.srgb).create_view()
 
     def _upload_cube(self, data: TextureData) -> tuple[wgpu.GPUTextureView, int]:
-        pixels = np.ascontiguousarray(data.pixels)
-        _, size, _, comps = pixels.shape  # (6, S, S, C) u8
-        fmt, bpp, linearize = self._format_for(comps, data.srgb)
+        tex = self._upload_pixels(data.pixels, data.srgb)
+        return tex.create_view(dimension="cube"), data.pixels.shape[1]
+
+    def _upload_pixels(self, pixels: np.ndarray, srgb: bool) -> wgpu.GPUTexture:
+        pixels = np.ascontiguousarray(pixels)
+        layers, h, w, comps = pixels.shape
+        fmt, bpp, linearize = self._format_for(comps, srgb)
         if comps == 3:
-            alpha = np.full((6, size, size, 1), 255, np.uint8)
+            alpha = np.full((layers, h, w, 1), 255, np.uint8)
             pixels = np.concatenate([pixels, alpha], axis=3)
         if linearize:
             pixels = np.ascontiguousarray(_srgb_to_linear_u8(pixels))
-        levels = _mip_chain(pixels, srgb=data.srgb and not linearize)
+        # Odd mip extents require the shared area filter. Exact 2x reductions
+        # stay on the GPU, avoiding large NumPy float buffers and repeat uploads.
+        gpu_mips = not (w & (w - 1) or h & (h - 1))
+        levels = [pixels] if gpu_mips else _mip_chain(pixels, srgb=srgb and not linearize)
+        mip_count = max(w, h).bit_length()
+        usage = wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST
+        if gpu_mips and mip_count > 1:
+            usage |= wgpu.TextureUsage.RENDER_ATTACHMENT
         tex = self._device.create_texture(
-            size=(size, size, 6),
+            size=(w, h, layers),
             format=fmt,
-            usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
-            mip_level_count=len(levels),
+            usage=usage,
+            mip_level_count=mip_count,
         )
         for mip_level, level in enumerate(levels):
             self._write_payload(tex, level, bpp, mip_level)
-        return tex.create_view(dimension="cube"), size
+        if gpu_mips and mip_count > 1:
+            if self._mipmaps is None:
+                self._mipmaps = MipmapGenerator(self._device)
+            self._mipmaps.generate(tex)
+        return tex
 
     def get(self, name: str | None) -> wgpu.GPUTextureView | None:
         if name is None:
@@ -195,3 +195,4 @@ class TextureStore:
         self._white = None
         self._white_cube = None
         self._black_cube = None
+        self._mipmaps = None

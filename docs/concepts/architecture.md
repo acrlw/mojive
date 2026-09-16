@@ -80,10 +80,11 @@ Consumers can depend on one group; capability checks remain the runtime authorit
 and advertised-operation diagnostics. A protocol declaration does not imply write support.
 
 Timeline coordinates, marker queries and decimation live in `interaction/timeline.py` without
-ImGui or Session dependencies. The panel owns disposable indexes keyed by model/content revision
+ImGui or Session dependencies. The timeline controller owns disposable indexes keyed by model/content revision
 and caches only the latest view. Range searches and marker hit tests use binary search; dense
-draw decimation skips occupied pixel buckets. `interaction/timeline_edit.py` owns the panel-local gesture state and produces edit decisions;
-the panel translates them into commands. Drag previews overlay one marker on a cached view.
+draw decimation skips occupied pixel buckets. `interaction/timeline_edit.py` owns transient gesture state and edit decisions;
+`ui/keyframe_editor/controller.py` coordinates that state with Session commands, while toolbar,
+track and property modules handle rendering and input sampling. Drag previews overlay one marker on a cached view.
 `session/keyframes.py` owns a content-revisioned catalog with stable per-model views and ID lookup,
 so appearance changes do not invalidate preset metadata. Session routes committed edits, history
 and authoritative scene/take data. Shared transform refusal policy lives in `ui/edit_policy.py`; gizmos do not import

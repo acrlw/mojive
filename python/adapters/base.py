@@ -13,6 +13,7 @@ import numpy as np
 from ..types import (
     CameraView,
     Environment,
+    GeometryView,
     Light,
     LightSet,
     Material,
@@ -86,12 +87,15 @@ class SceneNode:
 
     # True only when this compiled node has a stable element in the editable
     # scene source. Runtime pose control (``posable``) is intentionally
-    # separate: a free body can be movable even when no authored source exists.
+    # separate: a free body can be movable even when no editable source exists.
     source_editable: bool = False
 
     # Local geometry scaling is separate from runtime pose control. Adapters
     # advertise it only where set_scale can bake dimensions without losing shape.
     scalable: bool = False
+
+    # Display override for this link's own geometry; None follows the scene view.
+    geometry_view: GeometryView | None = None
 
     source_name: str = ""
 
@@ -679,7 +683,7 @@ class FrameNeeds:
 
 @dataclass
 class SceneFrame:
-    """Dynamic scene data for one simulation or authored-scene frame.
+    """Dynamic scene data for one simulation or scene frame.
 
     Arrays correspond to indices stored in :class:`SceneSource`. Optional arrays are ``None``
     when the matching :class:`FrameNeeds` flag was disabled or the adapter lacks that feature.
@@ -820,6 +824,12 @@ class SceneSource:
     # Appended to preserve the positional constructor used by older adapters.
     geom_segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
 
+    # Empty roles mean visual-only. Group visibility applies to the default view;
+    # explicit geometry views include hidden groups while retaining node visibility.
+    geom_role: np.ndarray = field(default_factory=lambda: np.zeros(0, np.uint8))
+    geom_group_visible: np.ndarray = field(default_factory=lambda: np.ones(0, bool))
+    geom_collision_mesh: list[MeshKey] = field(default_factory=list)
+
     @property
     def instance_count(self) -> int:
         """Return the number of render instances."""
@@ -851,19 +861,19 @@ class SceneAdapterBase:
         raise RuntimeError(f"{self.caps.name} does not support reload")
 
     def new_scene(self) -> None:
-        """Replace the current source with an empty authored scene."""
+        """Replace the current source with an empty scene."""
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
     def open_scene(self, path: Path) -> None:
-        """Open an authored scene document."""
+        """Open an scene document."""
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
     def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None:
-        """Save the current authored scene document."""
+        """Save the current scene document."""
         raise RuntimeError(f"{self.caps.name} does not support scene files")
 
     def current_pose_modified(self) -> bool:
-        """Return whether dynamic pose state differs from its authored state."""
+        """Return whether dynamic pose state differs from the document pose."""
         return False
 
     def export_mjcf(
@@ -1153,7 +1163,7 @@ class SceneAdapterBase:
         damping: float,
         stiffness: float,
     ) -> bool:
-        """Set authored numeric properties for one model joint."""
+        """Set source numeric properties for one model joint."""
         return False
 
     def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
@@ -1177,7 +1187,7 @@ class SceneAdapterBase:
         return None
 
     def set_geometry_properties(self, properties: GeometryProperties) -> bool:
-        """Set authored contact parameters for one model geometry."""
+        """Set source contact parameters for one model geometry."""
         return False
 
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
@@ -1207,7 +1217,7 @@ class SceneAdapterBase:
         return None
 
     def set_body_properties(self, properties: BodyProperties) -> bool:
-        """Set authored inertial and dynamic properties for one model body."""
+        """Set source inertial and dynamic properties for one model body."""
         return False
 
     def model_material_indices(self, model_id: int) -> tuple[int, ...]:
@@ -1320,13 +1330,13 @@ class SceneAdapterBase:
         return True
 
     def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool:
-        """Set authored primitive dimensions for a geometry or site node."""
+        """Set primitive dimensions for a geometry or site node."""
         return False
 
     def set_scale(self, node_id: int, scale: np.ndarray) -> bool:
         """Bake positive local XYZ factors into a scalable node's geometry.
 
-        Preserve position and rotation, update authored dimensions atomically, and
+        Preserve position and rotation, update source dimensions atomically, and
         publish a new structure revision. Unsupported targets remain unchanged.
         Scalable nodes own geometry in their local frame, not articulated subtrees.
         """
@@ -1346,11 +1356,11 @@ class SceneAdapterBase:
         color,
         material: Material,
     ) -> int:
-        """Create an authored render object and return its object ID."""
+        """Create a scene render object and return its object ID."""
         return -1
 
     def remove_scene_object(self, object_id: int) -> bool:
-        """Remove an authored render object."""
+        """Remove a scene render object."""
         return False
 
     def add_scene_light(self, name: str, light: Light) -> int:
@@ -1370,15 +1380,15 @@ class SceneAdapterBase:
         return False
 
     def duplicate_scene_entity(self, object_id: int) -> int:
-        """Duplicate an authored entity and return its new object ID."""
+        """Duplicate a scene entity and return its new object ID."""
         return 0
 
     def remove_scene_entity(self, object_id: int) -> bool:
-        """Remove an authored entity by selection object ID."""
+        """Remove a scene entity by selection object ID."""
         return False
 
     def rename_scene_entity(self, object_id: int, name: str) -> bool:
-        """Rename an authored entity by selection object ID."""
+        """Rename a scene entity by selection object ID."""
         return False
 
     def apply_perturb(
@@ -1661,8 +1671,11 @@ class KeyframePlayback(KeyframeCatalog, Protocol):
     def load_keyframe(self, keyframe_id: int) -> bool: ...
 
 
+@runtime_checkable
 class KeyframeEditing(Protocol):
-    """Read and change source presets when model.keyframe_edit is advertised."""
+    """Compatibility group for loading and changing source presets."""
+
+    def load_keyframe(self, keyframe_id: int) -> bool: ...
 
     def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None: ...
     def add_model_keyframe(self, model_id: int, name: str) -> int: ...
@@ -1675,8 +1688,146 @@ class ModelKeyframes(KeyframePlayback, KeyframeEditing, Protocol):
 
 
 @runtime_checkable
+class SceneInspection(SceneProvider, Protocol):
+    """Read scene structure, object metadata and current camera/physics timing."""
+
+    caps: AdapterCaps
+
+    def nodes(self) -> list[SceneNode]: ...
+
+    def joints(self) -> list[JointInfo]: ...
+
+    def actuators(self) -> list[ActuatorInfo]: ...
+
+    def cameras(self) -> list[CameraInfo]: ...
+
+    def keyframes(self) -> list[KeyframeInfo]: ...
+
+    def sensors(self) -> list[SensorInfo]: ...
+
+    def equality_constraints(self) -> list[EqualityConstraintInfo]: ...
+
+    def camera_view(self, camera_id: int) -> CameraView | None: ...
+
+    def visual_groups(self) -> tuple[VisualGroupInfo, ...]: ...
+
+    def raycast(self, origin: np.ndarray, direction: np.ndarray) -> tuple[int, float]: ...
+
+    def camera_hint(self) -> CameraView | None: ...
+
+    def timestep(self) -> float: ...
+
+    def scene_models(self) -> tuple[SceneModelInfo, ...]: ...
+
+    def release(self) -> None: ...
+
+
+@runtime_checkable
+class SimulationControl(Protocol):
+    """Advance simulation and read or modify backend-owned physics state."""
+
+    def reset(self) -> None: ...
+
+    def step(self, count: int = 1) -> None: ...
+
+    def set_paused(self, paused: bool) -> bool: ...
+
+    def create_simulation_driver(self) -> SimulationDriver | None: ...
+
+    def set_qpos(self, index: int, value: float) -> bool: ...
+
+    def set_qpos_batch(self, indices: np.ndarray, values: np.ndarray) -> bool: ...
+
+    def set_ctrl(self, index: int, value: float) -> bool: ...
+
+    def set_ctrl_vector(self, values: np.ndarray) -> bool: ...
+
+    def set_equality_enabled(self, constraint_id: int, enabled: bool) -> bool: ...
+
+    def capture_observation(self) -> PhysicsObservation | None: ...
+
+    def capture_state(self) -> PhysicsState | None: ...
+
+    def restore_state(self, state: PhysicsState) -> bool: ...
+
+    def apply_perturb(
+        self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
+    ) -> bool: ...
+
+    def clear_perturb(self) -> None: ...
+
+
+@runtime_checkable
+class SceneEditing(Protocol):
+    """Edit scene objects, transforms, appearance, cameras and lights."""
+
+    def set_pose(self, node_id: int, position, rotation) -> bool: ...
+
+    def set_light(self, light_index: int, light) -> bool: ...
+
+    def set_environment(self, environment: Environment) -> bool: ...
+
+    def set_skybox(self, texture: str | None) -> bool: ...
+
+    def set_material(self, material_index: int, material: Material) -> bool: ...
+
+    def set_geometry_color(self, node_id: int, rgba: np.ndarray) -> bool: ...
+
+    def set_geometry_size(self, node_id: int, size: np.ndarray) -> bool: ...
+
+    def set_scale(self, node_id: int, scale: np.ndarray) -> bool: ...
+
+    def set_camera_view(self, camera_id: int, camera: CameraView) -> bool: ...
+
+    def set_visual_group(self, category: str, group: int, visible: bool) -> bool: ...
+
+    def add_scene_object(
+        self,
+        shape: MeshShape | MeshKey,
+        name: str,
+        size,
+        position,
+        rotation,
+        color,
+        material: Material,
+    ) -> int: ...
+
+    def remove_scene_object(self, object_id: int) -> bool: ...
+
+    def add_scene_light(self, name: str, light: Light) -> int: ...
+
+    def remove_scene_light(self, light_id: int) -> bool: ...
+
+    def add_scene_camera(self, name: str, camera: CameraView) -> int: ...
+
+    def remove_scene_camera(self, camera_id: int) -> bool: ...
+
+    def duplicate_scene_entity(self, object_id: int) -> int: ...
+
+    def remove_scene_entity(self, object_id: int) -> bool: ...
+
+    def rename_scene_entity(self, object_id: int, name: str) -> bool: ...
+
+
+@runtime_checkable
+class SceneDocuments(ScenePersistence, Protocol):
+    """Compatibility group for document I/O and edit snapshots."""
+
+
+@runtime_checkable
+class ModelEditing(ModelTopology, ModelProperties, ModelAssets, Protocol):
+    """Compatibility group for model source editing."""
+
+    def add_scene_model(self, path: Path, position, rotation) -> int: ...
+    def remove_scene_model(self, model_id: int) -> bool: ...
+    def set_scene_model_transform(self, model_id: int, position, rotation) -> bool: ...
+    def preview_scene_model_transform(self, model_id: int, position, rotation) -> bool: ...
+    def clear_scene_model_transform_preview(self, model_id: int) -> bool: ...
+
+
+@runtime_checkable
 class SceneAdapter(
-    SceneRuntime,
+    SceneInspection,
     SimulationAccess,
     SceneAppearance,
     SceneAuthoring,

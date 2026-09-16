@@ -35,6 +35,8 @@ class RenderFlag(enum.StrEnum):
     CULL_FACE = "cull_face"
 
     CONVEXHULL = "convexhull"
+    VISUAL_GEOMETRY = "visual_geometry"
+    COLLISION_GEOMETRY = "collision_geometry"
     TEXTURE = "texture"
     JOINT = "joint"
     ACTUATOR = "actuator"
@@ -346,6 +348,10 @@ class RenderBackend(Protocol):
 
         ...
 
+    def set_geometry_view(self, view: str) -> bool:
+        """Apply a geometry preset as one display update."""
+        ...
+
     def get_flag(self, flag: RenderFlag) -> bool:
         """Return the effective value of a render flag."""
 
@@ -523,6 +529,9 @@ class NullBackend:
         return False
 
     def set_flag(self, flag: RenderFlag, value: bool) -> bool:
+        return False
+
+    def set_geometry_view(self, view: str) -> bool:
         return False
 
     def get_flag(self, flag: RenderFlag) -> bool:

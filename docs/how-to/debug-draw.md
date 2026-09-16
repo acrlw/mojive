@@ -15,6 +15,26 @@ Debug drawing is composited before the selection outline. The outline remains vi
 over diagnostics; transform gizmos and viewport UI appear above both. `ALWAYS` bypasses
 scene occlusion, not the visual priority of editor selection and interaction feedback.
 
+## Offscreen rendering
+
+`Renderer` and `SceneRenderer` expose the same retained drawing API without constructing a Viewer:
+
+```python
+from mojive import Renderer, Occlusion
+
+with Renderer(model) as renderer:
+    renderer.debug.layer("diagnostics", Occlusion.ALWAYS).arrow(
+        "velocity", (0, 0, 0), (1, 0, 0), (0.2, 0.8, 1, 1), 2,
+    )
+    renderer.update_scene(data)
+    rgb = renderer.render()
+```
+
+RGB includes diagnostics; depth, object ID and segmentation products retain scene semantics.
+`renderer.canvas2d` shares this drawing storage. See [materials and floor grids](materials.md)
+for a complete offscreen example and [configuration](../reference/configuration.md#choose-the-amount-of-ui-to-load)
+for optional viewer panels.
+
 ## Interactive example
 
 ```bash

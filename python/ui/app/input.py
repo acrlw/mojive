@@ -66,9 +66,11 @@ class _Input:
             if mouse_pos is not None
             else (float("inf"), float("inf"))
         )
+        scene_pointer_owned = self.router.owns_scene_pointer or self.gizmo.using
         status_bounds = getattr(self, "_status_notice_bounds", None)
         status_action = bool(
-            status_bounds is not None
+            not scene_pointer_owned
+            and status_bounds is not None
             and status_bounds[0] <= cursor[0] <= status_bounds[2]
             and status_bounds[1] <= cursor[1] <= status_bounds[3]
         )
@@ -82,7 +84,7 @@ class _Input:
             and overlay_config.movable
             # An already-owned scene gesture keeps capture until release;
             # merely crossing a capsule border must not interrupt a drag.
-            and not getattr(self.gizmo, "using", False)
+            and not scene_pointer_owned
             and pointer_engaged
             and any(
                 rect is not None and overlay_border_hit(cursor, rect, 6.0 * self.window.style_scale)

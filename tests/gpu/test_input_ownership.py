@@ -21,8 +21,6 @@ def viewer(tmp_path, monkeypatch, request):
         imgui.get_io().config_mac_osx_behaviors = request.param
         for _ in range(12):
             viewer.sync()
-        # Selection commands do not change native keyboard focus. Delete in a
-        # focused timeline belongs to that panel; these tests target the viewport.
         imgui.internal.focus_window(imgui.internal.find_window_by_name("Viewport"))
         viewer.sync()
         viewer.session.submit(cmd.Select(box.object_id))

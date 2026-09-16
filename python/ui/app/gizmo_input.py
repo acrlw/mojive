@@ -12,6 +12,7 @@ from mojive.interaction.gizmo import axis_active_color, axis_hover_color
 from mojive.ui import gestures as gs
 from mojive.ui.compound_fields import borderless_numeric_input, draw_joined_field_frame
 from mojive.ui.gizmo import JointLimitHit, PreciseGizmoInput
+from mojive.ui.gizmo.input import GizmoInput, update_gizmo_input
 from mojive.ui.panels import (
     padded_selectable,
     segmented_control,
@@ -31,74 +32,30 @@ class _GizmoInput:
     """Private gizmo input methods of ViewerApp; state belongs to its owner."""
 
     def _poll_gizmo(self, state: gs.InputState, keys: Keys) -> None:
-        if (
-            not self.interactions.gizmo
-            or not self.selection_style.gizmo
-            or not self.viewport_layers.gizmos
-        ):
-            self.gizmo.cancel()
-            return
-        if state.blocked:
-            self.gizmo.cancel()
-            return
-        if self._precise_gizmo_edit is not None:
-            self.gizmo.cancel()
-            return
-        if self._viewing_selected_camera():
-            self.gizmo.keyboard_interact(
-                self.session,
-                self._camera_view(),
-                self._viewport_rect,
-                state.cursor,
-                -1,
-                style_scale=self.window.style_scale,
-            )
-            self.gizmo.interact(
-                self.session,
-                self._camera_view(),
-                self._viewport_rect,
-                state.cursor,
-                claimed=False,
-                left_down=state.any_button and self.router.wants_gizmo(),
-                released=self.router.released,
-                style_scale=self.window.style_scale,
-            )
-            return
-        keyboard_was_active = self.gizmo.keyboard_using
-        axis = keys.gizmo_axis
-        if not keyboard_was_active and (not state.over_viewport or state.any_button):
-            axis = -1
-        if keyboard_was_active or axis >= 0:
-            self.gizmo.keyboard_interact(
-                self.session,
-                self._camera_view(),
-                self._viewport_rect,
-                state.cursor,
-                axis,
-                snap=state.shift or self._snap_latched,
-                style_scale=self.window.style_scale,
-            )
-            return
-        if state.gizmo_hovered and state.action(
-            PointerAction.GIZMO_VALUE, imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
-        ):
-            edit = self.gizmo.precise_input(self.session)
-            if edit is not None:
-                self.gizmo.cancel()
-                self.router.abort()
-                self._begin_precise_gizmo_input(edit)
-                return
-        self.gizmo.interact(
-            self.session,
-            self._camera_view(),
-            self._viewport_rect,
-            state.cursor,
+        event = GizmoInput(
+            state=state,
+            enabled=(
+                self.interactions.gizmo
+                and self.selection_style.gizmo
+                and self.viewport_layers.gizmos
+                and self._precise_gizmo_edit is None
+            ),
+            viewing_selected_camera=self._viewing_selected_camera(),
+            axis=keys.gizmo_axis,
+            precise_requested=state.action(
+                PointerAction.GIZMO_VALUE, imgui.is_mouse_double_clicked(imgui.MouseButton_.left)
+            ),
             claimed=self.router.wants_gizmo(),
-            left_down=state.any_button and self.router.wants_gizmo(),
             released=self.router.released,
-            snap=state.shift or self._snap_latched,
+            snap=self._snap_latched,
             style_scale=self.window.style_scale,
         )
+        edit = update_gizmo_input(
+            self.gizmo, self.session, self._camera_view(), self._viewport_rect, event
+        )
+        if edit is not None:
+            self.router.abort()
+            self._begin_precise_gizmo_input(edit)
 
     def _begin_precise_gizmo_input(self, edit: PreciseGizmoInput) -> None:
         self._precise_gizmo_edit = edit

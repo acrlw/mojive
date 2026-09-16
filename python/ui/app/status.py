@@ -337,6 +337,15 @@ class _Status:
         imgui.pop_style_color()
         imgui.pop_style_var()
 
+    def _viewport_hint_bottom(self) -> float:
+        """Stack editor hints above the current frame's interactive file receipt."""
+        _x, y, _width, height = self._viewport_rect
+        scale = self.window.style_scale
+        bottom = y + height - 16.0 * scale
+        if self._status_notice_bounds is not None:
+            bottom = min(bottom, self._status_notice_bounds[1] - 8.0 * scale)
+        return bottom
+
     def _draw_center_notice(
         self,
         overlay: ImguiDraw2D,

@@ -96,6 +96,7 @@ class MuJoCoAdapter(
         self._model_transform_preview: _ModelTransformPreview | None = None
         self._next_model_id = 1
         self._structure_revision = 0
+        self._keyframe_model = None
         self._notes: list[str] = []
 
         self._geom_xpos_buf = np.zeros((0, 3), np.float32)
@@ -275,16 +276,54 @@ class MuJoCoAdapter(
         self._structure_revision += 1
         return True
 
-    def refresh_model_visuals(self) -> bool:
-        """Refresh cached scene data after direct MjModel visual edits."""
+    def refresh_model_visuals(self, *, force: bool = False) -> bool:
+        """Refresh direct MjModel visual edits, optionally rebuilding uploaded resources."""
         source_changed = self._refresh_snapshots(self._visual_state)
         lights_changed = self._refresh_snapshots(self._light_state)
-        if source_changed:
+        if source_changed or force:
             self._source = None
             self._structure_revision += 1
         if lights_changed:
             self._lights_edited = True
-        return source_changed or lights_changed
+            if self._source is not None:
+                self._source.lights = replace(
+                    self._source.lights, lights=self._build_lights().lights
+                )
+            self._lights_dynamic = bool(self._m.nlight) and bool(
+                np.any(self._m.light_bodyid != 0)
+                or np.any(self._m.light_mode != mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+            )
+        # Physics actuator-group toggles change visibility, not scene membership.
+        # Consumers retain this array, so update it in place without GPU uploads.
+        disabled = int(self._m.opt.disableactuator)
+        if disabled != self._disabled_actuator_groups:
+            self._disabled_actuator_groups = disabled
+            if self._source is not None:
+                groups = np.clip(np.asarray(self._m.actuator_group, np.int32), 0, 30)
+                self._source.actuator_visible[:] = self._group_visibility(
+                    self._m.actuator_group, "actuator"
+                ) & ((disabled & (1 << groups)) == 0)
+        return source_changed or lights_changed or force
+
+    def refresh_model_fields(self, fields: set[str]) -> None:
+        """Refresh affected display caches after in-place model edits, without compiling."""
+        from .updates import (
+            ACTUATOR_DISPLAY_FIELDS,
+            diagnostic_fields_changed,
+            scene_fields_changed,
+        )
+
+        if scene_fields_changed(fields):
+            self.refresh_model_visuals(force=True)
+        elif self._source is not None and diagnostic_fields_changed(fields):
+            self._source.diagnostics = self._build_diagnostic_source()
+            self._source.debug_frame_length = float(self._m.stat.meansize) * float(
+                self._m.vis.scale.framelength
+            )
+        if self._source is not None:
+            for model_field, source_field in ACTUATOR_DISPLAY_FIELDS:
+                if model_field in fields:
+                    getattr(self._source, source_field)[:] = getattr(self._m, model_field)
 
     def _refresh_snapshots(self, snapshots: dict[str, np.ndarray]) -> bool:
         changed = False
@@ -310,6 +349,7 @@ class MuJoCoAdapter(
     def _install(self, model, data=None) -> None:
         if self._model_edit_batch_depth and model is self._m:
             return
+        self._keyframe_model = None
         # A compiled model is authoritative. Transient placement indices refer to
         # the previous model layout and must never survive an install.
         self._model_transform_preview = None
@@ -421,6 +461,11 @@ class MuJoCoAdapter(
             bool,
         )
         visual_fields = (
+            "geom_contype",
+            "geom_conaffinity",
+            "geom_group",
+            "pair_geom1",
+            "pair_geom2",
             "geom_rgba",
             "site_rgba",
             "flex_rgba",
@@ -439,6 +484,10 @@ class MuJoCoAdapter(
         )
         light_fields = (
             "light_type",
+            "light_bodyid",
+            "light_mode",
+            "light_texid",
+            "light_bulbradius",
             "light_pos",
             "light_dir",
             "light_diffuse",
@@ -465,6 +514,7 @@ class MuJoCoAdapter(
             if (value := np.asarray(getattr(model, name, ()))).size
         }
         self._lights_edited = False
+        self._disabled_actuator_groups = int(model.opt.disableactuator)
         self._perturb = mujoco.MjvPerturb()
         self._perturb_body = -1
         self._perturb_jac = np.zeros((3, model.nv), np.float64)
@@ -919,6 +969,7 @@ class MuJoCoAdapter(
         )
 
     def release(self) -> None:
+        self._keyframe_model = None
         self._model_transform_preview = None
         self._m = None
         self._d = None

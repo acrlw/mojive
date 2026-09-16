@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import statistics
@@ -95,8 +96,10 @@ def _run(markers: int, frames: int, output: Path, *, editable: bool = False) -> 
     ) as viewer:
         show_timeline(viewer)
         panel = viewer.panels.get("Keyframes")
-        panel._set_follow_mode("off")
-        draw, paint = panel.draw, panel._paint_dope_sheet
+        panel.editor.set_follow_mode("off")
+        from mojive.ui.keyframe_editor import track
+
+        draw, paint = panel.draw, track.paint_dope_sheet
         samples, counts = [], []
 
         def measured(ctx):
@@ -105,10 +108,10 @@ def _run(markers: int, frames: int, output: Path, *, editable: bool = False) -> 
             samples.append((time.perf_counter_ns() - start) / 1e6)
 
         def counted(*args, **kwargs):
-            counts.append(len(args[9]))
+            counts.append(len(args[10]))
             return paint(*args, **kwargs)
 
-        panel.draw, panel._paint_dope_sheet = measured, counted
+        panel.draw, track.paint_dope_sheet = measured, counted
         middle = markers * 0.05
         cases = (
             ("overview", (0, markers * 0.1)),
@@ -124,8 +127,8 @@ def _run(markers: int, frames: int, output: Path, *, editable: bool = False) -> 
             )
         for name, bounds in cases:
             imgui.get_io().add_mouse_pos_event(-100, -100)
-            panel._view_start, panel._view_end = bounds
-            panel._view_needs_fit = False
+            panel.editor.view_start, panel.editor.view_end = bounds
+            panel.editor.view_needs_fit = False
             for _ in range(8):
                 viewer.sync()
             if name.endswith("_drag") or name.endswith("_selection"):
@@ -136,9 +139,9 @@ def _run(markers: int, frames: int, output: Path, *, editable: bool = False) -> 
                 viewer.sync()
                 imgui.get_io().add_mouse_button_event(0, True)
                 viewer.sync()
-                if name.endswith("_drag") and panel._editor.drag_id < 0:
+                if name.endswith("_drag") and panel.editor.drag_id < 0:
                     raise RuntimeError("Benchmark did not acquire a keyframe drag")
-                if name.endswith("_selection") and panel._editor.pointer_mode != "select":
+                if name.endswith("_selection") and panel.editor.pointer_mode != "select":
                     raise RuntimeError("Benchmark did not acquire a selection gesture")
             samples.clear()
             counts.clear()
@@ -147,7 +150,10 @@ def _run(markers: int, frames: int, output: Path, *, editable: bool = False) -> 
                 span = bounds[1] - bounds[0]
                 if name.endswith("_pan"):
                     shift = span * index * 0.0005
-                    panel._view_start, panel._view_end = bounds[0] + shift, bounds[1] + shift
+                    panel.editor.view_start, panel.editor.view_end = (
+                        bounds[0] + shift,
+                        bounds[1] + shift,
+                    )
                 if name.endswith("_hover"):
                     point = timeline_point(
                         viewer, bounds[0] + span * (index + 1) / (frames + 1), "model"
@@ -170,15 +176,35 @@ def _run(markers: int, frames: int, output: Path, *, editable: bool = False) -> 
             }
             _save_window_crop(viewer, "Keyframes", output / f"{name}.png", padding=0)
             if name.endswith("_drag") or name.endswith("_selection"):
+                dragged_id = panel.editor.drag_id
+                expected_time = panel.editor.drag_preview_time
                 start = time.perf_counter_ns()
                 imgui.get_io().add_mouse_button_event(0, False)
                 viewer.sync()
                 report["cases"][name]["release_sync_ms"] = (time.perf_counter_ns() - start) / 1e6
-                if panel._error:
-                    raise RuntimeError(panel._error)
+                if dragged_id >= 0:
+                    # Release can enqueue a write; measure completion separately and
+                    # verify the model before starting another interaction sample.
+                    while (
+                        viewer.app._model_load_queue
+                        or viewer.app._model_load_future is not None
+                        or viewer.app._model_load_completion is not None
+                    ):
+                        viewer.sync()
+                        if (time.perf_counter_ns() - start) / 1e9 > 30:
+                            raise TimeoutError("Keyframe edit did not complete")
+                    report["cases"][name]["edit_completion_ms"] = (
+                        time.perf_counter_ns() - start
+                    ) / 1e6
+                    actual = viewer.session.keyframe_properties(dragged_id)
+                    if actual is None or not math.isclose(actual.time, expected_time):
+                        raise RuntimeError("Released drag did not update the model keyframe")
+                if panel.editor.error:
+                    raise RuntimeError(panel.editor.error)
         report["backend"] = viewer.backend.caps.name
         report["window_points"] = list(viewer.window.size_points)
         report["pixel_scale"] = viewer.window.pixel_scale
+    track.paint_dope_sheet = paint
     return report
 
 

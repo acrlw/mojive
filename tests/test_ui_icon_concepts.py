@@ -811,7 +811,7 @@ def test_rotate_uses_axis_rings_while_reset_uses_one_arrow() -> None:
 def test_loop_has_two_seamless_half_turn_arrows_distinct_from_reset(size, stroke):
     import numpy as np
 
-    from mojive.ui.panels.keyframes import _COMMAND_ICON_NAMES
+    from mojive.ui.keyframe_editor.controls import _COMMAND_ICON_NAMES
 
     draw = _render("transport-loop", size, stroke_width=stroke)
     assert len(draw.filled_paths) == 2

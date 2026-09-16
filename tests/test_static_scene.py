@@ -164,7 +164,9 @@ def test_global_playback_controls_prioritize_recording_and_take_replay():
     app = ViewerApp.__new__(ViewerApp)
     app.session = session
     panel = KeyframesPanel()
-    app.panels = SimpleNamespace(get=lambda name: panel)
+    from mojive.ui.panels import PanelManager
+
+    app.panels = PanelManager(panels=[panel])
     app._panel_context = lambda: PanelContext(session, None)
     assert session.submit(cmd.SeekStateTake(3))
     app._toggle_state_take_recording()
@@ -173,7 +175,7 @@ def test_global_playback_controls_prioritize_recording_and_take_replay():
     app._toggle_playback()
     assert not session.state_take_recording and session.paused
     assert session.state_take_cursor == 3
-    assert panel._editor.take_selection == (3, 4)
+    assert panel.editor.take_selection == (3, 4)
 
     assert session.submit(cmd.PlayStateTake())
     session.tick(FrameNeeds.none(), wall_dt=0.005)

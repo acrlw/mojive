@@ -946,6 +946,33 @@ class WorkspaceAdapter(SceneAdapterBase):
             geom_pose_source=np.concatenate((primary.geom_pose_source, authored.geom_pose_source)),
             geom_visual=np.concatenate((primary.geom_visual, authored.geom_visual)),
             geom_static=np.concatenate((primary.geom_static, authored.geom_static)),
+            geom_role=np.concatenate(
+                (
+                    primary.geom_role
+                    if len(primary.geom_role)
+                    else np.ones(primary.instance_count, np.uint8),
+                    authored.geom_role
+                    if len(authored.geom_role)
+                    else np.ones(authored.instance_count, np.uint8),
+                )
+            ),
+            geom_group_visible=np.concatenate(
+                (
+                    primary.geom_group_visible
+                    if len(primary.geom_group_visible)
+                    else np.ones(primary.instance_count, bool),
+                    authored.geom_group_visible
+                    if len(authored.geom_group_visible)
+                    else np.ones(authored.instance_count, bool),
+                )
+            ),
+            geom_collision_mesh=[
+                *(primary.geom_collision_mesh or primary.geom_mesh),
+                *(
+                    _mesh_key(key, mesh_map)
+                    for key in (authored.geom_collision_mesh or authored.geom_mesh)
+                ),
+            ],
             instance_island_body=np.concatenate(
                 (primary.instance_island_body, np.full(authored.instance_count, -1, np.int32))
             ),

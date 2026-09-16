@@ -148,6 +148,8 @@ class OpenGLBackend:
         self._flags[RenderFlag.CONTACTSPLIT] = False
         self._flags[RenderFlag.ISLAND] = False
         self._flags[RenderFlag.CONVEXHULL] = False
+        self._flags[RenderFlag.VISUAL_GEOMETRY] = False
+        self._flags[RenderFlag.COLLISION_GEOMETRY] = False
         self._flags[RenderFlag.AUTOCONNECT] = False
         self._flags[RenderFlag.ACTUATOR] = False
         self._flags[RenderFlag.ACTIVATION] = False
@@ -210,6 +212,8 @@ class OpenGLBackend:
             RenderFlag.FLEXSKIN,
             RenderFlag.ISLAND,
             RenderFlag.CONVEXHULL,
+            RenderFlag.VISUAL_GEOMETRY,
+            RenderFlag.COLLISION_GEOMETRY,
         }
         if "shadow" in self._passes:
             flags.add(RenderFlag.SHADOW)
@@ -535,6 +539,8 @@ class OpenGLBackend:
     def set_flag(self, flag: RenderFlag, value: bool) -> bool:
         if flag not in self.caps.render_flags:
             return False
+        if self._flags.get(flag, False) == bool(value):
+            return True
         self._flags[flag] = bool(value)
         if flag in {
             RenderFlag.STATIC,
@@ -543,7 +549,16 @@ class OpenGLBackend:
             RenderFlag.FLEXSKIN,
             RenderFlag.ISLAND,
             RenderFlag.CONVEXHULL,
+            RenderFlag.VISUAL_GEOMETRY,
+            RenderFlag.COLLISION_GEOMETRY,
         }:
+            self._sync_instance_visibility()
+        return True
+
+    def set_geometry_view(self, view: str) -> bool:
+        from ..geometry import set_geometry_flags
+
+        if set_geometry_flags(self._flags, view):
             self._sync_instance_visibility()
         return True
 
@@ -557,6 +572,8 @@ class OpenGLBackend:
             flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
             island=self.get_flag(RenderFlag.ISLAND),
             convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
+            visual_geometry=self.get_flag(RenderFlag.VISUAL_GEOMETRY),
+            collision_geometry=self.get_flag(RenderFlag.COLLISION_GEOMETRY),
         )
         if changed:
             self.set_render_scene(self._builder.scene)

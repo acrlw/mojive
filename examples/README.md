@@ -11,6 +11,9 @@ Run these programs from the repository root after `make setup`. Commands use
 | `canvas2d.py` | yes | layered 2D physics and geometry diagnostics |
 | `custom_adapter.py` | yes | small independent simulation adapter |
 | `mujoco_render.py` | no | RGB PNG, metric depth NPY, and segmentation NPY |
+| `mujoco_viewer.py` | yes | MuJoCo-style viewer handle, callback, camera/options and user geoms |
+| `viewer_managed.py` | yes | Minimal managed viewer: Mojive owns physics stepping |
+| `viewer_passive.py` | yes | Minimal passive viewer: the caller steps and synchronizes physics |
 | `mujoco_video.py` | no | streamed MP4 rollout with optional Pillow label/timestamp |
 | `multi_camera_render.py` | no | one PNG for the free view and each fixed camera |
 | `mujoco_control.py` | no | qpos editing and deterministic stepping through `Session` |

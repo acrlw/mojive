@@ -23,18 +23,16 @@ def box_reduce_axis(pixels: np.ndarray, axis: int) -> np.ndarray:
     if size == target * 2:
         return np.moveaxis(moved.reshape(target, 2, *moved.shape[1:]).mean(axis=1), 0, axis)
 
-    # Odd, non-power-of-two dimensions cannot be reshaped into 2x blocks.
-    # Use exact source-pixel coverage so the final row/column is included
-    # instead of truncating it or prematurely ending the mip chain.
-    edges = np.linspace(0.0, float(size), target + 1, dtype=np.float32)
-    source_lo = np.arange(size, dtype=np.float32)
-    weights = np.maximum(
-        0.0,
-        np.minimum(edges[1:, None], source_lo[None, :] + 1.0)
-        - np.maximum(edges[:-1, None], source_lo[None, :]),
-    )
-    weights /= float(size) / float(target)
-    reduced = np.tensordot(weights, moved, axes=((1,), (0,)))
+    # For size=2*n+1, output j spans [2*j+j/n, 2*j+2+(j+1)/n].
+    # Exactly three pixels contribute. Use their area weights directly instead
+    # of an n-by-size matrix, retaining the last row/column in linear work.
+    index = np.arange(target, dtype=np.float32)
+    shape = (target,) + (1,) * (moved.ndim - 1)
+    left = ((target - index) / size).reshape(shape)
+    right = ((index + 1) / size).reshape(shape)
+    reduced = moved[:-2:2] * left
+    reduced += moved[1:-1:2] * (target / size)
+    reduced += moved[2::2] * right
     return np.moveaxis(reduced, 0, axis)
 
 

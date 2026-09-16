@@ -83,6 +83,11 @@ class WorldInstances(SceneAdapterBase):
             geom_rgba=source.geom_rgba[rows],
             geom_local=expand_optional(source.geom_local),
             geom_visual=expand_optional(source.geom_visual),
+            geom_role=expand_optional(source.geom_role),
+            geom_group_visible=expand_optional(source.geom_group_visible),
+            geom_collision_mesh=[source.geom_collision_mesh[i] for i in rows]
+            if len(source.geom_collision_mesh)
+            else [],
             geom_infinite_plane=expand_optional(source.geom_infinite_plane),
             geom_static=static[rows],
             geom_object_id=ids.astype(np.uint32),

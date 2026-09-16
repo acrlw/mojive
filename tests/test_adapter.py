@@ -174,14 +174,14 @@ def test_object_id_is_per_body(adapter):
     assert ids("cap") <= body_ids
 
 
-def test_hidden_group_geoms_are_skipped(adapter):
+def test_hidden_group_geoms_are_retained_but_not_visible_by_default(adapter):
 
     src = adapter.scene_source()
     m = adapter.model
     hidden = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "hidden")
     assert hidden >= 0
-    assert hidden not in src.geom_source.tolist()
-    assert not any(n.name == "hidden" for n in adapter.nodes())
+    assert not src.geom_group_visible[src.geom_source == hidden].any()
+    assert any(n.name == "hidden" for n in adapter.nodes())
 
 
 def test_infinite_plane_flagged(adapter):
@@ -1424,7 +1424,8 @@ def test_mujoco_visuals_cover_heightfield_sites_and_tendon():
         scene = builder.set_source(src, CameraView())
         builder.update(frame)
         row = int(site_rows[0])
-        rendered = scene.transforms[builder.write_index[row]][:3, 3]
+        slot = int(np.flatnonzero(builder._source_instances == row)[0])
+        rendered = scene.transforms[builder.write_index[slot]][:3, 3]
         source_site = int(src.geom_source[row])
         assert rendered == pytest.approx(frame.site_xpos[source_site])
     finally:
@@ -1580,7 +1581,7 @@ def test_island_colors_match_mujocos_visualizer():
             for geom in reference.geoms[: reference.ngeom]
             if int(geom.objtype) == int(mujoco.mjtObj.mjOBJ_GEOM)
         }
-        moving = np.flatnonzero(source.instance_island_body >= 0)
+        moving = np.flatnonzero((source.instance_island_body >= 0) & source.geom_group_visible)
         assert len(moving)
         for instance in moving:
             geom = int(source.geom_source[instance])
@@ -1893,7 +1894,7 @@ def test_deformables_match_mujocos_abstract_visualization():
 
         builder = SceneSourceBuilder()
         scene = builder.set_source(src)
-        assert scene.count == src.instance_count - surface_count
+        assert scene.count == int(src.geom_group_visible.sum()) - surface_count
         builder.update(frame)
         dynamic_rows = np.flatnonzero(np.isin(scene.object_id, list(deformable_ids)))
         assert len(dynamic_rows) == a.model.nflex + a.model.nskin
@@ -2102,7 +2103,7 @@ def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
 
     a = MuJoCoAdapter(resolve("mujoco_visuals"))
     try:
-        before_instances = a.scene_source().instance_count
+        before_instances = int(a.scene_source().geom_group_visible.sum())
         before_nodes = len(a.nodes())
         revision = a.structure_revision
         groups = {item.category: item.visible for item in a.visual_groups()}
@@ -2112,8 +2113,8 @@ def test_mujoco_geom_groups_rebuild_scene_nodes_and_raycast_mask():
         assert a.structure_revision == revision + 1
         assert {item.category: item.visible for item in a.visual_groups()}["geom"][3]
         assert a._ray_geomgroup.tolist() == [1, 1, 1, 1, 0, 0]
-        assert a.scene_source().instance_count > before_instances
-        assert len(a.nodes()) == before_nodes + 1
+        assert int(a.scene_source().geom_group_visible.sum()) > before_instances
+        assert len(a.nodes()) == before_nodes
         assert any(n.name == "collision_debug" for n in a.nodes())
         source = a.scene_source()
         assert source.tendon_visible.tolist() == [True]

@@ -165,6 +165,11 @@ class GestureRouter:
         return self._held
 
     @property
+    def owns_scene_pointer(self) -> bool:
+        """Keep an acquired scene gesture until release or explicit interruption."""
+        return self._held and self._claim not in (Claim.NONE, Claim.UI)
+
+    @property
     def released(self) -> bool:
         return self._released
 

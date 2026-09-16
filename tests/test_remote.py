@@ -228,6 +228,53 @@ def test_publisher_does_not_serialize_every_frame_before_a_viewer_connects(monke
         source_session.release()
 
 
+def test_client_bootstrap_precedes_concurrent_structure_publication(monkeypatch):
+    import mojive.remote.publisher as remote_module
+
+    source_session = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    initial = snapshot_structure(source_session)
+    newer = replace(initial, structure_revision=initial.structure_revision + 1)
+    publisher.publish_structure(initial)
+    bootstrap_entered = threading.Event()
+    release_bootstrap = threading.Event()
+    update_queued = threading.Event()
+    delivered = []
+    reliable = remote_module._LatestSender.reliable
+
+    def delayed(sender, payload, **kwargs):
+        revision = remote_module.pickle.loads(payload).structure_revision
+        if revision == initial.structure_revision:
+            bootstrap_entered.set()
+            assert release_bootstrap.wait(3)
+        delivered.append(revision)
+        reliable(sender, payload, **kwargs)
+        if revision == newer.structure_revision:
+            update_queued.set()
+
+    monkeypatch.setattr(remote_module._LatestSender, "reliable", delayed)
+    remote = None
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            connecting = pool.submit(RemoteSceneAdapter, port=publisher.port)
+            assert bootstrap_entered.wait(3)
+            updating = pool.submit(publisher.publish_structure, newer)
+            # An update may queue while bootstrap is paused only if registration
+            # and bootstrap do not share the publication ordering boundary.
+            update_queued.wait(0.2)
+            release_bootstrap.set()
+            updating.result(timeout=3)
+            remote = connecting.result(timeout=3)
+        assert delivered == [initial.structure_revision, newer.structure_revision]
+        assert _eventually(lambda: remote.structure_revision == newer.structure_revision)
+    finally:
+        release_bootstrap.set()
+        if remote is not None:
+            remote.release()
+        publisher.close()
+        source_session.release()
+
+
 def test_structure_update_invalidates_frames_from_the_previous_revision():
     scene = Scene()
     scene.box(name="first")

@@ -120,10 +120,11 @@ class GeometryPreview:
         for name, values in (
             ("geom_mesh", [part[0] for part in parts]),
             ("geom_convex_mesh", [part[0] for part in parts]),
+            ("geom_collision_mesh", [part[0] for part in parts]),
             ("geom_material", [material] * added),
         ):
             old = getattr(source, name)
-            if name == "geom_convex_mesh" and len(old) != count:
+            if name in ("geom_convex_mesh", "geom_collision_mesh") and len(old) != count:
                 old = source.geom_mesh[:count]
             setattr(source, name, [*old, *values])
         for name, values, default in (
@@ -141,6 +142,8 @@ class GeometryPreview:
             ),
             ("geom_visual", [0] * added, 0),
             ("geom_static", [True] * added, False),
+            ("geom_role", [1] * added, 1),
+            ("geom_group_visible", [True] * added, True),
             ("instance_island_body", [-1] * added, -1),
             ("geom_node", [node.node_id] * added, -1),
             ("geom_infinite_plane", [False] * added, False),

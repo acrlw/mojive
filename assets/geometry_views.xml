@@ -1,0 +1,28 @@
+<mujoco model="geometry views">
+  <option gravity="0 0 0"/>
+  <visual><global offwidth="960" offheight="640"/></visual>
+  <asset>
+    <mesh name="concave" scale=".55 .55 .55"
+      vertex="-1 -1 -.25 1 -1 -.25 1 0 -.25 0 0 -.25 0 1 -.25 -1 1 -.25
+              -1 -1 .25 1 -1 .25 1 0 .25 0 0 .25 0 1 .25 -1 1 .25"
+      face="6 7 8 6 8 9 6 9 10 6 10 11 0 2 1 0 3 2 0 4 3 0 5 4
+            0 1 7 0 7 6 1 2 8 1 8 7 2 3 9 2 9 8 3 4 10 3 10 9
+            4 5 11 4 11 10 5 0 6 5 6 11"/>
+  </asset>
+  <worldbody>
+    <light pos="1 -3 5" dir="0 .3 -1"/>
+    <camera name="demo" pos="3 -5 4" xyaxes=".8575 .5145 0 -.2497 .4162 .8744"/>
+    <geom name="floor" type="plane" size="3 2 .1" rgba=".16 .18 .2 1"/>
+    <body name="separate" pos="-.85 0 .65">
+      <freejoint/>
+      <geom name="visual_shell" type="box" size=".5 .4 .5"
+        contype="0" conaffinity="0" rgba=".12 .45 .9 1"/>
+      <geom name="collision_proxy" type="capsule" size=".27 .25"
+        group="3" rgba="0 0 0 0"/>
+    </body>
+    <body name="shared" pos=".85 0 .35">
+      <freejoint/>
+      <geom name="shared_mesh" type="mesh" mesh="concave" rgba=".18 .7 .5 1"/>
+    </body>
+  </worldbody>
+</mujoco>

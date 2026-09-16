@@ -47,7 +47,7 @@ def test_dense_take_marks_merge_but_leave_visible_gaps_between_samples():
     take = LongTake()
     spans = list(recorded_take_spans(take, 0, 100_000 / 30, 0, 1000))
     assert spans == [(0, 1000)]
-    assert take.reads < 1100
+    assert take.reads < 18000
 
 
 def test_marker_projection_only_retains_visible_markers_and_edge_hit_margin():
@@ -120,16 +120,16 @@ def test_keyframe_index_rebuilds_for_model_switch_and_content_revision():
         key for key in session.keyframes if key.model_id == model_id
     )
     ctx = SimpleNamespace(session=session)
-    panel._set_model(0)
-    panel._keyframes(ctx)
-    assert panel._marker_index.project(0, 3, 0, 300).positions == {1: 100}
+    panel.editor.set_model(0)
+    panel.editor.keyframes(ctx)
+    assert panel.editor.marker_index.project(0, 3, 0, 300).positions == {1: 100}
     session.keyframes = [KeyframeInfo(1, "moved", 1.5, 0), session.keyframes[1]]
     session.keyframe_revision += 1
-    panel._keyframes(ctx)
-    assert panel._marker_index.project(0, 3, 0, 300).positions == {1: 150}
-    panel._set_model(1)
-    panel._keyframes(ctx)
-    assert panel._marker_index.project(0, 3, 0, 300).positions == {2: 200}
+    panel.editor.keyframes(ctx)
+    assert panel.editor.marker_index.project(0, 3, 0, 300).positions == {1: 150}
+    panel.editor.set_model(1)
+    panel.editor.keyframes(ctx)
+    assert panel.editor.marker_index.project(0, 3, 0, 300).positions == {2: 200}
 
 
 def test_drag_projection_matches_full_projection_and_preserves_cached_base():
@@ -172,3 +172,23 @@ def test_indexed_selection_includes_equal_times_and_inclusive_endpoints():
     assert index.ids_between(1, 2) == (2, 3, 8)
     assert index.ids_between(2.1, 3.9) == ()
     assert index.ids_between(3, 2) == ()
+
+
+def test_dense_take_sampling_preserves_isolated_frames_and_actual_gaps():
+    times = (0.0,) * 10001 + (0.5, 1.0)
+    assert list(recorded_take_spans(times, 0, 1, 0, 100)) == [(0, 1), (49, 51), (99, 100)]
+
+
+def test_take_spans_match_full_sample_coverage_with_uneven_density():
+    import numpy as np
+
+    rng = np.random.default_rng(37)
+    times = sorted([*rng.uniform(0, 0.1, 10000), *rng.uniform(0.1, 1, 100)])
+    expected = []
+    for time in times:
+        left, right = max(0, time * 100 - 1), min(100, time * 100 + 1)
+        if expected and left <= expected[-1][1]:
+            expected[-1] = expected[-1][0], right
+        else:
+            expected.append((left, right))
+    assert list(recorded_take_spans(times, 0, 1, 0, 100)) == pytest.approx(expected)

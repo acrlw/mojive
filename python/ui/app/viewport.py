@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import time
 from dataclasses import replace
 
@@ -13,6 +12,7 @@ from mojive import commands as cmd
 from mojive.adapters.base import NodeType
 from mojive.capture import RecordingPhase
 from mojive.interaction.gizmo import GizmoMode
+from mojive.render.backend import RenderFlag
 from mojive.render.debugdraw import Occlusion
 from mojive.ui import gestures as gs
 from mojive.ui.controls import action_menu_popup
@@ -58,7 +58,6 @@ from .support import (
     VIEWPORT_DOUBLE_CLICK_SECONDS,
     _clipped_overlay_draw,
     _clipped_overlay_host_rect,
-    _fit_image_rect,
     _rectangles_overlap,
     precise_input_status_hints,
 )
@@ -196,6 +195,14 @@ class _Viewport:
                 if self._selectable(object_id):
                     return object_id
 
+        if (
+            self.backend.get_flag(RenderFlag.VISUAL_GEOMETRY)
+            or self.backend.get_flag(RenderFlag.COLLISION_GEOMETRY)
+            or any(node.geometry_view for node in self.session.source.nodes)
+        ):
+            # A physics ray or nearest-body fallback can select filtered geometry.
+            # Explicit presentation views use the rendered identity buffer.
+            return 0
         if self.session.adapter.caps.raycast:
             origin, direction = self._cursor_ray(cursor)
             object_id, _dist = self.session.query(cmd.Pick(origin=origin, direction=direction))
@@ -238,30 +245,8 @@ class _Viewport:
     def _begin_viewport_panel(self) -> None:
         """Resolve the current dock layout before sizing or rendering the scene."""
 
-        title = self.localizer.text("Viewport")
-        if title != "Viewport":
-            title += "###Viewport"
-        # Docked scenes fill their panel; floating scenes retain the native
-        # resize border. Neither acquires the ordinary panel content padding.
-        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0.0, 0.0))
-        imgui.begin(title, None, imgui.WindowFlags_.no_scrollbar.value)
-        imgui.pop_style_var()
-        pos = imgui.get_cursor_screen_pos()
-        size = imgui.get_content_region_avail()
-        if not imgui.is_window_docked():
-            # Derive the inset from the border, not the drawing clip: moving
-            # partly off screen must not resize the scene or change its aspect.
-            inset = float(math.ceil(imgui.get_style().window_border_size * 0.5))
-            pos = imgui.ImVec2(pos.x + inset, pos.y)
-            size = imgui.ImVec2(size.x - 2.0 * inset, size.y - inset)
-        panel_position = (float(pos.x), float(pos.y))
-        self._viewport_panel_position = panel_position
-        self._viewport_panel_size = (max(float(size.x), 1.0), max(float(size.y), 1.0))
-        self._viewport_rect = _fit_image_rect(
-            panel_position,
-            self._viewport_panel_size,
-            self._current_viewport_render_size(),
-        )
+        self.viewport_surface.begin(self.localizer.text("Viewport"))
+        self._viewport_rect = self.viewport_surface.image_rect(self._current_viewport_render_size())
 
     def _draw_viewport_contents(
         self,
@@ -273,25 +258,9 @@ class _Viewport:
         if image is None:
             imgui.text_disabled(self.localizer.text("No viewport image is available"))
         else:
-            self._viewport_rect = _fit_image_rect(
-                self._viewport_panel_position,
-                self._viewport_panel_size,
-                (image.width, image.height),
+            self._viewport_rect = self.viewport_surface.draw_image(
+                image, self.window.viewport_texture_ref
             )
-            uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
-            uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
-            x, y, width, height = self._viewport_rect
-            imgui.set_cursor_screen_pos(imgui.ImVec2(x, y))
-            # Only the docked scene covers the native one-pixel inner border.
-            # Floating image bounds stop before resize grips and hover strokes.
-            imgui.push_clip_rect((x, y), (x + width, y + height), False)
-            imgui.image(
-                self.window.viewport_texture_ref(image),
-                imgui.ImVec2(width, height),
-                uv0,
-                uv1,
-            )
-            imgui.pop_clip_rect()
         x, y, w, h = self._viewport_rect
         imgui.push_clip_rect(imgui.ImVec2(x, y), imgui.ImVec2(x + w, y + h), True)
         try:
@@ -340,12 +309,13 @@ class _Viewport:
                         st.target_mat,
                         self.window.style_scale,
                     )
-                self.gizmo.draw_overlay(
-                    self._camera_view(),
-                    self._viewport_rect,
-                    overlay,
-                    style_scale=self.window.style_scale,
-                )
+                if self.viewport_layers.gizmos:
+                    self.gizmo.draw_overlay(
+                        self._camera_view(),
+                        self._viewport_rect,
+                        overlay,
+                        style_scale=self.window.style_scale,
+                    )
                 if self.viewport_layers.viewport_ui:
                     self.view_cube.draw(overlay, self.window.style_scale)
                 self._draw_model_drop_overlay(overlay)
@@ -411,7 +381,7 @@ class _Viewport:
         name: str,
         rect: tuple[float, float, float, float],
     ) -> None:
-        if not self.viewport_overlays.movable:
+        if not self.viewport_overlays.movable or self.router.owns_scene_pointer or self.gizmo.using:
             return
         io = imgui.get_io()
         point = (float(io.mouse_pos.x), float(io.mouse_pos.y))
@@ -757,7 +727,7 @@ class _Viewport:
         hints = self.tool_hints.resolve(surface="scene")
         if not hints:
             return
-        x, y, width, height = self._viewport_rect
+        x, _y, width, height = self._viewport_rect
         style_scale = self.window.style_scale
         available_width = width - 24.0 * style_scale
         available_height = height * 0.3
@@ -796,11 +766,12 @@ class _Viewport:
         widget_width = max(size[0] for size in sizes)
         widget_height = sum(size[1] for size in sizes) + row_gap * (len(rows) - 1)
         clip_pad = OVERLAY_CLIP_PADDING * scale
+        bottom = self._viewport_hint_bottom()
         widget_rect = (
             x + (width - widget_width) * 0.5,
-            y + height - widget_height - 16.0 * style_scale,
+            bottom - widget_height,
             x + (width + widget_width) * 0.5,
-            y + height - 16.0 * style_scale,
+            bottom,
         )
         host_rect = _clipped_overlay_host_rect(self._viewport_rect, widget_rect, clip_pad)
         if host_rect is None:

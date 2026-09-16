@@ -137,7 +137,12 @@ def test_authored_geometry_poses_follow_hidden_primary_geometries(visible_primar
         source = document.scene_source()
         frame = document.frame(FrameNeeds())
         primary_count = 1 + int(visible_primary)
-        assert primary.scene_source().instance_count == int(visible_primary)
+        assert primary.scene_source().instance_count == primary_count
+        assert primary.scene_source().geom_group_visible.sum() == int(visible_primary)
+        np.testing.assert_array_equal(source.geom_role, [3] * primary_count + [1])
+        np.testing.assert_array_equal(
+            source.geom_group_visible, [True] * int(visible_primary) + [False, True]
+        )
         assert source.geom_source[-1] == primary_count
         node = next(node for node in source.nodes if node.name == "authored.geom")
         assert node.geom_index == primary_count

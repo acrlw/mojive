@@ -11,7 +11,7 @@ from typing import Any
 from mojive.control.contracts import DEFAULT_RPC_LIMITS, RpcLimits
 from mojive.control.errors import ControlError as RpcError
 
-from .protocol import DEFAULT_SOCKET, PROTOCOL_VERSION, _validate_response
+from .protocol import DEFAULT_SOCKET, PROTOCOL_VERSION, _decode_json, _validate_response
 
 
 class RpcClient:
@@ -41,10 +41,13 @@ class RpcClient:
             raise RpcError("invalid_params", "Operation revision must be a positive integer")
         if params is not None and not isinstance(params, dict):
             raise RpcError("invalid_params", "Parameters must be a JSON object")
-        with self._lock:
-            if not math.isfinite(self.timeout) or self.timeout <= 0.0:
-                raise ValueError("RPC timeout must be finite and positive")
-            deadline = time.monotonic() + self.timeout
+        if not math.isfinite(self.timeout) or self.timeout <= 0.0:
+            raise ValueError("RPC timeout must be finite and positive")
+        deadline = time.monotonic() + self.timeout
+        if not self._lock.acquire(timeout=self.timeout):
+            # Another call owns the connection. Its request must remain intact.
+            raise RpcError("timeout", "RPC client is busy; request was not sent")
+        try:
             request_id = self._next_id
             self._next_id += 1
             request = {
@@ -67,9 +70,10 @@ class RpcClient:
             if len(encoded) > self.limits.max_request_bytes:
                 raise RpcError("request_too_large", "Request exceeds the configured byte limit")
             try:
-                client = self._connect()
+                client = self._connect(deadline=deadline)
                 write_error = None
                 try:
+                    client.settimeout(_remaining_timeout(deadline))
                     client.sendall(encoded)
                 except OSError as error:
                     # A budget rejection may arrive while a large write is still
@@ -106,6 +110,8 @@ class RpcClient:
                     self.close()
                 raise RpcError(error["code"], error["message"], details=error.get("details"))
             return response.get("result")
+        finally:
+            self._lock.release()
 
     def hello(self) -> dict[str, Any]:
         return self.call("hello")
@@ -168,10 +174,11 @@ class RpcClient:
             params["ctrl"] = list(ctrl)
         return self.call("step", params)
 
-    def _connect(self) -> socket.socket:
+    def _connect(self, *, deadline: float) -> socket.socket:
+        timeout = _remaining_timeout(deadline)
         if self._client is None:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            client.settimeout(self.timeout)
+            client.settimeout(timeout)
             try:
                 client.connect(str(self.socket_path))
             except Exception:
@@ -179,7 +186,7 @@ class RpcClient:
                 raise
             self._client = client
         else:
-            self._client.settimeout(self.timeout)
+            self._client.settimeout(timeout)
         return self._client
 
     def close(self) -> None:
@@ -204,10 +211,7 @@ def _read_response(
     data = bytearray()
     while not data.endswith(b"\n"):
         if deadline is not None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.0:
-                raise TimeoutError("RPC response deadline expired")
-            client.settimeout(remaining)
+            client.settimeout(_remaining_timeout(deadline))
         chunk = client.recv(min(65536, max_bytes + 1 - len(data)))
         if not chunk:
             break
@@ -219,6 +223,13 @@ def _read_response(
     if not data.endswith(b"\n"):
         raise RpcError("invalid_response", "RPC server closed before completing its response")
     try:
-        return json.loads(data)
+        return _decode_json(data)
     except (ValueError, UnicodeError) as exc:
         raise RpcError("invalid_response", "RPC response is not valid JSON") from exc
+
+
+def _remaining_timeout(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0.0:
+        raise TimeoutError("RPC request deadline expired")
+    return remaining

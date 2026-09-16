@@ -9,6 +9,8 @@ import numpy as np
 
 from ..types import (
     DEFAULT_MATERIAL,
+    GeometryRole,
+    GeometryView,
     InstancePoseSource,
     InstanceVisual,
     MeshKey,
@@ -75,6 +77,8 @@ class SceneSourceBuilder:
         self._src_geom = np.zeros(0, np.intp)
         self._source_instances = np.zeros(0, np.intp)
         self._base_colors = np.zeros((0, 4), np.float32)
+        self._preserved_color_rows = np.zeros(0, np.intp)
+        self._preserved_colors = np.zeros((0, 4), np.float32)
         self._color_stage = np.zeros((0, 4), np.float32)
         self._colors_overridden = False
 
@@ -85,6 +89,9 @@ class SceneSourceBuilder:
         self._show_flex_skin = True
         self._show_island = False
         self._show_convex_hull = False
+        self._geometry_view = 0
+        self._last_frame = None
+        self._last_instance_rgba = None
         self._planes: list[_InfinitePlane] = []
         self._tri_counts: dict[MeshKey, int] = {}
         self._notes: tuple[str, ...] = ()
@@ -134,6 +141,8 @@ class SceneSourceBuilder:
     def set_source(self, source: SceneSource, camera: CameraView | None = None) -> RenderScene:
         self._source = source
         self._overrides = {}
+        self._last_frame = None
+        self._last_instance_rgba = None
         return self._build(camera)
 
     def set_visible(self, node_id: int, visible: bool) -> bool:
@@ -144,11 +153,14 @@ class SceneSourceBuilder:
         if self._overrides.get(node_id, True) == visible:
             return False
         self._overrides[node_id] = visible
-        self._build(self._scene.camera)
+        self.rebuild()
         return True
 
     def rebuild(self, camera: CameraView | None = None) -> RenderScene:
-        return self._build(camera if camera is not None else self._scene.camera)
+        scene = self._build(camera if camera is not None else self._scene.camera)
+        if self._last_frame is not None:
+            return self.update(self._last_frame, scene.camera, self._last_instance_rgba)
+        return scene
 
     def set_visual_options(
         self,
@@ -159,6 +171,8 @@ class SceneSourceBuilder:
         flex_skin: bool,
         island: bool = False,
         convex_hull: bool = False,
+        visual_geometry: bool = False,
+        collision_geometry: bool = False,
     ) -> bool:
         options = (
             bool(static),
@@ -167,6 +181,7 @@ class SceneSourceBuilder:
             bool(flex_skin),
             bool(island),
             bool(convex_hull),
+            int(visual_geometry) | (int(collision_geometry) << 1),
         )
         current = (
             self._show_static,
@@ -175,6 +190,7 @@ class SceneSourceBuilder:
             self._show_flex_skin,
             self._show_island,
             self._show_convex_hull,
+            self._geometry_view,
         )
         if options == current:
             return False
@@ -185,6 +201,7 @@ class SceneSourceBuilder:
             self._show_flex_skin,
             self._show_island,
             self._show_convex_hull,
+            self._geometry_view,
         ) = options
         self.rebuild()
         return True
@@ -195,6 +212,7 @@ class SceneSourceBuilder:
             self._scene = RenderScene()
             return self._scene
 
+        self._instance_views = self._geometry_views()
         keep = self._visible_instances()
         self._hidden_count = int(np.count_nonzero(~keep))
         materials = src.materials or [DEFAULT_MATERIAL]
@@ -207,14 +225,30 @@ class SceneSourceBuilder:
         ls: list[np.ndarray] = []
         planes: list[_InfinitePlane] = []
 
-        for i in range(src.instance_count):
-            if not keep[i]:
-                continue
+        for i, collision in self._geometry_instances(keep):
+            view = int(self._instance_views[i])
             mat_index = src.geom_material[i] if i < len(src.geom_material) else 0
             mat = materials[mat_index] if 0 <= mat_index < len(materials) else DEFAULT_MATERIAL
             rgba = src.geom_rgba[i]
+            if collision:
+                mat = DEFAULT_MATERIAL
+                rgba = np.array((1.0, 0.55, 0.12, 1.0), np.float32)
+                if (
+                    view == int(GeometryRole.BOTH)
+                    and int(src.geom_role[i]) & int(GeometryRole.VISUAL)
+                    and len(src.geom_collision_mesh) == src.instance_count
+                    and src.geom_collision_mesh[i] != src.geom_mesh[i]
+                ):
+                    rgba[3] = 0.35
+            elif view == int(GeometryRole.BOTH) and (
+                len(src.geom_role) == src.instance_count
+                and int(src.geom_role[i]) == int(GeometryRole.VISUAL)
+            ):
+                rgba = rgba.copy()
+                rgba[3] *= 0.3
             if (
                 self._show_island
+                and not view
                 and i < len(src.instance_island_body)
                 and int(src.instance_island_body[i]) >= 0
             ):
@@ -223,11 +257,15 @@ class SceneSourceBuilder:
                 rgba[3] = 1.0
             matid = sb.material_id(mat)
             size = np.asarray(src.geom_size[i], np.float32)
-            key: MeshKey = (
-                src.geom_convex_mesh[i]
-                if self._show_convex_hull and len(src.geom_convex_mesh) == src.instance_count
-                else src.geom_mesh[i]
-            )
+            key: MeshKey = src.geom_mesh[i]
+            if collision and len(src.geom_collision_mesh) == src.instance_count:
+                key = src.geom_collision_mesh[i]
+            elif (
+                not view
+                and self._show_convex_hull
+                and len(src.geom_convex_mesh) == src.instance_count
+            ):
+                key = src.geom_convex_mesh[i]
             infinite = bool(src.geom_infinite_plane[i]) if len(src.geom_infinite_plane) else False
 
             local = (
@@ -238,6 +276,14 @@ class SceneSourceBuilder:
 
             ls_i = local.copy()
             ls_i[:3, :3] = local[:3, :3] * size[None, :]
+            if (
+                collision
+                and view == int(GeometryRole.BOTH)
+                and (int(src.geom_role[i]) & int(GeometryRole.VISUAL))
+            ):
+                # Shared mesh/hull faces are often coplanar. Separate only the
+                # translucent comparison overlay; collision-only stays exact.
+                ls_i[:3, :3] *= 1.005
 
             tex = self._tex_coef(mat, size, infinite, key, local)
             cube = self._cube_coef(src, mat, size, key, local)
@@ -264,6 +310,7 @@ class SceneSourceBuilder:
                 tex_coef=tex,
                 cube_coef=cube,
                 infinite_plane=infinite,
+                coverage=view == int(GeometryRole.BOTH) and float(rgba[3]) < 1,
             )
             slots.append(int(src.geom_source[i]) if len(src.geom_source) > i else i)
             source_instances.append(i)
@@ -306,6 +353,8 @@ class SceneSourceBuilder:
         self._write_index = sb.write_index.astype(np.intp)
         self._source_instances = np.asarray(source_instances, np.intp)
         self._base_colors = self._scene.colors.copy()
+        self._preserved_color_rows = np.flatnonzero(self._instance_views[self._source_instances])
+        self._preserved_colors = self._base_colors[self._write_index[self._preserved_color_rows]]
         self._color_stage = np.zeros((self._scene.count, 4), np.float32)
         self._colors_overridden = False
 
@@ -378,10 +427,56 @@ class SceneSourceBuilder:
         self._geom_count = 0
         return self._scene
 
+    def _geometry_views(self) -> np.ndarray:
+        src = self._source
+        views = np.full(src.instance_count, self._geometry_view, np.uint8)
+        overrides = {node.node_id: node.geometry_view for node in src.nodes if node.geometry_view}
+        if not overrides:
+            return views
+        by_id = {node.node_id: node for node in src.nodes}
+        modes = tuple(GeometryView)
+        for i, node_id in enumerate(src.geom_node):
+            node = by_id.get(int(node_id))
+            if node is not None:
+                view = overrides.get(node.node_id, overrides.get(node.parent))
+                if view is not None:
+                    views[i] = modes.index(GeometryView(view))
+        return views
+
+    def _geometry_instances(self, keep):
+        src = self._source
+        for i in np.flatnonzero(keep):
+            view = int(self._instance_views[i])
+            if view == int(GeometryRole.COLLISION):
+                yield i, True
+            elif view != int(GeometryRole.BOTH):
+                yield i, False
+            else:
+                role = int(src.geom_role[i]) if len(src.geom_role) else int(GeometryRole.VISUAL)
+                distinct_mesh = (
+                    len(src.geom_collision_mesh) == src.instance_count
+                    and src.geom_collision_mesh[i] != src.geom_mesh[i]
+                )
+                # An invisible/shared primitive still needs an opaque collision shape.
+                shared_transparent = (
+                    role == int(GeometryRole.BOTH) and not distinct_mesh and src.geom_rgba[i, 3] < 1
+                )
+                if role & int(GeometryRole.VISUAL) and not shared_transparent:
+                    yield i, False
+                if role & int(GeometryRole.COLLISION) and (
+                    not role & int(GeometryRole.VISUAL) or distinct_mesh or shared_transparent
+                ):
+                    yield i, True
+
     def _visible_instances(self) -> np.ndarray:
         src = self._source
         n = src.instance_count
         keep = np.ones(n, bool)
+        explicit = self._instance_views != 0
+        roles = src.geom_role if len(src.geom_role) == n else int(GeometryRole.VISUAL)
+        keep &= ~explicit | ((roles & self._instance_views) != 0)
+        if len(src.geom_group_visible) == n:
+            keep &= explicit | src.geom_group_visible
         if len(src.geom_static) == n and not self._show_static:
             keep &= ~src.geom_static
         if len(src.geom_visual) == n:
@@ -399,12 +494,24 @@ class SceneSourceBuilder:
         def effective(node_id: int) -> bool:
             if node_id in cache:
                 return cache[node_id]
-            node = by_id.get(node_id)
-            if node is None:
-                return True
-            own = node.visible and self._overrides.get(node_id, True)
-            cache[node_id] = own and (node.parent < 0 or effective(node.parent))
-            return cache[node_id]
+            path: set[int] = set()
+            current = node_id
+            visible = True
+            while current >= 0 and current not in cache:
+                if current in path:
+                    raise ValueError(f"Cycle in scene node parents at node {current}")
+                node = by_id.get(current)
+                if node is None:
+                    break
+                path.add(current)
+                if not node.visible or not self._overrides.get(current, True):
+                    visible = False
+                    break
+                current = node.parent
+            visible = visible and cache.get(current, True)
+            for current in path:
+                cache[current] = visible
+            return visible
 
         geom_nodes: dict[int, list[int]] = {}
         body_nodes: dict[int, int] = {}
@@ -529,6 +636,8 @@ class SceneSourceBuilder:
         camera: CameraView | None = None,
         instance_rgba: np.ndarray | None = None,
     ) -> RenderScene:
+        self._last_frame = frame
+        self._last_instance_rgba = instance_rgba
         scene = self._scene
         if camera is not None:
             scene.camera = camera
@@ -612,7 +721,7 @@ class SceneSourceBuilder:
         return scene
 
     def _update_colors(self, rgba: np.ndarray | None) -> bool:
-        if rgba is None:
+        if rgba is None or len(self._preserved_color_rows) == len(self._color_stage):
             if self._colors_overridden:
                 np.copyto(self._scene.colors, self._base_colors)
                 self._colors_overridden = False
@@ -624,6 +733,7 @@ class SceneSourceBuilder:
             2.2,
             out=self._color_stage[:, :3],
         )
+        self._color_stage[self._preserved_color_rows] = self._preserved_colors
         changed = not np.array_equal(self._scene.colors[self._write_index], self._color_stage)
         if changed:
             self._scene.colors[self._write_index] = self._color_stage

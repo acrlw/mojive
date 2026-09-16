@@ -15,6 +15,7 @@ from .base import (
     SceneAdapterBase,
     SceneAppearance,
     SceneFrame,
+    SceneInspection,
     SceneProvider,
     SceneSource,
     SimulationAccess,
@@ -103,6 +104,12 @@ def _check_scene_stream(provider: SceneProvider):
     )
     lengths = {name: len(getattr(source, name)) for name in instance_fields}
     add("instance columns", all(length == n for length in lengths.values()), str(lengths))
+    optional = (source.geom_role, source.geom_group_visible, source.geom_collision_mesh)
+    add(
+        "geometry views",
+        all(len(values) in (0, n) for values in optional),
+        "optional geometry columns match instance count",
+    )
     add(
         "instance dtypes",
         source.geom_object_id.dtype == np.uint32 and source.geom_source.dtype == np.int32,
@@ -112,7 +119,25 @@ def _check_scene_stream(provider: SceneProvider):
     ids = [node.node_id for node in source.nodes]
     known = set(ids)
     parents_ok = all(node.parent == -1 or node.parent in known for node in source.nodes)
-    add("node graph", len(ids) == len(known) and parents_ok, f"{len(ids)} nodes")
+    parents = {node.node_id: node.parent for node in source.nodes}
+    visited: set[int] = set()
+    cycle = None
+    for node_id in ids:
+        path: set[int] = set()
+        while node_id in parents and node_id not in visited:
+            if node_id in path:
+                cycle = node_id
+                break
+            path.add(node_id)
+            node_id = parents[node_id]
+        if cycle is not None:
+            break
+        visited.update(path)
+    add(
+        "node graph",
+        len(ids) == len(known) and parents_ok and cycle is None,
+        f"{len(ids)} nodes" if cycle is None else f"cycle in parents at node {cycle}",
+    )
 
     light_nodes = {node.light_index for node in source.nodes if node.light_index >= 0}
     lights_ok = light_nodes == set(range(len(source.lights.lights)))
@@ -130,7 +155,7 @@ def _check_scene_stream(provider: SceneProvider):
 
     mesh_ok = True
     mesh_detail = []
-    for key in (*source.geom_mesh, *source.geom_convex_mesh):
+    for key in (*source.geom_mesh, *source.geom_convex_mesh, *source.geom_collision_mesh):
         if key.shape in (
             MeshShape.ASSET,
             MeshShape.CONVEX_HULL,
@@ -217,7 +242,7 @@ def _check_scene_stream(provider: SceneProvider):
     return source, frame, checks
 
 
-def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
+def check_adapter(adapter: SceneInspection) -> ConformanceReport:
     """Validate one frame and declared optional capabilities without invoking writes.
 
     Unsupported base-class defaults are diagnosed only for advertised write contracts.
@@ -228,7 +253,9 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
     if not isinstance(caps, AdapterCaps):
         checks.append(ConformanceCheck("adapter capabilities", False, "caps must be AdapterCaps"))
         return ConformanceReport(type(adapter).__name__, tuple(checks))
-    required = ("prepare_frame", "nodes", "camera_hint", "release", "step", "reset", "set_paused")
+    required = ("nodes", "camera_hint", "release")
+    if caps.simulation:
+        required += ("step", "reset", "set_paused")
     missing = [name for name in required if not callable(getattr(adapter, name, None))]
     checks.append(
         ConformanceCheck(

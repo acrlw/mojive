@@ -682,7 +682,8 @@ def test_deformable_visibility_flags_rebuild_the_scene(backend_name, request):
         frame = adapter.frame(FrameNeeds(poses=True, deformables=True))
         backend.update(frame)
 
-        visual = source.geom_visual
+        visible = source.geom_group_visible
+        visual = source.geom_visual[visible]
         flex_face = int(InstanceVisual.FLEX_FACE)
         flex_skin = int(InstanceVisual.FLEX_SKIN)
         skin = int(InstanceVisual.SKIN)
@@ -700,7 +701,9 @@ def test_deformable_visibility_flags_rebuild_the_scene(backend_name, request):
 
         before_static = backend._scene.count
         assert backend.set_flag(RenderFlag.STATIC, False)
-        assert backend._scene.count == before_static - int(np.count_nonzero(source.geom_static))
+        assert backend._scene.count == before_static - int(
+            np.count_nonzero(source.geom_static[visible] & (visual != skin) & (visual != flex_skin))
+        )
         _render(backend, frame)
     finally:
         backend.release()

@@ -26,7 +26,7 @@ uv run --no-sync python examples/custom_adapter.py
 Derive from `SceneAdapterBase` for the full editor: it supplies defaults for unsupported
 operations. `SceneAdapter` describes that complete editor interface; `SceneProvider` describes
 only `structure_revision`, `scene_source()`, and `frame(needs)`. Read-only consumers such as
-`SceneRenderer.update_from()` accept the smaller protocol without simulation or authoring stubs.
+`SceneRenderer.update_from()` accept the smaller protocol without simulation or editing stubs.
 Capabilities describe supported write-back; do not advertise a capability without implementing
 its operations. Frames may reuse arrays until the next frame request; consumers retaining them
 must copy the required data.
@@ -41,6 +41,11 @@ the operations they advertise.
 | Contract | Responsibility |
 |---|---|
 | `SceneProvider` | revision, stable structure and requested frames |
+| `SceneInspection` | provider plus object metadata, cameras and timing |
+| `SimulationControl` | stepping, controls, state snapshots and physical perturbation |
+| `SceneDocuments` | compatibility group for document I/O and edit snapshots |
+| `SceneEditing` | scene object and appearance writes |
+| `ModelEditing` | compatibility group for model composition, topology, properties and assets |
 | `SceneRuntime` | provider plus preparation, hierarchy, camera hint and lifetime |
 | `SimulationAccess` | optional simulation observations, control and state write-back |
 | `SceneAppearance` | scene appearance, camera views and visual groups |
@@ -52,7 +57,7 @@ the operations they advertise.
 | `ModelAssets` | model-local resources and material binding |
 | `KeyframeCatalog` | preset metadata without playback or editing |
 | `KeyframePlayback` | metadata and loading a preset |
-| `KeyframeEditing` | authored preset properties and writes |
+| `KeyframeEditing` | compatibility group for preset playback, properties and writes |
 | `ModelKeyframes` | compatibility aggregate of playback and editing |
 
 A read-only consumer should accept `SceneProvider`. A model browser can accept
@@ -77,6 +82,15 @@ and reports advertised operations that are missing or still use unsupported base
 Neither check invokes editing writes. Empty inventories are valid, and a successful check does
 not prove that a custom implementation preserves atomicity; exercise its writes and rollback
 with representative engine state.
+
+A non-simulating inspection adapter can pass `check_adapter()` without simulation-control
+stubs, provided it does not advertise unavailable writes. `SceneDocuments` shares the persistence
+contract, and `ModelEditing` groups the model interfaces above.
+
+Session-owned changes to adapter values are exposed as `session.scene_overrides`, whose type is
+`mojive.session.SceneOverrides`. `authored_overlay` and `AuthoredSceneOverlay` remain compatible
+names. The legacy capability field `scene_authoring` means support for scene object creation,
+removal and editing; it does not imply simulation or model topology editing.
 
 Register an external adapter factory in the process that will use it:
 
@@ -151,7 +165,7 @@ UI callers suppress unsupported gestures before submission, including perturbati
 or dragging does not repeatedly produce unsupported-operation log messages. Programmatic callers
 still receive a failed `CommandResult` for an unsupported request.
 
-Generic pose, selection, scene appearance, and authoring commands retain existing Python names.
+Generic pose, selection, scene appearance, and editing commands retain existing Python names.
 MJCF source replacement requires both `topology_editing` and `mujoco.mjcf` revision 1;
 topology support alone does not imply XML editing. The existing structured component contract
 requires `model.components` revision 1 and `topology_editing`; model-keyframe editing requires
@@ -165,7 +179,7 @@ payloads need a new extension revision or a distinct namespaced operation.
 Advertise `AdapterCaps.write_scale` and mark each supported geometry `SceneNode.scalable`.
 A single-geometry object's parent can also be scalable; Session resolves it to that geometry,
 so both Inspector selections share one pending value. Implement `set_scale(node_id, factors)`
-to atomically bake positive local XYZ factors into authored dimensions, preserve world position
+to atomically bake positive local XYZ factors into source dimensions, preserve world position
 and rotation, and advance `structure_revision`. Return `False` without mutations for unsupported
 targets. This contract scales geometry in its local frame, not articulated subtrees or shear.
 Only mark shapes that can preserve the requested nonuniform scaling.
@@ -173,7 +187,7 @@ Only mark shapes that can preserve the requested nonuniform scaling.
 `SetScale` submitted directly applies its factors once. The UI coalesces it in `ModelEditDraft`,
 previews the render sizes, and applies one transaction on confirmation. The committed transform
 has identity scale; saved scenes and future rebuilds use the baked dimensions. `SceneObject.scale`
-provides the equivalent operation for programmatic authored scenes.
+provides the equivalent operation for programmatic scenes.
 
 RPC discovery includes operation `version`, `method_versions`, `available_methods`, and
 availability reasons. Clients should discover once per connection and refresh after document

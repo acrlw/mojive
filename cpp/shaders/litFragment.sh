@@ -1,3 +1,5 @@
+#include "coverage.sh"
+
 // Use the same bounded anisotropic footprint in each graphics API. Hardware
 // anisotropy may choose different LODs even with identical mips and sampler limits.
 vec4 sampleAlbedo(vec2 uv) {
@@ -27,12 +29,13 @@ vec4 sampleAlbedo(vec2 uv) {
 
 void main()
 {
+    float opacity = coverageAlpha(v_color0.a, gl_FragCoord.xy);
     if (u_reflectionConfig.x > .5 && dot(vec4(v_world, 1), u_reflectionPlane) < 0) discard;
     vec4 texel = v_litCube.w > .5 ? textureCube(s_cube, v_litCube.xyz) : sampleAlbedo(v_texcoord0);
     vec3 surface = v_color0.rgb;
     if (u_options.y > .5) { surface = gammaEncode(surface); texel.rgb = linearToSrgb(texel.rgb); }
     vec3 albedo = surface * texel.rgb;
-    float alpha = v_color0.a * texel.a;
+    float alpha = opacity * texel.a;
     vec3 material = v_litMaterial.xyz;
     if (v_litIdentity.x > .5) { albedo = mix(albedo, vec3(1, .82, .45), .35); material.x += .16; }
     int mode = int(u_options.w + .5);

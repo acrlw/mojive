@@ -102,16 +102,23 @@ class SceneEntityHelpers:
         ui_scale: float,
         view_through_camera: bool = False,
         selected_camera_aspect: float | None = None,
+        *,
+        enabled: bool = True,
     ) -> None:
         debug = getattr(backend, "debug", None)
         if debug is None:
+            return
+        if not enabled or view_through_camera or not self.visible or session.source is None:
+            # Hiding helpers must stop geometry construction, not only GPU visibility.
+            # Clear existing output so captures cannot retain the previous frame's helpers.
+            for layer in debug.layers():
+                if layer.name in (HELPER_LAYER, HELPER_ICON_LAYER):
+                    layer.clear()
             return
         layer = debug.layer(HELPER_LAYER, Occlusion.GHOST)
         icon_layer = debug.layer(HELPER_ICON_LAYER, Occlusion.ALWAYS)
         layer.clear()
         icon_layer.clear()
-        if view_through_camera or not self.visible or session.source is None:
-            return
         self._refresh_nodes(session)
 
         selected = session.selected

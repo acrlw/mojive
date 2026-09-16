@@ -265,7 +265,7 @@ class ViewportLayers:
 
 @dataclass(frozen=True)
 class RecordingConfig:
-    """Persisted interactive video defaults, independent from display pacing."""
+    """Persisted interactive capture/video defaults, independent from display pacing."""
 
     countdown: float = 3.0
     fps: float = 60.0
@@ -277,6 +277,7 @@ class RecordingConfig:
     bitrate_mbps: float = 12.0
     encoder_preset: str = "medium"
     pixel_format: str = "yuv420p"
+    copy_to_clipboard: bool = True
 
     @classmethod
     def from_mapping(cls, value: object) -> RecordingConfig:
@@ -311,12 +312,13 @@ class RecordingConfig:
             bitrate_mbps=number("bitrate_mbps", 0.1, 500.0),
             encoder_preset=choice("encoder_preset", ("fast", "medium", "slow")),
             pixel_format=choice("pixel_format", ("yuv420p", "yuv444p")),
+            copy_to_clipboard=_bool(source.get("copy_to_clipboard"), defaults.copy_to_clipboard),
         )
 
 
 @dataclass(frozen=True)
 class ViewerConfig:
-    """Top-level behavior configuration for an interactive viewer."""
+    """Configure the full interactive viewer; feature reduction is explicit opt-in."""
 
     interactions: InteractionConfig = field(default_factory=InteractionConfig)
     selection: SelectionStyle = field(default_factory=SelectionStyle)
@@ -329,6 +331,28 @@ class ViewerConfig:
     shadow_quality: ShadowQuality | str | None = None
     threaded_physics: bool = True
     live_model_updates: bool | None = None
+    # None retains the desktop panel set; an empty tuple loads no panels.
+    builtin_panels: tuple[str, ...] | None = None
+    debug_server: bool = True
+
+    @classmethod
+    def minimal(cls, *panels: str) -> ViewerConfig:
+        """Explicitly opt into navigation and selected panels without editing overlays or a socket.
+
+        Normal viewer construction uses the full desktop configuration instead.
+        Panel IDs are stable names such as ``inspector``, ``control``, ``joints``
+        and ``camera``. Use ``dataclasses.replace`` to enable additional options.
+        """
+        return cls(
+            builtin_panels=tuple(panels),
+            debug_server=False,
+            interactions=InteractionConfig(gizmo=False, perturb=False),
+            selection=SelectionStyle(gizmo=False),
+            layers=ViewportLayers(
+                viewport_ui=False, gizmos=False, helpers=False, perturbation=False
+            ),
+            layout=LayoutConfig(persistence=False),
+        )
 
 
 __all__ = [

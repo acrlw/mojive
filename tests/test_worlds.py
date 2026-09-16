@@ -48,6 +48,22 @@ def test_worlds_share_resources_and_keep_static_geometry_once():
     assert not adapter.caps.clock_control
 
 
+def test_worlds_preserve_geometry_views_in_serialized_sources():
+    import pickle
+
+    source, frame = template()
+    source.geom_role = np.array([3, 1, 2, 3], np.uint8)
+    source.geom_group_visible = np.array([True, True, False, True])
+    source.geom_collision_mesh = [MeshKey(MeshShape.SPHERE)] * 4
+    repeated = WorldInstances(source, frame, np.zeros((2, 3))).scene_source()
+    received = pickle.loads(pickle.dumps(repeated))
+    np.testing.assert_array_equal(received.geom_role, [1, 2, 3, 1, 2, 3, 3])
+    np.testing.assert_array_equal(
+        received.geom_group_visible, [True, False, True, True, False, True, True]
+    )
+    assert received.geom_collision_mesh == [MeshKey(MeshShape.SPHERE)] * 7
+
+
 def test_world_pose_updates_are_atomic_and_reuse_frame_buffers():
     source, frame = template()
     adapter = WorldInstances(source, frame, np.array([[0, 0, 0], [7, 0, 0]]))

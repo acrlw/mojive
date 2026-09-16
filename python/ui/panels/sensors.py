@@ -91,7 +91,7 @@ class SensorsPanel(Panel):
             if inline[1]:
                 imgui.same_line()
             if imgui.small_button(labels[1]) and ctx.panels is not None:
-                panel = ctx.panels.get("Plot")
+                panel = ctx.panels.load("Plot")
                 focus = getattr(panel, "focus_sensor", None)
                 if callable(focus):
                     focus(self.sensor_index)

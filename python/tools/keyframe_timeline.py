@@ -72,8 +72,8 @@ def timeline_point(viewer, time: float, row: str = "ruler") -> tuple[float, floa
     panel = viewer.panels.get("Keyframes")
     x = timeline_time_to_x(
         time,
-        panel._view_start,
-        panel._view_end,
+        panel.editor.view_start,
+        panel.editor.view_end,
         left,
         hi[0],
     )
@@ -114,7 +114,7 @@ def choose_follow(viewer, mode: str) -> None:
     """Choose the follow policy directly from the production toolbar."""
     index = ("off", "page", "locked").index(mode)
     _click(viewer, _item_center(viewer, "button", f"##timeline-follow-{index}"))
-    assert viewer.panels.get("Keyframes")._follow_mode == mode
+    assert viewer.panels.get("Keyframes").editor.follow_mode == mode
 
 
 def capture_take_editing(viewer, output: Path) -> None:
@@ -126,11 +126,11 @@ def capture_take_editing(viewer, output: Path) -> None:
         assert session.submit(cmd.SeekStateTake(index))
         assert session.submit(cmd.AddModelKeyframe(model_id, f"pose_{index}"))
     viewer.sync()
-    panel._view_start, panel._view_end = 0, 32
-    panel._view_needs_fit = False
+    panel.editor.view_start, panel.editor.view_end = 0, 32
+    panel.editor.view_needs_fit = False
     choose_follow(viewer, "off")
     drag(viewer, timeline_point(viewer, 10, "take"), timeline_point(viewer, 15, "take"))
-    bounds = panel._editor.take_selection
+    bounds = panel.editor.take_selection
     assert bounds is not None
     _save_window_crop(
         viewer,
@@ -173,7 +173,7 @@ def capture_take_editing(viewer, output: Path) -> None:
     session.tick(FrameNeeds.none(), wall_dt=2.0)
     for _ in range(3):
         viewer.sync()
-    assert session.state_take_playing and 10 < panel._playhead < 15
+    assert session.state_take_playing and 10 < panel.editor.playhead < 15
     _save_window_crop(viewer, "Keyframes", output / "gap-playback.png", padding=0)
     assert session.submit(cmd.PauseStateTake())
     _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
@@ -190,8 +190,8 @@ def capture_take_editing(viewer, output: Path) -> None:
     assert second_id != first_id and len(session.state_takes) == 2
     for _ in range(3):
         viewer.sync()
-    assert panel._editor.take_selection == (0, len(session.state_take_times) - 1)
-    assert panel._playhead == session.state_take_times[0]
+    assert panel.editor.take_selection == (0, len(session.state_take_times) - 1)
+    assert panel.editor.playhead == session.state_take_times[0]
     _save_window_crop(viewer, "Keyframes", output / "recorded-range.png", padding=0)
     _save_window_crop(
         viewer, "Status###application_status", output / "recorded-status.png", padding=0
@@ -205,7 +205,7 @@ def capture_take_editing(viewer, output: Path) -> None:
     assert session.state_take_loop is not None
     _save_window_crop(viewer, "Status###application_status", output / "loop-status.png", padding=0)
     imgui.get_io().add_key_event(imgui.Key.mod_shift, True)
-    _right_click(viewer, timeline_point(viewer, panel._playhead))
+    _right_click(viewer, timeline_point(viewer, panel.editor.playhead))
     imgui.get_io().add_key_event(imgui.Key.mod_shift, False)
     viewer.sync()
     assert session.state_take_loop is None
@@ -218,7 +218,7 @@ def capture_take_editing(viewer, output: Path) -> None:
             viewer, "selectable", f"{viewer.app.localizer.text('Take')} {first_id}##take-{first_id}"
         ),
     )
-    panel._view_start, panel._view_end = 0, 32
+    panel.editor.view_start, panel.editor.view_end = 0, 32
     _click(viewer, timeline_point(viewer, 20))
     old_count = len(session.state_take_times)
     _click(viewer, _item_center(viewer, "invisible_button", "##take-record"))
@@ -226,7 +226,7 @@ def capture_take_editing(viewer, output: Path) -> None:
         viewer.sync()
     _click(viewer, _item_center(viewer, "invisible_button", "##take-record"))
     assert len(session.state_take_times) < old_count and len(session.state_takes) == 2
-    panel._view_start, panel._view_end = 0, 32
+    panel.editor.view_start, panel.editor.view_end = 0, 32
     viewer.sync()
     _save_window_crop(
         viewer,
@@ -236,7 +236,7 @@ def capture_take_editing(viewer, output: Path) -> None:
         max_height=300 * viewer.window.style_scale,
     )
     drag(viewer, timeline_point(viewer, 2, "model"), timeline_point(viewer, 8, "model"))
-    assert len(panel._editor.selected_keyframes) == 2
+    assert len(panel.editor.selected_keyframes) == 2
     _save_window_crop(
         viewer,
         "Keyframes",
@@ -266,8 +266,12 @@ def capture_range_playback(viewer, output: Path) -> None:
     """Exercise independent range selection, endpoint navigation, and repeat toggling."""
     session, panel = viewer.session, viewer.panels.get("Keyframes")
     times = session.state_take_times
-    panel._set_follow_mode("off")
-    panel._view_start, panel._view_end, panel._view_needs_fit = times[0], times[-1], False
+    panel.editor.set_follow_mode("off")
+    panel.editor.view_start, panel.editor.view_end, panel.editor.view_needs_fit = (
+        times[0],
+        times[-1],
+        False,
+    )
     viewer.sync()
 
     def click_button(name):
@@ -293,7 +297,7 @@ def capture_range_playback(viewer, output: Path) -> None:
             assert session.submit(cmd.SeekStateTake(cursor))
             click_button("##take-play-pause")
             assert session.state_take_cursor == expected and session.state_take_playing
-            assert panel._playhead == times[expected]
+            assert panel.editor.playhead == times[expected]
             _save_window_crop(viewer, "Keyframes", output / f"range-start-{name}.png", padding=0)
             click_button("##take-play-pause")
     finally:
@@ -310,7 +314,7 @@ def capture_range_playback(viewer, output: Path) -> None:
     session.tick(FrameNeeds.none(), wall_dt=times[-1] - times[0] + 1)
     viewer.sync()
     assert not session.state_take_playing and session.state_take_cursor == last
-    assert panel._playhead == times[last]
+    assert panel.editor.playhead == times[last]
     _save_window_crop(viewer, "Keyframes", output / "range-end-paused.png", padding=0)
 
     click_button("##timeline-loop")
@@ -338,8 +342,8 @@ def capture_transport(viewer, output: Path) -> None:
     session, app = viewer.session, viewer.app
     app.set_take_pause_at_end(True, persist=False)
     panel = viewer.panels.get("Keyframes")
-    panel._set_follow_mode("off")
-    panel._view_start, panel._view_end, panel._view_needs_fit = 0.0, 2.0, False
+    panel.editor.set_follow_mode("off")
+    panel.editor.view_start, panel.editor.view_end, panel.editor.view_needs_fit = 0.0, 2.0, False
     viewer.sync()
     _save_window_crop(viewer, "Keyframes", output / "ruler.png", padding=0)
     _click(viewer, _item_center(viewer, "invisible_button", "##timeline-options"))
@@ -357,7 +361,7 @@ def capture_transport(viewer, output: Path) -> None:
     session.tick(FrameNeeds.none(), wall_dt=1.4)
     viewer.sync()
     assert session.state_take_playing and session.paused
-    assert panel._playhead > session.state_take_times[-1]
+    assert panel.editor.playhead > session.state_take_times[-1]
     assert session.frame.time == session.state_take_times[-1]
     _save_window_crop(viewer, "Keyframes", output / "continuous-playhead.png", padding=0)
     _save_window_crop(
@@ -442,7 +446,11 @@ def capture_replay(viewer, output: Path) -> list[dict[str, float]]:
                 recorder = VideoRecorder(output, (image.shape[1], image.shape[0]), fps=60)
             recorder.append(image)
             trace.append(
-                {"playhead": panel._playhead, "start": panel._view_start, "end": panel._view_end}
+                {
+                    "playhead": panel.editor.playhead,
+                    "start": panel.editor.view_start,
+                    "end": panel.editor.view_end,
+                }
             )
     finally:
         session._advance_state_take = advance
@@ -476,8 +484,8 @@ def capture_instability_recovery(viewer, output: Path) -> None:
     assert tuple(session.state_take_times) == before
     for _ in range(3):
         viewer.sync()
-    assert panel._playhead == 0
-    assert all(math.isfinite(value) for value in (panel._view_start, panel._view_end))
+    assert panel.editor.playhead == 0
+    assert all(math.isfinite(value) for value in (panel.editor.view_start, panel.editor.view_end))
     _save_window_crop(viewer, "Keyframes", output / "recovered-timeline.png", padding=0)
     Image.fromarray(viewer.capture_array(surface=CaptureSurface.WINDOW)).save(
         output / "recovered-window.png"
@@ -503,7 +511,7 @@ def capture_instability_recovery(viewer, output: Path) -> None:
     drag(
         viewer, timeline_point(viewer, before[2], "take"), timeline_point(viewer, before[5], "take")
     )
-    assert panel._editor.take_selection is not None
+    assert panel.editor.take_selection is not None
     for key, ctrl in ((imgui.Key.a, True), (imgui.Key.delete, False)):
         io = imgui.get_io()
         io.add_key_event(imgui.Key.mod_ctrl, ctrl)
@@ -612,12 +620,12 @@ def main(argv: list[str] | None = None) -> int:
         show_timeline(viewer)
         panel = viewer.panels.get("Keyframes")
         choose_follow(viewer, "off")
-        panel._view_start, panel._view_end = -5, 140
+        panel.editor.view_start, panel.editor.view_end = -5, 140
         _click(viewer, timeline_point(viewer, 55))
-        expected = panel._playhead
+        expected = panel.editor.playhead
         for _ in range(3):
             viewer.sync()
-        assert panel._playhead == expected
+        assert panel.editor.playhead == expected
         _save_window_crop(viewer, "Keyframes", args.output / "ruler-seek.png", padding=0)
         _save_window_crop(
             viewer, "Status###application_status", args.output / "status-hints.png", padding=0
@@ -645,7 +653,7 @@ def main(argv: list[str] | None = None) -> int:
         assert session.submit(cmd.SetStateTakeRange())
         assert session.submit(cmd.SeekStateTake(1720))
         viewer.sync()
-        panel._view_start, panel._view_end = 45.5, 57.25
+        panel.editor.view_start, panel.editor.view_end = 45.5, 57.25
         _save_window_crop(viewer, "Keyframes", args.output / "before-follow.png", padding=0)
         choose_follow(viewer, "page")
         _save_window_crop(viewer, "Keyframes", args.output / "page-follow.png", padding=0)

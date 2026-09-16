@@ -9,6 +9,7 @@ from .state import STATE_TAKE_BYTE_LIMIT as STATE_TAKE_BYTE_LIMIT
 from .state import STATE_TAKE_FRAME_LIMIT as STATE_TAKE_FRAME_LIMIT
 from .state import AuthoredSceneOverlay as AuthoredSceneOverlay
 from .state import PerturbState as PerturbState
+from .state import SceneOverrides as SceneOverrides
 from .state import SceneSnapshotInfo as SceneSnapshotInfo
 from .state import _apply_geometry_color_overrides as _apply_geometry_color_overrides
 from .state import _DocumentState as _DocumentState
