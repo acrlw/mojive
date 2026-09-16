@@ -538,6 +538,8 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch, capsys) ->
     )
     app = ViewerApp.__new__(ViewerApp)
     app.backend = SimpleNamespace(target=target)
+    app.window = SimpleNamespace(points_to_pixels=lambda rect: rect)
+    app._viewport_rect = (0, 0, 2, 1)
     app._scene_capture = SimpleNamespace(read=lambda *args, **kwargs: np.zeros((1, 2, 3), np.uint8))
     app._camera_view = lambda: None
     app.localizer = SimpleNamespace(text=lambda value: value)

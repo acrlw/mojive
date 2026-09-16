@@ -378,14 +378,18 @@ fn sample_albedo(uv: vec2f) -> vec4f {
     return color / taps;
 }
 
-// Alpha = -(1 + opacity) selects batched diagnostic coverage.
+// Diagnostic alpha is -(1 + opacity), or -(3 + opacity) for collision coverage.
 fn coverage_alpha(alpha: f32, pixel: vec2f) -> f32 {
     if alpha >= 0.0 { return alpha; }
     let lo = vec2u(pixel) & vec2u(1u);
     let hi = (vec2u(pixel) >> vec2u(1u)) & vec2u(1u);
     let low = 2u * (lo.x ^ lo.y) + lo.y;
     let high = 2u * (hi.x ^ hi.y) + hi.y;
-    if -alpha - 1.0 <= (f32(4u * low + high) + 0.5) / 16.0 { discard; }
+    let threshold = (f32(4u * low + high) + 0.5) / 16.0;
+    let collision = alpha <= -3.0;
+    let opacity = -alpha - select(1.0, 3.0, collision);
+    // Complementary patterns keep an inner collision surface visible through a visual shell.
+    if opacity <= select(threshold, 1.0 - threshold, collision) { discard; }
     return 1.0;
 }
 

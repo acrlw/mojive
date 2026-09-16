@@ -5,15 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
 
-from mojive import GeometryView, SceneRenderer
+from mojive import GeometryStyle, GeometryView, SceneRenderer
 from mojive.adapters.base import FrameNeeds
 from mojive.adapters.mujoco import MuJoCoAdapter
+from mojive.render.backend import RenderFlag
 from mojive.scene.assets import resolve
 from mojive.types import CameraView
+from mojive.ui.scene_capture import SceneCapture
 
 
 def capture(output: Path, backend: str) -> dict:
@@ -37,6 +40,23 @@ def capture(output: Path, backend: str) -> dict:
                 Image.fromarray(images[mode.value]).save(output / f"{mode.value}.png")
             view.set_geometry_view(GeometryView.DEFAULT)
             np.testing.assert_array_equal(view.render(), images["default"])
+            view.set_geometry_view(GeometryView.BOTH)
+            view.set_geometry_style(GeometryStyle((0.25, 0.5, 0.7), 0.9, 0.2))
+            Image.fromarray(view.render()).save(output / "both-custom.png")
+            view.set_flag(RenderFlag.INERTIA, True)
+            view.set_flag(RenderFlag.SCLINERTIA, True)
+            frame = adapter.frame(FrameNeeds(diagnostics=True))
+            view.update(frame)
+            capture = SceneCapture()
+            try:
+                session = SimpleNamespace(source=source, frame=frame, structure_generation=0)
+                with view._current():
+                    captured = capture.read(view._backend, session, camera.with_aspect(1.5))
+                np.testing.assert_array_equal(captured, view.render())
+                Image.fromarray(captured).save(output / "scene-scaled-inertia.png")
+            finally:
+                with view._current():
+                    capture.release()
         changes = {
             mode: int(np.any(pixels != images["visual"], axis=2).sum())
             for mode, pixels in images.items()

@@ -101,3 +101,32 @@ def test_scene_capture_and_video_exclude_helpers_and_selection(tmp_path, monkeyp
             np.testing.assert_array_equal(frame, clean)
         Image.fromarray(clean).save(tmp_path / "scene.png")
         viewer.capture(tmp_path / "window.png", surface="window")
+
+
+def test_geometry_preferences_and_default_capture_resolution(tmp_path, monkeypatch):
+    from mojive import GeometryStyle, ViewerConfig
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    style = GeometryStyle((0.2, 0.5, 0.7), 0.9, 0.15)
+    with build_scene(
+        acceptance_scene(),
+        vsync=False,
+        show_window=False,
+        width=900,
+        height=650,
+        config=ViewerConfig(geometry_style=style),
+    ) as viewer:
+        assert viewer.geometry_style == style
+        viewer.configure_geometry_style(style, persist=True)
+        for _ in range(5):
+            viewer.sync()
+        scene = viewer.capture_array()
+        viewport = viewer.capture_array(surface="viewport")
+        assert scene.shape == viewport.shape
+        x, y, w, h = viewer.window.points_to_pixels(viewer.app._viewport_rect)
+        assert scene.shape == (round(y + h) - round(y), round(x + w) - round(x), 3)
+        assert scene.shape[0] < viewer.window.size_pixels[1]
+        viewer.app.set_fixed_render_size(360, 240)
+        assert viewer.capture_array().shape == (240, 360, 3)
+    with build_scene(acceptance_scene(), vsync=False, show_window=False) as viewer:
+        assert viewer.geometry_style == style

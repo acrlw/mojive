@@ -46,6 +46,7 @@ the same preference.
 | Preference | Values | Settings panel |
 |---|---|---|
 | `shadow_quality` | `performance`, `balanced`, `high` | Rendering > Shadows > Shadow quality |
+| `geometry_style` | `collision_color`, `visual_opacity`, `collision_opacity` | MuJoCo Visuals > Both appearance |
 
 `balanced` is the default. `performance` reduces receiver filtering work, while `high` increases
 near-cascade density and filtering quality for close inspection. Changing the preset invalidates
@@ -297,11 +298,38 @@ without adding work to each physics step. For other adapters and programmatic sc
 `viewer.track_node(node.node_id)` with a node from `viewer.session.nodes`. `ViewerConfig(tracking=...)`
 sets initial preferences; `configure_tracking(..., persist=True)` also saves desktop preferences.
 
+## Geometry comparison appearance
+
+Settings > MuJoCo Visuals > Both appearance saves collision color and independent Visual/Collision
+opacity. The default is a muted amber collision color `(0.8, 0.45, 0.12)`, Visual opacity `0.65`,
+and Collision opacity `0.35`. Values range from 0 to 1. Visual opacity multiplies the authored
+material alpha; collision opacity is independent of it, including invisible physics proxies.
+Shared primitives with identical visual and collision geometry are drawn once with their original
+material; distinct collision hulls use the comparison opacity. Collision-only view stays opaque.
+These settings affect display only, preserve instanced rendering, and do not edit physics materials.
+
+```python
+from mojive import GeometryStyle, ViewerConfig
+
+style = GeometryStyle(collision_color=(0.3, 0.5, 0.7), visual_opacity=0.9, collision_opacity=0.2)
+config = ViewerConfig(geometry_style=style)
+viewer.configure_geometry_style(style, persist=True)
+# Offscreen SceneRenderer uses the same settings:
+scene_renderer.set_geometry_style(style)
+```
+
+An omitted `ViewerConfig.geometry_style` loads the saved desktop preference. Screenshots, videos,
+and the selected-camera preview follow the active style, including per-body Both overrides.
+
 ## Interactive capture and recording
 
-Interactive captures distinguish the raw scene from composed UI. Still captures default to `SCENE` and
-does not incur a full-window framebuffer readback. `VIEWPORT` includes Mojive's viewport tools
-and overlays but crops panels and the menu bar; `WINDOW` captures the complete ImGui window.
+Still captures default to `SCENE`, at the displayed viewport's physical-pixel resolution, without
+reading the full-window framebuffer. Scene images retain active render flags, MuJoCo visuals
+(including inertia, scaled inertia and contacts), visual groups, geometry comparisons, labels,
+coordinate frames and diagnostic views. Editor selection, gizmos and viewport controls are excluded.
+`VIEWPORT` includes Mojive's viewport tools and overlays but crops panels and the menu bar;
+`WINDOW` captures the complete ImGui window. An explicitly fixed render size, including `record(size=...)`,
+continues to override the default Scene output resolution.
 
 ```python
 from mojive import CaptureSurface

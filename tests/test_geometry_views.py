@@ -194,7 +194,7 @@ def test_both_keeps_transparent_shared_primitives_visible_as_collision(adapter, 
     set_view(builder, GeometryView.BOTH)
     rows = np.flatnonzero(builder.scene.segmentation[:, 0] == 3)
     assert len(rows) == 1
-    assert builder.scene.colors[rows[0], 3] == 1
+    assert builder.scene.colors[rows[0], 3] == pytest.approx(-3.35)
     set_view(builder, GeometryView.VISUAL)
     rows = np.flatnonzero(builder.scene.segmentation[:, 0] == 3)
     assert builder.scene.colors[rows[0], 3] == alpha

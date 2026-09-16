@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
-from ..types import CameraView, ViewportImage
+from ..types import CameraView, GeometryStyle, ViewportImage
 
 if TYPE_CHECKING:
     from mojive.interaction.gizmo import GizmoFrame
@@ -277,6 +277,10 @@ class RenderBackend(Protocol):
 
         ...
 
+    def get_background(self) -> tuple[float, float, float, float]:
+        """Return the current scene clear color."""
+        ...
+
     def set_transparent_id_rendering(self, enabled: bool) -> None:
         """Include or exclude transparent objects from ID output."""
 
@@ -350,6 +354,14 @@ class RenderBackend(Protocol):
 
     def set_geometry_view(self, view: str) -> bool:
         """Apply a geometry preset as one display update."""
+        ...
+
+    def set_geometry_style(self, style: GeometryStyle) -> bool:
+        """Set display-only collision color and Both-mode opacity."""
+        ...
+
+    def get_geometry_style(self) -> GeometryStyle:
+        """Return the current geometry display style."""
         ...
 
     def get_flag(self, flag: RenderFlag) -> bool:
@@ -497,11 +509,15 @@ class NullBackend:
         self._label_mode = LabelMode.NONE
         self._frame_mode = FrameMode.NONE
         self._shadow_quality = ShadowQuality.BALANCED
+        self._geometry_style = GeometryStyle()
 
     def set_scene(self, source) -> None: ...
     def update(self, frame) -> None: ...
     def set_camera(self, camera) -> None: ...
     def set_background(self, rgba) -> None: ...
+    def get_background(self) -> tuple[float, float, float, float]:
+        return (0.0, 0.0, 0.0, 1.0)
+
     def set_transparent_id_rendering(self, enabled: bool) -> None: ...
     def render(self, frame=None, request: RenderRequest | None = None) -> ViewportImage | None:
         del frame, request
@@ -533,6 +549,12 @@ class NullBackend:
 
     def set_geometry_view(self, view: str) -> bool:
         return False
+
+    def set_geometry_style(self, style: GeometryStyle) -> bool:
+        return False
+
+    def get_geometry_style(self) -> GeometryStyle:
+        return self._geometry_style
 
     def get_flag(self, flag: RenderFlag) -> bool:
         return self._flags.get(flag, False)

@@ -48,6 +48,8 @@ class CameraPreview:
             self._source_generation = source_generation
         for flag in main_backend.render_options():
             backend.set_flag(flag, main_backend.get_flag(flag))
+        backend.set_background(main_backend.get_background())
+        backend.set_geometry_style(main_backend.get_geometry_style())
         backend.set_shadow_quality(main_backend.get_shadow_quality())
         backend.set_debug_view(main_backend.get_debug_view())
         backend.set_label_mode(main_backend.get_label_mode())

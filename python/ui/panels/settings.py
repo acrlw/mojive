@@ -115,7 +115,7 @@ _CATEGORY_SEARCH_TERMS = {
         "opengl render flags outline tonemap msaa",
     ),
     "MuJoCo Visuals": (
-        "visual groups bvh depth",
+        "visual groups bvh depth geometry both collision color opacity",
         "mjt rnd flag shadow wireframe reflection additive skybox fog haze cull face",
         "mjt vis flag joint actuator camera light contact force split inertia bvh",
     ),
@@ -962,6 +962,7 @@ class SettingsPanel(Panel):
     def _mujoco_visuals(self, ctx: PanelContext) -> None:
         imgui.text(ctx.tr("Geometry view"))
         draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme)
+        self._geometry_style(ctx)
         self._visual_groups(ctx)
         self._bvh_depth(ctx)
 
@@ -975,6 +976,32 @@ class SettingsPanel(Panel):
         if self._message:
             imgui.separator()
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._message)
+
+    def _geometry_style(self, ctx: PanelContext) -> None:
+        if not imgui.collapsing_header(
+            f"{ctx.tr('Both appearance')}###geometry_style", imgui.TreeNodeFlags_.default_open
+        ):
+            return
+        style = ctx.backend.get_geometry_style()
+        if self._begin_properties("geometry_style_properties"):
+            self._property(ctx.tr("Collision color"))
+            changed, color = imgui.color_edit3("##collision_color", style.collision_color)
+            if changed:
+                style = replace(style, collision_color=tuple(color))
+            for name, label in (
+                ("visual_opacity", "Visual opacity"),
+                ("collision_opacity", "Collision opacity"),
+            ):
+                self._property(ctx.tr(label))
+                changed, opacity = imgui.slider_float(
+                    f"##{name}", getattr(style, name), 0.0, 1.0, "%.2f"
+                )
+                if changed:
+                    style = replace(style, **{name: opacity})
+            imgui.end_table()
+        if style != ctx.backend.get_geometry_style():
+            setter = ctx.set_geometry_style or ctx.backend.set_geometry_style
+            setter(style)
 
     @staticmethod
     def _begin_toggle_grid(str_id: str, labels: tuple[str, ...]) -> bool:
