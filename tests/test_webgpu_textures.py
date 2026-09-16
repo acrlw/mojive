@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 wgpu = pytest.importorskip("wgpu")
 
 import numpy as np  # noqa: E402
 
+from mojive.render.texture import box_reduce_axis  # noqa: E402
 from mojive.render.webgpu.textures import TextureStore, _mip_chain  # noqa: E402
 
 
@@ -70,3 +73,24 @@ def test_srgb_mip_averages_light_energy_without_gamma_correcting_alpha():
     np.testing.assert_array_equal(levels[0], pixels)
     np.testing.assert_array_equal(levels[1][0, 0, 0], [188, 188, 188, 128])
     np.testing.assert_array_equal(_mip_chain(pixels)[1][0, 0, 0], [128, 128, 128, 128])
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 9, 31, 63])
+@pytest.mark.parametrize("axis", [1, 2])
+def test_mip_reduction_matches_exact_pixel_area_and_preserves_average(size, axis):
+    shape = [2, 5, 5, 4]
+    shape[axis] = size
+    pixels = np.random.default_rng(123).random(shape, dtype=np.float32) * 255
+    target = max(1, size // 2)
+    # Independent integration of each source pixel's overlap in double precision.
+    bounds = np.linspace(0, size, target + 1)
+    weights = np.array(
+        [
+            [max(0, min(hi, i + 1) - max(lo, i)) / (hi - lo) for i in range(size)]
+            for lo, hi in pairwise(bounds)
+        ]
+    )
+    reference = np.moveaxis(np.tensordot(weights, np.moveaxis(pixels, axis, 0), axes=1), 0, axis)
+    actual = box_reduce_axis(pixels, axis)
+    np.testing.assert_allclose(actual, reference, atol=3e-5, rtol=1e-6)
+    np.testing.assert_allclose(actual.mean(axis=axis), pixels.mean(axis=axis), atol=1e-4)
