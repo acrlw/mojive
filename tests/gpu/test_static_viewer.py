@@ -926,14 +926,21 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
             assert not imgui.get_current_context().open_popup_stack
 
         def append(self, image):
-            assert viewer.recording.phase is RecordingPhase.RECORDING
-            assert not imgui.get_current_context().open_popup_stack
             images.append(image.copy())
-            notices.append(viewer.app._status_notice_bounds)
 
         def close(self):
             pass
 
+    surface_image = viewer.app._surface_image
+
+    def capture_surface(*args, **kwargs):
+        # UI state belongs to the capture boundary; encoding runs on its worker.
+        assert viewer.recording.phase is RecordingPhase.RECORDING
+        assert not imgui.get_current_context().open_popup_stack
+        notices.append(viewer.app._status_notice_bounds)
+        return surface_image(*args, **kwargs)
+
+    monkeypatch.setattr(viewer.app, "_surface_image", capture_surface)
     monkeypatch.setattr(recording, "VideoRecorder", Recorder)
     monkeypatch.setattr(viewer.app, "_capture_output", lambda *args: tmp_path / "menu.mp4")
     viewer.configure_recording(RecordingConfig(countdown=0))
@@ -943,8 +950,9 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
         _click(viewer, _item_center(viewer, "menu_item", "Viewport with UI"))
         for _ in range(3):
             viewer.sync()
-        assert images
         viewer.stop_recording()
+        assert images
+        monkeypatch.setattr(viewer.app, "_surface_image", surface_image)
         clean = viewer.capture_array(surface=CaptureSurface.VIEWPORT)
         # File receipts can wrap into multiple rows. Compare above the actual
         # notice, retaining the scene and transport pixels rather than assuming

@@ -30,13 +30,18 @@ class Ring:
         self.filled = 0
 
     @property
+    def values(self) -> np.ndarray:
+        """Return initialized samples without copying their backing storage."""
+        return self.data if self.filled == len(self.data) else self.data[: self.filled]
+
+    @property
     def offset(self) -> int:
         return self.index if self.filled == len(self.data) else 0
 
     def span(self) -> tuple[float, float]:
         if self.filled == 0:
             return -1.0, 1.0
-        view = self.data if self.filled == len(self.data) else self.data[: self.filled]
+        view = self.values
         lo, hi = float(view.min()), float(view.max())
         if hi - lo < 1e-6:
             mid = (lo + hi) * 0.5
@@ -67,6 +72,7 @@ class PlotPanel(Panel):
         self._sensor = Ring()
         self._tracked = -1
         self._tracked_sensor = (-1, -1)
+        self._structure_generation = -1
 
     def focus_sensor(self, sensor_index: int, component: int = 0) -> None:
         """Open the plot on one sensor component from a diagnostic deep link."""
@@ -87,6 +93,10 @@ class PlotPanel(Panel):
         )
 
     def draw(self, ctx: PanelContext) -> None:
+        if self._structure_generation != ctx.session.structure_generation:
+            self._structure_generation = ctx.session.structure_generation
+            for ring in (self._angle, self._velocity, self._contact, self._sensor):
+                ring.clear()
         source_index = segmented_control(
             "plot-source",
             (ctx.tr("Joints"), ctx.tr("Sensors")),
@@ -174,9 +184,9 @@ class PlotPanel(Panel):
         joints = ctx.session.joints
         j = joints[self.joint_index]
 
-        if self.show_angle and frame.qpos is not None and j.qpos_adr < len(frame.qpos):
+        if self.show_angle and frame.qpos is not None and 0 <= j.qpos_adr < len(frame.qpos):
             self._angle.push(float(frame.qpos[j.qpos_adr]))
-        if self.show_velocity and frame.qvel is not None and j.qvel_adr < len(frame.qvel):
+        if self.show_velocity and frame.qvel is not None and 0 <= j.qvel_adr < len(frame.qvel):
             self._velocity.push(float(frame.qvel[j.qvel_adr]))
         if self.show_contact:
             c = frame.contacts
@@ -186,7 +196,7 @@ class PlotPanel(Panel):
         lo, hi = ring.span()
         imgui.plot_lines(
             f"##{label}",
-            ring.data,
+            ring.values,
             values_offset=ring.offset,
             overlay_text=f"{label}  {overlay}",
             scale_min=lo,

@@ -21,7 +21,7 @@ from mojive.interaction.gizmo import (
 )
 from mojive.scene.geometry import GeometryDimensions
 from mojive.types import CameraView, MeshShape
-from mojive.ui.panels.inspector import gizmo_refusal_reason
+from mojive.ui.edit_policy import gizmo_refusal_reason
 from mojive.ui.theme import THEME
 
 if TYPE_CHECKING:

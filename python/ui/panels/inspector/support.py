@@ -11,12 +11,19 @@ from mojive.adapters.base import (
     NodeType,
     SceneNode,
 )
+from mojive.ui.edit_policy import (
+    GIZMO_REFUSAL_DRIVEN as GIZMO_REFUSAL_DRIVEN,
+)
+from mojive.ui.edit_policy import (
+    GIZMO_REFUSAL_RUNNING as GIZMO_REFUSAL_RUNNING,
+)
+from mojive.ui.edit_policy import (
+    gizmo_refusal_reason as gizmo_refusal_reason,
+)
 from mojive.ui.panels import (
     PanelContext,
 )
 
-GIZMO_REFUSAL_RUNNING = "Physics is running; pause to move things"
-GIZMO_REFUSAL_DRIVEN = "This link is joint-driven; use its joint gizmo or the Joints panel"
 _MATERIAL_PRESETS = {
     "Matte": (0.0, 0.05, 0.10, 0.0),
     "Plastic": (0.0, 0.40, 0.50, 0.05),
@@ -120,17 +127,6 @@ def _matching_path_preset(
         ),
         None,
     )
-
-
-def gizmo_refusal_reason(
-    paused: bool,
-    posable: bool,
-) -> str | None:
-    if not paused:
-        return GIZMO_REFUSAL_RUNNING
-    if not posable:
-        return GIZMO_REFUSAL_DRIVEN
-    return None
 
 
 def _body_pose(xpos, xmat, body_index: int):

@@ -19,7 +19,7 @@ from mojive.interaction.gizmo import (
 from mojive.scene.geometry import GeometryDimensions, geometry_dimensions
 from mojive.scene.queries import node_world_pose
 from mojive.types import LightType
-from mojive.ui.panels.inspector import gizmo_refusal_reason
+from mojive.ui.edit_policy import gizmo_refusal_reason
 
 if TYPE_CHECKING:
     from mojive.adapters.base import SceneNode

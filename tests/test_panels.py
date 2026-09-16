@@ -133,7 +133,10 @@ def test_dense_keyframe_hit_testing_keeps_markers_omitted_from_the_draw_buckets(
     drawn = decimated_marker_ids(tuple(markers.items()), 0.0, 11.0, 4.0)
     omitted = next(keyframe_id for keyframe_id in markers if keyframe_id not in drawn)
 
-    hit = KeyframesPanel._hit_marker(markers, 20.0, 0.5, (markers[omitted], 20.0))
+    from mojive.interaction.timeline import TimelineMarkerIndex
+
+    projection = TimelineMarkerIndex(tuple(markers.items())).project(0, 11, 0, 11)
+    hit = projection.hit(markers[omitted], 4.5)
 
     assert hit == omitted
     assert hit in decimated_marker_ids(tuple(markers.items()), 0.0, 11.0, 4.0, (hit,))
@@ -169,11 +172,14 @@ def test_structure_generation_invalidates_panel_metadata_caches() -> None:
     keyframes = KeyframesPanel()
     keyframes._model_id = 0
     session.keyframes = (first,)
+    session.keyframe_revision = 1
+    session.model_keyframes = lambda model_id: session.keyframes
     cached, by_id = keyframes._keyframes(ctx)
     assert cached == (first,)
     assert by_id == {1: first}
     session.structure_generation = 3
     session.keyframes = (second,)
+    session.keyframe_revision += 1
     cached, by_id = keyframes._keyframes(ctx)
     assert cached == (second,)
     assert by_id == {2: second}

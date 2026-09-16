@@ -44,7 +44,7 @@ class StatsPanel(Panel):
         recent = ctx.dt * 1000.0
         imgui.plot_lines(
             "##frame",
-            self._frame_ms.data,
+            self._frame_ms.values,
             values_offset=self._frame_ms.offset,
             overlay_text=f"{recent:6.2f} ms   {1000.0 / recent if recent > 0.01 else 0.0:5.1f} fps",
             scale_min=0.0,

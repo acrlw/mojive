@@ -26,7 +26,6 @@ from . import (
 from .filters import filter_pills, node_filter_color
 
 _LARGE_SCENE_NODES = 2_000
-_VISIBLE_ROW_BUDGET = 512
 _TYPE_FILTERS = (
     "all",
     "model",
@@ -99,12 +98,13 @@ class HierarchyPanel(Panel):
         self._search_names: tuple[str, ...] = ()
         self._type_counts: dict[str, int] = {}
         self._default_open_depth = 2
-        self._row_budget = _VISIBLE_ROW_BUDGET
         self._rows_drawn = 0
-        self._rows_truncated = False
         self._batch_selected: set[int] = set()
         self._selection_token: tuple[int, int] | None = None
         self._open_state: dict[int, bool] = {}
+        self._row_cache_key: tuple[str, str] | None = None
+        self._row_cache_open_state: dict[int, bool] = {}
+        self._row_cache: list[tuple[SceneNode, int, bool]] = []
         self._show_type_column = True
         self._text_line_offset = 0.0
 
@@ -208,43 +208,26 @@ class HierarchyPanel(Panel):
             _VISIBILITY_COLUMN_WIDTH_PT * ctx.style_scale,
         )
 
-        self._rows_drawn = 0
-        self._rows_truncated = False
+        rows = self._visible_rows()
+        self._rows_drawn = len(rows)
         self._text_line_offset = text_line_y(ImguiDraw2D(), 0.0)
-        if self._filter or self._type_filter != "all":
-            needle = self._filter.casefold()
-            hits = []
-            for node, name in zip(s.nodes, self._search_names, strict=True):
-                type_matches = self._type_filter == "all" or node.type.value == self._type_filter
-                if type_matches and needle in name:
-                    if len(hits) >= self._row_budget:
-                        self._rows_truncated = True
-                        break
-                    hits.append(node)
-            clipper = imgui.ListClipper()
-            clipper.begin(len(hits))
-            while clipper.step():
-                for index in range(clipper.display_start, clipper.display_end):
-                    self._row(ctx, hits[index], leaf=True, depth=0)
-            clipper.end()
-            if not hits:
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.text_disabled(ctx.tr("no match"))
-        else:
-            for root in self._roots:
-                if self._rows_drawn >= self._row_budget:
-                    self._rows_truncated = True
-                    break
-                self._subtree(ctx, root, depth=0)
-
-        if self._rows_truncated:
+        clipper = imgui.ListClipper()
+        clipper.begin(len(rows))
+        while clipper.step():
+            for index in range(clipper.display_start, clipper.display_end):
+                node, depth, leaf = rows[index]
+                self._row(
+                    ctx,
+                    node,
+                    leaf=leaf,
+                    depth=depth,
+                    default_open=depth < self._default_open_depth,
+                )
+        clipper.end()
+        if not rows and (self._filter or self._type_filter != "all"):
             imgui.table_next_row()
             imgui.table_next_column()
-            imgui.text_disabled(
-                f"{ctx.tr('showing the first')} {self._row_budget} "
-                f"{ctx.tr('visible nodes; use the filter to narrow')}"
-            )
+            imgui.text_disabled(ctx.tr("no match"))
 
         imgui.end_table()
         imgui.pop_style_var()
@@ -269,38 +252,56 @@ class HierarchyPanel(Panel):
             return
         self._cache_generation = gen
         nodes = ctx.session.nodes
+        previous = self._by_id
         self._by_id = {n.node_id: n for n in nodes}
         self._type_counts = dict(Counter(node.type.value for node in nodes))
         self._type_counts["all"] = len(nodes)
-        self._batch_selected.intersection_update(self._by_id)
+        # A surviving index can belong to another element after a topology edit.
+        compatible = {
+            node_id
+            for node_id, node in self._by_id.items()
+            if node_id in previous
+            and (node.object_id, node.model_id, node.type, node.name)
+            == (
+                previous[node_id].object_id,
+                previous[node_id].model_id,
+                previous[node_id].type,
+                previous[node_id].name,
+            )
+        }
+        self._batch_selected.intersection_update(compatible)
         self._roots = [n for n in nodes if n.parent < 0 or n.parent not in self._by_id]
         self._search_names = tuple(node.name.casefold() for node in nodes)
         self._default_open_depth = hierarchy_open_depth(len(nodes))
-        self._row_budget = (
-            _VISIBLE_ROW_BUDGET if len(nodes) >= _LARGE_SCENE_NODES else len(nodes) + 1
-        )
         self._open_state = {
-            node_id: value for node_id, value in self._open_state.items() if node_id in self._by_id
+            node_id: value for node_id, value in self._open_state.items() if node_id in compatible
         }
+        self._row_cache_key = None
 
-    def _subtree(self, ctx: PanelContext, node: SceneNode, depth: int) -> None:
-        if self._rows_drawn >= self._row_budget:
-            self._rows_truncated = True
-            return
-        children = [self._by_id[c] for c in node.children if c in self._by_id]
-        opened = self._row(
-            ctx,
-            node,
-            leaf=not children,
-            depth=depth,
-            default_open=depth < self._default_open_depth,
-        )
-        if children and opened:
-            for child in children:
-                if self._rows_drawn >= self._row_budget:
-                    self._rows_truncated = True
-                    break
-                self._subtree(ctx, child, depth + 1)
+    def _visible_rows(self) -> list[tuple[SceneNode, int, bool]]:
+        """Cache the complete browse order; ImGui clips drawing, not accessible nodes."""
+        key = (self._filter.casefold(), self._type_filter)
+        if key == self._row_cache_key and self._open_state == self._row_cache_open_state:
+            return self._row_cache
+        rows = []
+        if key[0] or key[1] != "all":
+            rows = [
+                (node, 0, True)
+                for node, name in zip(self._by_id.values(), self._search_names, strict=True)
+                if (key[1] == "all" or node.type.value == key[1]) and key[0] in name
+            ]
+        else:
+            pending = [(node, 0) for node in reversed(self._roots)]
+            while pending:
+                node, depth = pending.pop()
+                children = [self._by_id[c] for c in node.children if c in self._by_id]
+                rows.append((node, depth, not children))
+                if self._open_state.get(node.node_id, depth < self._default_open_depth):
+                    pending.extend((child, depth + 1) for child in reversed(children))
+        self._row_cache_key = key
+        self._row_cache_open_state = self._open_state.copy()
+        self._row_cache = rows
+        return rows
 
     def _row(
         self,
@@ -310,7 +311,6 @@ class HierarchyPanel(Panel):
         depth: int,
         default_open: bool = False,
     ) -> bool:
-        self._rows_drawn += 1
         row_height = max(
             imgui.get_font_size() + 2.0 * ROW_PADDING_Y * ctx.style_scale,
             26.0 * ctx.style_scale,

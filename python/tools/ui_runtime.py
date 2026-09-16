@@ -1051,7 +1051,7 @@ def _capture_keyframes(output: Path) -> None:
         if keyframes is not None and model_ids:
             result = viewer.session.submit(cmd.AddModelKeyframe(model_ids[0], "pose1"))
             if result.ok:
-                keyframes._selected_id = result.entity_id
+                keyframes._editor.selected_id = result.entity_id
                 keyframes._selection_generation = -1
         _settle(viewer, 3)
         _save_window_crop(
@@ -1167,8 +1167,10 @@ def _capture_joint_gizmos(output: Path) -> None:
                 key=lambda joint: len(joint.name or f"joint{joint.joint_id}"),
             )
             long_joint_name = long_joint.name or f"joint{long_joint.joint_id}"
-            joints._search = long_joint_name
+            _click(viewer, _item_center(viewer, "input_text_with_hint", "##joint_search"))
+            imgui.get_io().add_input_characters_utf8(long_joint_name)
             _settle(viewer, 2)
+            assert joints._search == long_joint_name
             label_point = _item_center(
                 viewer,
                 "invisible_button",
@@ -1185,7 +1187,7 @@ def _capture_joint_gizmos(output: Path) -> None:
                 output / "joints-name-status-closeup.png",
                 padding=0.0,
             )
-            joints._search = ""
+            _click(viewer, _item_center(viewer, "invisible_button", "##clear_joint_search"))
             _settle(viewer, 2)
             _right_click(
                 viewer,
@@ -1725,6 +1727,7 @@ def _capture_joint_gizmo_scene(output: Path) -> None:
     )
     try:
         viewer.app.gizmo.set_style("2d")
+        viewer.app.gizmo.set_mode("translate")
         _settle(viewer, 8)
 
         compiled_only = next(

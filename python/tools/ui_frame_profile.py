@@ -188,12 +188,12 @@ def main(argv: list[str] | None = None) -> int:
         }
 
         profile_path = args.output / "ui-frame-profile.prof"
-        from ..ui.draw2d import _cached_fringe_points, _concave_indices
         from ..ui.icons import (
             _icon_draw_commands,
             _production_icon_layout,
             production_helper_strokes,
         )
+        from ..ui.imgui_draw import _cached_fringe_points, _concave_indices
         from ..ui.panels.filters import severity_meshes
         from ..ui.viewport_widgets import _scaled_reset_glyph
 
@@ -277,12 +277,14 @@ def main(argv: list[str] | None = None) -> int:
 @contextmanager
 def _timed_widgets(viewer):
     """Measure actual widget calls independently of frame pacing and cProfile overhead."""
-    from ..ui.panels import camera, control, filters, inspector, joints, output
+    from ..ui.panels import camera, control, filters, joints, output
+    from ..ui.panels.inspector import environment
 
     targets = [(viewer.app, method, method) for method in _CAPSULE_METHODS]
     targets += [(module, "severity_icon", "diagnostics") for module in (filters, output)]
     targets += [
-        (module, "value_rail", "value_controls") for module in (camera, control, inspector, joints)
+        (module, "value_rail", "value_controls")
+        for module in (camera, control, environment, joints)
     ]
     targets.append((viewer.panels.get("Keyframes"), "draw", "keyframes"))
     saved, timings = [], {}

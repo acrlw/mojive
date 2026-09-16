@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import bisect
 import math
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
@@ -13,7 +12,48 @@ from imgui_bundle import imgui
 
 from mojive.geometry2d.curves import CORNER_SMOOTHING
 from mojive.interaction.gizmo import _rounded_polygon_corners
-from mojive.interaction.input import InputClaim
+from mojive.interaction.input import InputClaim, physical_ctrl_super
+from mojive.interaction.timeline import (
+    MIN_TIMELINE_SPAN as _MIN_TIMELINE_SPAN,
+)
+from mojive.interaction.timeline import (
+    MarkerProjection,
+    TimelineMarkerIndex,
+)
+from mojive.interaction.timeline import (
+    decimated_marker_ids as decimated_marker_ids,
+)
+from mojive.interaction.timeline import (
+    fitted_timeline_range as fitted_timeline_range,
+)
+from mojive.interaction.timeline import (
+    follow_timeline_range as follow_timeline_range,
+)
+from mojive.interaction.timeline import (
+    nearest_take_frame as nearest_take_frame,
+)
+from mojive.interaction.timeline import (
+    neighboring_keyframe as neighboring_keyframe,
+)
+from mojive.interaction.timeline import (
+    nice_timeline_step as nice_timeline_step,
+)
+from mojive.interaction.timeline import (
+    recorded_take_spans as recorded_take_spans,
+)
+from mojive.interaction.timeline import (
+    timeline_channel_width as timeline_channel_width,
+)
+from mojive.interaction.timeline import (
+    timeline_time_to_x as timeline_time_to_x,
+)
+from mojive.interaction.timeline import (
+    timeline_x_to_time as timeline_x_to_time,
+)
+from mojive.interaction.timeline import (
+    zoom_timeline_range as zoom_timeline_range,
+)
+from mojive.interaction.timeline_edit import TimelineEditorState
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.paint_protocol import Draw2D
 from mojive.ui.text_layout import fit_text, text_line_y
@@ -31,7 +71,6 @@ from ..viewport_widgets import (
 )
 from . import Panel, PanelContext, button_row_layout, button_width, segmented_control
 
-_MIN_TIMELINE_SPAN = 1e-6
 _COMMAND_HEIGHT_PT = 28.0
 _COMMAND_ICON_PT = 16.0
 _MARKER_SPACING_FACTOR = 1.5
@@ -74,7 +113,7 @@ class _TimelineHit:
     on_track: bool
     keyframe_id: int
     snapshot_id: int
-    marker_positions: dict[int, float]
+    marker_positions: Mapping[int, float]
 
 
 @lru_cache(maxsize=256)
@@ -189,152 +228,6 @@ def unique_keyframe_name(existing: set[str]) -> str:
         index += 1
         name = f"key{index}"
     return name
-
-
-def fitted_timeline_range(times: tuple[float, ...], fallback: float = 0.0) -> tuple[float, float]:
-    """Return a padded, finite range with enough context around isolated keys."""
-
-    finite = tuple(float(value) for value in times if math.isfinite(value))
-    if not finite:
-        center = float(fallback) if math.isfinite(fallback) else 0.0
-        return min(0.0, center), max(1.0, center + 0.5)
-    lo, hi = min(finite), max(finite)
-    if hi - lo < 1e-9:
-        context = max(1.0, abs(lo) * 0.1)
-        return max(0.0, lo - context * 0.5) if lo >= 0 else lo - context * 0.5, hi + context * 0.5
-    padding = (hi - lo) * 0.08
-    return max(0.0, lo - padding) if lo >= 0 else lo - padding, hi + padding
-
-
-def nice_timeline_step(span: float, pixel_width: float, target_pixels: float = 90.0) -> float:
-    """Choose a stable 1/2/5 ruler step for the visible time range."""
-
-    if not math.isfinite(span) or not math.isfinite(pixel_width) or pixel_width <= 0.0:
-        return 1.0
-    raw = max(float(span), _MIN_TIMELINE_SPAN) * target_pixels / pixel_width
-    exponent = math.floor(math.log10(raw))
-    fraction = raw / (10.0**exponent)
-    nice = 1.0 if fraction <= 1.0 else 2.0 if fraction <= 2.0 else 5.0 if fraction <= 5.0 else 10.0
-    return nice * (10.0**exponent)
-
-
-def zoom_timeline_range(
-    start: float, end: float, anchor: float, wheel: float
-) -> tuple[float, float]:
-    """Zoom around ``anchor`` while keeping it at the same screen position."""
-
-    span = max(float(end) - float(start), _MIN_TIMELINE_SPAN)
-    ratio = min(1.0, max(0.0, (float(anchor) - float(start)) / span))
-    new_span = min(1e12, max(_MIN_TIMELINE_SPAN, span * math.exp(-float(wheel) * 0.18)))
-    new_start = float(anchor) - ratio * new_span
-    return new_start, new_start + new_span
-
-
-def timeline_channel_width(available: float, scale: float) -> float:
-    return min(150 * scale, available * 0.35)
-
-
-def timeline_time_to_x(time: float, start: float, end: float, lo: float, hi: float) -> float:
-    span = max(float(end) - float(start), _MIN_TIMELINE_SPAN)
-    return float(lo) + (float(time) - float(start)) * (float(hi) - float(lo)) / span
-
-
-def timeline_x_to_time(x: float, start: float, end: float, lo: float, hi: float) -> float:
-    width = max(float(hi) - float(lo), 1e-9)
-    return float(start) + (float(x) - float(lo)) * (float(end) - float(start)) / width
-
-
-def follow_timeline_range(
-    start: float, end: float, playhead: float, mode: str, locked_fraction: float = 0.15
-) -> tuple[float, float]:
-    """Page an escaped playhead forward, or hold its relative screen position."""
-    span = max(end - start, _MIN_TIMELINE_SPAN)
-    if mode == "locked":
-        start = playhead - min(0.95, max(0.05, locked_fraction)) * span
-    elif mode == "page" and not start + span * 0.01 <= playhead <= end - span * 0.01:
-        start = playhead - span * 0.08
-    else:
-        return start, end
-    return start, start + span
-
-
-def neighboring_keyframe(
-    markers: tuple[tuple[int, float], ...],
-    selected_id: int,
-    playhead: float,
-    direction: int,
-) -> int:
-    """Return the adjacent marker ID, using the playhead when none is selected."""
-
-    if not markers or direction == 0:
-        return -1
-    ordered = sorted(markers, key=lambda marker: (marker[1], marker[0]))
-    for slot, marker in enumerate(ordered):
-        if marker[0] == selected_id:
-            adjacent = slot + (1 if direction > 0 else -1)
-            return ordered[min(len(ordered) - 1, max(0, adjacent))][0]
-    if direction > 0:
-        return next((key_id for key_id, time in ordered if time > playhead), ordered[-1][0])
-    return next((key_id for key_id, time in reversed(ordered) if time < playhead), ordered[0][0])
-
-
-def nearest_take_frame(times: Sequence[float], time: float) -> int:
-    """Return the nearest chronological take frame without scanning the full recording."""
-
-    if not times:
-        return -1
-    slot = bisect.bisect_left(times, float(time))
-    if slot <= 0:
-        return 0
-    if slot >= len(times):
-        return len(times) - 1
-    return slot - 1 if abs(times[slot - 1] - time) <= abs(times[slot] - time) else slot
-
-
-def recorded_take_spans(times: Sequence[float], start: float, end: float, lo: float, hi: float):
-    """Merge overlapping sample marks with work bounded by visible pixel columns."""
-    first = bisect.bisect_left(times, start)
-    last = bisect.bisect_right(times, end)
-    if first == last:
-        return
-    stride = max(1, (last - first) // max(1, round(hi - lo)))
-    factor = (hi - lo) / max(end - start, _MIN_TIMELINE_SPAN)
-    left = right = None
-    for index in range(first, last + stride - 1, stride):
-        x = lo + (times[min(index, last - 1)] - start) * factor
-        mark_left, mark_right = max(lo, x - 1.0), min(hi, x + 1.0)
-        if right is not None and mark_left > right:
-            yield left, right
-            left = None
-        if left is None:
-            left = mark_left
-        right = mark_right
-    yield left, right
-
-
-def decimated_marker_ids(
-    markers: Sequence[tuple[int, float]],
-    lo: float,
-    hi: float,
-    min_spacing: float,
-    priority_ids: Sequence[int] = (),
-) -> tuple[int, ...]:
-    """Bound overlapping marker draws while retaining interactive priority markers."""
-
-    spacing = max(float(min_spacing), 1.0)
-    visible = tuple((keyframe_id, x) for keyframe_id, x in markers if lo <= x <= hi)
-    capacity = max(1, int(max(0.0, hi - lo) // spacing) + 1)
-    if len(visible) <= capacity:
-        return tuple(keyframe_id for keyframe_id, _x in visible)
-    priority = set(priority_ids)
-    buckets: dict[int, int] = {}
-    priority_visible: list[int] = []
-    for keyframe_id, x in visible:
-        if keyframe_id in priority:
-            priority_visible.append(keyframe_id)
-            continue
-        buckets.setdefault(int((x - lo) // spacing), keyframe_id)
-    return (*buckets.values(), *dict.fromkeys(priority_visible))
 
 
 def _draw_command_icon(
@@ -469,18 +362,12 @@ class KeyframesPanel(Panel):
 
     def __init__(self, *, follow_mode_icon_drawer: IconLabelDrawer = draw_icon_label) -> None:
         super().__init__()
+        self._editor = TimelineEditorState()
         self.follow_mode_icon_drawer = follow_mode_icon_drawer
         self._model_id = -1
         self._command_layouts: dict = {}
-        self._selected_id = -1
-        self._selected_keyframes: set[int] = set()
-        self._edit_lane = "model"
-        self._take_selection: tuple[int, int] | None = None
-        self._selection_anchor_time = 0.0
-        self._selection_base: set[int] = set()
         self._seen_take_id = -2
         self._seen_take_length = 0
-        self._selected_snapshot = -1
         self._selection_generation = -1
         self._properties: KeyframeProperties | None = None
         self._name = ""
@@ -497,22 +384,16 @@ class KeyframesPanel(Panel):
         self._seen_take_playhead: float | None = None
         self._seen_frame_time: float | None = None
         self._pan_moved = False
-        self._drag_id = -1
-        self._drag_start_x = 0.0
-        self._drag_offset_x = 0.0
-        self._drag_preview_time = 0.0
-        self._drag_moved = False
-        self._pointer_mode = ""
         self._pointer_chord = None
-        self._scrub_resume = False
-        self._range_anchor = -1
-        self._range_preview: tuple[int, int] | None = None
         self._follow_mode = "page"
         self._locked_fraction = 0.15
         self._last_followed_playhead: float | None = None
         self._keyframe_cache_key: tuple[int, int] | None = None
         self._keyframe_cache: tuple[KeyframeInfo, ...] = ()
         self._keyframe_by_id: dict[int, KeyframeInfo] = {}
+        self._marker_index = TimelineMarkerIndex(())
+        self._snapshot_index = TimelineMarkerIndex(())
+        self._snapshot_cache = None
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -533,14 +414,14 @@ class KeyframesPanel(Panel):
         self._error = "" if result.ok else result.message
         if result.ok:
             self._view_needs_fit = not recording
-            self._edit_lane = "take"
-            self._take_selection = None
+            self._editor.edit_lane = "take"
+            self._editor.take_selection = None
             if recording:
                 first = ctx.session.state_take_recording_start_frame
                 self._sync_selection(ctx, self._keyframe_by_id, ctx.session.state_take_times)
                 result = ctx.submit(cmd.SeekStateTake(first))
                 if result.ok:
-                    self._take_selection = (first, len(ctx.session.state_take_times) - 1)
+                    self._editor.take_selection = (first, len(ctx.session.state_take_times) - 1)
                     self._playhead = ctx.session.state_take_times[first]
                 self._error = "" if result.ok else result.message
         return result
@@ -557,8 +438,8 @@ class KeyframesPanel(Panel):
         keyframes, keyframe_by_id = self._keyframes(ctx)
         take_times = ctx.session.state_take_times
         editable = bool(
-            ctx.session.paused
-            and not ctx.take_video_active
+            self._can_load_keyframes(ctx)
+            and ctx.session.adapter.caps.topology_editing
             and ctx.session.adapter.caps.supports("model.keyframe_edit")
         )
         self._sync_selection(ctx, keyframe_by_id, take_times)
@@ -566,22 +447,22 @@ class KeyframesPanel(Panel):
         take_times = ctx.session.state_take_times
         self._sync_selection(ctx, keyframe_by_id, take_times)
         self._draw_dope_sheet(ctx, models, keyframes, keyframe_by_id, take_times, editable)
-        if self._selected_snapshot >= 0:
+        if self._editor.selected_snapshot >= 0:
             snapshot = next(
                 (
                     item
                     for item in ctx.session.scene_snapshots
-                    if item.snapshot_id == self._selected_snapshot
+                    if item.snapshot_id == self._editor.selected_snapshot
                 ),
                 None,
             )
             if snapshot is None:
-                self._selected_snapshot = -1
+                self._editor.selected_snapshot = -1
             else:
                 imgui.text_disabled(f"{snapshot.name}  {snapshot.time:.3f} {ctx.tr('s')}")
                 if imgui.button(ctx.tr("Remove snapshot") + "##remove-scene-snapshot"):
                     ctx.submit(cmd.RemoveSceneSnapshot(snapshot.snapshot_id))
-                    self._selected_snapshot = -1
+                    self._editor.selected_snapshot = -1
         self._draw_selected(ctx, editable)
         self._draw_error(ctx)
 
@@ -616,7 +497,7 @@ class KeyframesPanel(Panel):
                 else {key.name for key in keyframes}
             )
             name = unique_keyframe_name(existing)
-            self._edit_lane = "model"
+            self._editor.edit_lane = "model"
             ctx.submit_model_edit(
                 cmd.AddModelKeyframe(self._model_id, name), self._snapshot_created
             )
@@ -758,10 +639,10 @@ class KeyframesPanel(Panel):
         ):
             result = ctx.submit(cmd.CaptureSceneSnapshot())
             if result.ok:
-                self._selected_snapshot = result.entity_id
-                self._selected_id = -1
-                self._selected_keyframes.clear()
-                self._edit_lane = "snapshots"
+                self._editor.selected_snapshot = result.entity_id
+                self._editor.selected_id = -1
+                self._editor.selected_keyframes.clear()
+                self._editor.edit_lane = "snapshots"
                 self._view_needs_fit = True
             self._error = "" if result.ok else result.message
         imgui.end_group()
@@ -1151,11 +1032,12 @@ class KeyframesPanel(Panel):
         owns_escape = (
             imgui.is_window_focused()
             and not ctx.popup_owned_frame
+            and not (ctx.input_claim and ctx.input_claim.claims_key("escape"))
             and (
-                self._pointer_mode in ("range", "select")
+                self._editor.pointer_mode in ("range", "select")
                 or ctx.session.state_take_range is not None
-                or self._take_selection is not None
-                or self._selected_keyframes
+                or self._editor.take_selection is not None
+                or self._editor.selected_keyframes
             )
         )
         if owns_escape:
@@ -1189,25 +1071,28 @@ class KeyframesPanel(Panel):
         if additive and pointer.matches(PointerChord((0,), (additive_modifier,)), press=True):
             select_press = PointerChord((0,), (additive_modifier,))
         load_press = bindings.pointer_match(PointerAction.TIMELINE_LOAD, pointer, press=True)
-        if over_timeline and (pan_press or range_press) and not self._pointer_mode:
-            self._drag_start_x = mouse_xy[0]
+        if over_timeline and (pan_press or range_press) and not self._editor.pointer_mode:
+            self._editor.drag_start_x = mouse_xy[0]
             self._pan_moved = False
             self._pointer_chord = range_press or pan_press
             if range_press:
                 if len(take_times) > 1 and not ctx.session.state_take_recording:
-                    self._pointer_mode = "range"
+                    self._editor.pointer_mode = "range"
                     time = timeline_x_to_time(
                         mouse_xy[0], self._view_start, self._view_end, time_lo, time_hi
                     )
-                    self._range_anchor = nearest_take_frame(take_times, time)
-                    self._range_preview = (self._range_anchor, self._range_anchor)
+                    self._editor.range_anchor = nearest_take_frame(take_times, time)
+                    self._editor.range_preview = (
+                        self._editor.range_anchor,
+                        self._editor.range_anchor,
+                    )
             else:
-                self._pointer_mode = "pan"
+                self._editor.pointer_mode = "pan"
 
         zooming = bool(
             over_timeline
             and bindings.pointer_match(PointerAction.TIMELINE_ZOOM, pointer)
-            and not self._pointer_mode
+            and not self._editor.pointer_mode
         )
         if zooming:
             anchor = timeline_x_to_time(
@@ -1219,9 +1104,9 @@ class KeyframesPanel(Panel):
                 self._view_start, self._view_end, anchor, float(io.mouse_wheel)
             )
         if (
-            self._pointer_mode == "pan"
+            self._editor.pointer_mode == "pan"
             and pointer.held(self._pointer_chord)
-            and abs(mouse_xy[0] - self._drag_start_x) >= float(io.mouse_drag_threshold)
+            and abs(mouse_xy[0] - self._editor.drag_start_x) >= float(io.mouse_drag_threshold)
         ):
             self._pan_moved = True
             self._follow_mode = "off"
@@ -1230,7 +1115,7 @@ class KeyframesPanel(Panel):
             self._view_end += shift
 
         if (
-            not self._pointer_mode
+            not self._editor.pointer_mode
             and not zooming
             and not fitted
             and (
@@ -1260,33 +1145,38 @@ class KeyframesPanel(Panel):
             else "snapshots"
         )
         if hovered and mouse_xy[1] >= lo[1] + ruler_height and (select_press or load_press):
-            self._edit_lane = lane
+            self._editor.edit_lane = lane
         marker_radius = 7.0 * scale
-        marker_positions = {
-            key.keyframe_id: timeline_time_to_x(
-                self._drag_preview_time
-                if self._drag_id == key.keyframe_id and self._drag_moved
-                else key.time,
-                self._view_start,
-                self._view_end,
-                time_lo,
-                time_hi,
+        projection = self._marker_index.project(
+            self._view_start,
+            self._view_end,
+            time_lo,
+            time_hi,
+            marker_radius + 4.0,
+            moved=(self._editor.drag_id, self._editor.drag_preview_time)
+            if self._editor.drag_moved
+            else None,
+        )
+        marker_positions = projection.positions
+        snapshots = ctx.session.scene_snapshots
+        if snapshots is not self._snapshot_cache:
+            self._snapshot_index = TimelineMarkerIndex(
+                tuple((item.snapshot_id, item.time) for item in snapshots)
             )
-            for key in keyframes
-        }
-        snapshot_positions = {
-            item.snapshot_id: timeline_time_to_x(
-                item.time, self._view_start, self._view_end, time_lo, time_hi
-            )
-            for item in ctx.session.scene_snapshots
-        }
+            self._snapshot_cache = snapshots
+        snapshot_projection = self._snapshot_index.project(
+            self._view_start, self._view_end, time_lo, time_hi, marker_radius + 4.0
+        )
+        snapshot_positions = snapshot_projection.positions
         snapshot_hit = (
-            self._hit_marker(snapshot_positions, snapshot_y, marker_radius, mouse_xy)
-            if hovered
+            snapshot_projection.hit(mouse_xy[0], marker_radius + 4.0)
+            if hovered and abs(snapshot_y - mouse_xy[1]) <= marker_radius + 4.0
             else -1
         )
         hit_id = (
-            self._hit_marker(marker_positions, marker_y, marker_radius, mouse_xy) if hovered else -1
+            projection.hit(mouse_xy[0], marker_radius + 4.0)
+            if hovered and abs(marker_y - mouse_xy[1]) <= marker_radius + 4.0
+            else -1
         )
 
         hit = _TimelineHit(
@@ -1301,7 +1191,7 @@ class KeyframesPanel(Panel):
         if (
             over_timeline
             and (select_press or load_press)
-            and not self._pointer_mode
+            and not self._editor.pointer_mode
             and not ctx.take_video_active
         ):
             self._pointer_chord = load_press or select_press
@@ -1337,15 +1227,15 @@ class KeyframesPanel(Panel):
         ctx.status_hints = timeline_status_hints(
             ctx.tr,
             has_range=ctx.session.state_take_range is not None,
-            edit_lane=(self._edit_lane if mouse_xy[1] < lo[1] + ruler_height else lane)
+            edit_lane=(self._editor.edit_lane if mouse_xy[1] < lo[1] + ruler_height else lane)
             if hovered
             else "",
             over_ruler=mouse_xy[1] < lo[1] + ruler_height,
             has_selection=bool(
-                self._take_selection
-                if self._edit_lane == "take"
-                else self._selected_keyframes
-                if self._edit_lane == "model"
+                self._editor.take_selection
+                if self._editor.edit_lane == "take"
+                else self._editor.selected_keyframes
+                if self._editor.edit_lane == "model"
                 else False
             ),
             bindings=bindings,
@@ -1364,15 +1254,15 @@ class KeyframesPanel(Panel):
             keyframe_by_id,
             take_times,
             hit_id,
+            projection,
         )
         overlay = ctx.painter()
         imgui.push_clip_rect((time_lo, lo[1] + ruler_height), (time_hi, hi[1]), True)
-        for snapshot_id in decimated_marker_ids(
-            tuple(snapshot_positions.items()),
+        for snapshot_id in snapshot_projection.draw_ids(
             time_lo,
             time_hi,
             marker_radius * 1.5,
-            (self._selected_snapshot, snapshot_hit),
+            (self._editor.selected_snapshot, snapshot_hit),
         ):
             x = snapshot_positions[snapshot_id]
             radius = marker_radius * 0.7
@@ -1380,7 +1270,9 @@ class KeyframesPanel(Panel):
                 overlay,
                 (x, snapshot_y),
                 "key-keyframe",
-                ctx.theme.info if snapshot_id != self._selected_snapshot else ctx.theme.primary,
+                ctx.theme.info
+                if snapshot_id != self._editor.selected_snapshot
+                else ctx.theme.primary,
                 radius / 6,
             )
         imgui.pop_clip_rect()
@@ -1417,10 +1309,7 @@ class KeyframesPanel(Panel):
         hit_id, snapshot_hit = hit.keyframe_id, hit.snapshot_id
         marker_positions = hit.marker_positions
         if snapshot_hit >= 0:
-            self._edit_lane = "snapshots"
-            self._selected_snapshot = snapshot_hit
-            self._selected_id = -1
-            self._selected_keyframes.clear()
+            self._editor.select_snapshot(snapshot_hit)
             if (
                 load
                 and ctx.session.paused
@@ -1436,44 +1325,34 @@ class KeyframesPanel(Panel):
                         if item.snapshot_id == snapshot_hit
                     )
         elif hit_id >= 0:
-            self._edit_lane = "model"
-            self._selected_snapshot = -1
-            if additive:
-                if hit_id in self._selected_keyframes:
-                    self._selected_keyframes.remove(hit_id)
-                else:
-                    self._selected_keyframes.add(hit_id)
-            else:
-                self._selected_keyframes = {hit_id}
-            self._selected_id = hit_id if hit_id in self._selected_keyframes else -1
-            self._selection_generation = -1
             marker = keyframe_by_id[hit_id]
+            self._editor.select_key(
+                hit_id,
+                marker.time,
+                additive=additive,
+                editable=editable,
+                mouse_x=mouse_xy[0],
+                marker_x=marker_positions[hit_id],
+            )
+            self._selection_generation = -1
             self._playhead = marker.time
-            if editable and not additive:
-                self._pointer_mode = "key"
-                self._drag_id = hit_id
-                self._drag_start_x = mouse_xy[0]
-                self._drag_offset_x = marker_positions[hit_id] - mouse_xy[0]
-                self._drag_preview_time = marker.time
-                self._drag_moved = False
-            if editable and load:
+            if load and self._can_load_keyframes(ctx):
                 self._load_keyframe(ctx, marker)
         else:
             if not ctx.session.state_take_recording:
-                on_track = hit.on_track
-                self._pointer_mode = "select" if on_track and lane in ("model", "take") else "scrub"
-                self._scrub_resume = (
-                    ctx.session.state_take_playing and self._pointer_mode == "scrub"
+                time = timeline_x_to_time(
+                    mouse_xy[0], self._view_start, self._view_end, time_lo, time_hi
                 )
-                self._selected_id = -1
+                self._editor.begin_empty(
+                    lane,
+                    on_track=hit.on_track,
+                    playing=ctx.session.state_take_playing,
+                    time=time,
+                    additive=additive,
+                )
                 self._selection_generation = -1
-                if self._pointer_mode == "select":
-                    self._selection_anchor_time = timeline_x_to_time(
-                        mouse_xy[0], self._view_start, self._view_end, time_lo, time_hi
-                    )
-                    self._selection_base = set(self._selected_keyframes) if additive else set()
-                    if lane == "take":
-                        self._seek_time(ctx, take_times, self._selection_anchor_time)
+                if self._editor.pointer_mode == "select" and lane == "take":
+                    self._seek_time(ctx, take_times, time)
 
     def _update_timeline_drag(
         self,
@@ -1491,7 +1370,7 @@ class KeyframesPanel(Panel):
         mouse_xy = hit.position
         time_lo, time_hi = hit.time_bounds
         scale = ctx.style_scale
-        if self._pointer_mode == "select" and pointer.held(self._pointer_chord):
+        if self._editor.pointer_mode == "select" and pointer.held(self._pointer_chord):
             time = timeline_x_to_time(
                 min(time_hi, max(time_lo, mouse_xy[0])),
                 self._view_start,
@@ -1499,18 +1378,9 @@ class KeyframesPanel(Panel):
                 time_lo,
                 time_hi,
             )
-            start, end = sorted((self._selection_anchor_time, time))
-            if self._edit_lane == "take" and take_times:
-                self._take_selection = (
-                    nearest_take_frame(take_times, start),
-                    nearest_take_frame(take_times, end),
-                )
-            elif self._edit_lane == "model":
-                self._selected_keyframes = self._selection_base | {
-                    key.keyframe_id for key in keyframes if start <= key.time <= end
-                }
+            self._editor.select_to(time, self._marker_index, take_times)
 
-        if self._pointer_mode == "scrub" and pointer.held(self._pointer_chord):
+        if self._editor.pointer_mode == "scrub" and pointer.held(self._pointer_chord):
             x = min(time_hi, max(time_lo, mouse_xy[0]))
             self._seek_time(
                 ctx,
@@ -1518,119 +1388,129 @@ class KeyframesPanel(Panel):
                 timeline_x_to_time(x, self._view_start, self._view_end, time_lo, time_hi),
             )
 
-        if self._pointer_mode == "range" and pointer.held(self._pointer_chord):
+        if self._editor.pointer_mode == "range" and pointer.held(self._pointer_chord):
             x = min(time_hi, max(time_lo, mouse_xy[0]))
             time = timeline_x_to_time(x, self._view_start, self._view_end, time_lo, time_hi)
             index = nearest_take_frame(take_times, time)
-            self._range_preview = (min(index, self._range_anchor), max(index, self._range_anchor))
+            self._editor.range_preview = (
+                min(index, self._editor.range_anchor),
+                max(index, self._editor.range_anchor),
+            )
 
         if clear_range or escape:
-            if self._pointer_mode == "range":
-                self._range_preview = None
-                self._pointer_mode = "cancelled"
+            if self._editor.pointer_mode == "range":
+                self._editor.range_preview = None
+                self._editor.pointer_mode = "cancelled"
             if ctx.session.state_take_range is not None:
                 ctx.submit(cmd.SetStateTakeRange())
             elif (
                 escape
-                and self._pointer_mode != "cancelled"
-                and (self._take_selection is not None or self._selected_keyframes)
+                and self._editor.pointer_mode != "cancelled"
+                and (self._editor.take_selection is not None or self._editor.selected_keyframes)
             ):
-                self._take_selection = None
-                self._selected_keyframes.clear()
-                self._selected_id = -1
-                if self._pointer_mode == "select":
-                    self._pointer_mode = "cancelled"
+                self._editor.take_selection = None
+                self._editor.selected_keyframes.clear()
+                self._editor.selected_id = -1
+                if self._editor.pointer_mode == "select":
+                    self._editor.pointer_mode = "cancelled"
 
-        if self._drag_id >= 0 and pointer.held(self._pointer_chord):
-            self._drag_moved = (
-                self._drag_moved or abs(mouse_xy[0] - self._drag_start_x) > 3.0 * scale
-            )
-            if self._drag_moved:
-                drag_x = min(time_hi, max(time_lo, mouse_xy[0] + self._drag_offset_x))
-                self._drag_preview_time = timeline_x_to_time(
-                    drag_x, self._view_start, self._view_end, time_lo, time_hi
-                )
-                self._playhead = self._drag_preview_time
+        if escape:
+            self._editor.cancel_key()
+        if self._editor.drag_id >= 0 and pointer.held(self._pointer_chord):
+            drag_x = min(time_hi, max(time_lo, mouse_xy[0] + self._editor.drag_offset_x))
+            time = timeline_x_to_time(drag_x, self._view_start, self._view_end, time_lo, time_hi)
+            preview = self._editor.preview_key(mouse_xy[0], time, 3.0 * scale)
+            if preview is not None:
+                self._playhead = preview
         released = self._pointer_chord is not None and not pointer.held(self._pointer_chord)
-        if self._drag_id >= 0 and released:
-            if self._drag_moved and editable:
-                self._retime_keyframe(ctx, self._drag_id, self._drag_preview_time)
-            self._drag_id = -1
-            self._drag_moved = False
-
-        if released and self._pointer_mode in (
-            "key",
-            "scrub",
-            "select",
-        ):
-            if self._pointer_mode == "scrub" and self._scrub_resume:
+        if released:
+            retime, resume = self._editor.release(editable=editable)
+            if retime is not None:
+                self._retime_keyframe(ctx, *retime)
+            if resume:
                 result = ctx.submit(cmd.PlayStateTake())
                 self._error = "" if result.ok else result.message
-            self._pointer_mode = ""
-            self._scrub_resume = False
         return released
 
     def _finish_timeline_range(
         self, ctx: PanelContext, hit: _TimelineHit, *, hovered: bool
     ) -> None:
         """Commit a released loop range or expose the stationary pan context menu."""
-        if self._pointer_mode not in ("range", "pan", "cancelled"):
+        if self._editor.pointer_mode not in ("range", "pan", "cancelled"):
             return
-        if self._pointer_mode == "pan" and not self._pan_moved and hovered:
+        if self._editor.pointer_mode == "pan" and not self._pan_moved and hovered:
             if hit.on_track:
-                self._edit_lane = hit.lane
+                self._editor.edit_lane = hit.lane
             imgui.open_popup("timeline-selection-menu")
-        if self._pointer_mode == "range" and self._range_preview is not None:
-            first, last = self._range_preview
+        if self._editor.pointer_mode == "range" and self._editor.range_preview is not None:
+            first, last = self._editor.range_preview
             command = cmd.SetStateTakeLoop(first, last) if first < last else cmd.SetStateTakeRange()
             result = ctx.submit(command)
             self._error = "" if result.ok else result.message
-        self._pointer_mode = ""
-        self._range_preview = None
+        self._editor.pointer_mode = ""
+        self._editor.range_preview = None
 
     def _handle_editor_keys(self, ctx, keyframes, take_times, editable, timeline_id):
         io = imgui.get_io()
+        claim = ctx.input_claim
         if (
             not imgui.is_window_focused()
             or io.want_text_input
             or ctx.popup_owned_frame
+            or (claim is not None and claim.keyboard)
             or imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
         ):
             return
-        for key in (imgui.Key.a, imgui.Key.delete, imgui.Key.backspace):
+
+        def available(name):
+            return claim is None or not claim.claims_key(name)
+
+        for name in ("a", "delete", "backspace"):
+            if not available(name):
+                continue
             imgui.internal.set_key_owner(
-                key, timeline_id, imgui.internal.InputFlagsPrivate_.lock_until_release
+                getattr(imgui.Key, name),
+                timeline_id,
+                imgui.internal.InputFlagsPrivate_.lock_until_release,
             )
-        if (io.key_ctrl or io.key_super) and imgui.internal.is_key_pressed(
-            imgui.Key.a, 0, timeline_id
+        ctrl, super_key = physical_ctrl_super(io)
+        modifier_available = (not ctrl or available("ctrl")) and (
+            not super_key or available("super")
+        )
+        if (
+            (ctrl or super_key)
+            and modifier_available
+            and available("a")
+            and imgui.internal.is_key_pressed(imgui.Key.a, 0, timeline_id)
         ):
-            if self._edit_lane == "take" and take_times:
-                self._take_selection = (0, len(take_times) - 1)
-            elif self._edit_lane == "model":
-                self._selected_keyframes = {key.keyframe_id for key in keyframes}
-                self._selected_id = (
-                    next(iter(self._selected_keyframes))
-                    if len(self._selected_keyframes) == 1
+            if self._editor.edit_lane == "take" and take_times:
+                self._editor.take_selection = (0, len(take_times) - 1)
+            elif self._editor.edit_lane == "model":
+                self._editor.selected_keyframes = {key.keyframe_id for key in keyframes}
+                self._editor.selected_id = (
+                    next(iter(self._editor.selected_keyframes))
+                    if len(self._editor.selected_keyframes) == 1
                     else -1
                 )
         if any(
-            imgui.internal.is_key_pressed(key, 0, timeline_id)
-            for key in (imgui.Key.delete, imgui.Key.backspace)
+            available(name)
+            and imgui.internal.is_key_pressed(getattr(imgui.Key, name), 0, timeline_id)
+            for name in ("delete", "backspace")
         ):
             self._delete_selection(ctx, editable)
 
     def _delete_selection(self, ctx, editable):
         if ctx.session.state_take_recording or ctx.take_video_active:
             return
-        if self._edit_lane == "take" and self._take_selection is not None:
-            result = ctx.submit(cmd.DeleteStateTakeFrames(*self._take_selection))
+        if self._editor.edit_lane == "take" and self._editor.take_selection is not None:
+            result = ctx.submit(cmd.DeleteStateTakeFrames(*self._editor.take_selection))
             self._error = "" if result.ok else result.message
             if result.ok:
-                self._take_selection = None
-        elif self._edit_lane == "model" and editable and self._selected_keyframes:
+                self._editor.take_selection = None
+        elif self._editor.edit_lane == "model" and editable and self._editor.selected_keyframes:
             commands = tuple(
                 cmd.RemoveModelKeyframe(key)
-                for key in sorted(self._selected_keyframes, reverse=True)
+                for key in sorted(self._editor.selected_keyframes, reverse=True)
             )
             if ctx.queue_model_edit is not None:
                 for command in commands:
@@ -1641,9 +1521,9 @@ class KeyframesPanel(Panel):
                 )
 
     def _selection_count(self):
-        if self._edit_lane == "take" and self._take_selection is not None:
-            return self._take_selection[1] - self._take_selection[0] + 1
-        return len(self._selected_keyframes) if self._edit_lane == "model" else 0
+        if self._editor.edit_lane == "take" and self._editor.take_selection is not None:
+            return self._editor.take_selection[1] - self._editor.take_selection[0] + 1
+        return len(self._editor.selected_keyframes) if self._editor.edit_lane == "model" else 0
 
     def status_detail(self, translate) -> str:
         count = self._selection_count()
@@ -1654,7 +1534,7 @@ class KeyframesPanel(Panel):
             enabled = (
                 bool(self._selection_count())
                 and not (ctx.session.state_take_recording or ctx.take_video_active)
-                and (self._edit_lane == "take" or editable)
+                and (self._editor.edit_lane == "take" or editable)
             )
             if imgui.menu_item(ctx.tr("Delete selection"), "Delete", False, enabled)[0]:
                 self._delete_selection(ctx, editable)
@@ -1671,10 +1551,11 @@ class KeyframesPanel(Panel):
         marker_y: float,
         take_y: float,
         marker_radius: float,
-        marker_positions: dict[int, float],
+        marker_positions: Mapping[int, float],
         keyframe_by_id: dict[int, KeyframeInfo],
         take_times: Sequence[float],
         hit_id: int,
+        projection: MarkerProjection,
     ) -> None:
         overlay = ImguiDraw2D()
         theme = ctx.theme
@@ -1687,7 +1568,7 @@ class KeyframesPanel(Panel):
         row_divider = (marker_y + take_y) * 0.5
         overlay.line((lo[0], row_divider), (hi[0], row_divider), theme.border, 1.0)
 
-        loop = self._range_preview or ctx.session.state_take_range
+        loop = self._editor.range_preview or ctx.session.state_take_range
         if loop is not None:
             start_x, end_x = (
                 timeline_time_to_x(
@@ -1741,7 +1622,7 @@ class KeyframesPanel(Panel):
         ]
         row_height = take_y - marker_y
         for center_y, label, lane in rows:
-            if self._edit_lane == lane:
+            if self._editor.edit_lane == lane:
                 overlay.rect_filled(
                     (lo[0], center_y - row_height * 0.5),
                     (time_lo, center_y + row_height * 0.5),
@@ -1778,18 +1659,18 @@ class KeyframesPanel(Panel):
                 theme.danger,
             )
 
-        marker_ids = decimated_marker_ids(
-            tuple(marker_positions.items()),
+        marker_ids = projection.draw_ids(
             time_lo - marker_radius,
             time_hi + marker_radius,
             marker_radius * _MARKER_SPACING_FACTOR,
-            (self._selected_id, ctx.session.active_keyframe, hit_id),
+            (self._editor.selected_id, ctx.session.active_keyframe, hit_id),
         )
         for keyframe_id in marker_ids:
             key = keyframe_by_id[keyframe_id]
             x = marker_positions[keyframe_id]
             selected = (
-                key.keyframe_id in self._selected_keyframes or key.keyframe_id == self._selected_id
+                key.keyframe_id in self._editor.selected_keyframes
+                or key.keyframe_id == self._editor.selected_id
             )
             hovered = key.keyframe_id == hit_id
             fill = (
@@ -1823,8 +1704,8 @@ class KeyframesPanel(Panel):
                 overlay.line((x, take_y - length), (x, take_y + length), color, 2.0)
             else:
                 overlay.rect_filled((left, take_y - length), (right, take_y + length), color)
-        if self._take_selection is not None:
-            first, last = self._take_selection
+        if self._editor.take_selection is not None:
+            first, last = self._editor.take_selection
             start_x, end_x = (
                 timeline_time_to_x(
                     take_times[index], self._view_start, self._view_end, time_lo, time_hi
@@ -1844,13 +1725,13 @@ class KeyframesPanel(Panel):
                 length = 13.0 * ctx.style_scale
                 overlay.line((x, take_y - length), (x, take_y + length), theme.danger, 2.5)
 
-        if self._selected_id in marker_positions:
-            key = keyframe_by_id[self._selected_id]
+        if self._editor.selected_id in marker_positions:
+            key = keyframe_by_id[self._editor.selected_id]
             x = marker_positions[key.keyframe_id]
             if time_lo <= x <= time_hi:
                 value = (
-                    self._drag_preview_time
-                    if self._drag_id == key.keyframe_id and self._drag_moved
+                    self._editor.drag_preview_time
+                    if self._editor.drag_id == key.keyframe_id and self._editor.drag_moved
                     else key.time
                 )
                 label = f"{key.name or ctx.tr('keyframe')}  {value:g} s"
@@ -1860,21 +1741,6 @@ class KeyframesPanel(Panel):
 
         draw_list.pop_clip_rect()
         overlay.rect(lo, hi, theme.border, 1.0, rounding=3.0 * ctx.style_scale)
-
-    @staticmethod
-    def _hit_marker(
-        positions: dict[int, float],
-        marker_y: float,
-        radius: float,
-        mouse: tuple[float, float],
-    ) -> int:
-        limit = radius + 4.0
-        hits = (
-            (abs(x - mouse[0]) + abs(marker_y - mouse[1]), key_id)
-            for key_id, x in positions.items()
-            if abs(x - mouse[0]) <= limit and abs(marker_y - mouse[1]) <= limit
-        )
-        return min(hits, default=(math.inf, -1))[1]
 
     def _sync_selection(
         self,
@@ -1886,20 +1752,20 @@ class KeyframesPanel(Panel):
         if take_id != self._seen_take_id:
             self._seen_take_id = take_id
             self._seen_take_cursor = -2
-            self._take_selection = None
-            self._range_preview = None
-            self._pointer_mode = ""
+            self._editor.take_selection = None
+            self._editor.range_preview = None
+            self._editor.pointer_mode = ""
             if take_id >= 0:
-                self._edit_lane = "take"
+                self._editor.edit_lane = "take"
                 self._playhead = (
                     take_times[max(0, ctx.session.state_take_cursor)] if take_times else 0.0
                 )
             self._view_needs_fit = True
         if len(take_times) != self._seen_take_length:
-            self._take_selection = None
+            self._editor.take_selection = None
             self._seen_take_length = len(take_times)
-        self._selected_keyframes.intersection_update(keyframe_by_id)
-        if self._selected_id >= 0 and self._selected_id not in keyframe_by_id:
+        self._editor.selected_keyframes.intersection_update(keyframe_by_id)
+        if self._editor.selected_id >= 0 and self._editor.selected_id not in keyframe_by_id:
             self._clear_selection()
         active = ctx.session.active_keyframe
         if active != self._seen_active_id:
@@ -1933,15 +1799,13 @@ class KeyframesPanel(Panel):
     def _keyframes(
         self, ctx: PanelContext
     ) -> tuple[tuple[KeyframeInfo, ...], dict[int, KeyframeInfo]]:
-        cache_key = (ctx.session.structure_generation, self._model_id)
+        cache_key = (ctx.session.keyframe_revision, self._model_id)
         if cache_key != self._keyframe_cache_key:
-            self._keyframe_cache = tuple(
-                sorted(
-                    (key for key in ctx.session.keyframes if key.model_id == self._model_id),
-                    key=lambda key: (key.time, key.keyframe_id),
-                )
-            )
+            self._keyframe_cache = ctx.session.model_keyframes(self._model_id)
             self._keyframe_by_id = {key.keyframe_id: key for key in self._keyframe_cache}
+            self._marker_index = TimelineMarkerIndex(
+                tuple((key.keyframe_id, key.time) for key in self._keyframe_cache)
+            )
             self._keyframe_cache_key = cache_key
         return self._keyframe_cache, self._keyframe_by_id
 
@@ -1950,13 +1814,13 @@ class KeyframesPanel(Panel):
     ) -> None:
         key_id = neighboring_keyframe(
             tuple((key.keyframe_id, key.time) for key in keyframes),
-            self._selected_id,
+            self._editor.selected_id,
             self._playhead,
             direction,
         )
         marker = next((key for key in keyframes if key.keyframe_id == key_id), None)
         if marker is not None:
-            self._selected_id = marker.keyframe_id
+            self._editor.selected_id = marker.keyframe_id
             self._selection_generation = -1
             self._load_keyframe(ctx, marker)
 
@@ -1968,10 +1832,19 @@ class KeyframesPanel(Panel):
         else:
             self._error = result.message
 
+    @staticmethod
+    def _can_load_keyframes(ctx: PanelContext) -> bool:
+        return bool(
+            ctx.session.paused
+            and ctx.session.adapter.caps.keyframes
+            and not ctx.take_video_active
+            and not ctx.session.state_take_recording
+        )
+
     def _snapshot_created(self, result) -> None:
         if result.ok:
-            self._selected_id = result.entity_id
-            self._selected_keyframes = {result.entity_id}
+            self._editor.selected_id = result.entity_id
+            self._editor.selected_keyframes = {result.entity_id}
             self._selection_generation = -1
             self._view_needs_fit = True
             self._error = ""
@@ -2003,18 +1876,30 @@ class KeyframesPanel(Panel):
         )
 
     def _draw_selected(self, ctx: PanelContext, editable: bool) -> None:
-        if self._edit_lane != "model" or self._selected_id < 0 or len(self._selected_keyframes) > 1:
+        if (
+            self._editor.edit_lane != "model"
+            or self._editor.selected_id < 0
+            or len(self._editor.selected_keyframes) > 1
+        ):
             self._draw_error(ctx)
             return
         generation = ctx.session.structure_generation
         if self._selection_generation != generation:
             self._selection_generation = generation
-            self._properties = ctx.session.keyframe_properties(self._selected_id)
+            self._properties = ctx.session.keyframe_properties(self._editor.selected_id)
             if self._properties is not None:
                 self._name = self._properties.name
                 self._time = self._properties.time
         properties = self._properties
         if properties is None:
+            marker = self._keyframe_by_id.get(self._editor.selected_id)
+            if marker is not None:
+                imgui.separator()
+                imgui.text_disabled(f"{marker.name}  {marker.time:g} {ctx.tr('s')}")
+                imgui.begin_disabled(not self._can_load_keyframes(ctx))
+                if imgui.button(ctx.tr("Load")):
+                    self._load_keyframe(ctx, marker)
+                imgui.end_disabled()
             self._draw_error(ctx)
             return
 
@@ -2060,15 +1945,17 @@ class KeyframesPanel(Panel):
             imgui.end_disabled()
         if inline[1]:
             imgui.same_line()
-        if not editable:
-            imgui.begin_disabled()
+        imgui.begin_disabled(not self._can_load_keyframes(ctx))
         if imgui.button(action_labels[1]):
             keyframe = KeyframeInfo(
                 properties.keyframe_id, properties.name, properties.time, properties.model_id
             )
             self._load_keyframe(ctx, keyframe)
+        imgui.end_disabled()
         if inline[2]:
             imgui.same_line()
+        if not editable:
+            imgui.begin_disabled()
         if imgui.button(action_labels[2]):
             ctx.submit_model_edit(
                 cmd.RemoveModelKeyframe(properties.keyframe_id), self._snapshot_removed
@@ -2095,21 +1982,18 @@ class KeyframesPanel(Panel):
         self._view_model_id = -1
         self._seen_active_id = -2
         self._seen_take_cursor = -2
-        self._pointer_mode = ""
-        self._range_preview = None
+        self._editor.pointer_mode = ""
+        self._editor.range_preview = None
         self._last_followed_playhead = None
         self._clear_selection()
 
     def _clear_selection(self) -> None:
-        self._selected_id = -1
-        self._selected_keyframes.clear()
+        self._editor.clear_model_selection()
         self._selection_generation = -1
         self._properties = None
         self._name = ""
         self._time = 0.0
         self._error = ""
-        self._drag_id = -1
-        self._drag_moved = False
 
 
 def _set_keyframe_command(
