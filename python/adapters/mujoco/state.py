@@ -72,3 +72,4 @@ class _CompositionEditState:
     geometry_object_ids: dict[tuple[int, str], int]
     next_geometry_object_id: int
     component_entries: dict[tuple[int, str], tuple[_ModelComponentEntry, ...]]
+    root_options_explicit: bool

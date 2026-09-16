@@ -245,6 +245,20 @@ class _Environment:
             )
 
     def _environment(self, ctx: PanelContext) -> None:
+        caps = ctx.session.adapter.caps
+        if caps.simulation or caps.supports("physics.options"):
+            self._environment_tab = segmented_control(
+                "##environment-category",
+                (ctx.tr("Rendering"), ctx.tr("Physics")),
+                self._environment_tab,
+                theme=ctx.theme,
+            )
+            if self._environment_tab == 1:
+                self._physics_options(ctx)
+                return
+        self._environment_rendering(ctx)
+
+    def _environment_rendering(self, ctx: PanelContext) -> None:
         source = ctx.session.source
         if source is None:
             imgui.text_disabled(ctx.tr("environment data is unavailable"))

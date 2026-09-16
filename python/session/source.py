@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import cast
 
 import numpy as np
 
@@ -13,6 +14,8 @@ from mojive.adapters.base import (
     FrameNeeds,
     JointInfo,
     NodeType,
+    PhysicsOption,
+    PhysicsOptions,
     SceneNode,
 )
 from mojive.commands import Query
@@ -29,6 +32,13 @@ from .state import (
 
 class _Source:
     """Private source methods of Session; state belongs to its owner."""
+
+    @property
+    def physics_options(self) -> tuple[PhysicsOption, ...]:
+        """World-wide simulation settings, or an empty tuple when unsupported."""
+        if not self._adapter.caps.supports("physics.options"):
+            return ()
+        return cast(PhysicsOptions, self._adapter).physics_options()
 
     def query(self, q: Query):
         """Evaluate a read-only pick, node lookup, or bounds query."""

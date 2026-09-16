@@ -93,6 +93,7 @@ _HANDLERS = {
     cmd.SetCtrlVector: physics.set_ctrl_vector,
     cmd.SetCtrl: physics.set_ctrl,
     cmd.Perturb: physics.perturb,
+    cmd.SetPhysicsOptions: physics.set_physics_options,
     cmd.ClearPerturb: physics.clear_perturb,
     cmd.SetLight: scene.set_light,
     cmd.SetEnvironment: scene.set_environment,

@@ -425,6 +425,25 @@ class PhysicsState:
 
 
 @dataclass(frozen=True)
+class PhysicsOption:
+    """One world-wide physics setting exposed by an optional adapter extension.
+
+    Keys belong to the adapter's schema. Kinds are float, int, vector, choice,
+    or bool. Choices pair a display label with its integer engine value.
+    Descriptions supply field tooltips and shared group help to generic editors.
+    """
+
+    key: str
+    label: str
+    group: str
+    kind: str
+    value: float | int | bool | tuple[float, ...]
+    choices: tuple[tuple[str, int], ...] = ()
+    description: str = ""
+    group_description: str = ""
+
+
+@dataclass(frozen=True)
 class AdapterCaps:
     """Capabilities used by UI and command routing to expose supported operations.
 
@@ -1460,6 +1479,18 @@ class PointPerturbation(Protocol):
         mode: str,
         local_position: np.ndarray,
     ) -> bool: ...
+
+
+class PhysicsOptions(Protocol):
+    """Optional ``physics.options`` revision 1; independent of model authoring.
+
+    Read immutable descriptors and apply a validated patch atomically between
+    physics steps. Preserve time and integration state, refresh derived data,
+    and persist options in the editable source when one is available.
+    """
+
+    def physics_options(self) -> tuple[PhysicsOption, ...]: ...
+    def set_physics_options(self, values: dict[str, object]) -> bool: ...
 
 
 class SceneRuntime(SceneProvider, Protocol):

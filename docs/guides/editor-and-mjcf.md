@@ -8,6 +8,7 @@ Use `.mojive.json` while composing multiple models and Mojive entities. The docu
 - model root position and rotation
 - editable MjSpec XML for changed models
 - authored geometry, materials, lights, cameras, and environment
+- world physics options
 - resource search directories
 
 Use **File > Save As** and select MuJoCo XML / MJCF to produce a standalone MuJoCo model. The
@@ -21,6 +22,34 @@ radius and private text metadata that restores the area semantic when the file i
 Mojive. Image lights require a cube or skybox texture; export reports an error instead of silently
 dropping an invalid reference. Save `.mojive.json` when the Mojive composition itself, including model
 references and resource roots, must remain editable.
+
+## World physics options
+
+Open **Window > Physics Options...**, or select **environment** in Hierarchy and choose
+**Inspector > Physics**. The **Rendering** tab retains lighting, fog, and background
+controls. Physics belongs to the scene's simulation world, not global UI preferences
+or an individual attached model.
+
+The MuJoCo panel exposes the loaded engine's integrator, friction cone, Jacobian,
+solver, algorithmic parameters, physical parameters, contact overrides, and enable/disable
+flags. Numeric fields accept scientific notation; vectors use space-separated components.
+Press Enter or leave a field to apply it. A checked **Disable flags** item disables the
+named feature; a checked **Enable flags** item enables it. Contact override values take
+effect when **Enable flags > Contact override** is checked. Disabled actuator groups
+use a bit mask: `1` disables group 0, `2` group 1, and `3` both.
+
+Changes take effect between physics steps without resetting position, velocity, or time.
+MuJoCo writes `mjModel.opt` and refreshes derived `mjData` through `mj_forward`. Authored
+models support Undo/Redo; their options survive Reset, model recomposition, workspace
+save/open, and MJCF export. Multiple attached models share one option set; until explicitly
+edited, an empty world inherits the first model's options. Source-less compiled models
+expose runtime settings only. A passive viewer reports that options are controlled by
+the external simulation owner; edit that owner's model and synchronize the viewer.
+
+These fields follow [MuJoCo's option semantics](https://mujoco.readthedocs.io/en/3.11.0/XMLreference.html#option).
+Mojive does not substitute different solver defaults or silently tune the model.
+Run `make physics-options-check` to verify live edits, persistence, and localized UI input;
+review the captures under `output/physics-options/`.
 
 ## Selection and panel interaction
 

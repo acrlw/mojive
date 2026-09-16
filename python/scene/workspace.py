@@ -64,6 +64,8 @@ def save_workspace(workspace, path: str | Path) -> Path:
         "models": models,
         "scene": scene_to_document(workspace.scene),
     }
+    if workspace.caps.supports("physics.options"):
+        document["physics_options"] = {item.key: item.value for item in workspace.physics_options()}
     if not any(item.model_id == 0 for item in workspace.scene_models()):
         root_mjcf = workspace.scene_model_xml(0)
         if root_mjcf is not None:
@@ -95,6 +97,10 @@ def load_workspace(workspace, path: str | Path) -> None:
         workspace.primary.caps.supports("mujoco.mjcf")
     ):
         raise RuntimeError(f"{workspace.primary.caps.name} does not support workspace MJCF sources")
+    if "physics_options" in document and not workspace.caps.supports("physics.options"):
+        raise RuntimeError(
+            f"{workspace.primary.caps.name} does not support workspace physics options"
+        )
     authored_scene = scene_from_document(document["scene"])
     workspace.primary.new_scene()
     if (root_mjcf := document.get("root_mjcf")) and not workspace.primary.set_scene_model_xml(
@@ -115,6 +121,10 @@ def load_workspace(workspace, path: str | Path) -> None:
             raise RuntimeError(f"Failed to add {model_path.name}")
         if (xml := model.get("mjcf")) and not workspace.primary.set_scene_model_xml(model_id, xml):
             raise RuntimeError(f"Failed to restore the MJCF source for {model_path.name}")
+    if "physics_options" in document and not workspace.set_physics_options(
+        document["physics_options"]
+    ):
+        raise RuntimeError("Failed to restore the workspace physics options")
     workspace.scene = authored_scene
 
 

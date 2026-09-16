@@ -63,6 +63,7 @@ class MuJoCoSimulation:
         self._seconds_per_step = 0.0
         self._suspended_time = 0.0
         self._speed = 1.0
+        self._timestep = None
 
     def start(self, speed: float, *, reset_clock: bool = True) -> None:
         """Start real-time stepping after binding an immutable initial snapshot."""
@@ -87,9 +88,16 @@ class MuJoCoSimulation:
             self._adapter.use_data(self._slots[slot])
             self._held = slot
             self._displaying = True
-            if reset_clock or data.time != self._suspended_time or speed != self._speed:
+            timestep = float(model.opt.timestep)
+            if (
+                reset_clock
+                or data.time != self._suspended_time
+                or speed != self._speed
+                or timestep != self._timestep
+            ):
                 self._epoch = time.perf_counter()
                 self._epoch_step = self._completed
+            self._timestep = timestep
             self._speed = speed
             self._running = True
             if self._thread is None:

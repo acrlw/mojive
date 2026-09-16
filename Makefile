@@ -107,6 +107,7 @@ help:
 		'  make gizmo-gallery     enlarged 2D/3D gizmo reference images' \
 		'  make hidpi-gallery     gizmo references at explicit 200% UI scale' \
 		'  make perturb           MuJoCo translation/rotation perturbation' \
+		'  make physics-options-check  validate and capture environment physics controls' \
 		'  make text-overlay      GPU world-space text' \
 		'  make mujoco-visuals    hfield/site/tendon/contact' \
 		'  make mujoco-debug      joint/COM/inertia debug visuals' \
@@ -805,6 +806,12 @@ settings:
 ## Perturbation acceptance: Ctrl+left translates and Ctrl+right rotates a selected free body.
 perturb:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli view gizmo $(ARGS)
+
+.PHONY: physics-options-check
+## Exercise live physics options and capture localized Inspector controls.
+physics-options-check:
+	$(PYTEST) -q -m physics tests/test_physics_options.py
+	MOJIVE_PHYSICS_OPTIONS_CAPTURE=output/physics-options $(PYTEST) -q -m gpu tests/gpu/test_physics_options.py
 
 .PHONY: perturb-check
 ## Native viewer force parity and held Control drags with captured viewport feedback.

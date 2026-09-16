@@ -32,11 +32,12 @@ from mojive.ui.pointer_bindings import PointerAction
 from .environment import _Environment
 from .geometry import _Geometry
 from .model import _Model
+from .options import _Options
 from .physics import _Physics
 from .transform import _Transform
 
 
-class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, Panel):
+class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Options, Panel):
     id = "inspector"
 
     name = "Inspector"
@@ -56,6 +57,10 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, Pane
         self._rotation_euler = np.zeros(3, np.float64)
         self._rotation_matrix = np.eye(3, dtype=np.float64)
         self._edit_transaction = False
+        self._environment_tab = 0
+        self._physics_document = None
+        self._physics_text: dict[str, str] = {}
+        self._physics_error = ""
         self._model_name_source: tuple[int, int, int, str] | None = None
         self._model_name = ""
         self._renaming = False

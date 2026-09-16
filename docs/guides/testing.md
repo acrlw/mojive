@@ -55,6 +55,11 @@ across repeated view switches and verify that replacing the source clears retain
 Chinese at narrow, standard and HiDPI sizes, checks that Help remains visible in the real menu
 bar, and captures the resulting panels. Inspect the captures under `output/geometry-ui`.
 
+`make physics-options-check` exercises **Window > Physics Options...** and the environment
+Inspector in English and Chinese at normal and 150% scale. It checks numeric commit and
+validation, enum and flag writes, Undo/Redo, live worker timestep changes, and workspace/MJCF
+round trips. Inspect `output/physics-options/` for algorithm, physical, and flag sections.
+
 Viewer capture sharing is covered by `tests/test_capture_sharing.py`: saved image/file formats,
 save failures, filename uniqueness, queued requests, cancellation, and asynchronous clipboard
 ownership. `make keyframe-timeline ARGS='--recording-settings --language zh_CN'` captures the

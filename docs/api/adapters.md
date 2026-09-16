@@ -43,6 +43,10 @@ display choices from collision-engine state; renderers consume the same neutral 
 
 ::: mojive.adapters.base.PointPerturbation
 
+::: mojive.adapters.base.PhysicsOption
+
+::: mojive.adapters.base.PhysicsOptions
+
 ## Application session
 
 ::: mojive.session.Session

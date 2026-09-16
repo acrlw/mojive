@@ -532,6 +532,13 @@ class SetEnvironment(Command):
 
 
 @dataclass(frozen=True)
+class SetPhysicsOptions(Command):
+    """Patch world-wide simulation options through ``physics.options`` revision 1."""
+
+    values: dict[str, object]
+
+
+@dataclass(frozen=True)
 class SetSkybox(Command):
     """Select a cube texture for the environment, or disable the skybox."""
 
