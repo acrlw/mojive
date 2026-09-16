@@ -911,6 +911,8 @@ _ZH_CN = {
     "elevation scale": "高程缩放",
     "base depth": "基底深度",
     "Stop Recording": "停止录制",
+    "Finalizing recording": "正在完成录制",
+    "Saving scene": "正在保存场景",
     "Record New Take": "录制新片段",
     "Stop recording": "停止录制",
     "Record new take": "录制新片段",

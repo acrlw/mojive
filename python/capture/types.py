@@ -74,6 +74,7 @@ class RecordingPhase(StrEnum):
     COUNTDOWN = "countdown"
     RECORDING = "recording"
     PAUSED = "paused"
+    FINALIZING = "finalizing"
 
 
 @dataclass(frozen=True)

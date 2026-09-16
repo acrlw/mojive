@@ -296,27 +296,27 @@ def test_single_frame_take_without_end_hold_saves_one_frame(viewer, tmp_path):
 def test_video_recording_start_action_does_not_replay_an_existing_take(
     viewer, tmp_path, monkeypatch, run_simulation
 ):
-    from mojive.capture.recording import VideoRecorder
-
     session = viewer.session
     assert session.submit(cmd.SeekStateTake(3))
     viewer.sync()
     original = tuple(session.state_take_times)
     initial_time = session.frame.time
-    encoded = []
-    append = VideoRecorder.append
+    captured = []
+    surface_image = viewer.app._surface_image
 
-    def observe(recorder, image):
-        encoded.append((session.paused, session.state_take_playing, session.frame.time))
-        append(recorder, image)
+    def observe(*args, **kwargs):
+        captured.append((session.paused, session.state_take_playing, session.frame.time))
+        return surface_image(*args, **kwargs)
 
-    monkeypatch.setattr(VideoRecorder, "append", observe)
+    monkeypatch.setattr(viewer.app, "_surface_image", observe)
     viewer.configure_recording(
         RecordingConfig(countdown=0, run_simulation=run_simulation, surface=CaptureSurface.SCENE)
     )
     viewer.start_recording(tmp_path / "interactive.mp4")
     tick(viewer)
-    assert encoded[0] == (True, False, initial_time)
+    assert captured[0] == (True, False, initial_time)
+    assert viewer.app._viewport_recorder.started.wait(2)
+    tick(viewer)
     assert session.paused is not run_simulation
     assert not session.state_take_playing
     assert viewer.pause_recording()

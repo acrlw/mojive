@@ -527,7 +527,9 @@ class _Viewport:
                         else "stop"
                     ),
                     record_tooltip=self.localizer.text(
-                        "Pause Recording"
+                        "Finalizing recording"
+                        if self.recording.phase is RecordingPhase.FINALIZING
+                        else "Pause Recording"
                         if self.recording.phase is RecordingPhase.RECORDING
                         else "Resume Recording"
                         if self.recording.phase is RecordingPhase.PAUSED
@@ -541,11 +543,14 @@ class _Viewport:
                         if self._viewport_recording_mode == "take"
                         else "Record Video"
                     ),
-                    record_enabled=self.recording.active
-                    or self._viewport_recording_mode == "video"
-                    or (
-                        self.session.adapter.caps.simulation
-                        and self.session.adapter.caps.state_snapshots
+                    record_enabled=self.recording.phase is not RecordingPhase.FINALIZING
+                    and (
+                        self.recording.active
+                        or self._viewport_recording_mode == "video"
+                        or (
+                            self.session.adapter.caps.simulation
+                            and self.session.adapter.caps.state_snapshots
+                        )
                     ),
                     enabled=not self._scene_input_blocked(),
                     clock_enabled=self.session.adapter.caps.clock_control,

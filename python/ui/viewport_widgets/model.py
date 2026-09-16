@@ -93,6 +93,7 @@ class ViewportLabels:
     physics: str = "Physics"
     render: str = "Render"
     passive: str = "Passive"
+    recording_finalizing: str = "Finalizing recording"
     recording_scene: str = "SCENE"
     recording_viewport: str = "VIEW"
     recording_window: str = "WINDOW"

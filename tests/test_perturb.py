@@ -883,7 +883,8 @@ def test_run_and_sync_go_through_the_same_startup(monkeypatch):
     assert "release" not in seen
 
 
-def test_app_release_is_idempotent():
+@pytest.mark.parametrize("failed_dialog", (None, "_texture_dialog"))
+def test_app_release_is_idempotent(failed_dialog):
     app_mod = load_app_module()
     ViewerApp = app_mod.ViewerApp
 
@@ -897,12 +898,34 @@ def test_app_release_is_idempotent():
         def release(self) -> None:
             self.calls += 1
 
+        def kill(self) -> None:
+            self.calls += 1
+            if self is dialogs.get(failed_dialog):
+                raise RuntimeError("dialog failed")
+
     app = ViewerApp.__new__(ViewerApp)
     app._released = False
     app._model_dialog = None
     app._scene_dialog = None
     app._resource_dialog = None
+    app._texture_dialog = None
+    app._geometry_resource_dialog = None
+    app._model_asset_dialog = None
     app._resource_repair_dialog = None
+    dialogs = {
+        name: Resource()
+        for name in (
+            "_model_dialog",
+            "_scene_dialog",
+            "_resource_dialog",
+            "_texture_dialog",
+            "_geometry_resource_dialog",
+            "_model_asset_dialog",
+            "_resource_repair_dialog",
+        )
+    }
+    for name, dialog in dialogs.items():
+        setattr(app, name, dialog)
     bridge = Resource()
     app.debug_bridge = bridge
     app.camera_preview = Resource()
@@ -919,6 +942,8 @@ def test_app_release_is_idempotent():
     assert app._scene_capture.calls == 1
     assert app.backend.calls == 1
     assert app.session.calls == 1
+    assert all(dialog.calls == 1 for dialog in dialogs.values())
+    assert all(getattr(app, name) is None for name in dialogs)
 
 
 def test_app_release_continues_after_one_resource_fails():
@@ -941,6 +966,9 @@ def test_app_release_continues_after_one_resource_fails():
     app._model_dialog = None
     app._scene_dialog = None
     app._resource_dialog = None
+    app._texture_dialog = None
+    app._geometry_resource_dialog = None
+    app._model_asset_dialog = None
     app._resource_repair_dialog = None
     app.debug_bridge = FailingBridge()
     app.camera_preview = Resource()

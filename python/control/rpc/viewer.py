@@ -50,6 +50,7 @@ class ViewerControlService:
         self._queued_bytes = 0
         self._inflight = 0
         self._closed = False
+        self._active_response: Future | None = None
 
     def submit(self, request, *, request_bytes: int | None = None, disconnected=None):
         """Admit a request without waiting; cancellation remains possible until pump starts it."""
@@ -150,6 +151,10 @@ class ViewerControlService:
             raise ValueError("limit must be a positive integer")
         if type(budget) not in (int, float) or not 0 < budget < float("inf"):
             raise ValueError("budget_ms must be finite and positive")
+        if self._active_response is not None:
+            if not self._active_response.done():
+                return 0
+            self._active_response = None
         if self._pending.empty():
             return 0
         started = time.monotonic()
@@ -175,11 +180,20 @@ class ViewerControlService:
             request_started = self.stats.start(pending.queued_at)
             response = self._core._handle(pending.request)
             if isinstance(response, Future):
+                # Deferred document writes own Session until their UI-thread
+                # completion. Later requests retain ordering and preconditions.
+                from mojive.control.operations import OPERATIONS
+
+                operation = OPERATIONS.get(pending.request.get("method"))
+                if operation is not None and operation.writes_document:
+                    self._active_response = response
                 response.add_done_callback(
                     lambda value, target=pending.result, begin=request_started: self._complete(
                         target, value.result(), begin
                     )
                 )
+                if self._active_response is response:
+                    break
             else:
                 self._complete(pending.result, response, request_started)
         if handled:

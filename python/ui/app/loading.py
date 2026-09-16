@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +20,28 @@ from .support import SCENE_SUFFIXES, _ApplyModelEdits, _ModelLoadCompletion, _Mo
 
 class _Loading:
     """Private loading methods of ViewerApp; state belongs to its owner."""
+
+    def request_document_command(self, command, action: str) -> Future:
+        """Run a remote document operation through the exclusive model loader."""
+        future = Future()
+        future.set_running_or_notify_cancel()
+        if (
+            self._released
+            or self._model_load_future is not None
+            or self._model_load_queue
+            or self.model_edits.active
+        ):
+            future.set_result(cmd.CommandResult.bad("The viewer has unfinished document work"))
+            return future
+        path = getattr(command, "path", None) or self.session.asset_path or Path("Untitled")
+        self._model_load_queue.append(_ModelLoadJob(action, Path(path), command, future.set_result))
+        return future
+
+    def _cancel_model_load_queue(self, message: str) -> None:
+        jobs, self._model_load_queue = getattr(self, "_model_load_queue", []), []
+        for job in jobs:
+            if job.completed is not None:
+                job.completed(cmd.CommandResult.bad(message))
 
     def load_model(self, path: str | Path) -> CommandResult:
         result = self.session.submit(cmd.LoadAsset(Path(path)))
@@ -143,7 +165,9 @@ class _Loading:
             paused = self.session.submit(cmd.Pause())
             if not paused.ok:
                 job = self._model_load_queue.pop(0)
-                self._model_load_queue.clear()
+                self._cancel_model_load_queue(paused.message)
+                if job.completed is not None:
+                    job.completed(paused)
                 self._report_model_error(
                     f"Cannot {self._model_load_verb(job.action).lower()} while physics is running: "
                     f"{paused.message}"
@@ -171,7 +195,7 @@ class _Loading:
         )
         self._model_source_prepared = time.monotonic()
         prepare = getattr(getattr(self, "backend", None), "prepare_scene", None)
-        if result.ok and prepare is not None:
+        if result.ok and prepare is not None and not isinstance(command, cmd.SaveScene):
             self._model_prepared_resources = prepare(self.session.source)
         return result
 
@@ -190,7 +214,9 @@ class _Loading:
         self._model_load_future = None
         self._model_load_job = None
         if result.ok:
-            if job.action == "edit":
+            if job.action == "save":
+                pass
+            elif job.action == "edit":
                 self._sync_structure()
             else:
                 self._after_model_change()
@@ -202,7 +228,7 @@ class _Loading:
             log.info(
                 "{} {} after {:.3f}s", result.message, job.path, prepared - self._model_load_started
             )
-            self._model_load_queue.clear()
+            self._cancel_model_load_queue(result.message)
             self._report_model_error(result.message)
         self._model_prepared_resources = None
         if job.completed is not None:
@@ -219,6 +245,7 @@ class _Loading:
             "open": "Opening scene",
             "reload": "Reloading model",
             "edit": "Applying model edit",
+            "save": "Saving scene",
         }.get(action, "Loading model")
 
     def _after_model_change(self) -> None:
@@ -289,7 +316,7 @@ class _Loading:
             return
         if len(paths) == 1 and paths[0].name.endswith(SCENE_SUFFIXES):
             path = paths[0]
-            if not self.session.adapter.caps.scene_files:
+            if not self.session.adapter.caps.supports("scene_open"):
                 self._report_model_error(
                     self.localizer.text("The current workspace cannot open Mojive scene files")
                 )

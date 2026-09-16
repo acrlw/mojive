@@ -110,13 +110,34 @@ class ControlApplication:
             # Service and viewport queries do not own the offscreen capture cache.
             if operation.scope in ("scene", "capture"):
                 self._sync_capture_document()
-            if operation.handler:
+            if self.app is not None and operation.viewer_document_action:
+                result = self._document_command(
+                    operation.command(values), operation.viewer_document_action
+                )
+            elif operation.handler:
                 result = getattr(self, operation.handler)(values)
             else:
                 result = self._command(operation.command(values))
             if isinstance(result, dict) and "ok" in result and "entity_id" in result:
                 result["document"] = document_state(self.session)
             return json_value(result)
+
+    def _document_command(self, command, action: str) -> Future:
+        future = Future()
+        future.set_running_or_notify_cancel()
+
+        def complete(source):
+            try:
+                result = source.result()
+                if not result.ok:
+                    raise ControlError("command_failed", result.message)
+                self._sync_capture_document()
+                future.set_result(json_value(self._command_payload(command, result)))
+            except Exception as exc:
+                future.set_exception(exc)
+
+        self.app.request_document_command(command, action).add_done_callback(complete)
+        return future
 
     def _sync_capture_document(self):
         if self.session.document_id != self._capture_document_id:
