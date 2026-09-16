@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -26,6 +26,7 @@ from .base import (
     KeyframeProperties,
     ModelAssetInfo,
     NodeType,
+    PointPerturbation,
     SceneAdapter,
     SceneAdapterBase,
     SceneFrame,
@@ -795,6 +796,15 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def apply_perturb(self, node_id: int, target_position, target_rotation, mode: str) -> bool:
         return self.primary.apply_perturb(node_id, target_position, target_rotation, mode)
+
+    def apply_perturb_at_point(
+        self, node_id: int, target_position, target_rotation, mode: str, local_position
+    ) -> bool:
+        if not self.caps.supports("physics.perturb_point"):
+            return False
+        return cast(PointPerturbation, self.primary).apply_perturb_at_point(
+            node_id, target_position, target_rotation, mode, local_position
+        )
 
     def clear_perturb(self) -> None:
         self.primary.clear_perturb()

@@ -174,6 +174,22 @@ the documented `ModelComponentInfo` / keyframe method contracts, not arbitrary e
 Adapters must implement those contracts completely before advertising them. New incompatible
 payloads need a new extension revision or a distinct namespaced operation.
 
+### Physical grab points
+
+`perturb=True` retains the four-argument `apply_perturb` method. Adapters that can
+apply force at a selected point additionally advertise `("physics.perturb_point", 1)`
+and implement `PointPerturbation.apply_perturb_at_point`. The target position and
+rotation describe the body pose in world coordinates; `local_position` identifies
+the grab point in the body frame and remains fixed throughout the gesture.
+`clear_perturb` ends either form of perturbation. Workspace forwards the extension
+only when its primary adapter advertises it.
+
+The viewer sends the grab point to supporting adapters and keeps the original call
+for other adapters. An explicit `Perturb(local_position=...)` command fails before
+physics mutation when the extension is unavailable. MuJoCo uses the selected point
+for effective mass, damping and moment arm, with the model's native viewer stiffness
+parameters. A zero-mobility pivot uses MuJoCo's `localmass=1` convention.
+
 ### Local geometry scale
 
 Advertise `AdapterCaps.write_scale` and mark each supported geometry `SceneNode.scalable`.

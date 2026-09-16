@@ -358,6 +358,7 @@ _CAPABILITY_WRITES = {
     "write_qpos": ("set_qpos", "set_qpos_batch"),
     "write_ctrl": ("set_ctrl", "set_ctrl_vector"),
     "perturb": ("apply_perturb", "clear_perturb"),
+    "physics.perturb_point": ("apply_perturb_at_point",),
     "raycast": ("raycast",),
     "state_snapshots": ("capture_state", "restore_state"),
     "equality_constraints": ("set_equality_enabled",),
@@ -436,7 +437,7 @@ def _check_capability_implementations(adapter: SceneAdapter, caps: AdapterCaps):
         for name in methods:
             method = getattr(adapter, name, None)
             if not callable(method) or getattr(method, "__func__", method) is getattr(
-                SceneAdapterBase, name
+                SceneAdapterBase, name, None
             ):
                 missing.append(name)
         yield ConformanceCheck(

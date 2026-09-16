@@ -1444,6 +1444,24 @@ class DocumentCheckpoint(Protocol):
     def restore_document_state(self, state: object) -> bool: ...
 
 
+class PointPerturbation(Protocol):
+    """Optional ``physics.perturb_point`` revision 1, alongside ``perturb``.
+
+    Targets describe the body pose in world coordinates, as in ``apply_perturb``.
+    ``local_position`` is the grab point in the body frame, fixed for a gesture.
+    Releasing the gesture uses the existing ``clear_perturb`` contract.
+    """
+
+    def apply_perturb_at_point(
+        self,
+        node_id: int,
+        target_position: np.ndarray,
+        target_rotation: np.ndarray,
+        mode: str,
+        local_position: np.ndarray,
+    ) -> bool: ...
+
+
 class SceneRuntime(SceneProvider, Protocol):
     """Scene stream preparation, hierarchy and adapter lifetime."""
 

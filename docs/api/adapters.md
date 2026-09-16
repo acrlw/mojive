@@ -41,6 +41,8 @@ display choices from collision-engine state; renderers consume the same neutral 
 
 ::: mojive.adapters.base.DocumentCheckpoint
 
+::: mojive.adapters.base.PointPerturbation
+
 ## Application session
 
 ::: mojive.session.Session
