@@ -93,7 +93,7 @@ _ZH_CN = {
     "Enable flags": "启用标志",
     "Checked flags disable these features.": "勾选会禁用对应功能。",
     "Checked flags enable these features.": "勾选会启用对应功能。",
-    "Used when Contact override is enabled under Enable flags.": "在「启用标志」中勾选「接触参数覆盖」后生效。",
+    "Used when Contact override is enabled under Enable flags.": "在 Enable flags 中勾选 Contact override 后生效。",
     "Physics options are controlled by the simulation owner.": "物理选项由外部仿真程序控制。",
     "This adapter does not expose physics options.": "当前适配器不提供物理选项。",
     "Enter a valid number.": "请输入有效数值。",

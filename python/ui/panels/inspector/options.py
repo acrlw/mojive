@@ -43,15 +43,6 @@ class _Options:
             self._physics_document = identity
             self._physics_text.clear()
             self._physics_error = ""
-        imgui.text_wrapped(
-            ctx.tr("Applies to the whole simulation. Changes take effect immediately.")
-            + " "
-            + ctx.tr(
-                "Saved with the scene."
-                if ctx.session.adapter.caps.model_composition
-                else "Runtime only: this model has no editable source."
-            )
-        )
         if self._physics_error:
             imgui.text_wrapped(self._physics_error)
         changes = {}
@@ -59,16 +50,17 @@ class _Options:
         for index, (group, fields) in enumerate(groupby(options, key=lambda option: option.group)):
             fields = tuple(fields)
             flags = imgui.TreeNodeFlags_.default_open if index < 2 else 0
-            if not imgui.collapsing_header(ctx.tr(group), flags):
+            opened = imgui.collapsing_header(group, flags)
+            if fields[0].group_description and imgui.is_item_hovered():
+                imgui.set_tooltip(ctx.tr(fields[0].group_description))
+            if not opened:
                 continue
-            if fields[0].group_description:
-                imgui.text_wrapped(ctx.tr(fields[0].group_description))
-            labels = tuple(ctx.tr(field.label) for field in fields)
+            labels = tuple(field.label for field in fields)
             if not begin_property_table(f"physics-{group}", labels=labels):
                 continue
             for field in fields:
                 property_row(
-                    ctx.tr(field.label),
+                    field.label,
                     tooltip=ctx.tr(field.description) if field.description else field.key,
                 )
                 item_id = f"##physics-{field.key}"
@@ -78,13 +70,13 @@ class _Options:
                         changes[field.key] = value
                 elif field.kind == "choice":
                     preview = next(
-                        (ctx.tr(label) for label, value in field.choices if value == field.value),
+                        (label for label, value in field.choices if value == field.value),
                         str(field.value),
                     )
                     if imgui.begin_combo(item_id, preview):
                         for label, value in field.choices:
                             if (
-                                imgui.selectable(ctx.tr(label), field.value == value)[0]
+                                imgui.selectable(label, field.value == value)[0]
                                 and value != field.value
                             ):
                                 changes[field.key] = value
@@ -107,7 +99,7 @@ class _Options:
                                 self._physics_error = ""
                         except ValueError:
                             self._physics_error = (
-                                f"{ctx.tr(field.label)}: {ctx.tr('Enter a valid number.')}"
+                                f"{field.label}: {ctx.tr('Enter a valid number.')}"
                             )
                             invalid = True
                     elif not imgui.is_item_active():
