@@ -322,3 +322,28 @@ def test_windows_keep_independent_imgui_contexts(backend_name):
     finally:
         left.release()
         right.release()
+
+
+def test_ui_texture_bindings_survive_frames_and_release_with_registration(viewer, monkeypatch):
+    v, _scene = viewer
+    backend = v.window._imgui_backend
+    device = v.backend.device
+    create = device.create_bind_group
+    created = []
+
+    def counted(**kwargs):
+        group = create(**kwargs)
+        if kwargs.get("layout") is backend._texture_bind_group_layout:
+            created.append(group)
+        return group
+
+    monkeypatch.setattr(device, "create_bind_group", counted)
+    for _ in range(5):
+        v.sync()
+    assert not created
+    texture_ref = backend.register_texture(v.backend.target.color_view)
+    key = texture_ref.get_tex_id()
+    backend._texture_group(key)
+    assert len(created) == 1
+    backend.unregister_texture(texture_ref)
+    assert key not in backend._texture_bind_groups
