@@ -119,3 +119,32 @@ def test_empty_frame_needs_no_buffers():
     buffers = ImguiBuffers(device)
     assert buffers.upload(frame([])) == {}
     assert not device.created and not device.writes
+
+
+def test_texture_bindings_reuse_registration_and_respect_backend_ownership():
+    from mojive.ui.wgpu_backend import WgpuImguiBackend
+
+    groups = []
+
+    def create(**kwargs):
+        group = object()
+        groups.append((group, kwargs))
+        return group
+
+    device = SimpleNamespace(create_bind_group=create)
+    backend = object.__new__(WgpuImguiBackend)
+    backend._device = device
+    backend._texture_bind_group_layout = object()
+    backend._texture_bind_groups = {}
+    backend._texture_views = {7: SimpleNamespace(_device=device)}
+    group = backend._texture_group(7)
+    for _ in range(100):
+        assert backend._texture_group(7) is group
+    assert len(groups) == 1
+    backend._texture_views[7] = SimpleNamespace(_device=device)
+    assert backend._texture_group(7) is not group
+    assert len(groups) == 2
+    backend._texture_views[7] = SimpleNamespace(_device=object())
+    with pytest.raises(ValueError, match="another WebGPU device"):
+        backend._texture_group(7)
+    assert len(groups) == 2

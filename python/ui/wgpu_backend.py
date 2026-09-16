@@ -33,6 +33,7 @@ class WgpuImguiBackend(ImguiWgpuBackend):
         # ImGui contexts may share an atlas, but GPU handles never cross devices.
         self._textures, self._texture_views = self._registries.setdefault(device, ({}, {}))
         self._registered_textures: set[int] = set()
+        self._texture_bind_groups: dict[int, tuple[object, object]] = {}
         self._context = imgui.get_current_context()
         self.buffers = ImguiBuffers(device)
         self._closed = False
@@ -53,12 +54,14 @@ class WgpuImguiBackend(ImguiWgpuBackend):
         if key not in self._registered_textures:
             raise ValueError("ImGui texture registration does not belong to this backend")
         self._registered_textures.remove(key)
+        self._texture_bind_groups.pop(key, None)
         super().unregister_texture(texture_ref)
 
     def _destroy_texture(self, tex):
         key = tex.tex_id
         texture = self._textures.pop(key, None)
         self._texture_views.pop(key, None)
+        self._texture_bind_groups.pop(key, None)
         if texture is not None:
             texture.destroy()
         tex.set_tex_id(0)
@@ -128,6 +131,10 @@ class WgpuImguiBackend(ImguiWgpuBackend):
         for tex in draw_data.textures or ():
             if tex.status != imgui.ImTextureStatus.ok:
                 self._update_texture(tex)
+        # Another context can retire an atlas in the shared device registry.
+        for key in tuple(self._texture_bind_groups):
+            if key not in self._texture_views:
+                del self._texture_bind_groups[key]
         offsets = self.buffers.upload(draw_data)
         self._set_render_state(draw_data)
         return offsets
@@ -163,21 +170,24 @@ class WgpuImguiBackend(ImguiWgpuBackend):
             )
             if clip is None:
                 continue
-            tex_view = self._texture_views[command.tex_ref.get_tex_id()]
-            if tex_view._device is not self._device:
-                raise ValueError("ImGui texture belongs to another WebGPU device")
-            group = getattr(tex_view, "__imgui_bind_group", None)
-            if group is None:
-                group = self._device.create_bind_group(
-                    layout=self._texture_bind_group_layout,
-                    entries=[{"binding": 0, "resource": tex_view}],
-                )
-                tex_view.__imgui_bind_group = group
-            render_pass.set_bind_group(1, group)
+            render_pass.set_bind_group(1, self._texture_group(command.tex_ref.get_tex_id()))
             render_pass.set_scissor_rect(*clip)
             render_pass.draw_indexed(
                 command.elem_count, 1, command.idx_offset + io, command.vtx_offset + vo, 0
             )
+
+    def _texture_group(self, key):
+        view = self._texture_views[key]
+        if view._device is not self._device:
+            raise ValueError("ImGui texture belongs to another WebGPU device")
+        cached = self._texture_bind_groups.get(key)
+        if cached is None or cached[0] is not view:
+            group = self._device.create_bind_group(
+                layout=self._texture_bind_group_layout,
+                entries=[{"binding": 0, "resource": view}],
+            )
+            cached = self._texture_bind_groups[key] = (view, group)
+        return cached[1]
 
     def render(self, draw_data, render_pass, target_size=None):
         """Render an ordinary ImGui frame using reusable upload buffers."""
@@ -209,6 +219,7 @@ class WgpuImguiBackend(ImguiWgpuBackend):
         for key in self._registered_textures:
             self._texture_views.pop(key, None)
         self._registered_textures.clear()
+        self._texture_bind_groups.clear()
         # RefCount is ImGui's number of contexts sharing this atlas texture.
         for texture in imgui.get_platform_io().textures:
             if texture.ref_count == 1:
