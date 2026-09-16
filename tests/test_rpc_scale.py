@@ -50,7 +50,9 @@ def test_scale_discovery_describes_capability_validation_and_transaction(service
 
 
 @pytest.mark.parametrize("target", ["object", "geometry"])
-def test_scale_bakes_local_dimensions_and_roundtrips_history_and_file(service, target, tmp_path):
+def test_scale_bakes_dimensions_and_roundtrips_history_and_supported_files(
+    service, target, tmp_path
+):
     before = create_box(service)
     node_id = before["node_id"] if target == "object" else before["geometries"][0]["node_id"]
     assert call(service, "inspect_object", node_id=node_id)["scalable"]
@@ -79,6 +81,12 @@ def test_scale_bakes_local_dimensions_and_roundtrips_history_and_file(service, t
     call(service, "redo")
     check([0.4, 0.15, 1.2])
     path = str(tmp_path / "scaled.mojive.json")
+    if not service.session.adapter.caps.supports("scene_save"):
+        with pytest.raises(RpcError, match="does not support scene_save"):
+            call(service, "save_scene", path=path)
+        assert not (tmp_path / "scaled.mojive.json").exists()
+        check([0.4, 0.15, 1.2])
+        return
     call(service, "save_scene", path=path)
     call(service, "new_scene")
     call(service, "open_scene", path=path)

@@ -963,6 +963,9 @@ class _SceneConversion:
                 0,
                 object_id=m.nbody + m.nflex + si,
             )
+        for node in nodes:
+            if node.source_editable:
+                node.source_name = self._node_element[node.node_id][2]
         return nodes
 
     def _rebuild_model_element_names(self) -> None:

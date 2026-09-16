@@ -14,8 +14,10 @@ from ..types import InstancePoseSource, LightSet, Material, MeshKey, MeshShape
 from .base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
+    AdapterCaps,
     BodyProperties,
     CameraInfo,
+    DocumentCheckpoint,
     FrameNeeds,
     GeometryAdvancedProperties,
     GeometryProperties,
@@ -24,10 +26,12 @@ from .base import (
     KeyframeProperties,
     ModelAssetInfo,
     NodeType,
+    SceneAdapter,
     SceneAdapterBase,
     SceneFrame,
     SceneModelInfo,
     SceneNode,
+    SceneRuntime,
     SceneSaveOptions,
     SceneSource,
     SiteProperties,
@@ -41,10 +45,33 @@ _AUTHORED_LIGHT_BASE = 0x74000000
 _AUTHORED_CAMERA_BASE = 0x75000000
 
 
+def _workspace_caps(primary: SceneRuntime) -> AdapterCaps:
+    """Declare delegated operations without allocating a model snapshot to probe support."""
+    caps = primary.caps
+    new = caps.supports("scene_new")
+    opened = new and caps.document_checkpoints
+    # Workspace JSON persists a model catalog plus this owner's authored scene.
+    # A primary's standalone save method cannot serialize arbitrary primary
+    # entities, including another Workspace's independent authored scene.
+    saved = caps.model_composition and not isinstance(primary, WorkspaceAdapter)
+    return replace(
+        caps,
+        name=f"workspace:{caps.name}",
+        write_pose=True,
+        write_scale=True,
+        model_cameras=True,
+        scene_authoring=True,
+        scene_files=new and opened and saved,
+        scene_new=new,
+        scene_open=opened,
+        scene_save=saved,
+    )
+
+
 class WorkspaceAdapter(SceneAdapterBase):
     """Combines a simulation adapter with backend-neutral authored entities."""
 
-    def __init__(self, primary: SceneAdapterBase, scene: Scene | None = None) -> None:
+    def __init__(self, primary: SceneAdapter, scene: Scene | None = None) -> None:
         self.primary = primary
         if scene is None:
             environment = primary.scene_source().lights.environment()
@@ -59,23 +86,15 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._object_to_scene: dict[int, int] = {}
         self._light_to_scene: dict[int, int] = {}
         self._camera_to_scene: dict[int, int] = {}
-        self.caps = replace(
-            primary.caps,
-            name=f"workspace:{primary.caps.name}",
-            write_pose=True,
-            write_scale=True,
-            model_cameras=True,
-            scene_authoring=True,
-            scene_files=True,
-            edit_history=primary.capture_edit_state() is not None,
-            model_composition=primary.caps.model_composition,
-        )
+        self.caps = _workspace_caps(primary)
 
     @property
     def structure_revision(self) -> int:
         return self.primary.structure_revision * 1_000_003 + self.scene.structure_revision
 
     def new_scene(self) -> None:
+        if not self.caps.supports("scene_new"):
+            raise RuntimeError(f"{self.caps.name} does not support scene_new")
         self.primary.new_scene()
         environment = self.primary.scene_source().lights.environment()
         self.scene = Scene(lights=LightSet().with_environment(environment))
@@ -107,11 +126,40 @@ class WorkspaceAdapter(SceneAdapterBase):
     def open_scene(self, path: Path) -> None:
         from mojive.scene.workspace import load_workspace
 
-        load_workspace(self, path)
+        if not self.caps.supports("scene_open"):
+            raise RuntimeError(
+                "Opening a workspace requires a primary adapter document checkpoint and scene_new"
+            )
+        before = (
+            self.primary.capture_document_state()
+            if isinstance(self.primary, DocumentCheckpoint)
+            else None
+        )
+        if before is None:
+            raise RuntimeError("Opening a workspace requires a primary adapter document checkpoint")
+        scene, roots = self.scene, self._resource_roots
+        try:
+            load_workspace(self, path)
+        except Exception as exc:
+            self.scene, self._resource_roots = scene, roots
+            self._invalidate()
+            try:
+                restored = self.primary.restore_document_state(before)
+            except Exception as failure:
+                raise RuntimeError(
+                    f"Workspace open failed: {exc}; rollback failed: {failure}"
+                ) from exc
+            if not restored:
+                raise RuntimeError(
+                    f"Workspace open failed: {exc}; adapter rejected rollback"
+                ) from exc
+            raise
         self._path = Path(path).expanduser().resolve()
         self._invalidate()
 
     def save_scene(self, path: Path, options: SceneSaveOptions | None = None) -> None:
+        if not self.caps.supports("scene_save"):
+            raise RuntimeError(f"{self.caps.name} does not support scene_save")
         target = Path(path).expanduser().resolve()
         if target.suffix.lower() in {".xml", ".mjcf"}:
             self.primary.export_mjcf(target, self.scene.source, self.scene.frame, options)
@@ -123,6 +171,24 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def current_pose_modified(self) -> bool:
         return self.primary.current_pose_modified()
+
+    def capture_document_state(self) -> object | None:
+        if not self.caps.document_checkpoints or not isinstance(self.primary, DocumentCheckpoint):
+            return None
+        primary = self.primary.capture_document_state()
+        if primary is None:
+            return None
+        return self.scene, primary, self._resource_roots, self._path
+
+    def restore_document_state(self, state: object) -> bool:
+        if not isinstance(state, tuple) or len(state) != 4 or not isinstance(state[0], Scene):
+            return False
+        if not self.primary.restore_document_state(state[1]):
+            return False
+        self.scene, self._resource_roots, self._path = state[0], state[2], state[3]
+        self.caps = _workspace_caps(self.primary)
+        self._invalidate()
+        return True
 
     def capture_edit_state(self) -> object | None:
         primary_state = self.primary.capture_edit_state()
@@ -325,9 +391,7 @@ class WorkspaceAdapter(SceneAdapterBase):
     def scene_source(self) -> SceneSource:
         primary_revision = self.primary.structure_revision
         if self._primary_revision != primary_revision:
-            self.caps = replace(
-                self.caps, edit_history=self.primary.capture_edit_state() is not None
-            )
+            self.caps = _workspace_caps(self.primary)
         if (
             self._source is None
             or self._primary_revision != primary_revision

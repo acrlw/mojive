@@ -81,6 +81,7 @@ class _Source:
 
         if getattr(self, "_applying_model_edits", False) and not installed:
             return
+        selected_before = self._by_node_id.get(self._selected_node_id)
         self._mesh_bounds_cache.clear()
         self._scene_bounds = None
         self._source = self._adapter.scene_source()
@@ -161,7 +162,7 @@ class _Source:
                 if 0 <= slot < len(cameras):
                     cameras[slot] = camera
             self._source.cameras = tuple(cameras)
-        self._keyframes = self._adapter.keyframes() if self._adapter.caps.keyframes else []
+        self._model_keyframes.refresh(self._adapter if self._adapter.caps.keyframes else None)
         self._sensor_infos = self._adapter.sensors() if self._adapter.caps.sensors else []
         self._equality_constraints = (
             self._adapter.equality_constraints() if self._adapter.caps.equality_constraints else []
@@ -171,7 +172,13 @@ class _Source:
         self._by_node_id = {n.node_id: n for n in self._nodes}
         self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
         self._unlocked_entity_gizmos.intersection_update(self._by_object_id)
-        if self._selected:
+        if selected_before is not None and selected_before.source_editable:
+            self._restore_model_selection(
+                selected_before.model_id,
+                selected_before.type,
+                selected_before.source_name or selected_before.name,
+            )
+        elif self._selected:
             selected = self._by_object_id.get(self._selected)
             if selected is None:
                 self._selected = 0
@@ -205,6 +212,20 @@ class _Source:
         self._sync_equality_state()
         self._compose_lights()
         self._compose_cameras()
+
+    def _restore_model_selection(self, model_id: int, node_type: NodeType, name: str) -> None:
+        """Rebind an editable model element without reusing compiled body/node indices."""
+        body_types = (NodeType.LINK, NodeType.ROBOT)
+        matches = [
+            node
+            for node in self._nodes
+            if node.model_id == model_id
+            and (node.source_name or node.name) == name
+            and (node.type is node_type or (node.type in body_types and node_type in body_types))
+        ]
+        selected = matches[0] if len(matches) == 1 else None
+        self._selected = selected.object_id if selected is not None else 0
+        self._selected_node_id = selected.node_id if selected is not None else -1
 
     def _refresh_joint_metadata(self) -> None:
         """Refresh joint lookup tables without rebuilding stable scene geometry."""
@@ -267,14 +288,7 @@ class _Source:
         return self._camera_slot_by_id.get(int(camera_id), -1)
 
     def _keyframe_slot(self, keyframe_id: int) -> int:
-        return next(
-            (
-                slot
-                for slot, keyframe in enumerate(self._keyframes)
-                if keyframe.keyframe_id == keyframe_id
-            ),
-            -1,
-        )
+        return self._model_keyframes.slot(keyframe_id)
 
     def _equality_slot(self, constraint_id: int) -> int:
         return next(

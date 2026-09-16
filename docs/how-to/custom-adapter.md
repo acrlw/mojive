@@ -31,6 +31,53 @@ Capabilities describe supported write-back; do not advertise a capability withou
 its operations. Frames may reuse arrays until the next frame request; consumers retaining them
 must copy the required data.
 
+### Choose the contract your consumer actually needs
+
+The full editor protocol is a compatibility facade composed from the following structural
+protocols in `mojive.adapters`. They document dependencies; inheriting them does not enable
+features. Existing adapters can continue inheriting only `SceneAdapterBase` and overriding
+the operations they advertise.
+
+| Contract | Responsibility |
+|---|---|
+| `SceneProvider` | revision, stable structure and requested frames |
+| `SceneRuntime` | provider plus preparation, hierarchy, camera hint and lifetime |
+| `SimulationAccess` | optional simulation observations, control and state write-back |
+| `SceneAppearance` | scene appearance, camera views and visual groups |
+| `SceneAuthoring` | backend-neutral object, light and camera authoring |
+| `ScenePersistence` | document I/O, resource roots and restorable edit state |
+| `ModelComposition` | attached model identities and world placement |
+| `ModelTopology` | model-source topology and declaration edits |
+| `ModelProperties` | authored body, joint, site and geometry properties |
+| `ModelAssets` | model-local resources and material binding |
+| `KeyframeCatalog` | preset metadata without playback or editing |
+| `KeyframePlayback` | metadata and loading a preset |
+| `KeyframeEditing` | authored preset properties and writes |
+| `ModelKeyframes` | compatibility aggregate of playback and editing |
+
+A read-only consumer should accept `SceneProvider`. A model browser can accept
+`ModelComposition`; it does not need a physics engine or the whole editor interface.
+Session and Workspace coordinate multiple responsibilities and still use `SceneAdapter`.
+An `isinstance(adapter, SceneAdapter)` check only establishes structural membership: inherited
+unsupported methods satisfy that check. Use `caps.supports(...)` to determine availability.
+Implementing keyframe playback does not require advertising `model.keyframe_edit`. The Session
+metadata index consumes `KeyframeCatalog`; loading and editing controls check their capabilities
+independently. Basic timeline selection and navigation remain available without either write capability.
+
+Document operations use `caps.supports("scene_new")`, `"scene_open"`, and `"scene_save"`.
+Each flag defaults to `None`, which inherits legacy `scene_files`; an explicit Boolean overrides
+that fallback. Partial implementations should set the individual flags and leave `scene_files`
+false. File support is independent from `scene_authoring` and `edit_history`. Declare
+`edit_history=True` only when capture and restore preserve the entire editable primary state;
+Workspace trusts this declaration rather than cloning a document to probe availability.
+
+`check_scene_provider(provider)`, available from `mojive`, validates the minimal stream independently
+of UI, simulation and authoring. `check_adapter(adapter)` additionally validates editor metadata
+and reports advertised operations that are missing or still use unsupported base defaults.
+Neither check invokes editing writes. Empty inventories are valid, and a successful check does
+not prove that a custom implementation preserves atomicity; exercise its writes and rollback
+with representative engine state.
+
 Register an external adapter factory in the process that will use it:
 
 ```python
@@ -58,6 +105,20 @@ factories before calling `mojive.cli.main()`.
 Use `check_adapter(adapter)` for a custom instance, or
 `make adapter-conformance ADAPTER=toy` for a built-in adapter. Importing shared contracts,
 `Scene`, or `SceneProvider` does not initialize physics, UI, or graphics packages.
+
+Workspace document replacement uses the optional `DocumentCheckpoint` protocol in
+`mojive.adapters`: `capture_document_state()` and `restore_document_state(state)`.
+Declare `document_checkpoints=True` when both hooks can restore a replaced document.
+Workspace opening additionally requires the primary adapter to support `scene_new`; Workspace
+saving requires a primary model-composition catalog. A primary
+standalone `scene_save` does not suffice: Workspace JSON cannot preserve an arbitrary primary
+scene or another Workspace's independent authored entities. Those compositions remain usable
+in memory but cannot be saved through the outer Workspace. Unsupported operations fail before writes.
+This extension is separate from the full compatibility facade. Checkpoints include backing file paths and ownership;
+ordinary edit snapshots intentionally retain the current save destination during Undo.
+Workspace restores the primary state, authored entities and resource roots if loading fails. Stored MJCF sources require
+the `mujoco.mjcf` contract; a rejected source write fails the load instead of silently omitting
+the edited source. The previously open document path is retained on failure.
 
 Legacy metadata names retain their constructor compatibility: `JointInfo.body` is a body index,
 `qpos_adr` and `qvel_adr` are starting addresses in their state arrays, and `ActuatorInfo.joint`

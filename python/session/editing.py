@@ -141,7 +141,7 @@ class _Editing:
         result = self._dispatch(command)
         if not result.ok and scene_edit and self.editing:
             self._edit_error = self._edit_error or result.message or "Scene edit failed"
-        if result.ok and scene_edit and self._adapter.caps.scene_files:
+        if result.ok and scene_edit:
             if self.editing:
                 self._edit_changed = True
             elif before is not None:
@@ -188,7 +188,9 @@ class _Editing:
         state = self._adapter.capture_edit_state()
         if state is None:
             raise RuntimeError(f"{self._adapter.caps.name} did not provide an edit state")
-        return _DocumentState(state, self._selected, deepcopy(self._authored))
+        return _DocumentState(
+            state, self._selected, deepcopy(self._authored), self._selected_node_id
+        )
 
     def _restore_document_state(self, state: _DocumentState) -> bool:
         if not self._adapter.restore_edit_state(state.adapter_state):
@@ -197,9 +199,11 @@ class _Editing:
         self._selected = int(state.selected)
         self._selected_node_id = -1
         self._refresh_structure()
-        if self._selected not in self._by_object_id:
-            self._selected = 0
-            self._selected_node_id = -1
+        # The adapter restored this exact snapshot, so its hierarchy indices are
+        # valid again, including joints/sites that have no render object ID.
+        selected = self._by_node_id.get(state.selected_node_id)
+        self._selected = selected.object_id if selected is not None else 0
+        self._selected_node_id = selected.node_id if selected is not None else -1
         return True
 
     def _begin_edit(self, label: str) -> CommandResult:

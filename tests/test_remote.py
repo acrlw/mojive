@@ -278,7 +278,7 @@ def test_remote_masks_operations_that_have_no_transport_and_retains_camera_capab
         assert not adapter.caps.state_snapshots
         result = session.submit(cmd.NewScene())
         assert not result.ok
-        assert "does not support scene files" in result.message
+        assert "does not support scene new" in result.message
     finally:
         session.release()
         publisher.close()

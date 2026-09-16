@@ -114,13 +114,8 @@ def execute_edit_plan(session: Session, plan: ModelEditPlan, label: str) -> Edit
             raise ValueError("Edited model rejected the preserved physics state")
         session._applying_model_edits = False
         session._refresh_structure()
-        if (
-            not history
-            and session.adapter.caps.scene_files
-            and any(
-                isinstance(command, _SCENE_EDIT_COMMANDS)
-                for command in (*plan.creations, *plan.direct)
-            )
+        if not history and any(
+            isinstance(command, _SCENE_EDIT_COMMANDS) for command in (*plan.creations, *plan.direct)
         ):
             session._advance_document_revision()
         result = (

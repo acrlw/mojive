@@ -23,14 +23,9 @@ _REQUIREMENTS = {
         ),
         ("simulation",),
     ),
-    **dict.fromkeys(
-        (
-            cmd.NewScene,
-            cmd.OpenScene,
-            cmd.SaveScene,
-        ),
-        ("scene_files",),
-    ),
+    cmd.NewScene: ("scene_new",),
+    cmd.OpenScene: ("scene_open",),
+    cmd.SaveScene: ("scene_save",),
     **dict.fromkeys((cmd.SetPose,), ("write_pose",)),
     cmd.SetScale: ("write_scale",),
     **dict.fromkeys(

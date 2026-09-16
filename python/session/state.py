@@ -50,6 +50,7 @@ class _DocumentState:
     adapter_state: object
     selected: int
     authored: AuthoredSceneOverlay
+    selected_node_id: int
 
 
 @dataclass(frozen=True)

@@ -162,6 +162,7 @@ class Operation:
     writes_document: bool = False
     alias_of: str | None = None
     version: int = 1
+    viewer_document_action: str = ""
     validator: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
@@ -463,6 +464,8 @@ _CATALOG = [
         {"path": NAME},
         ("path",),
         handler="_load",
+        command=_command_factory(cmd.LoadAsset),
+        viewer_document_action="load",
         mutates=True,
         writes_document=True,
         capabilities=("asset_loading",),
@@ -473,17 +476,26 @@ _CATALOG = [
         {"model_id": ID, "mjcf": NAME},
         ("model_id", "mjcf"),
         capabilities=("topology_editing", "mujoco.mjcf"),
+        viewer_document_action="edit",
         paused=True,
         writes_document=True,
     ),
-    _cmd("reload", cmd.Reload, handler="_reload", capabilities=("reload",), writes_document=True),
-    _cmd("new_scene", cmd.NewScene, capabilities=("scene_files",), writes_document=True),
+    _cmd(
+        "reload",
+        cmd.Reload,
+        handler="_reload",
+        capabilities=("reload",),
+        writes_document=True,
+        viewer_document_action="reload",
+    ),
+    _cmd("new_scene", cmd.NewScene, capabilities=("scene_new",), writes_document=True),
     _cmd(
         "open_scene",
         cmd.OpenScene,
         {"path": NAME},
         ("path",),
-        capabilities=("scene_files",),
+        capabilities=("scene_open",),
+        viewer_document_action="open",
         writes_document=True,
     ),
     _cmd(
@@ -491,7 +503,8 @@ _CATALOG = [
         cmd.SaveScene,
         {"path": NAME, "current_pose_keyframe": {"type": ["string", "null"]}},
         ("path",),
-        capabilities=("scene_files",),
+        capabilities=("scene_save",),
+        viewer_document_action="save",
         writes_document=True,
     ),
     _cmd(

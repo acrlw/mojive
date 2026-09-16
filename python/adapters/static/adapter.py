@@ -29,6 +29,7 @@ class StaticSceneAdapter(SceneAdapterBase):
         scene_authoring=True,
         scene_files=True,
         edit_history=True,
+        document_checkpoints=True,
     )
 
     def __init__(self, scene: Scene) -> None:
@@ -53,6 +54,19 @@ class StaticSceneAdapter(SceneAdapterBase):
         if not isinstance(state, Scene):
             return False
         self.scene.restore(state)
+        return True
+
+    def capture_document_state(self) -> object | None:
+        state = self.capture_edit_state()
+        return None if state is None else (self.scene, state, self._path)
+
+    def restore_document_state(self, state: object) -> bool:
+        if not isinstance(state, tuple) or len(state) != 3 or not isinstance(state[0], Scene):
+            return False
+        self.scene = state[0]
+        if not self.restore_edit_state(state[1]):
+            return False
+        self._path = state[2]
         return True
 
     def reload(self) -> None:

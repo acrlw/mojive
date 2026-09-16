@@ -51,7 +51,12 @@ if TYPE_CHECKING:
         SensorInfo,
         VisualGroupInfo,
     )
-    from .adapters.conformance import ConformanceCheck, ConformanceReport, check_adapter
+    from .adapters.conformance import (
+        ConformanceCheck,
+        ConformanceReport,
+        check_adapter,
+        check_scene_provider,
+    )
     from .adapters.mujoco import MuJoCoAdapter
     from .adapters.registry import register_adapter, unregister_adapter
     from .adapters.toy import ToyPhysicsAdapter
@@ -128,7 +133,12 @@ _EXPORT_MODULES = {
         "SensorInfo",
         "VisualGroupInfo",
     ),
-    ".adapters.conformance": ("ConformanceCheck", "ConformanceReport", "check_adapter"),
+    ".adapters.conformance": (
+        "ConformanceCheck",
+        "ConformanceReport",
+        "check_adapter",
+        "check_scene_provider",
+    ),
     ".adapters.toy": ("ToyPhysicsAdapter",),
     ".app.backends": ("make_adapter",),
     ".render.canvas": ("Canvas2D", "CanvasLayer2D"),
@@ -305,6 +315,7 @@ __all__ = [
     "build_scene",
     "build_workspace",
     "check_adapter",
+    "check_scene_provider",
     "launch_passive",
     "make_adapter",
     "read_snapshots",

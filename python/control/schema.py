@@ -348,6 +348,9 @@ STATE_RESULT = record(
 )
 ADAPTER_CAPABILITIES = value_schema(AdapterCaps())
 ADAPTER_CAPABILITIES["properties"].update(
+    scene_new={"type": ["boolean", "null"]},
+    scene_open={"type": ["boolean", "null"]},
+    scene_save={"type": ["boolean", "null"]},
     notes=array(STRING),
     model_formats=array({"type": "string", "pattern": r"^\.[a-z0-9]+$"}),
     features=array(
