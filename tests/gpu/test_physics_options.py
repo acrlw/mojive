@@ -46,7 +46,7 @@ def _enter(viewer):
 def _groups(viewer, monkeypatch, *groups):
     """Expose each section without depending on persisted window scroll position."""
     native = imgui.collapsing_header
-    labels = set(groups)
+    labels = {viewer.app.localizer.text(group) for group in groups}
 
     def header(label, *args, **kwargs):
         imgui.set_next_item_open(label in labels, imgui.Cond_.always)

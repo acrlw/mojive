@@ -50,17 +50,17 @@ class _Options:
         for index, (group, fields) in enumerate(groupby(options, key=lambda option: option.group)):
             fields = tuple(fields)
             flags = imgui.TreeNodeFlags_.default_open if index < 2 else 0
-            opened = imgui.collapsing_header(group, flags)
+            opened = imgui.collapsing_header(ctx.tr(group), flags)
             if fields[0].group_description and imgui.is_item_hovered():
                 imgui.set_tooltip(ctx.tr(fields[0].group_description))
             if not opened:
                 continue
-            labels = tuple(field.label for field in fields)
+            labels = tuple(ctx.tr(field.label) for field in fields)
             if not begin_property_table(f"physics-{group}", labels=labels):
                 continue
             for field in fields:
                 property_row(
-                    field.label,
+                    ctx.tr(field.label),
                     tooltip=ctx.tr(field.description) if field.description else field.key,
                 )
                 item_id = f"##physics-{field.key}"
@@ -99,7 +99,7 @@ class _Options:
                                 self._physics_error = ""
                         except ValueError:
                             self._physics_error = (
-                                f"{field.label}: {ctx.tr('Enter a valid number.')}"
+                                f"{ctx.tr(field.label)}: {ctx.tr('Enter a valid number.')}"
                             )
                             invalid = True
                     elif not imgui.is_item_active():
