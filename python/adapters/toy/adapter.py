@@ -18,6 +18,7 @@ class ToyPhysicsAdapter(SceneAdapterBase):
         simulation=True,
         write_pose=True,
         model_cameras=True,
+        edit_history=True,
         notes=("dependency-free reference adapter",),
     )
 

@@ -400,10 +400,7 @@ class _Playback:
             return CommandResult.bad("scene snapshot state is incompatible with this model")
         keyframe_id = int(active_keyframe)
         self._active_keyframe = (
-            keyframe_id
-            if keyframe_id == -1
-            or any(keyframe.keyframe_id == keyframe_id for keyframe in self._keyframes)
-            else -1
+            keyframe_id if keyframe_id == -1 or self._model_keyframes.slot(keyframe_id) >= 0 else -1
         )
         self._pending_steps = 0
         self._sim_time_credit = 0.0

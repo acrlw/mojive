@@ -160,18 +160,18 @@ class _Input:
         if modifier:
             if caps.edit_history and pressed("z"):
                 self.session.submit(cmd.Redo() if io.key_shift else cmd.Undo())
-            if caps.scene_files:
-                if pressed("n"):
-                    self._request_document_action("new_scene")
-                if pressed("o") and not io.key_shift:
+            if caps.supports("scene_new") and pressed("n"):
+                self._request_document_action("new_scene")
+            if pressed("o") and not io.key_shift:
+                if caps.supports("scene_open"):
                     self._open_scene_dialog("open")
-                if pressed("s"):
-                    if io.key_shift or self.session.asset_path is None:
-                        self._open_scene_dialog("save")
-                    else:
-                        self._request_scene_save(self.session.asset_path)
-            elif _model_filters(caps) and pressed("o") and not io.key_shift:
-                self._open_model_dialog()
+                elif _model_filters(caps):
+                    self._open_model_dialog()
+            if caps.supports("scene_save") and pressed("s"):
+                if io.key_shift or self.session.asset_path is None:
+                    self._open_scene_dialog("save")
+                else:
+                    self._request_scene_save(self.session.asset_path)
             if caps.reload and io.key_shift and pressed("o"):
                 self._queue_model_load("reload", self.session.asset_path)
             if pressed("comma"):

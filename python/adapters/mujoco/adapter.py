@@ -84,6 +84,7 @@ class MuJoCoAdapter(
             topology_editing=True,
             model_properties=True,
             model_assets=True,
+            scene_new=True,
         )
         self._m = None
         self._d = None
@@ -199,7 +200,9 @@ class MuJoCoAdapter(
         self._reset_next_model_id()
         self._reset_geometry_object_ids()
         self._component_entries.clear()
-        self.caps = replace(self.caps, model_composition=True)
+        self.caps = replace(
+            self.caps, model_composition=True, edit_history=True, document_checkpoints=True
+        )
         self._install(model)
 
     def new_scene(self) -> None:
@@ -211,7 +214,9 @@ class MuJoCoAdapter(
         self._reset_next_model_id()
         self._reset_geometry_object_ids()
         self._component_entries.clear()
-        self.caps = replace(self.caps, model_composition=True)
+        self.caps = replace(
+            self.caps, model_composition=True, edit_history=True, document_checkpoints=True
+        )
         self._install(self._root_spec.compile())
 
     def load_model(self, model, data=None) -> None:
@@ -229,7 +234,9 @@ class MuJoCoAdapter(
         self._attached_models.clear()
         self._reset_geometry_object_ids()
         self._component_entries.clear()
-        self.caps = replace(self.caps, model_composition=False)
+        self.caps = replace(
+            self.caps, model_composition=False, edit_history=False, document_checkpoints=False
+        )
         self._install(model, data)
 
     def use_data(self, data) -> None:

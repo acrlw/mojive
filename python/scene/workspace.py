@@ -90,12 +90,20 @@ def load_workspace(workspace, path: str | Path) -> None:
     if missing:
         names = ", ".join(item.reference for item in missing)
         raise FileNotFoundError(f"Missing workspace resources: {names}")
+    models = document.get("models", ())
+    if (document.get("root_mjcf") or any(model.get("mjcf") for model in models)) and not (
+        workspace.primary.caps.supports("mujoco.mjcf")
+    ):
+        raise RuntimeError(f"{workspace.primary.caps.name} does not support workspace MJCF sources")
+    authored_scene = scene_from_document(document["scene"])
     workspace.primary.new_scene()
-    if root_mjcf := document.get("root_mjcf"):
-        workspace.primary.set_scene_model_xml(0, str(root_mjcf))
+    if (root_mjcf := document.get("root_mjcf")) and not workspace.primary.set_scene_model_xml(
+        0, str(root_mjcf)
+    ):
+        raise RuntimeError("Failed to restore the workspace root MJCF source")
     resource_roots = _document_resource_roots(document, source.parent)
     workspace.set_resource_roots(tuple(root for root in resource_roots if root != source.parent))
-    for model in document.get("models", ()):
+    for model in models:
         model_path = _resolve_resource(str(model["path"]), source.parent, resource_roots)
         rotation = np.asarray(model.get("rotation", np.eye(3)), np.float32).reshape(3, 3)
         model_id = workspace.primary.add_scene_model(
@@ -105,9 +113,9 @@ def load_workspace(workspace, path: str | Path) -> None:
         )
         if model_id < 0:
             raise RuntimeError(f"Failed to add {model_path.name}")
-        if xml := model.get("mjcf"):
-            workspace.primary.set_scene_model_xml(model_id, xml)
-    workspace.scene = scene_from_document(document["scene"])
+        if (xml := model.get("mjcf")) and not workspace.primary.set_scene_model_xml(model_id, xml):
+            raise RuntimeError(f"Failed to restore the MJCF source for {model_path.name}")
+    workspace.scene = authored_scene
 
 
 def missing_resources(path: str | Path) -> tuple[Path, ...]:

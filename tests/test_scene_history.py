@@ -118,6 +118,7 @@ def test_workspace_history_restores_primary_pose_color_and_simulation_state():
 
 def test_workspace_does_not_advertise_history_without_restorable_primary():
     primary = ToyPhysicsAdapter()
+    primary.caps = replace(primary.caps, edit_history=False)
     primary.capture_edit_state = lambda: None
     session = Session(WorkspaceAdapter(primary, Scene()))
     try:

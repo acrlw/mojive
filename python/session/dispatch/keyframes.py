@@ -39,7 +39,7 @@ def load_keyframe(self: Session, c: cmd.LoadKeyframe) -> CommandResult:
     self._state_take_playing = False
     self._take.cursor = -1
     self._frame_history_dirty = True
-    return CommandResult.good(f"loaded {self._keyframes[slot].name}")
+    return CommandResult.good(f"loaded {self.keyframes[slot].name}")
 
 
 def add_model_keyframe(self: Session, c: cmd.AddModelKeyframe) -> CommandResult:

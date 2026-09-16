@@ -41,9 +41,12 @@ def reload(self: Session, c: cmd.Reload) -> CommandResult:
 
 def new_scene(self: Session, c: cmd.NewScene) -> CommandResult:
     caps = self._adapter.caps
-    if not caps.scene_files:
+    if not caps.supports("scene_new"):
         return CommandResult.bad(f"{caps.name} does not support scene files")
-    self._adapter.new_scene()
+    try:
+        self._adapter.new_scene()
+    except Exception as exc:
+        return CommandResult.bad(str(exc))
     self._pause_loaded_scene()
     self._asset_path = None
     self._selected = 0
@@ -56,7 +59,7 @@ def new_scene(self: Session, c: cmd.NewScene) -> CommandResult:
 
 def open_scene(self: Session, c: cmd.OpenScene) -> CommandResult:
     caps = self._adapter.caps
-    if not caps.scene_files:
+    if not caps.supports("scene_open"):
         return CommandResult.bad(f"{caps.name} does not support scene files")
     if not self._pause_before_model_change():
         return CommandResult.bad("physics backend rejected pause before opening scene")
@@ -77,7 +80,7 @@ def open_scene(self: Session, c: cmd.OpenScene) -> CommandResult:
 
 def save_scene(self: Session, c: cmd.SaveScene) -> CommandResult:
     caps = self._adapter.caps
-    if not caps.scene_files:
+    if not caps.supports("scene_save"):
         return CommandResult.bad(f"{caps.name} does not support scene files")
     path = Path(c.path).expanduser().resolve()
     try:
@@ -283,14 +286,19 @@ def rename_model_element(self: Session, c: cmd.RenameModelElement) -> CommandRes
         return CommandResult.bad(f"Unknown node_id={c.node_id}")
     if not node.source_editable:
         return CommandResult.bad(f"{node.name} has no editable source element")
+    selected = self._selected_node_id == node.node_id
     try:
         changed = self._adapter.rename_model_element(c.node_id, c.name)
     except Exception as exc:
         return CommandResult.bad(str(exc))
     if not changed:
         return CommandResult.bad(f"{node.name} cannot be renamed")
+    if selected:
+        # A rebuild group may defer structure refresh until all edits succeed.
+        # Keep the selected element's new identity for that final refresh.
+        node.source_name = c.name.strip()
     self._refresh_structure()
-    return CommandResult.good(f"Renamed {node.name}")
+    return CommandResult.good(f"Renamed {c.name}")
 
 
 def model_edit_batch(self: Session, c: cmd.ModelEditBatch) -> CommandResult:
@@ -305,7 +313,9 @@ def model_edit_batch(self: Session, c: cmd.ModelEditBatch) -> CommandResult:
         return CommandResult.bad("A model edit batch contains an unsupported operation")
     selected = self.selected_node
     selected_identity = (
-        (selected.model_id, selected.type, selected.name) if selected is not None else None
+        (selected.model_id, selected.type, selected.source_name or selected.name)
+        if selected is not None
+        else None
     )
     if selected is not None:
         for edit in c.edits:
@@ -317,7 +327,7 @@ def model_edit_batch(self: Session, c: cmd.ModelEditBatch) -> CommandResult:
             if isinstance(edit, cmd.RemoveModelElementEdit):
                 selected_identity = None
             elif isinstance(edit, cmd.RenameModelElementEdit):
-                selected_identity = (selected.model_id, selected.type, edit.name)
+                selected_identity = (selected.model_id, selected.type, edit.name.strip())
     try:
         node_ids = self._adapter.apply_model_edit_batch(c.edits)
     except Exception as exc:
@@ -328,23 +338,7 @@ def model_edit_batch(self: Session, c: cmd.ModelEditBatch) -> CommandResult:
     self._selected_node_id = -1
     self._refresh_structure()
     if selected_identity is not None:
-        model_id, node_type, name = selected_identity
-        body_types = {NodeType.LINK, NodeType.ROBOT}
-        restored = next(
-            (
-                node
-                for node in self._nodes
-                if node.model_id == model_id
-                and node.name == name
-                and (
-                    node.type is node_type or (node.type in body_types and node_type in body_types)
-                )
-            ),
-            None,
-        )
-        if restored is not None:
-            self._selected = restored.object_id
-            self._selected_node_id = restored.node_id
+        self._restore_model_selection(*selected_identity)
     entity_id = next((node_id for node_id in reversed(node_ids) if node_id >= 0), -1)
     return CommandResult.good(f"Applied {len(c.edits)} model edits", entity_id)
 
@@ -424,7 +418,7 @@ def remove_model_component(self: Session, c: cmd.RemoveModelComponent) -> Comman
 
 def add_resource_root(self: Session, c: cmd.AddResourceRoot) -> CommandResult:
     caps = self._adapter.caps
-    if not caps.scene_files or not c.path.is_dir():
+    if not caps.scene_authoring or not c.path.is_dir():
         return CommandResult.bad(f"Resource directory is unavailable: {c.path}")
     return (
         CommandResult.good(f"Added resource directory {c.path}")

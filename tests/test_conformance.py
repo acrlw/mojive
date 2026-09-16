@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from mojive import commands as cmd
-from mojive.adapters.base import FrameNeeds
-from mojive.adapters.conformance import check_adapter
+from mojive.adapters.base import AdapterCaps, FrameNeeds, SceneAdapterBase
+from mojive.adapters.conformance import check_adapter, check_scene_provider
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
 from mojive.app.backends import available_backends, make_adapter
@@ -84,3 +84,73 @@ def test_conformance_requires_every_camera_to_be_an_entity():
 
     failed = {check.name for check in report.checks if not check.ok}
     assert "camera entities" in failed
+
+
+def test_read_only_provider_needs_no_editor_or_physics_interface():
+    scene = Scene()
+    scene.box()
+
+    class Provider:
+        structure_revision = 0
+
+        def scene_source(self):
+            return scene.source
+
+        def frame(self, needs):
+            return scene.frame
+
+    report = check_scene_provider(Provider())
+    assert report.ok, report.checks
+
+
+def test_minimal_editor_adapter_can_inherit_all_unadvertised_defaults():
+    scene = Scene()
+    scene.box()
+
+    class Adapter(SceneAdapterBase):
+        def scene_source(self):
+            return scene.source
+
+        def frame(self, needs):
+            return scene.frame
+
+    report = check_adapter(Adapter())
+    assert report.ok, report.checks
+
+
+def test_claimed_write_capability_reports_inherited_unsupported_methods():
+    from dataclasses import replace
+
+    adapter = StaticSceneAdapter(Scene())
+    adapter.caps = replace(adapter.caps, write_qpos=True)
+    report = check_adapter(adapter)
+    failure = next(check for check in report.checks if check.name == "capability write_qpos")
+    assert not failure.ok
+    assert "set_qpos_batch" in failure.detail
+    assert "set_qpos" in failure.detail
+
+
+def test_external_clock_does_not_require_internal_stepping():
+    from dataclasses import replace
+
+    adapter = StaticSceneAdapter(Scene())
+    adapter.caps = replace(adapter.caps, simulation=True, external_clock=True, clock_control=False)
+    adapter.timestep = lambda: 0.01
+    report = check_adapter(adapter)
+    assert report.ok, report.checks
+
+
+def test_missing_provider_methods_and_stream_failures_are_named():
+    report = check_scene_provider(object())
+    assert not report.ok
+    assert "scene_source" in report.checks[0].detail
+
+    class Broken(SceneAdapterBase):
+        caps = AdapterCaps(name="broken")
+
+        def scene_source(self):
+            raise ValueError("bad fixture")
+
+    report = check_adapter(Broken())
+    assert not report.ok
+    assert any("ValueError: bad fixture" in check.detail for check in report.checks)

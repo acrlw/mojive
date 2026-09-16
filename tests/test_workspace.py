@@ -50,6 +50,34 @@ pytestmark = [pytest.mark.integration, pytest.mark.physics]
 ASSETS = Path(__file__).parents[1] / "assets"
 
 
+def test_failed_workspace_open_restores_primary_file_identity_and_physics(tmp_path):
+    adapter = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    try:
+        original_path = tmp_path / "original.mojive.json"
+        adapter.save_scene(original_path)
+        models = adapter.scene_models()
+        source_count = adapter.scene_source().instance_count
+        before = adapter.capture_state()
+        document = json.loads(original_path.read_text())
+        document["root_mjcf"] = (
+            '<mujoco><worldbody><geom type="sphere" size="-1"/></worldbody></mujoco>'
+        )
+        failed = tmp_path / "failed.mojive.json"
+        failed.write_text(json.dumps(document))
+        with pytest.raises(Exception, match="size"):
+            adapter.open_scene(failed)
+        assert adapter._path == original_path
+        assert adapter.scene_models() == models
+        assert adapter.primary._root_path == ASSETS / "test_scene.xml"
+        assert adapter.primary._path == ASSETS / "test_scene.xml"
+        assert adapter.scene_source().instance_count == source_count
+        np.testing.assert_array_equal(adapter.capture_state().qpos, before.qpos)
+        adapter.primary.reload()
+        assert adapter.scene_source().instance_count == source_count
+    finally:
+        adapter.release()
+
+
 def workspace() -> WorkspaceAdapter:
     primary = MuJoCoAdapter()
     primary.new_scene()
@@ -1371,15 +1399,68 @@ def test_empty_root_model_edit_batch_resolves_new_body_by_key() -> None:
     assert {"fixture_root", "fixture_visual"} <= names
 
 
-def test_model_edit_batch_restores_selection_by_model_element_identity() -> None:
+@pytest.mark.parametrize("kind", ("body", "joint"))
+@pytest.mark.parametrize("attached", (False, True))
+def test_single_model_edit_preserves_selection_across_reindex_and_history(kind, attached) -> None:
+    document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "joint_types.xml"))
+    model_id = (
+        document.add_scene_model(ASSETS / "joint_types.xml", np.zeros(3), np.eye(3))
+        if attached
+        else 0
+    )
+    session = Session(document)
+    try:
+        assert session.submit(cmd.Pause())
+        nodes = [n for n in session.nodes if n.model_id == model_id]
+        parent = next(n for n in nodes if n.source_name == "free_body")
+        if kind == "body":
+            selected = next(n for n in nodes if n.source_name == "welded")
+            element_type = "body"
+        else:
+            selected = next(n for n in nodes if n.type is NodeType.JOINT)
+            element_type = "geom:box"
+        selected_name = selected.name
+        assert session.submit(cmd.SelectNode(selected.node_id))
+        result = session.submit(cmd.AddModelElement(parent.node_id, element_type, "added"))
+        assert result.ok, result.message
+        assert session.selected_node.name == selected_name
+        assert session.selected_node.node_id != selected.node_id
+        assert session.selected == session.selected_node.object_id
+        for command in (cmd.Undo(), cmd.Redo()):
+            result = session.submit(command)
+            assert result.ok, result.message
+            assert session.selected_node.name == selected_name
+        result = session.submit(cmd.RenameModelElement(session.selected_node.node_id, " renamed "))
+        assert result.ok, result.message
+        assert session.selected_node.source_name == "renamed"
+        assert session.submit(cmd.Undo()).ok
+        assert session.selected_node.name == selected_name
+        assert session.submit(cmd.Redo()).ok
+        assert session.selected_node.source_name == "renamed"
+        with pytest.raises(RuntimeError, match="cancel diagnostic edit"), session.edit():
+            assert session.submit(cmd.RenameModelElement(session.selected_node.node_id, "failed"))
+            raise RuntimeError("cancel diagnostic edit")
+        assert session.selected_node.source_name == "renamed"
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize("attached", (False, True))
+def test_model_edit_batch_restores_selection_by_model_element_identity(attached) -> None:
     document = WorkspaceAdapter(MuJoCoAdapter(ASSETS / "test_scene.xml"))
+    model_id = (
+        document.add_scene_model(ASSETS / "test_scene.xml", np.zeros(3), np.eye(3))
+        if attached
+        else 0
+    )
     session = Session(document)
     assert session.submit(cmd.Pause())
-    removed = next(node for node in session.nodes if node.name == "frame")
+    nodes = [node for node in session.nodes if node.model_id == model_id]
+    removed = next(node for node in nodes if node.source_name == "frame")
     selected = next(
         node
-        for node in session.nodes
-        if node.name == "mark_sphere" and node.type in (NodeType.LINK, NodeType.ROBOT)
+        for node in nodes
+        if node.source_name == "mark_sphere" and node.type in (NodeType.LINK, NodeType.ROBOT)
     )
     assert session.submit(cmd.SelectNode(selected.node_id))
 
@@ -1391,7 +1472,8 @@ def test_model_edit_batch_restores_selection_by_model_element_identity() -> None
 
     assert result.ok, result.message
     assert session.selected_node is not None
-    assert session.selected_node.name == "mark_sphere"
+    assert session.selected_node.source_name == "mark_sphere"
+    assert session.selected_node.model_id == model_id
     assert session.selected == session.selected_node.object_id
 
     selected = session.selected_node
@@ -1406,7 +1488,8 @@ def test_model_edit_batch_restores_selection_by_model_element_identity() -> None
     )
     assert result.ok, result.message
     assert session.selected_node is not None
-    assert session.selected_node.name == "renamed_mark_sphere"
+    assert session.selected_node.source_name == "renamed_mark_sphere"
+    assert session.selected_node.model_id == model_id
 
     selected = session.selected_node
     result = session.submit(

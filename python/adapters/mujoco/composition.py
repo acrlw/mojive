@@ -111,6 +111,21 @@ class _ModelComposition:
         self._install(self._compile_composed_model())
         return self.restore_state(state.physics)
 
+    def capture_document_state(self) -> object | None:
+        state = self.capture_edit_state()
+        return None if state is None else (state, self._path, self._root_path, self.caps)
+
+    def restore_document_state(self, state: object) -> bool:
+        if (
+            not isinstance(state, tuple)
+            or len(state) != 4
+            or not isinstance(state[0], _CompositionEditState)
+        ):
+            return False
+        self._path, self._root_path, self.caps = state[1:]
+        self._root_spec = state[0].root_spec.copy()
+        return self.restore_edit_state(state[0])
+
     def add_scene_model(self, path: Path, position, rotation) -> int:
         if self._root_spec is None:
             return -1

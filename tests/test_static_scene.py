@@ -173,7 +173,7 @@ def test_global_playback_controls_prioritize_recording_and_take_replay():
     app._toggle_playback()
     assert not session.state_take_recording and session.paused
     assert session.state_take_cursor == 3
-    assert panel._take_selection == (3, 4)
+    assert panel._editor.take_selection == (3, 4)
 
     assert session.submit(cmd.PlayStateTake())
     session.tick(FrameNeeds.none(), wall_dt=0.005)

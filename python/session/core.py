@@ -44,6 +44,7 @@ from mojive.types import (
 
 from .dispatch import dispatch
 from .editing import _Editing
+from .keyframes import ModelKeyframeCatalog
 from .playback import _Playback
 from .source import _Source
 from .state import (
@@ -104,7 +105,7 @@ class Session(_Editing, _Playback, _Source):
         self._actuators_by_joint: dict[int, tuple[ActuatorInfo, ...]] = {}
         self._cameras: list[CameraInfo] = []
         self._camera_slot_by_id: dict[int, int] = {}
-        self._keyframes: list[KeyframeInfo] = []
+        self._model_keyframes = ModelKeyframeCatalog()
         self._sensor_infos: list[SensorInfo] = []
         self._equality_constraints: list[EqualityConstraintInfo] = []
         self._active_keyframe = -1
@@ -268,7 +269,16 @@ class Session(_Editing, _Playback, _Source):
     @property
     def keyframes(self) -> list[KeyframeInfo]:
         """Return available physics keyframes."""
-        return self._keyframes
+        return self._model_keyframes.items
+
+    @property
+    def keyframe_revision(self) -> int:
+        """Return the preset metadata revision, independent of appearance changes."""
+        return self._model_keyframes.revision
+
+    def model_keyframes(self, model_id: int) -> tuple[KeyframeInfo, ...]:
+        """Return sorted preset metadata for one model, stable until content changes."""
+        return self._model_keyframes.for_model(model_id)
 
     @property
     def active_keyframe(self) -> int:
