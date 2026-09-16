@@ -217,6 +217,20 @@ class SceneSourceBuilder:
         self._hidden_count = int(np.count_nonzero(~keep))
         materials = src.materials or [DEFAULT_MATERIAL]
         untextured = tuple(replace(material, texture=None) for material in materials)
+        colors = self._linear_color(src.geom_rgba)
+        collision_color = self._linear_color((1.0, 0.55, 0.12, 1.0))
+        count = src.instance_count
+        if len(src.geom_local) >= count:
+            local_transforms = np.asarray(src.geom_local[:count], np.float32)
+        else:
+            local_transforms = np.broadcast_to(np.eye(4, dtype=np.float32), (count, 4, 4)).copy()
+            local_transforms[: len(src.geom_local)] = src.geom_local
+        scaled_transforms = local_transforms.copy()
+        scaled_transforms[:, :3, :3] *= np.asarray(src.geom_size, np.float32)[:, None, :]
+        material_values: dict[tuple[int, bool], np.ndarray] = {}
+        default_tex = np.array([1.0, 1.0, 0.0, 0.0], np.float32)
+        reflected_tex = np.array([1.0, -1.0, 0.0, 1.0], np.float32)
+        no_cube = np.zeros(4, np.float32)
 
         sb = SceneBuilder()
         slots: list[int] = []
@@ -230,9 +244,11 @@ class SceneSourceBuilder:
             mat_index = src.geom_material[i] if i < len(src.geom_material) else 0
             mat = materials[mat_index] if 0 <= mat_index < len(materials) else DEFAULT_MATERIAL
             rgba = src.geom_rgba[i]
+            color = colors[i]
             if collision:
                 mat = DEFAULT_MATERIAL
                 rgba = np.array((1.0, 0.55, 0.12, 1.0), np.float32)
+                color = collision_color
                 if (
                     view == int(GeometryRole.BOTH)
                     and int(src.geom_role[i]) & int(GeometryRole.VISUAL)
@@ -268,14 +284,8 @@ class SceneSourceBuilder:
                 key = src.geom_convex_mesh[i]
             infinite = bool(src.geom_infinite_plane[i]) if len(src.geom_infinite_plane) else False
 
-            local = (
-                np.asarray(src.geom_local[i], np.float32)
-                if len(src.geom_local) > i
-                else np.eye(4, dtype=np.float32)
-            )
-
-            ls_i = local.copy()
-            ls_i[:3, :3] = local[:3, :3] * size[None, :]
+            local = local_transforms[i]
+            ls_i = scaled_transforms[i]
             if (
                 collision
                 and view == int(GeometryRole.BOTH)
@@ -283,24 +293,35 @@ class SceneSourceBuilder:
             ):
                 # Shared mesh/hull faces are often coplanar. Separate only the
                 # translucent comparison overlay; collision-only stays exact.
+                ls_i = ls_i.copy()
                 ls_i[:3, :3] *= 1.005
 
-            tex = self._tex_coef(mat, size, infinite, key, local)
-            cube = self._cube_coef(src, mat, size, key, local)
+            if mat.texture is None:
+                tex = (
+                    reflected_tex
+                    if key.shape is MeshShape.CAPSULE_CAP and float(local[2, 2]) < 0.0
+                    else default_tex
+                )
+                cube = no_cube
+            else:
+                tex = self._tex_coef(mat, size, infinite, key, local)
+                cube = self._cube_coef(src, mat, size, key, local)
+            planar = key.shape in (MeshShape.PLANE, MeshShape.BOX)
+            material_key = (matid, planar)
+            if material_key not in material_values:
+                material_values[material_key] = np.array(
+                    [mat.emission, mat.specular, mat.shininess, mat.reflectance if planar else 0.0],
+                    np.float32,
+                )
+            if color[3] != rgba[3]:
+                color = color.copy()
+                color[3] = rgba[3]
             slot = sb.add(
                 mesh=key,
                 matid=matid,
                 transform=ls_i,
-                color=self._linear_color(rgba),
-                material=np.array(
-                    [
-                        mat.emission,
-                        mat.specular,
-                        mat.shininess,
-                        (mat.reflectance if key.shape in (MeshShape.PLANE, MeshShape.BOX) else 0.0),
-                    ],
-                    np.float32,
-                ),
+                color=color,
+                material=material_values[material_key],
                 object_id=int(src.geom_object_id[i]),
                 segmentation=(
                     src.geom_segmentation[i]
@@ -367,8 +388,9 @@ class SceneSourceBuilder:
         self._geom_sources = self._src_geom[pose == int(InstancePoseSource.GEOM)]
         self._site_rot = np.zeros((len(self._site_rows), 3, 3), np.float32)
         self._site_pos = np.zeros((len(self._site_rows), 3), np.float32)
-        self._ls_rot = np.stack([m[:3, :3] for m in ls]) if n else np.zeros((0, 3, 3), np.float32)
-        self._ls_pos = np.stack([m[:3, 3] for m in ls]) if n else np.zeros((0, 3), np.float32)
+        local_matrices = np.asarray(ls, np.float32).reshape(n, 4, 4)
+        self._ls_rot = local_matrices[:, :3, :3].copy()
+        self._ls_pos = local_matrices[:, :3, 3].copy()
         self._ls_scale = (
             np.diagonal(self._ls_rot, axis1=1, axis2=2).copy()
             if n
@@ -606,8 +628,8 @@ class SceneSourceBuilder:
 
     @staticmethod
     def _linear_color(rgba) -> np.ndarray:
-        c = np.asarray(rgba, np.float32).reshape(4).copy()
-        c[:3] = np.power(np.clip(c[:3], 0.0, 1.0), 2.2, dtype=np.float32)
+        c = np.asarray(rgba, np.float32).copy()
+        c[..., :3] = np.power(np.clip(c[..., :3], 0.0, 1.0), 2.2, dtype=np.float32)
         return c
 
     def _mesh_triangles(self) -> dict[MeshKey, int]:

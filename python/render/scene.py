@@ -256,25 +256,27 @@ class SceneBuilder:
         scene = RenderScene(count=n)
         scene.bucket = row_bucket[order].astype(np.int32)
         scene.transforms = (
-            np.stack([r["transform"] for r in self._rows])[order]
+            np.asarray([r["transform"] for r in self._rows])[order]
             if n
             else np.zeros((0, 4, 4), np.float32)
         )
         scene.colors = (
-            np.stack([r["color"] for r in self._rows])[order] if n else np.zeros((0, 4), np.float32)
+            np.asarray([r["color"] for r in self._rows])[order]
+            if n
+            else np.zeros((0, 4), np.float32)
         )
         scene.material = (
-            np.stack([r["material"] for r in self._rows])[order]
+            np.asarray([r["material"] for r in self._rows])[order]
             if n
             else np.zeros((0, 4), np.float32)
         )
         scene.tex_coef = (
-            np.stack([r["tex_coef"] for r in self._rows])[order]
+            np.asarray([r["tex_coef"] for r in self._rows])[order]
             if n
             else np.zeros((0, 4), np.float32)
         )
         scene.cube_coef = (
-            np.stack([r["cube_coef"] for r in self._rows])[order]
+            np.asarray([r["cube_coef"] for r in self._rows])[order]
             if n
             else np.zeros((0, 4), np.float32)
         )
@@ -284,7 +286,7 @@ class SceneBuilder:
             else np.zeros(0, np.uint32)
         )
         scene.segmentation = (
-            np.stack([r["segmentation"] for r in self._rows])[order]
+            np.asarray([r["segmentation"] for r in self._rows])[order]
             if n
             else np.full((0, 2), -1, np.int32)
         )

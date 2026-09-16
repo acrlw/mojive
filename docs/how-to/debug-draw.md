@@ -63,6 +63,12 @@ depth.arrows("robot-velocities", starts, ends, (0.2, 0.7, 1.0, 1.0), 2.0)
 Do not split a batch merely to assign numeric IDs to records. Split only where independent
 lifetime or erasure semantics are required.
 
+Local renderer layers also provide `polylines(id, points, color, width_px, closed=False)` for
+joined paths with shape `[N, P, 3]`. Paths share a point count and width; `color` is one RGBA
+value or `[N, 4]`. Neighbors remain within each path, preserving open endpoints and closed joins.
+The complete batch has one retained ID. Editor camera icons use this path to keep the number of
+submission calls independent of the number of camera entities. The remote command protocol is unchanged.
+
 ## Solid straight and circular arrows
 
 `arrow_3d` and `arc_arrow_3d` share the 3D gizmo's cylinder, cone, and shoulder geometry.

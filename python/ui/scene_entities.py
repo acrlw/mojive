@@ -201,16 +201,12 @@ class SceneEntityHelpers:
             viewport_height,
             ui_scale,
         )
-        for index, (object_id, _view, selected) in enumerate(helpers):
-            color = SELECTED_COLOR if selected else HELPER_COLOR
-            for part, (points, width, closed) in zip(("outline", "lens"), paths, strict=True):
-                icon_layer.polyline(
-                    f"camera:{object_id}:{part}",
-                    points[index],
-                    color,
-                    width,
-                    closed=closed,
-                )
+        colors = np.asarray(
+            [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
+            np.float32,
+        )
+        for part, (points, width, closed) in zip(("outline", "lens"), paths, strict=True):
+            icon_layer.polylines(f"cameras:{part}", points, colors, width, closed=closed)
         if self.show_influence:
             for object_id, view, selected in helpers:
                 if selected:

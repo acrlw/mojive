@@ -429,6 +429,57 @@ class Layer:
         st.colors[i : i + count] = colors[:count] if colors.ndim == 2 else _rgba(color)
         st.sizes[i : i + count] = width_px
 
+    def polylines(
+        self,
+        ident: str,
+        points,
+        color,
+        width_px: float = 1.5,
+        *,
+        closed: bool = False,
+        duration: float = NEVER,
+    ) -> None:
+        """Submit independent joined paths [N, P, 3] with uniform or per-path RGBA.
+
+        One retained ID owns the batch. Paths share a point count and width, but
+        never share endpoint neighbors; updating the ID replaces the whole batch.
+        """
+        p = np.asarray(points, np.float32)
+        if p.ndim != 3 or p.shape[2] != 3 or not np.isfinite(p).all():
+            raise ValueError("Polyline points must be finite [N, P, 3]")
+        colors = np.asarray(color, np.float32)
+        if colors.shape == (3,):
+            colors = np.append(colors, np.float32(1))
+        if colors.shape not in ((4,), (len(p), 4)) or not np.isfinite(colors).all():
+            raise ValueError("Polyline colors must be finite RGBA or [N, 4]")
+        if not math.isfinite(width_px) or width_px <= 0 or not math.isfinite(duration):
+            raise ValueError("Polyline width must be positive and width/duration finite")
+        segments = max(0, p.shape[1] - (not closed))
+        count = len(p) * segments
+        if not count:
+            self._remove(ident)
+            return
+        index = self._alloc(PrimitiveType.STROKE, ident, count, duration)
+        if index < 0:
+            return
+        store = self._stores[PrimitiveType.STROKE]
+        dst = store.positions[index : index + count].reshape(len(p), segments, 3, 3)
+        if closed:
+            dst[:, 0, 0] = p[:, -1]
+            dst[:, 1:, 0] = p[:, :-1]
+            dst[:, :, 1] = p
+            dst[:, :-1, 2] = p[:, 1:]
+            dst[:, -1, 2] = p[:, 0]
+        else:
+            dst[:, :, 1] = p[:, :-1]
+            dst[:, :, 2] = p[:, 1:]
+            dst[:, 0, 0] = p[:, 0]
+            dst[:, 1:, 0] = p[:, :-2]
+        store.colors[index : index + count].reshape(len(p), segments, 4)[:] = (
+            colors[:, None, :] if colors.ndim == 2 else colors
+        )
+        store.sizes[index : index + count] = width_px
+
     def triangles(self, ident: str, vertices, color, duration: float = NEVER) -> None:
         """Submit a batch of filled world-space triangles under one retained ID.
 
