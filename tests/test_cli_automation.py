@@ -339,6 +339,44 @@ def test_capture_requires_both_dimensions_before_loading(monkeypatch, capsys):
     assert "width and height must be provided together" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_keyframe_recording_uses_returned_ids_and_checks_initial_load(monkeypatch, capsys, fails):
+    from mojive.commands import CommandResult
+
+    loaded, recorded, released = [], [], []
+
+    def submit(command):
+        loaded.append(command.keyframe_id)
+        return CommandResult.bad("keyframe load rejected") if fails else CommandResult.good()
+
+    def record(_path, *, frames, before_frame, **_kwargs):
+        for index in range(frames):
+            before_frame(index, viewer)
+            recorded.append(loaded[-1])
+
+    viewer = SimpleNamespace(
+        session=SimpleNamespace(
+            keyframes=[SimpleNamespace(keyframe_id=7), SimpleNamespace(keyframe_id=42)],
+            submit=submit,
+        ),
+        app=SimpleNamespace(
+            set_fixed_render_size=lambda *_args: None, camera=SimpleNamespace(distance=1)
+        ),
+        sync=lambda: None,
+        record=record,
+        release=lambda: released.append(True),
+    )
+    monkeypatch.setattr("mojive.cli.capture._resolve", lambda value: value)
+    monkeypatch.setattr("mojive.app.composition.build", lambda *_args, **_kwargs: viewer)
+    assert cli.main(["keyframes", "scene", "-o", "clip.mp4"]) == (2 if fails else 0)
+    assert released == [True]
+    if fails:
+        assert loaded == [7] and not recorded
+        assert "keyframe load rejected" in capsys.readouterr().err
+    else:
+        assert loaded == [7, 7, 42] and recorded == [7, 42]
+
+
 def test_audit_rejects_unsupported_adapter_before_loading(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_resolve", lambda _: pytest.fail("Wrong adapter loaded an asset"))
     assert cli.main(["audit", "unused", "--adapter", "toy", "--json"]) == 2

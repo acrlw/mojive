@@ -33,6 +33,34 @@ matrix; other agent guidance links here.
 
 ## Change mapping
 
+MuJoCo viewer compatibility is covered by `tests/test_mujoco_viewer.py` (real MuJoCo state with
+isolated window ownership) and `tests/gpu/test_mujoco_viewer.py` (user geometry on both renderers).
+`tests/test_mujoco_model_updates.py` covers every `mjOption` field and enable/disable flag,
+physics-only model edits, control metadata, diagnostic refresh, and visual/resource invalidation.
+The tests distinguish retained model/data objects, retained scene sources, and updated values.
+Run `make viewer-compat ARGS='--seconds 10'` for the actual window, callback, camera and user-scene
+workflow. Space pauses/resumes the caller's simulation; the example closes after ten seconds.
+See the [migration guide](../tutorials/mujoco-viewer.md) for supported signatures and limitations.
+The minimal comparison programs are `make viewer-managed` and `make viewer-passive`.
+
+`make geometry-views ARGS='--renderer opengl'` (or `wgpu` / `bgfx`) captures the four geometry
+views using `assets/geometry_views.xml`. Inspect the hidden transparent capsule proxy and the
+shared concave mesh/hull comparison. `tests/test_geometry_views.py` checks classification and
+state preservation; `tests/gpu/test_geometry_views.py` verifies real colors, depth, IDs, resource
+reuse, the MuJoCo-compatible renderer's segmentation, and scene screenshot/video frames in
+each view. The repeated-instance regression ensures Both keeps diagnostic overlays batched.
+With `MOJIVE_RENDERER=bgfx`, the geometry-view tests also count native mesh/texture uploads
+across repeated view switches and verify that replacing the source clears retained mesh slots.
+`make geometry-ui` clicks the production Hierarchy and Inspector controls in English and
+Chinese at narrow, standard and HiDPI sizes, checks that Help remains visible in the real menu
+bar, and captures the resulting panels. Inspect the captures under `output/geometry-ui`.
+
+Viewer capture sharing is covered by `tests/test_capture_sharing.py`: saved image/file formats,
+save failures, filename uniqueness, queued requests, cancellation, and asynchronous clipboard
+ownership. `make keyframe-timeline ARGS='--recording-settings --language zh_CN'` captures the
+settings controls. Desktop acceptance must also paste a screenshot and a finished video into an
+application accepting images/file attachments; offscreen rendering does not validate that transfer.
+
 Code, executable example, test, and build behavior changes finish with `make check`. The table adds
 checks for each affected behavior; combine applicable rows without rerunning shared prerequisites.
 Pure prose, link, and metadata edits use their own rows instead of the CPU or GPU suites.
@@ -165,6 +193,31 @@ visible image. A nested Weston running inside Xvfb instead uses software composi
 require Mesa's software Vulkan ICD; it is not a substitute for GPU performance measurements.
 
 ## Renderer performance
+
+`make model-loading` captures the empty scene, file-drop preview, and MJCF/URDF loading UI.
+For resource-loading measurements on an existing model, use the same target without a window:
+
+```bash
+make model-loading ARGS='--offscreen --asset /path/to/scene.xml --renderer opengl --profile'
+```
+
+This initializes an empty renderer before timing source preparation, resource replacement, and
+the first readable image. Device startup is excluded; image readback waits for GPU completion.
+The output directory contains `model.png`, `report.json`, and, with `--profile`,
+`resources.prof` / `resources.txt`. Omit profiling for repeated latency measurements, and run
+them separately from other tests. This measures the resource path used by runtime loading;
+window presentation and UI responsiveness still require the windowed target.
+`tests/gpu/test_backend_parity.py` checks OpenGL power-of-two texture filtering without redundant
+CPU mipmap generation. `tests/gpu/test_texture_mipmaps.py` reads back WebGPU mip levels for 2D
+and cube textures, checking sRGB, alpha, narrow extents, resource reuse, and GPU-only generation
+for power-of-two sizes. Non-power-of-two sizes retain shared area filtering; CPU tests compare
+its sparse reduction against exact source-pixel overlap.
+
+`make timeline-profile` measures production Keyframes panel CPU draw-data generation at 100,
+10,000 and 100,000 keys, including zoom, pan and full selection. It requires no display server.
+On Linux, `make timeline-profile ARGS='--capture'` also renders the panel through offscreen EGL
+and saves images under `output/timeline-profile/`. The JSON report records CPU samples, vertex
+counts and the capture device; CPU timings exclude GPU submission and are not viewer frame rates.
 
 The production physics/render concurrency comparison includes the official MuJoCo 100-humanoid
 model (1,600 moving bodies, 2,700 degrees of freedom), deformable stress, and a lightweight rigid
@@ -387,3 +440,16 @@ production presets with dynamic icon fitting. Inspect JSON and images under
 README media uses isolated settings, the real jointed scene and fixed-size captures. Inspect
 all three files under `output/readme-media/` before delivery. The documentation gate checks
 local links, including the README image paths; the capture command checks identical dimensions.
+
+## Material and optional-feature acceptance
+
+`make material-workflow` captures box/floor material replacement, a skybox, and a retained
+floor grid whose spacing, width and color change under the same ID. On headless Linux,
+use `MOJIVE_GL=egl make material-workflow`; pass `ARGS='--renderer wgpu'` for WebGPU.
+The tool checks the box's color separately from the floor, so unrelated pixel changes cannot
+hide a broken material binding. Output is written under `output/material-workflow/`.
+
+`tests/test_feature_composition.py` verifies selected panel imports in a fresh interpreter,
+later activation, disabled-panel policy, minimal Viewer construction and socket suppression.
+`tests/test_timeline_gestures.py` exercises the production panel with real ImGui input without
+a native window. `make timeline-profile ARGS='--capture'` captures the same panel with EGL.

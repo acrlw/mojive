@@ -268,8 +268,8 @@ def test_viewport_target_uses_current_dock_geometry_in_the_resize_frame(viewer, 
         window_wgpu.glfw.poll_events()
         v.sync()
 
-        assert sampled[-1] == pytest.approx(v.app._viewport_panel_size)
-        expected = window.points_to_pixels(v.app._viewport_panel_size)
+        assert sampled[-1] == pytest.approx(v.app.viewport_surface.size)
+        expected = window.points_to_pixels(v.app.viewport_surface.size)
         image = v.app._viewport_image
         assert image is not None
         assert (image.width, image.height) == tuple(max(1, int(value)) for value in expected)

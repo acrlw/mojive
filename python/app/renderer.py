@@ -11,15 +11,19 @@ from typing import Any
 import numpy as np
 
 from mojive.adapters.base import FrameNeeds
+from mojive.app.mujoco_visuals import (
+    RND_FLAGS,
+    apply_render_options,
+    camera_view,
+    flag_enabled,
+    mode_value,
+)
 from mojive.render.backend import (
-    DebugView,
-    FrameMode,
-    LabelMode,
-    RenderFlag,
     RenderRequest,
     ShadowQuality,
 )
 from mojive.render.context import _select_backend
+from mojive.render.geometry import GeometryView, geometry_view, set_geometry_view
 from mojive.types import CameraView, InstancePoseSource, InstanceVisual
 
 try:
@@ -31,75 +35,6 @@ except ImportError as exc:  # pragma: no cover - optional dependency
 else:
     _IMPORT_ERROR = None
     DEFAULT_FONT_SCALE = mujoco.mjtFontScale.mjFONTSCALE_150
-
-
-_VIS_FLAGS = {
-    "mjVIS_CONVEXHULL": RenderFlag.CONVEXHULL,
-    "mjVIS_TEXTURE": RenderFlag.TEXTURE,
-    "mjVIS_JOINT": RenderFlag.JOINT,
-    "mjVIS_CAMERA": RenderFlag.CAMERA,
-    "mjVIS_ACTUATOR": RenderFlag.ACTUATOR,
-    "mjVIS_ACTIVATION": RenderFlag.ACTIVATION,
-    "mjVIS_LIGHT": RenderFlag.LIGHT,
-    "mjVIS_TENDON": RenderFlag.TENDON,
-    "mjVIS_RANGEFINDER": RenderFlag.RANGEFINDER,
-    "mjVIS_CONSTRAINT": RenderFlag.CONSTRAINT,
-    "mjVIS_INERTIA": RenderFlag.INERTIA,
-    "mjVIS_SCLINERTIA": RenderFlag.SCLINERTIA,
-    "mjVIS_CONTACTPOINT": RenderFlag.CONTACTPOINT,
-    "mjVIS_ISLAND": RenderFlag.ISLAND,
-    "mjVIS_CONTACTFORCE": RenderFlag.CONTACTFORCE,
-    "mjVIS_CONTACTSPLIT": RenderFlag.CONTACTSPLIT,
-    "mjVIS_AUTOCONNECT": RenderFlag.AUTOCONNECT,
-    "mjVIS_COM": RenderFlag.COM,
-    "mjVIS_STATIC": RenderFlag.STATIC,
-    "mjVIS_SKIN": RenderFlag.SKIN,
-    "mjVIS_FLEXVERT": RenderFlag.FLEXVERT,
-    "mjVIS_FLEXEDGE": RenderFlag.FLEXEDGE,
-    "mjVIS_FLEXFACE": RenderFlag.FLEXFACE,
-    "mjVIS_FLEXSKIN": RenderFlag.FLEXSKIN,
-    "mjVIS_BODYBVH": RenderFlag.BODYBVH,
-    "mjVIS_MESHBVH": RenderFlag.MESHBVH,
-}
-
-_RND_FLAGS = {
-    "mjRND_SHADOW": RenderFlag.SHADOW,
-    "mjRND_WIREFRAME": RenderFlag.WIREFRAME,
-    "mjRND_REFLECTION": RenderFlag.REFLECTION,
-    "mjRND_ADDITIVE": RenderFlag.ADDITIVE,
-    "mjRND_SKYBOX": RenderFlag.SKYBOX,
-    "mjRND_FOG": RenderFlag.FOG,
-    "mjRND_HAZE": RenderFlag.HAZE,
-    "mjRND_CULL_FACE": RenderFlag.CULL_FACE,
-}
-
-_LABEL_MODES = {
-    "mjLABEL_NONE": LabelMode.NONE,
-    "mjLABEL_BODY": LabelMode.BODY,
-    "mjLABEL_JOINT": LabelMode.JOINT,
-    "mjLABEL_GEOM": LabelMode.GEOM,
-    "mjLABEL_SITE": LabelMode.SITE,
-    "mjLABEL_CAMERA": LabelMode.CAMERA,
-    "mjLABEL_LIGHT": LabelMode.LIGHT,
-    "mjLABEL_TENDON": LabelMode.TENDON,
-    "mjLABEL_ACTUATOR": LabelMode.ACTUATOR,
-    "mjLABEL_CONSTRAINT": LabelMode.CONSTRAINT,
-    "mjLABEL_FLEX": LabelMode.FLEX,
-    "mjLABEL_SELECTION": LabelMode.SELECTION,
-    "mjLABEL_CONTACTPOINT": LabelMode.CONTACT_POINT,
-    "mjLABEL_CONTACTFORCE": LabelMode.CONTACT_FORCE,
-}
-
-_FRAME_MODES = {
-    "mjFRAME_NONE": FrameMode.NONE,
-    "mjFRAME_BODY": FrameMode.BODY,
-    "mjFRAME_GEOM": FrameMode.GEOM,
-    "mjFRAME_SITE": FrameMode.SITE,
-    "mjFRAME_CAMERA": FrameMode.CAMERA,
-    "mjFRAME_LIGHT": FrameMode.LIGHT,
-    "mjFRAME_CONTACT": FrameMode.CONTACT,
-    "mjFRAME_WORLD": FrameMode.WORLD,
-}
 
 
 @dataclass(frozen=True)
@@ -227,6 +162,15 @@ class Renderer:
         return self._width
 
     @property
+    def debug(self):
+        """Return retained 3D diagnostics rendered with RGB output, without a Viewer."""
+        self._require_open("debug")
+        draw = getattr(self._backend, "debug", None)
+        if draw is None:
+            raise RuntimeError("the active backend does not provide debug drawing")
+        return draw
+
+    @property
     def canvas2d(self):
         """Return a retained 2D diagnostic canvas rendered with RGB output."""
 
@@ -234,10 +178,7 @@ class Renderer:
         if self._canvas_2d is None:
             from mojive.render.canvas import Canvas2D
 
-            draw = getattr(self._backend, "debug", None)
-            if draw is None:
-                raise RuntimeError("the active backend does not provide debug drawing")
-            self._canvas_2d = Canvas2D(draw)
+            self._canvas_2d = Canvas2D(self.debug)
         return self._canvas_2d
 
     @property
@@ -281,7 +222,7 @@ class Renderer:
             self._cached_frame_needs = _frame_needs(option, self._model)
         frame = self._adapter.frame(self._cached_frame_needs)
         adapter_source = self._adapter.scene_source()
-        transparent_visual = _flag_enabled(option.flags, mujoco.mjtVisFlag, "mjVIS_TRANSPARENT")
+        transparent_visual = flag_enabled(option.flags, mujoco.mjtVisFlag, "mjVIS_TRANSPARENT")
         if (
             adapter_source is not self._adapter_source
             or transparent_visual != self._transparent_visual
@@ -291,6 +232,7 @@ class Renderer:
                 self._scene.maxgeom,
                 self._model,
                 transparent_visual,
+                geometry_view(self._backend),
             )
             _configure_segmentation(source)
             self._source = source
@@ -299,8 +241,8 @@ class Renderer:
             with self._gl_current():
                 self._backend.set_scene(source)
         if self._sync_render_option_state(option, option_changed):
-            _apply_render_options(self._backend, option, self._scene)
-        view = _camera_view(self._scene, self._model, self._aspect)
+            apply_render_options(self._backend, option, self._scene)
+        view = camera_view(self._scene, self._model, self._aspect)
         with self._gl_current():
             self._view = view
             self._backend.set_camera(view)
@@ -454,9 +396,20 @@ class Renderer:
         if member is None:
             raise ValueError(f"Unknown MuJoCo render flag: {name}")
         self._scene.flags[int(member)] = bool(enabled)
-        backend_flag = _RND_FLAGS.get(member.name)
+        backend_flag = RND_FLAGS.get(member.name)
         if backend_flag is not None:
             self._backend.set_flag(backend_flag, bool(enabled))
+
+    def set_geometry_view(self, view: GeometryView | str) -> None:
+        """Choose default, visual, collision, or both; publish with update_scene()."""
+        self._require_open("set_geometry_view")
+        view = GeometryView(view)
+        if view == geometry_view(self._backend):
+            return
+        with self._gl_current():
+            if not set_geometry_view(self._backend, view):
+                raise NotImplementedError("The backend does not support geometry views")
+        self._adapter_source = None
 
     @property
     def shadow_quality(self) -> ShadowQuality:
@@ -535,35 +488,28 @@ class Renderer:
             )
 
 
-def _camera_view(scene, model, aspect: float) -> CameraView:
-    left, right = scene.camera[0], scene.camera[1]
-    eye = (np.asarray(left.pos, np.float32) + np.asarray(right.pos, np.float32)) * 0.5
-    forward = np.asarray(left.forward, np.float32)
-    up = np.asarray(left.up, np.float32)
-    near = max(float(left.frustum_near), 1e-6)
-    far = max(float(left.frustum_far), near)
-    height = max(float(left.frustum_top - left.frustum_bottom), 1e-6)
-    orthographic = bool(left.orthographic)
-    fov_y = np.deg2rad(45.0) if orthographic else 2.0 * np.arctan2(height * 0.5, near)
-    distance = max(float(model.stat.extent), 1e-3)
-    return CameraView(
-        eye=eye,
-        target=(eye + forward * distance).astype(np.float32),
-        up=up,
-        fov_y=float(fov_y),
-        near=near,
-        far=far,
-        aspect=float(aspect),
-        orthographic=orthographic,
-        ortho_height=height if orthographic else 2.0 * distance * np.tan(fov_y * 0.5),
-    )
-
-
-def _limit_scene_source(source, max_geom: int, model, transparent_visual: bool):
+def _limit_scene_source(
+    source,
+    max_geom: int,
+    model,
+    transparent_visual: bool,
+    view: GeometryView = GeometryView.DEFAULT,
+):
     limit = max(int(max_geom), 0)
     keep = np.zeros(source.instance_count, bool)
     logical: set[tuple[int, int]] = set()
+    role_mask = {
+        GeometryView.DEFAULT: 0,
+        GeometryView.VISUAL: 1,
+        GeometryView.COLLISION: 2,
+        GeometryView.BOTH: 3,
+    }[view]
     for index in range(source.instance_count):
+        if view is GeometryView.DEFAULT:
+            if len(source.geom_group_visible) and not source.geom_group_visible[index]:
+                continue
+        elif len(source.geom_role) and not int(source.geom_role[index]) & role_mask:
+            continue
         pose = int(source.geom_pose_source[index])
         source_id = int(source.geom_source[index])
         if pose == int(InstancePoseSource.GEOM):
@@ -614,6 +560,13 @@ def _limit_scene_source(source, max_geom: int, model, transparent_visual: bool):
         geom_pose_source=source.geom_pose_source[indices].copy(),
         geom_visual=source.geom_visual[indices].copy(),
         geom_static=source.geom_static[indices].copy(),
+        geom_role=source.geom_role[indices].copy() if len(source.geom_role) else source.geom_role,
+        geom_group_visible=source.geom_group_visible[indices].copy()
+        if len(source.geom_group_visible)
+        else source.geom_group_visible,
+        geom_collision_mesh=[source.geom_collision_mesh[i] for i in indices]
+        if len(source.geom_collision_mesh)
+        else [],
         instance_island_body=source.instance_island_body[indices].copy(),
         geom_node=source.geom_node[indices].copy(),
         geom_local=source.geom_local[indices].copy(),
@@ -646,7 +599,7 @@ def _frame_needs(option, model=None) -> FrameNeeds:
     """Translate visible MuJoCo features into adapter-side dynamic data needs."""
 
     def visible(*names: str) -> bool:
-        return any(_flag_enabled(option.flags, mujoco.mjtVisFlag, name) for name in names)
+        return any(flag_enabled(option.flags, mujoco.mjtVisFlag, name) for name in names)
 
     def present(field: str) -> bool:
         return model is None or int(getattr(model, field, 0)) > 0
@@ -683,8 +636,8 @@ def _frame_needs(option, model=None) -> FrameNeeds:
             )
         )
     )
-    label_none = _mode_value(mujoco.mjtLabel, "mjLABEL_NONE")
-    frame_none = _mode_value(mujoco.mjtFrame, "mjFRAME_NONE")
+    label_none = mode_value(mujoco.mjtLabel, "mjLABEL_NONE")
+    frame_none = mode_value(mujoco.mjtFrame, "mjFRAME_NONE")
     diagnostics = diagnostics or int(option.label) != label_none or int(option.frame) != frame_none
     return FrameNeeds(
         poses=True,
@@ -696,49 +649,3 @@ def _frame_needs(option, model=None) -> FrameNeeds:
         islands=islands,
         bvh=bvh,
     )
-
-
-def _flag_enabled(values, enum_type, name: str) -> bool:
-    member = getattr(enum_type, name, None)
-    return bool(member is not None and member.value < len(values) and values[member.value])
-
-
-def _mode_value(enum_type, name: str) -> int | None:
-    member = getattr(enum_type, name, None)
-    return None if member is None else int(member.value)
-
-
-def _apply_render_options(backend, option, scene) -> None:
-    for name, flag in _VIS_FLAGS.items():
-        backend.set_flag(flag, _flag_enabled(option.flags, mujoco.mjtVisFlag, name))
-    for name, flag in _RND_FLAGS.items():
-        backend.set_flag(flag, _flag_enabled(scene.flags, mujoco.mjtRndFlag, name))
-
-    debug_view = DebugView.SHADED
-    if _flag_enabled(scene.flags, mujoco.mjtRndFlag, "mjRND_DEPTH"):
-        debug_view = DebugView.DEPTH
-    elif _flag_enabled(scene.flags, mujoco.mjtRndFlag, "mjRND_IDCOLOR"):
-        debug_view = DebugView.IDCOLOR
-    elif _flag_enabled(scene.flags, mujoco.mjtRndFlag, "mjRND_SEGMENT"):
-        debug_view = DebugView.SEGMENT
-    backend.set_debug_view(debug_view)
-
-    label = next(
-        (
-            mode
-            for name, mode in _LABEL_MODES.items()
-            if _mode_value(mujoco.mjtLabel, name) == int(option.label)
-        ),
-        LabelMode.NONE,
-    )
-    frame = next(
-        (
-            mode
-            for name, mode in _FRAME_MODES.items()
-            if _mode_value(mujoco.mjtFrame, name) == int(option.frame)
-        ),
-        FrameMode.NONE,
-    )
-    backend.set_label_mode(label)
-    backend.set_frame_mode(frame)
-    backend.set_bvh_depth(int(option.bvh_depth))

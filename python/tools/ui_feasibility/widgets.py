@@ -16,7 +16,7 @@ from mojive.ui.icons import (
     draw_icon_label,
 )
 from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.panels import keyframes as keyframes_panel_module
+from mojive.ui.keyframe_editor import controls as keyframes_panel_module
 from mojive.ui.panels import search_input, searchable_ordered_list_header
 from mojive.ui.viewport_widgets import (
     OVERLAY_GEOMETRY,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
+from importlib import import_module
 
 import numpy as np
 from imgui_bundle import imgui
@@ -336,8 +337,15 @@ class PanelManager:
         self,
         panels: list[Panel] | None = None,
         config: dict[str, PanelConfig] | None = None,
+        *,
+        builtin_ids: tuple[str, ...] | None = None,
     ) -> None:
-        self.panels: list[Panel] = list(panels) if panels is not None else default_panels()
+        if panels is not None and builtin_ids is not None:
+            raise ValueError("Pass either panels or builtin_ids, not both")
+        self._load_builtins = panels is None
+        self.panels: list[Panel] = (
+            list(panels) if panels is not None else default_panels(builtin_ids)
+        )
         self._pending_config = dict(config or {})
         problems = validate_panels(self.panels)
         if problems:
@@ -354,6 +362,29 @@ class PanelManager:
         value = str(panel_id)
         return next((p for p in self.panels if _panel_id(p) == value or p.name == value), None)
 
+    def load(self, panel_id: str) -> Panel | None:
+        """Load a built-in panel on demand; custom-only managers keep their registry closed."""
+        panel = self.get(panel_id)
+        if panel is not None or not self._load_builtins:
+            return panel
+        name = str(panel_id).lower()
+        if name not in _BUILTIN_PANELS:
+            return None
+        panel = _create_builtin_panel(name)
+        self.register(panel)
+        return panel
+
+    def unloaded_builtins(self) -> tuple[tuple[str, str], ...]:
+        """Return IDs and titles for discovery without importing their implementations."""
+        if not self._load_builtins:
+            return ()
+        return tuple(
+            (name, class_name.removesuffix("Panel"))
+            for name, class_name in _BUILTIN_PANELS.items()
+            if self.get(name) is None
+            and self._pending_config.get(name, PanelConfig()).enabled is not False
+        )
+
     def register(self, panel: Panel) -> None:
         """Register one custom panel and apply any deferred configuration."""
 
@@ -367,7 +398,7 @@ class PanelManager:
         self._apply_config(panel)
 
     def set_open(self, panel_id: str, open: bool) -> bool:
-        panel = self.get(panel_id)
+        panel = self.load(panel_id) if open else self.get(panel_id)
         if panel is None or not panel.enabled:
             return False
         panel.open = bool(open)
@@ -390,7 +421,7 @@ class PanelManager:
         )
 
     def set_enabled(self, panel_id: str, enabled: bool) -> bool:
-        panel = self.get(panel_id)
+        panel = self.load(panel_id) if enabled else self.get(panel_id)
         if panel is None:
             return False
         panel.enabled = bool(enabled)
@@ -636,40 +667,39 @@ def _panel_id(panel: Panel) -> str:
 PanelSet = PanelManager
 
 
-def default_panels() -> list[Panel]:
-    from .assets import AssetsPanel
-    from .camera import CameraPanel
-    from .control import ControlPanel
-    from .help import HelpPanel
-    from .hierarchy import HierarchyPanel
-    from .info import InfoPanel
-    from .inspector import InspectorPanel
-    from .joints import JointsPanel
-    from .keyframes import KeyframesPanel
-    from .layers import LayersPanel
-    from .output import OutputPanel
-    from .plot import PlotPanel
-    from .sensors import SensorsPanel
-    from .settings import SettingsPanel
-    from .stats import StatsPanel
+_BUILTIN_PANELS = {
+    "control": "ControlPanel",
+    "hierarchy": "HierarchyPanel",
+    "assets": "AssetsPanel",
+    "inspector": "InspectorPanel",
+    "joints": "JointsPanel",
+    "keyframes": "KeyframesPanel",
+    "camera": "CameraPanel",
+    "plot": "PlotPanel",
+    "stats": "StatsPanel",
+    "output": "OutputPanel",
+    "settings": "SettingsPanel",
+    "layers": "LayersPanel",
+    "sensors": "SensorsPanel",
+    "help": "HelpPanel",
+    "info": "InfoPanel",
+}
 
-    return [
-        ControlPanel(),
-        HierarchyPanel(),
-        AssetsPanel(),
-        InspectorPanel(),
-        JointsPanel(),
-        KeyframesPanel(),
-        CameraPanel(),
-        PlotPanel(),
-        StatsPanel(),
-        OutputPanel(),
-        SettingsPanel(),
-        LayersPanel(),
-        SensorsPanel(),
-        HelpPanel(),
-        InfoPanel(),
-    ]
+
+def _create_builtin_panel(panel_id: str) -> Panel:
+    module = import_module(f"{__name__}.{panel_id}")
+    return getattr(module, _BUILTIN_PANELS[panel_id])()
+
+
+def default_panels(ids: tuple[str, ...] | None = None) -> list[Panel]:
+    """Construct only the requested built-ins; None retains the desktop defaults."""
+    names = tuple(_BUILTIN_PANELS) if ids is None else tuple(ids)
+    unknown = set(names) - _BUILTIN_PANELS.keys()
+    if unknown:
+        raise ValueError(f"Unknown built-in panel IDs: {', '.join(sorted(unknown))}")
+    if len(names) != len(set(names)):
+        raise ValueError("Duplicate built-in panel IDs")
+    return [_create_builtin_panel(name) for name in names]
 
 
 __all__ = [

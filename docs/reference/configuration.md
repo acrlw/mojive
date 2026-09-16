@@ -51,6 +51,69 @@ the same preference.
 near-cascade density and filtering quality for close inspection. Changing the preset invalidates
 the shadow-map cache once; subsequent static frames reuse the rebuilt maps.
 
+## Choose the amount of UI to load
+
+Mojive has two separate entry points: an offscreen renderer that returns scene images, and an
+interactive viewer that exposes Mojive's full desktop tools. Normal Viewer construction loads
+and enables every built-in panel, with the standard docking layout and interaction defaults.
+Inspector, Control, Joints, Camera and Keyframes are available from the start. Users can close
+panels, disable tools, or explicitly choose a reduced configuration after deciding what they need.
+`ViewerConfig.minimal()` is an opt-in embedding preset, never the default viewer experience.
+
+| Use case | Entry point | What is constructed |
+|---|---|---|
+| Replace `mujoco.Renderer` | `mojive.Renderer(model)` | MuJoCo scene conversion and offscreen rendering; no Viewer, panels or socket |
+| Migrate `mujoco.viewer` calls | `mojive.viewer.launch(...)` or `mojive.viewer.launch_passive(model, data)` | Full Mojive desktop UI by default; see the [compatibility guide](../tutorials/mujoco-viewer.md) |
+| Render programmatic or custom scenes | `mojive.SceneRenderer(...)` | Scene rendering without a physics engine or editor |
+| Explicitly reduce the viewer | `ViewerConfig.minimal("inspector", "control", "joints", "camera")` | Viewer with those four panels; editing overlays and the debug socket start disabled |
+
+Both offscreen renderers expose `renderer.debug` for retained 3D drawing and
+`renderer.canvas2d` for grids and planar annotations. These draw into scene images and do not
+add UI. RGB, depth and segmentation are rendering products, not interactive viewer surfaces.
+
+For the normal desktop experience, omit the configuration:
+
+```python
+from mojive import build
+
+with build("robot.xml") as viewer:
+    viewer.run()
+```
+
+The process-based `mojive.launch_passive` extension also loads all panels. Its caller owns the clock and
+model, pose/topology edits and playback shortcuts remain unavailable; see
+[passive viewing](../tutorials/passive-viewing.md) for write-back support. Capability restrictions
+are independent of optional UI configuration.
+
+### Explicitly reduce the viewer
+
+For an application that intentionally needs only selected tools:
+
+```python
+from mojive import ViewerConfig, build
+
+with build("robot.xml", config=ViewerConfig.minimal("inspector", "control", "joints", "camera")) as viewer:
+    # Optional features can be loaded later, from code or the Window menu.
+    viewer.panels.open("keyframes")
+    viewer.run()
+```
+
+`ViewerConfig.minimal()` loads no panels. It retains navigation, selection, and debug drawing,
+uses an isolated docking layout, and disables gizmo/perturbation input, scene helpers and viewport
+capsules. The menu bar and status bar remain available. It is a lighter interactive viewer;
+use `Renderer` or `SceneRenderer` when no UI is needed.
+
+For independent choices, use `ViewerConfig(builtin_panels=("inspector", "camera"), debug_server=False)`.
+`builtin_panels=None` preserves all desktop panels; `()` constructs none. Only selected panel
+implementations are imported and instantiated. `PanelConfig` still controls availability/open state
+of loaded panels and applies when a panel is loaded later. Closing a panel stops its frame-data
+requests but keeps its state. `panels.get()` is read-only; `load()`, `open()` and `enable()` can load a
+built-in on demand. Explicit custom-only `PanelManager(panels=[...])` registries remain closed.
+
+`debug_server=False` disables the legacy local debug-drawing socket. In-process debug drawing
+remains available. The separate control RPC server starts only when `viewer.start_rpc()` is called.
+Use `dataclasses.replace()` to customize a minimal preset, including interactions and visible layers.
+
 ## Programmatic viewer configuration
 
 Embedding code can define interaction ownership before the viewer starts. The options are
@@ -262,6 +325,18 @@ in **Settings > Recording**, also reachable through **View > Recording Settings.
 uses wall time, can be canceled with its button or the recording shortcut, and creates no video
 file until a frame is captured. A zero-second delay starts on the next clean frame after menus
 close. The recording rate is independent from display and physics rates.
+
+Successful viewer screenshot saves automatically copy an image to the desktop clipboard;
+successfully finalized videos copy a file for pasting as an attachment. The copy runs in the
+background and the status receipt reports success or failure, retaining the saved file either
+way. Disable this in **Settings → Recording → Copy to clipboard**, or
+use `RecordingConfig(copy_to_clipboard=False)`. A burst of saves leaves the newest item on the
+clipboard. In-memory captures, the UI-free renderer and silent recording finalization
+(`report=False`, including viewer shutdown) do not change the clipboard.
+
+Linux X11 uses GTK3; native Wayland requires `wl-copy` (XWayland can use the X11 route).
+macOS uses the system pasteboard and Windows uses file-drop/image clipboard data. The receiving
+application must support pasting images or file attachments; video data is not pasted as text.
 
 The **Video encoding** section applies to both live recordings and take exports. **Quality
 priority** uses CRF (0–51; lower values preserve more detail and produce larger files), while

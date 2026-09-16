@@ -8,6 +8,7 @@ from imgui_bundle import imgui
 from mojive import Scene, build_scene
 from mojive import commands as cmd
 from mojive.control.rpc import RpcLimits
+from mojive.tools.ui_runtime import _click
 
 pytestmark = pytest.mark.gpu
 
@@ -19,6 +20,8 @@ def test_backlog_keeps_keyboard_editing_live_and_drains(tmp_path, monkeypatch):
     with build_scene(scene, width=960, height=640, vsync=False, show_window=False) as viewer:
         for _ in range(12):
             viewer.sync()
+        x, y, width, height = viewer.app._viewport_rect
+        _click(viewer, (x + width * 0.5, y + height * 0.5))
         viewer.session.submit(cmd.Select(box.object_id))
         server = viewer.start_rpc(
             tmp_path / "budget.sock",

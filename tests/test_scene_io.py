@@ -121,3 +121,25 @@ def test_legacy_scene_format_remains_readable(tmp_path):
     restored = Scene.load(path)
 
     assert any(node.name == "legacy box" for node in restored.source.nodes)
+
+
+def test_material_color_inheritance_and_explicit_override_survive_save_and_clone(tmp_path):
+    from dataclasses import replace
+
+    red = Material(name="paint", rgba=np.array((1, 0, 0, 0.7), np.float32))
+    blue = replace(red, rgba=np.array((0, 0, 1, 0.6), np.float32))
+    scene = Scene()
+    inherited = scene.box(material=red)
+    overridden = scene.box(material=red, color=(0, 1, 0, 1))
+    np.testing.assert_allclose(scene.source.geom_rgba, ((1, 0, 0, 0.7), (0, 1, 0, 1)))
+    revision = scene.structure_revision
+    assert scene.set_material(0, blue)
+    assert scene.structure_revision > revision
+    for copy in (scene, scene.clone(), Scene.load(scene.save(tmp_path / "scene.json"))):
+        np.testing.assert_allclose(copy.source.geom_rgba, ((0, 0, 1, 0.6), (0, 1, 0, 1)))
+        assert copy.set_material(0, red)
+        np.testing.assert_allclose(copy.source.geom_rgba, ((1, 0, 0, 0.7), (0, 1, 0, 1)))
+    overridden.set_color(None)
+    np.testing.assert_allclose(scene.source.geom_rgba, (red.rgba, red.rgba))
+    inherited.set_material(blue)
+    np.testing.assert_allclose(scene.source.geom_rgba, (blue.rgba, red.rgba))

@@ -304,6 +304,7 @@ class NativeBackend:
     def set_scene(self, source):
         self._require_open()
         self._source = source
+        self._mesh_indices.clear()
         self._last_frame = None
         self._uploaded_visuals = None
         self._overlay.set_scene(source)
@@ -322,6 +323,9 @@ class NativeBackend:
         self._sync_scene(scene)
 
     def _sync_scene(self, scene=None):
+        if self._external_scene != (scene is not None):
+            self._mesh_indices.clear()
+            self._uploaded = None
         self._external_scene = scene is not None
         scene = self._builder.scene if scene is None else scene
         self._scene = scene
@@ -342,6 +346,11 @@ class NativeBackend:
                 tuple(scene.scene_center),
             )
             keys = list(dict.fromkeys(key for key, _ in scene.bucket_keys))
+            if not self._external_scene:
+                # Keep meshes encountered in this SceneSource resident while
+                # visibility changes. Dropping their last GPU owner here made
+                # every Visual/Collision/Both round trip upload them again.
+                keys = list(dict.fromkeys((*self._mesh_indices, *keys)))
             self._mesh_indices = {key: index for index, key in enumerate(keys)}
             triangle_counts = {}
             leases = []
@@ -707,6 +716,8 @@ class NativeBackend:
         flag = RenderFlag(flag)
         if flag not in self.caps.render_flags:
             return False
+        if self._flags.get(flag, False) == bool(value):
+            return True
         self._flags[flag] = bool(value)
         self._render_state_dirty = True
         style_names = {
@@ -728,6 +739,18 @@ class NativeBackend:
             setattr(self._style, style_names[flag], bool(value))
             self.runtime.configure(self._scene_handle, self._style)
             return True
+        self._sync_instance_visibility()
+        return True
+
+    def set_geometry_view(self, view: str) -> bool:
+        from ..geometry import set_geometry_flags
+
+        if set_geometry_flags(self._flags, view):
+            self._render_state_dirty = True
+            self._sync_instance_visibility()
+        return True
+
+    def _sync_instance_visibility(self):
         if self._source is not None:
             self._builder.set_visual_options(
                 static=self.get_flag(RenderFlag.STATIC),
@@ -735,10 +758,11 @@ class NativeBackend:
                 flex_face=self.get_flag(RenderFlag.FLEXFACE),
                 flex_skin=self.get_flag(RenderFlag.FLEXSKIN),
                 convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
+                visual_geometry=self.get_flag(RenderFlag.VISUAL_GEOMETRY),
+                collision_geometry=self.get_flag(RenderFlag.COLLISION_GEOMETRY),
                 island=self.get_flag(RenderFlag.ISLAND),
             )
             self._sync_scene()
-        return True
 
     def get_flag(self, flag):
         return self._flags.get(flag, False)

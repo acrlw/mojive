@@ -35,7 +35,7 @@ from mojive.ui.drag_link import draw_drag_link
 from mojive.ui.gizmo import ObjectGizmo, _basis_from_z, _JointRangeState
 from mojive.ui.icon_draw import ImguiIconDraw
 from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.panels.keyframes import _draw_command_icon, _rounded_command_icon_path
+from mojive.ui.keyframe_editor.controls import _draw_command_icon, _rounded_command_icon_path
 from mojive.ui.viewport_widgets import (
     _draw_axis_arrow_glyph,
     _move_glyph_path,

@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 from jsonschema import Draft202012Validator, validators
 
+from mojive import math3d
 from mojive.adapters.base import AdapterCaps, PhysicsState
 from mojive.config import InteractionConfig, SelectionStyle
 from mojive.control.contracts import RPC_COUNTERS, RPC_TIMINGS, RpcLimits
@@ -119,7 +120,7 @@ NODE = {
             **BOOLEAN,
             "description": (
                 "Whether a compiled adapter node maps to an editable model-source element. "
-                "Scene authoring has separate capabilities."
+                "Scene editing has separate capabilities."
             ),
         },
         "body_index": INTEGER,
@@ -471,24 +472,27 @@ def validate(validator, value, method: str) -> None:
 
 def camera_value(value: dict) -> CameraView:
     """Decode and validate a shared camera, retaining roll and physical intrinsics."""
-    view = CameraView(
-        **{
-            name: np.asarray(item, np.float32)
-            if name
-            in {
-                "eye",
-                "target",
-                "up",
-                "focal_length",
-                "sensor_size",
-                "principal_offset",
+    try:
+        view = CameraView(
+            **{
+                name: math3d.as_finite_float32(item)
+                if name
+                in {
+                    "eye",
+                    "target",
+                    "up",
+                    "focal_length",
+                    "sensor_size",
+                    "principal_offset",
+                }
+                else item
+                for name, item in value.items()
+                if name in CAMERA_FIELDS
             }
-            else item
-            for name, item in value.items()
-            if name in CAMERA_FIELDS
-        }
-    )
-    forward = np.asarray(view.target) - np.asarray(view.eye)
+        )
+    except ValueError as error:
+        raise ControlError("invalid_params", f"camera: {error}") from error
+    forward = np.asarray(view.target, np.float64) - np.asarray(view.eye, np.float64)
     if view.far <= view.near:
         raise ControlError("invalid_params", "camera far must be greater than near")
     if np.linalg.norm(forward) < 1e-8 or np.linalg.norm(np.cross(forward, view.up)) < 1e-8:
@@ -497,5 +501,20 @@ def camera_value(value: dict) -> CameraView:
     if (np.any(focal > 0) or np.any(sensor > 0)) and not (np.all(focal > 0) and np.all(sensor > 0)):
         raise ControlError(
             "invalid_params", "physical intrinsics require positive focal_length and sensor_size"
+        )
+    # JSON numbers can be finite yet overflow the camera's render matrices or
+    # distance. Validate the derived products before replacing any camera state.
+    try:
+        with np.errstate(over="raise", invalid="raise", divide="raise"):
+            valid = (
+                np.isfinite(view.distance())
+                and np.isfinite(view.view_matrix()).all()
+                and np.isfinite(view.proj_matrix()).all()
+            )
+    except (FloatingPointError, OverflowError, ZeroDivisionError):
+        valid = False
+    if not valid:
+        raise ControlError(
+            "invalid_params", "camera must produce finite render matrices and distance"
         )
     return view

@@ -17,7 +17,7 @@ from mojive.tools.ui_feasibility import workspace as probe_workspace
 from mojive.tools.ui_redesign import _capsule, reset_glyph_path
 from mojive.ui.icons import draw_icon_label
 from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.panels import keyframes as keyframes_panel_module
+from mojive.ui.keyframe_editor import controls as keyframes_panel_module
 from mojive.ui.viewport_widgets import OVERLAY_GEOMETRY
 from mojive.ui.window import Window, WindowConfig
 
@@ -184,7 +184,9 @@ def test_keyframe_follow_icons_keep_native_selection_in_production_and_preview(m
             assert all(x1 - x0 == pytest.approx(y1 - y0) for x0, y0, x1, y1 in bounds)
             for index in (0, 2, 1):
                 rig.click(f"timeline-follow-{index}")
-                assert rig.probe.timeline_panel._follow_mode == ("off", "page", "locked")[index]
+                assert (
+                    rig.probe.timeline_panel.editor.follow_mode == ("off", "page", "locked")[index]
+                )
                 assert hovered_tooltips[-1] == keyframes_panel_module.FOLLOW_MODE_TOOLTIPS[index]
                 assert any(
                     window.active and window.flags & imgui.WindowFlags_.tooltip.value
@@ -192,8 +194,8 @@ def test_keyframe_follow_icons_keep_native_selection_in_production_and_preview(m
                 )
         rig.probe.preview_icon_library = False
         rig.frame()
-        assert rig.probe.timeline_panel.follow_mode_icon_drawer is draw_icon_label
-        assert rig.probe.timeline_panel._follow_mode == "page"
+        assert rig.probe.timeline_panel.toolbar.follow_mode_icon_drawer is draw_icon_label
+        assert rig.probe.timeline_panel.editor.follow_mode == "page"
     finally:
         rig.close()
 

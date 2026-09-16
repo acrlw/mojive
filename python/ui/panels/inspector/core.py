@@ -18,6 +18,7 @@ from mojive.adapters.base import (
     SiteProperties,
 )
 from mojive.ui.controls import pill_label
+from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels import (
     Panel,
@@ -162,6 +163,13 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, Pane
 
         self._name_editor(ctx, node)
         self._identity(ctx, node)
+        if node.type in (NodeType.LINK, NodeType.ROBOT, NodeType.GEOM) and len(s.source.geom_role):
+            imgui.text_disabled(
+                ctx.tr("Geometry view" if node.type is NodeType.GEOM else "Link geometry")
+            )
+            draw_geometry_view(
+                ctx.backend, ctx.tr, compact=True, theme=ctx.theme, node=node, submit=ctx.submit
+            )
         if node.type is NodeType.MODEL:
             self._model(ctx, node)
             return

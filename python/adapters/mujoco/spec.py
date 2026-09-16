@@ -388,7 +388,9 @@ def _set_text_names(spec, name: str, values) -> None:
         previous.data = data
 
 
-def _compiled_text_names(model, name: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+def _compiled_text_names(
+    model, name: str, *, strict: bool = False
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
     out = []
     for index in range(model.ntext):
         compiled_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXT, index) or ""
@@ -401,7 +403,19 @@ def _compiled_text_names(model, name: str) -> tuple[tuple[str, tuple[str, ...]],
         start = int(model.text_adr[index])
         stop = start + int(model.text_size[index])
         raw = bytes(model.text_data[start:stop]).split(b"\0", 1)[0]
-        out.append((prefix, _decode_text_names(raw.decode("utf-8", errors="replace"))))
+        text = raw.decode("utf-8", errors="replace")
+        if strict:
+            try:
+                values = json.loads(text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{compiled_name} must contain a JSON array of geom names"
+                ) from exc
+            if not isinstance(values, list) or any(
+                not isinstance(value, str) or not value for value in values
+            ):
+                raise ValueError(f"{compiled_name} must contain a JSON array of geom names")
+        out.append((prefix, _decode_text_names(text)))
     return tuple(out)
 
 

@@ -5,6 +5,7 @@
 #define OVERDRAW_STEP (1.0 / 16.0)
 
 #include "common.glsl"
+#include "coverage.glsl"
 #include "lighting.glsl"
 
 in VertexData {
@@ -76,6 +77,7 @@ vec4 sampleAlbedo(vec2 uv) {
 }
 
 void main() {
+    float opacity = coverageAlpha(v.color.a, gl_FragCoord.xy);
     vec4 texel = v.cube_on > 0.5
         ? texture(u_cube_texture, v.cube)
         : sampleAlbedo(v.uv);
@@ -84,7 +86,7 @@ void main() {
         surface = gamma_encode(surface);
         texel.rgb = linear_to_srgb(texel.rgb);
     }
-    vec4 base = vec4(surface * texel.rgb, v.color.a * texel.a);
+    vec4 base = vec4(surface * texel.rgb, opacity * texel.a);
     vec3 albedo = base.rgb;
     float alpha = base.a;
     float emission = v.material.x;

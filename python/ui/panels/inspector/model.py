@@ -156,7 +156,7 @@ class _Model:
         imgui.text_disabled(ctx.tr("Model Components"))
         editable = ctx.session.paused
         if not any(self._component_counts.values()):
-            imgui.text_disabled(ctx.tr("no authored components"))
+            imgui.text_disabled(ctx.tr("no model components"))
         for category, count in self._component_counts.items():
             if not count or not imgui.collapsing_header(f"{category.capitalize()} ({count})"):
                 continue

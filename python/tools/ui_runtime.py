@@ -41,8 +41,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--scale-only", action="store_true", help="Exercise Inspector scale preview, Apply and Undo"
     )
+    parser.add_argument(
+        "--gestures-only", action="store_true", help="Exercise scene drags across viewport overlays"
+    )
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.gestures_only:
+        _capture_gesture_ownership(args.output)
+        return 0
     if args.scale_only:
         _capture_scale_authoring(args.output)
         return 0
@@ -568,7 +574,7 @@ def _settle(viewer, frames: int = 7) -> None:
     while viewer.app._fixed_render_size is None:
         target = tuple(
             max(1, int(value))
-            for value in viewer.window.points_to_pixels(viewer.app._viewport_panel_size)
+            for value in viewer.window.points_to_pixels(viewer.app.viewport_surface.size)
         )
         if viewer.window.latch.committed == target:
             break
@@ -582,6 +588,60 @@ def _settle(viewer, frames: int = 7) -> None:
         # after the resize rather than capturing the last pre-resize image.
         viewer.sync()
         viewer.sync()
+
+
+def _capture_gesture_ownership(output: Path) -> None:
+    """Exercise held native input through the same overlay boundary for both tools."""
+    from mojive.config import ViewportOverlayConfig
+    from mojive.interaction.input import add_physical_mouse_button_event, imgui_key_for_physical_key
+    from mojive.ui.gestures import Claim
+
+    with build(
+        resolve("gizmo"), paused=True, vsync=False, width=1280, height=900, show_window=False
+    ) as viewer:
+        viewer.configure_viewport_overlays(ViewportOverlayConfig(movable=True))
+        _settle(viewer)
+        app = viewer.app
+        initial_camera = viewer.session.camera
+        selected = next(node for node in viewer.session.nodes if node.posable)
+        io = imgui.get_io()
+        control = imgui_key_for_physical_key(imgui.Key.left_ctrl)
+        control_modifier = imgui_key_for_physical_key(imgui.Key.mod_ctrl)
+        for perturbing in (False, True):
+            viewer.set_camera(initial_camera)
+            viewer.session.submit(cmd.Select(selected.object_id if perturbing else 0))
+            _settle(viewer, 3)
+            rect = app._playback_widget_rect
+            assert rect is not None
+            endpoint = (rect[0] + 2.0, (rect[1] + rect[3]) * 0.5)
+            start = (endpoint[0], rect[3] + 100.0)
+            io.add_mouse_pos_event(*start)
+            io.add_key_event(control, perturbing)
+            io.add_key_event(control_modifier, perturbing)
+            viewer.sync()
+            add_physical_mouse_button_event(io, 0, True)
+            viewer.sync()
+            expected = Claim.PERTURB if perturbing else Claim.CAMERA
+            assert app.router.claim is expected, (expected, app.router.claim, app._state, rect)
+            for fraction in np.linspace(0.1, 1.0, 10):
+                io.add_mouse_pos_event(
+                    start[0] + (endpoint[0] - start[0]) * fraction,
+                    start[1] + (endpoint[1] - start[1]) * fraction,
+                )
+                viewer.sync()
+                assert app.router.claim is expected and app.router.held
+                assert not app._overlay_drag_kind
+            if perturbing:
+                assert viewer.session.perturb.active
+            else:
+                assert not np.allclose(viewer.session.camera.eye, initial_camera.eye)
+            _save(viewer, output / ("perturb-overlay.png" if perturbing else "camera-overlay.png"))
+            add_physical_mouse_button_event(io, 0, False)
+            io.add_key_event(control, False)
+            io.add_key_event(control_modifier, False)
+            _settle(viewer, 3)
+            assert not app.router.held and not viewer.session.perturb.active
+            assert app._playback_widget_rect == rect
 
 
 def _capture_status_spacing(output: Path) -> None:

@@ -1,5 +1,9 @@
 # Passive viewing
 
+This page documents the process-based **`mojive.launch_passive`** extension. For the
+`mujoco.viewer` signatures, mutable camera/options and `sync(state_only=...)`, use
+**`mojive.viewer.launch_passive`** and the [migration guide](mujoco-viewer.md).
+
 `launch_passive(model, data)` displays an existing MuJoCo simulation while the calling code
 owns all physics stepping. A spawned process owns the window and renderer. Its Python GIL,
 event loop, and display rate are independent of the policy loop. `sync()` exchanges the latest
@@ -40,6 +44,12 @@ private copies, and the model's structure and parameters are fixed at launch. St
 including resets, mocap targets, activation, and applied forces, appear on the next published
 snapshot. Close and relaunch after replacing or editing a model. `step` is an optional
 caller-supplied episode counter (default zero), while simulation time comes from `data.time`.
+
+The viewer loads the full Mojive desktop panel set by default. Inspection, camera tools,
+diagnostics and recording remain discoverable; individual actions depend on the external
+simulation's supported write-back operations. A reduced panel set requires an explicit
+`config=ViewerConfig.minimal(...)` choice. This is separate from `mojive.Renderer`, which returns
+offscreen scene images without any UI.
 
 The status bar labels **Physics … Hz** and **Render … FPS** separately. Physics throughput
 uses actual counter increments over wall time, never the nominal `1 / timestep`. Supply

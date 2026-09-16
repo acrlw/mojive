@@ -73,10 +73,27 @@ def test_render_layer_does_not_import_ui():
     assert not bad
 
 
+def test_mujoco_viewer_does_not_depend_on_offscreen_product_internals():
+    for path in _files("app/mujoco_viewer"):
+        assert not _hits(_imports(path), "mojive.app.renderer"), path
+    imports = _imports(SRC / "app/mujoco_visuals.py")
+    for prefix in (
+        "mojive.ui",
+        "mojive.app.renderer",
+        "mojive.app.composition",
+        "mojive.app.mujoco_viewer",
+    ):
+        assert not _hits(imports, prefix)
+
+
 def test_ui_layer_does_not_import_concrete_backend():
     """UI modules depend on render contracts instead of backend internals."""
 
-    allowed_prefixes = ("mojive.render.backend", "mojive.render.debugdraw")
+    allowed_prefixes = (
+        "mojive.render.backend",
+        "mojive.render.debugdraw",
+        "mojive.render.geometry",
+    )
     bad = {}
     for path in _files("ui"):
         hit = _hits(_imports(path), "mojive.render")
@@ -265,3 +282,16 @@ def test_scene_adapter_base_methods_have_docstrings():
         and ast.get_docstring(node) is None
     ]
     assert not missing
+
+
+def test_editor_input_controllers_do_not_depend_on_presentation_or_application():
+    forbidden = ("imgui_bundle", "mojive.ui.app", "mojive.ui.panels", "mojive.render")
+    for relative in ("ui/keyframe_editor/controller.py", "ui/gizmo/input.py"):
+        imports = _imports(SRC / relative)
+        assert not {name for prefix in forbidden for name in _hits(imports, prefix)}, relative
+
+
+def test_viewport_surface_does_not_own_scene_editing_or_gestures():
+    imports = _imports(SRC / "ui/viewport_surface.py")
+    for prefix in ("mojive.session", "mojive.ui.gizmo", "mojive.ui.app", "mojive.adapters"):
+        assert not _hits(imports, prefix)

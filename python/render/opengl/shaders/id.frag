@@ -1,4 +1,6 @@
 #version 330 core
+#include "coverage.glsl"
+flat in float v_alpha;
 
 #ifndef ID_ATTACHMENT
 #define ID_ATTACHMENT 0
@@ -16,6 +18,7 @@ uniform uint u_selected;
 #endif
 
 void main() {
+    coverageAlpha(v_alpha, gl_FragCoord.xy);
 #ifdef ID_ONLY_SELECTED
     if (v_id != u_selected) discard;
 #endif

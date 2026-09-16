@@ -117,13 +117,15 @@ def test_adapter_applies_mjv_option_visual_groups():
     adapter = MuJoCoAdapter()
     adapter.load_model(model)
     try:
-        assert set(adapter.scene_source().geom_source) == {0}
+        source = adapter.scene_source()
+        assert set(source.geom_source[source.geom_group_visible]) == {0}
 
         option = mujoco.MjvOption()
         option.geomgroup[:] = 0
         option.geomgroup[5] = 1
         assert adapter.apply_scene_option(option)
-        assert set(adapter.scene_source().geom_source) == {1}
+        source = adapter.scene_source()
+        assert set(source.geom_source[source.geom_group_visible]) == {1}
         assert not adapter.apply_scene_option(option)
     finally:
         adapter.release()

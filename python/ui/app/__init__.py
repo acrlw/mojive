@@ -1,5 +1,7 @@
 """Main viewer UI loop and panel coordination."""
 
+from mojive.ui.viewport_surface import fit_image_rect
+
 from .core import ViewerApp as ViewerApp
 from .support import _DEFAULT_INTERACTIONS as _DEFAULT_INTERACTIONS
 from .support import _NO_INPUT_CLAIM as _NO_INPUT_CLAIM
@@ -32,7 +34,6 @@ from .support import _clipped_foreground_overlay_draw as _clipped_foreground_ove
 from .support import _clipped_overlay_draw as _clipped_overlay_draw
 from .support import _clipped_overlay_host_rect as _clipped_overlay_host_rect
 from .support import _equal_modal_buttons as _equal_modal_buttons
-from .support import _fit_image_rect as _fit_image_rect
 from .support import _FrameRateDisplay as _FrameRateDisplay
 from .support import _GizmoHintHoverState as _GizmoHintHoverState
 from .support import _JointLimitHoverState as _JointLimitHoverState
@@ -50,3 +51,5 @@ from .support import _toggle_angle_input as _toggle_angle_input
 from .support import _translated_file_filters as _translated_file_filters
 from .support import log as log
 from .support import precise_input_status_hints as precise_input_status_hints
+
+_fit_image_rect = fit_image_rect

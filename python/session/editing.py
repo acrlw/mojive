@@ -41,15 +41,18 @@ class _Editing:
             raise RuntimeError(result.message)
         try:
             yield self
-        except BaseException as error:
-            result = self.submit(cmd.CancelEditTransaction())
-            if not result.ok:
-                raise RuntimeError(result.message) from error
-            raise
-        else:
             result = self.submit(cmd.EndEditTransaction())
             if not result.ok:
                 raise RuntimeError(result.message)
+        except BaseException as error:
+            if self.editing:
+                try:
+                    result = self.submit(cmd.CancelEditTransaction())
+                    if not result.ok:
+                        raise RuntimeError(result.message)
+                except Exception as recovery:
+                    raise RuntimeError(f"{error}; rollback failed: {recovery}") from error
+            raise
 
     @property
     def editing(self) -> bool:
@@ -92,10 +95,12 @@ class _Editing:
         if intercepted is not None:
             return self._record_result(intercepted)
         driver = self._simulation_driver
-        # Camera and selection only change Session-owned state. All other
+        # Camera, selection and geometry views only change Session-owned state. Other
         # commands fence physics before reading history or mutating an adapter;
         # new command types inherit the safe default.
-        if driver is None or isinstance(command, (cmd.SetCamera, cmd.Select, cmd.SelectNode)):
+        if driver is None or isinstance(
+            command, (cmd.SetCamera, cmd.Select, cmd.SelectNode, cmd.SetGeometryView)
+        ):
             return self._submit(command)
         was_running = not self._paused and not self._state_take_playing
         self._step_counter += driver.suspend()
@@ -138,7 +143,12 @@ class _Editing:
             if scene_edit and self._adapter.caps.edit_history and not self.editing
             else None
         )
-        result = self._dispatch(command)
+        try:
+            result = self._dispatch(command)
+        except Exception as error:
+            if scene_edit and self.editing:
+                self._edit_error = self._edit_error or str(error) or "Scene edit failed"
+            raise
         if not result.ok and scene_edit and self.editing:
             self._edit_error = self._edit_error or result.message or "Scene edit failed"
         if result.ok and scene_edit and self._adapter.caps.scene_files:
@@ -188,12 +198,12 @@ class _Editing:
         state = self._adapter.capture_edit_state()
         if state is None:
             raise RuntimeError(f"{self._adapter.caps.name} did not provide an edit state")
-        return _DocumentState(state, self._selected, deepcopy(self._authored))
+        return _DocumentState(state, self._selected, deepcopy(self._scene_overrides))
 
     def _restore_document_state(self, state: _DocumentState) -> bool:
         if not self._adapter.restore_edit_state(state.adapter_state):
             return False
-        self._authored = deepcopy(state.authored)
+        self._scene_overrides = deepcopy(state.overrides)
         self._selected = int(state.selected)
         self._selected_node_id = -1
         self._refresh_structure()
@@ -287,10 +297,14 @@ class _Editing:
             return CommandResult.bad("Finish the active edit before undo")
         if not self._undo_stack:
             return CommandResult.bad("Nothing to undo")
-        record = self._undo_stack.pop()
-        if not self._restore_document_state(record.before):
-            self._undo_stack.append(record)
+        record = self._undo_stack[-1]
+        try:
+            restored = self._restore_document_state(record.before)
+        except Exception as error:
+            return CommandResult.bad(f"Undo failed: {error}")
+        if not restored:
             return CommandResult.bad("Undo state is incompatible with this scene")
+        self._undo_stack.pop()
         self._redo_stack.append(record)
         self._document_revision = record.before_revision
         return CommandResult.good(f"Undo {record.label}")
@@ -300,10 +314,14 @@ class _Editing:
             return CommandResult.bad("Finish the active edit before redo")
         if not self._redo_stack:
             return CommandResult.bad("Nothing to redo")
-        record = self._redo_stack.pop()
-        if not self._restore_document_state(record.after):
-            self._redo_stack.append(record)
+        record = self._redo_stack[-1]
+        try:
+            restored = self._restore_document_state(record.after)
+        except Exception as error:
+            return CommandResult.bad(f"Redo failed: {error}")
+        if not restored:
             return CommandResult.bad("Redo state is incompatible with this scene")
+        self._redo_stack.pop()
         self._undo_stack.append(record)
         self._document_revision = record.after_revision
         return CommandResult.good(f"Redo {record.label}")

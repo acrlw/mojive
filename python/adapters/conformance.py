@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..types import MeshShape
-from .base import FrameNeeds, SceneAdapter
+from .base import FrameNeeds, SceneInspection
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class ConformanceReport:
         return all(check.ok for check in self.checks)
 
 
-def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
+def check_adapter(adapter: SceneInspection) -> ConformanceReport:
     """Exercise adapter structure and one full-data frame."""
     revision = adapter.structure_revision
     source = adapter.scene_source()
@@ -56,7 +56,9 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
     def add(name: str, ok: bool, detail: str) -> None:
         checks.append(ConformanceCheck(name, bool(ok), detail))
 
-    required = ("scene_source", "frame", "step", "reset", "set_paused", "release")
+    required = ("scene_source", "frame", "release")
+    if adapter.caps.simulation:
+        required += ("step", "reset", "set_paused")
     missing = [name for name in required if not callable(getattr(adapter, name, None))]
     add("required methods", not missing, "all present" if not missing else f"missing {missing}")
 
@@ -77,6 +79,12 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
     )
     lengths = {name: len(getattr(source, name)) for name in instance_fields}
     add("instance columns", all(length == n for length in lengths.values()), str(lengths))
+    optional = (source.geom_role, source.geom_group_visible, source.geom_collision_mesh)
+    add(
+        "geometry views",
+        all(len(values) in (0, n) for values in optional),
+        "optional geometry columns match instance count",
+    )
     add(
         "instance dtypes",
         source.geom_object_id.dtype == np.uint32 and source.geom_source.dtype == np.int32,
@@ -86,7 +94,25 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
     ids = [node.node_id for node in source.nodes]
     known = set(ids)
     parents_ok = all(node.parent == -1 or node.parent in known for node in source.nodes)
-    add("node graph", len(ids) == len(known) and parents_ok, f"{len(ids)} nodes")
+    parents = {node.node_id: node.parent for node in source.nodes}
+    visited: set[int] = set()
+    cycle = None
+    for node_id in ids:
+        path: set[int] = set()
+        while node_id in parents and node_id not in visited:
+            if node_id in path:
+                cycle = node_id
+                break
+            path.add(node_id)
+            node_id = parents[node_id]
+        if cycle is not None:
+            break
+        visited.update(path)
+    add(
+        "node graph",
+        len(ids) == len(known) and parents_ok and cycle is None,
+        f"{len(ids)} nodes" if cycle is None else f"cycle in parents at node {cycle}",
+    )
 
     light_nodes = {node.light_index for node in source.nodes if node.light_index >= 0}
     lights_ok = light_nodes == set(range(len(source.lights.lights)))
@@ -107,7 +133,7 @@ def check_adapter(adapter: SceneAdapter) -> ConformanceReport:
 
     mesh_ok = True
     mesh_detail = []
-    for key in (*source.geom_mesh, *source.geom_convex_mesh):
+    for key in (*source.geom_mesh, *source.geom_convex_mesh, *source.geom_collision_mesh):
         if key.shape in (
             MeshShape.ASSET,
             MeshShape.CONVEX_HULL,

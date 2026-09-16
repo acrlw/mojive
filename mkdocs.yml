@@ -24,11 +24,13 @@ nav:
       - Tutorial map: guides/examples.md
       - Programmatic scene: tutorials/programmatic-scene.md
       - MuJoCo rendering: tutorials/mujoco-rendering.md
+      - MuJoCo viewer migration: tutorials/mujoco-viewer.md
       - Remote viewing and replay: tutorials/remote-viewing.md
       - Passive viewing: tutorials/passive-viewing.md
   - How-to guides:
       - Custom scene adapter: how-to/custom-adapter.md
       - Debug drawing: how-to/debug-draw.md
+      - Materials and floor grids: how-to/materials.md
       - Local RPC control: how-to/rpc-control.md
       - Agent workflows: how-to/agent-workflows.md
       - Editor and MJCF: guides/editor-and-mjcf.md

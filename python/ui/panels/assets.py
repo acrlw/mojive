@@ -462,7 +462,7 @@ class AssetsPanel(Panel):
             self._hfield_controls(ctx, item)
         if item.type == "material":
             self._material_controls(ctx, item)
-        if item.type in ("mesh", "hfield"):
+        if item.type in ("mesh", "hfield", "material"):
             self._assignment_control(ctx, item)
         if not editable:
             imgui.end_disabled()
@@ -706,8 +706,21 @@ class AssetsPanel(Panel):
     @staticmethod
     def _assignment_control(ctx: PanelContext, item: ModelAssetInfo) -> None:
         node = ctx.session.selected_node
-        if node is None or node.type is not NodeType.GEOM:
+        allowed = (NodeType.GEOM, NodeType.SITE) if item.type == "material" else (NodeType.GEOM,)
+        if node is None or node.type not in allowed:
             imgui.text_disabled(ctx.tr("Select a geometry to assign this asset"))
+            return
+        if item.type == "material":
+            if node.model_id != item.model_id:
+                imgui.text_disabled(ctx.tr("The selected geometry belongs to a different model"))
+                return
+            if not node.source_editable or item.runtime_index < 0:
+                imgui.text_disabled(
+                    ctx.tr("The selected geometry has no editable material binding")
+                )
+                return
+            if imgui.button(ctx.tr("Assign to Selected Geometry")):
+                ctx.submit(cmd.SetGeometryMaterial(node.node_id, item.runtime_index))
             return
         properties = ctx.session.geometry_shape_properties(node.node_id)
         choices = (

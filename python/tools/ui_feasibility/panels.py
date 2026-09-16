@@ -11,9 +11,9 @@ from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.icons import draw_concept_icon, draw_icon_label
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.keyframe_editor import controls as keyframes_panel_module
 from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import PanelContext, button_row_layout, button_width, search_input
-from mojive.ui.panels import keyframes as keyframes_panel_module
 from mojive.ui.panels import output as output_panel_module
 from mojive.ui.panels.hierarchy import disclosure_triangle
 from mojive.ui.text_layout import text_line_y
@@ -73,7 +73,7 @@ def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
     session = state.timeline_session
     session.tick(FrameNeeds.none(), wall_dt=min(0.05, imgui.get_io().delta_time))
     ctx = PanelContext(session, None, theme=CONCEPT_THEME, style_scale=scale, painter=state.painter)
-    state.timeline_panel.follow_mode_icon_drawer = (
+    state.timeline_panel.toolbar.follow_mode_icon_drawer = (
         partial(_draw_icon_library_label, state=state)
         if state.preview_icon_library
         else draw_icon_label

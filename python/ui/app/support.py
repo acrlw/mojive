@@ -130,27 +130,6 @@ def _translated_file_filters(filters: list[str], translate) -> list[str]:
     return [translate(value) if index % 2 == 0 else value for index, value in enumerate(filters)]
 
 
-def _fit_image_rect(
-    position: tuple[float, float],
-    available: tuple[float, float],
-    image_size: tuple[int, int],
-) -> tuple[float, float, float, float]:
-    """Aspect-fit a render target inside its current viewport panel."""
-
-    x, y = float(position[0]), float(position[1])
-    width, height = max(float(available[0]), 1.0), max(float(available[1]), 1.0)
-    image_width, image_height = max(int(image_size[0]), 1), max(int(image_size[1]), 1)
-    scale = min(width / image_width, height / image_height)
-    fitted_width = image_width * scale
-    fitted_height = image_height * scale
-    return (
-        x + (width - fitted_width) * 0.5,
-        y + (height - fitted_height) * 0.5,
-        fitted_width,
-        fitted_height,
-    )
-
-
 def _scene_save_target(path: str | Path) -> Path:
     target = Path(path).expanduser().resolve()
     if target.name.endswith(SCENE_SUFFIXES) or target.suffix.lower() in {".xml", ".mjcf"}:

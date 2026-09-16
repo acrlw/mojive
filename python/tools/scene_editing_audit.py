@@ -53,19 +53,19 @@ def capture_empty_editor(output: Path) -> dict:
         _activate_panel(viewer, "Keyframes")
         panel = viewer.panels.get("Keyframes")
         assert not session.state_take_times
-        panel._set_follow_mode("off")
-        first, last = panel._view_start, panel._view_end
+        panel.editor.set_follow_mode("off")
+        first, last = panel.editor.view_start, panel.editor.view_end
         span = last - first
         drag(
             viewer,
             timeline_point(viewer, first + span * 0.2),
             timeline_point(viewer, first + span * 0.8),
         )
-        assert abs(panel._playhead - (first + span * 0.8)) < span * 0.002
-        chosen = panel._playhead
+        assert abs(panel.editor.playhead - (first + span * 0.8)) < span * 0.002
+        chosen = panel.editor.playhead
         _park_cursor(viewer)
         _settle(viewer, 4)
-        assert panel._playhead == chosen
+        assert panel.editor.playhead == chosen
         Image.fromarray(viewer.capture_array(surface="window")).save(output / "empty-timeline.png")
 
         app.camera.pivot[:] = (0, 0, 0)

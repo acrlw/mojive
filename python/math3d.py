@@ -8,6 +8,15 @@ Vec3 = np.ndarray
 Mat4 = np.ndarray
 
 
+def as_finite_float32(value) -> np.ndarray:
+    """Convert numeric input without letting float32 overflow poison scene state."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        result = np.asarray(value, dtype=np.float32)
+    if not np.isfinite(result).all():
+        raise ValueError("Values must remain finite when represented as float32")
+    return result
+
+
 def identity() -> Mat4:
     """Return a float32 4x4 identity matrix."""
     return np.eye(4, dtype=np.float32)
