@@ -329,8 +329,8 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
                     record = _item_rect(viewer, "invisible_button", "##take-record")
                     options = _item_rect(viewer, "invisible_button", "##timeline-options")
                     assert abs(record[0][1] - options[0][1]) < 1, (width, record, options)
-                panel._editor.selected_id = viewer.session.keyframes[0].keyframe_id
-                panel._selection_generation = -1
+                panel.editor.selected_id = viewer.session.keyframes[0].keyframe_id
+                panel.editor.selection_generation = -1
                 _settle(viewer, 3)
                 _save_window_crop(
                     viewer, target, folder / f"keyframes-{width}-snapshot.png", padding=3.0

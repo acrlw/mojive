@@ -409,7 +409,9 @@ def test_capture_snapshot_does_not_recompile_or_modify_model_keyframes(viewer):
     scale = viewer.window.style_scale
     left = lo[0] + timeline_channel_width(hi[0] - lo[0], scale)
     right = hi[0] - (64 * scale if hi[0] - lo[0] >= 600 * scale else 0)
-    x = timeline_time_to_x(snapshot.time, panel._view_start, panel._view_end, left, right)
+    x = timeline_time_to_x(
+        snapshot.time, panel.editor.view_start, panel.editor.view_end, left, right
+    )
     y = lo[1] + 27 * scale + (hi[1] - lo[1] - 27 * scale) * 0.75
     _click(viewer, (x, y))
     _click(viewer, (x, y))

@@ -116,18 +116,26 @@ def recorded_take_spans(times: Sequence[float], start: float, end: float, lo: fl
     last = bisect.bisect_right(times, end)
     if first == last:
         return
-    stride = max(1, (last - first) // max(1, round(hi - lo)))
     factor = (hi - lo) / max(end - start, MIN_TIMELINE_SPAN)
+    if factor <= 0:
+        return
     left = right = None
-    for index in range(first, last + stride - 1, stride):
-        x = lo + (times[min(index, last - 1)] - start) * factor
-        mark_left, mark_right = max(lo, x - 1.0), min(hi, x + 1.0)
+    index = first
+    while index < last:
+        x = lo + (times[index] - start) * factor
+        # Marks in one pixel column overlap. Their first/last samples describe
+        # the exact union; striding by sample count can erase isolated frames.
+        boundary = start + (math.floor(x - lo) + 1) / factor
+        following = bisect.bisect_left(times, boundary, lo=index + 1, hi=last)
+        last_x = lo + (times[following - 1] - start) * factor
+        mark_left, mark_right = max(lo, x - 1.0), min(hi, last_x + 1.0)
         if right is not None and mark_left > right:
             yield left, right
             left = None
         if left is None:
             left = mark_left
         right = mark_right
+        index = following
     yield left, right
 
 

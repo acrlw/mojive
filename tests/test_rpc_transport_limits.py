@@ -94,6 +94,57 @@ def test_oversized_frame_closes_without_parsing_its_suffix(tmp_path):
         assert session.frame.step == 1
 
 
+@pytest.mark.parametrize("version", [True, 1.0, "1"])
+def test_invalid_protocol_version_cannot_execute_mutation(tmp_path, version):
+    with (
+        running(tmp_path) as (server, _service, session),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer,
+    ):
+        peer.settimeout(2)
+        peer.connect(str(server.socket_path))
+        peer.sendall(wire_request(version=version))
+        assert read_reply(peer)["error"]["code"] == "version_mismatch"
+        assert session.frame.step == 0
+        peer.sendall(wire_request())
+        assert read_reply(peer)["result"]["ok"]
+        assert session.frame.step == 3
+
+
+@pytest.mark.parametrize("value", [float("nan"), object()])
+def test_unserializable_result_reports_error_and_keeps_socket_usable(tmp_path, monkeypatch, value):
+    with running(tmp_path) as (server, service, session), RpcClient(server.socket_path) as client:
+        dispatch = service.dispatch
+
+        def invalid_result(method, params):
+            result = dispatch(method, params)
+            return {"invalid": value} if method == "step" else result
+
+        monkeypatch.setattr(service, "dispatch", invalid_result)
+        with pytest.raises(RpcError) as error:
+            client.step(1)
+        assert error.value.code == "internal_error"
+        assert "serialize" in str(error.value)
+        assert session.frame.step == 1
+        connection = client._client
+        assert client.hello()["service"] == "mojive.control"
+        assert client._client is connection
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_nonfinite_request_envelope_cannot_execute_mutation(tmp_path, value):
+    with (
+        running(tmp_path) as (server, _service, session),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer,
+    ):
+        peer.settimeout(2)
+        peer.connect(str(server.socket_path))
+        peer.sendall(wire_request().replace(b'"id": 1', f'"id": {value}'.encode()))
+        assert read_reply(peer)["error"]["code"] == "invalid_request"
+        assert session.frame.step == 0
+        peer.sendall(wire_request())
+        assert read_reply(peer)["result"]["ok"]
+
+
 def test_large_write_receives_transport_rejection_without_retry(tmp_path):
     with running(tmp_path, max_request_bytes=512) as (server, service, session):
         with RpcClient(server.socket_path) as client:

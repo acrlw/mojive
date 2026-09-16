@@ -37,10 +37,10 @@ from mojive.ui.icons import (
     icon_metrics,
     minimum_enclosing_circle,
 )
+from mojive.ui.keyframe_editor import controls as keyframes_panel_module
+from mojive.ui.keyframe_editor.controls import _draw_command_icon
 from mojive.ui.localization import Language, Localizer
-from mojive.ui.panels import keyframes as keyframes_panel_module
 from mojive.ui.panels.filters import severity_icon, severity_meshes
-from mojive.ui.panels.keyframes import _draw_command_icon
 from mojive.ui.text_layout import text_line_y
 from mojive.ui.theme import THEME
 
@@ -998,15 +998,15 @@ def _draw_follow_mode_preview(origin, scale: float, state: ProbeState) -> None:
         selected = segmented_control(
             f"follow-icon-preview-{column}",
             labels,
-            modes.index(state.timeline_panel._follow_mode),
+            modes.index(state.timeline_panel.editor.follow_mode),
             width=segmented_control_width(labels, icons=icons, show_labels=False),
             theme=CONCEPT_THEME,
             icons=icons,
             icon_label_drawer=partial(_draw_icon_library_label, state=state),
             show_labels=False,
         )
-        if modes[selected] != state.timeline_panel._follow_mode:
-            state.timeline_panel._set_follow_mode(modes[selected])
+        if modes[selected] != state.timeline_panel.editor.follow_mode:
+            state.timeline_panel.editor.set_follow_mode(modes[selected])
         imgui.end_group()
     imgui.pop_style_var()
     imgui.set_cursor_screen_pos((origin[0], origin[1] + 64 * scale))

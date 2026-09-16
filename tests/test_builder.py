@@ -486,6 +486,29 @@ def test_texuniform_off_uses_repeat_directly():
     assert scene.tex_coef[0][0] == pytest.approx(3.0)
 
 
+def test_deep_node_visibility_does_not_depend_on_python_recursion_limit():
+    src = make_source(bodies=1, with_plane=False)
+    count = 2000
+    src.nodes = [
+        SceneNode(node_id=i, name=f"link{i}", type=NK.LINK, parent=i - 1) for i in range(count)
+    ]
+    src.geom_node = np.full(src.instance_count, count - 1, np.int32)
+    builder = SceneSourceBuilder()
+    assert builder.set_source(src).count == src.instance_count
+    assert builder.set_visible(0, False)
+    assert builder.scene.count == 0
+    assert builder.set_visible(0, True)
+    assert builder.scene.count == src.instance_count
+
+
+def test_cyclic_visibility_reports_the_invalid_node_graph():
+    src = make_source(bodies=1, with_plane=False)
+    src.nodes[0].parent = src.nodes[-1].node_id
+    src.geom_node = np.full(src.instance_count, src.nodes[-1].node_id, np.int32)
+    with pytest.raises(ValueError, match=r"[Cc]ycle.*node"):
+        SceneSourceBuilder().set_source(src)
+
+
 def test_set_visible_rebuilds_and_drops_instances():
 
     src = make_source(bodies=3)

@@ -13,6 +13,7 @@ not required.
 |---|---|---|
 | Create geometry, cameras, and lights | [Programmatic scene](../tutorials/programmatic-scene.md) | `Scene`, `build_scene` |
 | Render MuJoCo arrays | [MuJoCo rendering](../tutorials/mujoco-rendering.md) | `Renderer` |
+| Migrate MuJoCo viewer calls | [MuJoCo viewer](../tutorials/mujoco-viewer.md) | `mojive.viewer` |
 | Evaluate caller-owned physics with a live window | [Passive viewing](../tutorials/passive-viewing.md) | `launch_passive` |
 | Record a rollout or add video subtitles | [Rollout video](../tutorials/mujoco-rendering.md#record-a-rollout) | `VideoRecorder`, Pillow |
 | Publish or record dynamic frames | [Remote viewing and replay](../tutorials/remote-viewing.md) | `SnapshotPublisher`, `SnapshotWriter` |
@@ -32,6 +33,9 @@ not required.
 | `canvas2d.py` | layered 2D physics and geometry diagnostics |
 | `custom_adapter.py` | backend-neutral simulation integration |
 | `mujoco_render.py` | RGB, metric depth, and segmentation output |
+| `mujoco_viewer.py` | MuJoCo-style viewer handle, callback, camera/options and user geoms |
+| `viewer_managed.py` | Minimal managed viewer: Mojive owns physics stepping |
+| `viewer_passive.py` | Minimal passive viewer: the caller steps and synchronizes physics |
 | `mujoco_video.py` | streamed MP4 rollout with optional RGB label/timestamp |
 | `multi_camera_render.py` | one PNG per MuJoCo camera |
 | `mujoco_control.py` | qpos editing and deterministic stepping |

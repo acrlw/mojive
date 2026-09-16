@@ -49,7 +49,7 @@ class PerturbState:
 class _DocumentState:
     adapter_state: object
     selected: int
-    authored: AuthoredSceneOverlay
+    overrides: SceneOverrides
     selected_node_id: int
 
 
@@ -108,8 +108,8 @@ class _LightOverride:
 
 
 @dataclass
-class AuthoredSceneOverlay:
-    """Mojive-owned property edits layered over an adapter scene."""
+class SceneOverrides:
+    """Camera, light and appearance overrides retained over adapter-owned scene values."""
 
     lights: dict[int, _LightOverride] = field(default_factory=dict)
     environment: Environment | None = None
@@ -119,7 +119,7 @@ class AuthoredSceneOverlay:
     cameras: dict[int, CameraView] = field(default_factory=dict)
 
     def clear(self) -> None:
-        """Discard all authored overrides and reveal adapter-owned values."""
+        """Discard property overrides and reveal adapter-owned values."""
 
         self.lights.clear()
         self.environment = None
@@ -127,6 +127,10 @@ class AuthoredSceneOverlay:
         self.geometry_colors.clear()
         self.geometry_color_targets.clear()
         self.cameras.clear()
+
+
+# Preserve the published type name for existing imports and serialized state.
+AuthoredSceneOverlay = SceneOverrides
 
 
 def _apply_geometry_color_overrides(source: SceneSource, overrides: dict[int, np.ndarray]) -> None:

@@ -9,6 +9,7 @@ from functools import lru_cache
 from imgui_bundle import imgui
 
 from mojive.geometry2d.curves import CORNER_SMOOTHING, smooth_polygon_corners
+from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.text_layout import text_line_y
 
@@ -153,6 +154,9 @@ class HierarchyPanel(Panel):
         )
 
         self._draw_type_filters(ctx)
+        if len(s.source.geom_role):
+            imgui.text_disabled(ctx.tr("Geometry view"))
+            draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme)
 
         removable = self._batch_removable_roots()
         if len(self._batch_selected) > 1:

@@ -154,11 +154,13 @@ class TextureStore:
         else:
             tex = self.ctx.texture((w, h), comps, blob)
         tex.build_mipmaps()
-        # Driver mip generation differs for odd extents. Upload the shared
-        # linear-light area filter used by the native and WebGPU backends.
-        for level, data in enumerate(mip_chain(pixels[None], srgb=fmt is not None)):
-            if level:
-                tex.write(data[0].tobytes(), level=level, alignment=1)
+        # Power-of-two extents reduce to exact 2x blocks on the GPU. Recomputing
+        # them on the CPU dominates loading large texture sets. Odd mip extents
+        # need the shared area filter to retain edge coverage across backends.
+        if w & (w - 1) or h & (h - 1):
+            for level, data in enumerate(mip_chain(pixels[None], srgb=fmt is not None)):
+                if level:
+                    tex.write(data[0].tobytes(), level=level, alignment=1)
         return tex
 
     def _make_cube(self, size, comps, pixels, fmt):

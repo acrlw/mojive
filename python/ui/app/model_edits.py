@@ -182,7 +182,7 @@ class _ModelEdits:
         if stacked:
             hint_height += imgui.get_style().item_spacing.y
         imgui.set_next_window_pos(
-            imgui.ImVec2(x + width * 0.5, y + height - 16 * scale),
+            imgui.ImVec2(x + width * 0.5, self._viewport_hint_bottom()),
             imgui.Cond_.always,
             imgui.ImVec2(0.5, 1),
         )

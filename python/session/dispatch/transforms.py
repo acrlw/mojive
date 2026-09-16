@@ -12,6 +12,7 @@ from mojive.adapters.base import (
 )
 from mojive.commands import CommandResult
 from mojive.scene.geometry import scale_vector
+from mojive.types import GeometryView
 
 if TYPE_CHECKING:
     from .. import Session
@@ -60,6 +61,24 @@ def set_visual_group(self: Session, c: cmd.SetVisualGroup) -> CommandResult:
         if ok
         else CommandResult.bad(f"visual group {c.category}:{c.group} is unavailable")
     )
+
+
+def set_geometry_view(self: Session, c: cmd.SetGeometryView) -> CommandResult:
+    node = self.node(c.node_id)
+    if node is None or node.type not in (NodeType.LINK, NodeType.ROBOT, NodeType.GEOM):
+        return CommandResult.bad("Geometry view requires a link or geometry node")
+    view = GeometryView(c.view) if c.view is not None else None
+    if view is GeometryView.DEFAULT:
+        view = None
+    if node.geometry_view == view:
+        return CommandResult.good("")
+    node.geometry_view = view
+    for source_node in self._source.nodes:
+        if source_node.node_id == node.node_id:
+            source_node.geometry_view = view
+            break
+    self._structure_generation += 1
+    return CommandResult.good("")
 
 
 def set_pose(self: Session, c: cmd.SetPose) -> CommandResult:

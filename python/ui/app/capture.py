@@ -7,6 +7,7 @@ import time
 from concurrent.futures import Future
 from dataclasses import asdict
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 from imgui_bundle import imgui
@@ -61,7 +62,9 @@ class _Capture:
             CaptureSurface.VIEWPORT: "viewport-ui",
             CaptureSurface.WINDOW: "window",
         }[surface]
-        return Path("output") / f"{stem}-{time.strftime('%Y%m%d-%H%M%S')}{suffix}"
+        return (
+            Path("output") / f"{stem}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:12]}{suffix}"
+        )
 
     def request_capture(
         self,
@@ -70,10 +73,11 @@ class _Capture:
         surface: CaptureSurface | str = CaptureSurface.SCENE,
     ) -> Path:
         """Capture one future presented frame; pure scene output is the default."""
-
+        if getattr(self, "_released", False):
+            raise RuntimeError("The viewer is closed")
         surface = CaptureSurface(surface)
         path = Path(output) if output is not None else self._capture_output(surface, ".png")
-        self._capture_request = (path, surface)
+        self._capture_requests.append((path, surface))
         return path
 
     def request_capture_async(
@@ -110,7 +114,8 @@ class _Capture:
         countdown: float | None = None,
     ) -> Path:
         """Start an interactive recording of the scene, viewport UI, or full window."""
-
+        if getattr(self, "_released", False):
+            raise RuntimeError("The viewer is closed")
         if self.recording.active:
             raise RuntimeError("a viewer recording is already active")
         config = getattr(self, "recording_config", RecordingConfig())
@@ -339,6 +344,7 @@ class _Capture:
                 duration=8.0,
                 copy_text=str(destination),
             )
+            self._copy_saved_capture(destination, "file")
         return path
 
     def _request_recording_stop(self) -> Path | None:
@@ -399,9 +405,37 @@ class _Capture:
             self.stop_recording(report=False)
             self.session.report_message(result.message, level="error")
 
+    def _copy_saved_capture(self, path: Path, kind: str) -> None:
+        clipboard = getattr(self, "_capture_clipboard", None)
+        if clipboard is not None and self.recording_config.copy_to_clipboard:
+            clipboard.submit(path, kind)
+
+    def _poll_capture_clipboard(self) -> None:
+        clipboard = getattr(self, "_capture_clipboard", None)
+        result = clipboard.poll() if clipboard is not None else None
+        if result is None:
+            return
+        saved = "Saved capture to" if result.kind == "image" else "Saved video to"
+        copied = (
+            "Image copied to clipboard" if result.kind == "image" else "File copied to clipboard"
+        )
+        detail = (
+            f"{self.localizer.text('Clipboard copy failed')}: {result.error}"
+            if result.error
+            else self.localizer.text(copied)
+        )
+        self.session.report_message(
+            f"{self.localizer.text(saved)} {result.path} · {detail}",
+            level="warning" if result.error else "success",
+            duration=8.0,
+            copy_text=str(result.path),
+        )
+
     def _needs_presented_readback(self, dt: float) -> bool:
-        requested = getattr(self, "_capture_request", None)
-        if requested is not None and requested[1] is not CaptureSurface.SCENE:
+        if any(
+            surface is not CaptureSurface.SCENE
+            for _, surface in getattr(self, "_capture_requests", [])
+        ):
             return True
         if any(
             surface is not CaptureSurface.SCENE
@@ -421,6 +455,7 @@ class _Capture:
     def _present_frame(self, dt: float) -> None:
         presented = self.window.end_frame(readback=self._needs_presented_readback(dt))
         self._finish_capture_and_recording(presented, dt)
+        self._poll_capture_clipboard()
         self._finish_model_load_frame()
 
     def _finish_model_load_frame(self) -> None:
@@ -474,10 +509,8 @@ class _Capture:
                 images[surface] = self._surface_image(surface, presented)
             return images[surface]
 
-        request = getattr(self, "_capture_request", None)
-        self._capture_request = None
-        if request is not None:
-            path, surface = request
+        requests, self._capture_requests = getattr(self, "_capture_requests", []), []
+        for path, surface in requests:
             try:
                 from PIL import Image
 
@@ -493,6 +526,7 @@ class _Capture:
                     level="success",
                     copy_text=str(path.resolve()),
                 )
+                self._copy_saved_capture(path, "image")
         tasks, self._capture_tasks = getattr(self, "_capture_tasks", []), []
         for path, surface, future, out in tasks:
             if not future.set_running_or_notify_cancel():
@@ -508,6 +542,7 @@ class _Capture:
                 if path is not None:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     Image.fromarray(image, "RGB").save(path)
+                    self._copy_saved_capture(path, "image")
                 future.set_result(
                     {
                         **(
@@ -619,7 +654,7 @@ class _Capture:
         self.stop_recording(report=report)
 
     def _toggle_state_take_recording(self) -> None:
-        self.panels.get("Keyframes").toggle_recording(self._panel_context())
+        self.panels.load("keyframes").toggle_recording(self._panel_context())
 
     def _toggle_playback(self, *, source: str | None = None) -> None:
         if getattr(self, "_take_video", None) is not None:

@@ -20,6 +20,11 @@ take-video:
 keyframe-timeline:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.keyframe_timeline $(ARGS)
 
+.PHONY: timeline-profile
+## Profile 100 to 100,000 keys; add ARGS='--capture' for Linux EGL panel captures.
+timeline-profile:
+	$(PY) -m mojive.tools.timeline_profile $(ARGS)
+
 camera-tracking:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
 
@@ -61,6 +66,8 @@ help:
 		'  make native-model-parity verify live rigid, skin, and flex scenes' \
 		'  make native-wheel-test  build, install, and verify the native wheel' \
 		'  make passive-viewer     independent physics and display rates with captures' \
+		'  make viewer-managed     MuJoCo-style managed viewer; Mojive steps physics' \
+		'  make viewer-passive     MuJoCo-style passive viewer; caller steps physics' \
 		'  make egl-viewer         Linux viewer with a GLFW EGL context' \
 		'  make hidpi              viewer with an explicit 200% UI scale' \
 		'  make empty              empty viewer; load MJCF or URDF from File menu' \
@@ -109,6 +116,7 @@ help:
 		'  make mujoco-islands     constraint-island color reference images' \
 		'  make mujoco-bvh         body, mesh, and flex BVH reference images' \
 		'  make mujoco-convex-hull original and collision-hull reference images' \
+		'  make geometry-views    visual, collision, and combined geometry images' \
 		'  make mujoco-rangefinder site/camera rays, hits, and normals' \
 		'  make mujoco-constraints  equality constraint endpoint markers' \
 		'  make mujoco-editing     mocap pose and equality controls' \
@@ -297,6 +305,9 @@ GPU_WGPU_FILES += tests/gpu/test_passive.py
 GPU_WGPU_FILES += tests/gpu/test_camera_tracking.py tests/gpu/test_input_mapping.py
 GPU_WGPU_FILES += tests/gpu/test_keyframe_timeline.py tests/gpu/test_ui_refinement.py tests/gpu/test_ui_redesign.py tests/gpu/test_take_video.py tests/gpu/test_ui_corner_controls.py
 GPU_WGPU_FILES += tests/gpu/test_scene_capture.py
+GPU_WGPU_FILES += tests/gpu/test_mujoco_viewer.py
+GPU_WGPU_FILES += tests/gpu/test_geometry_views.py
+GPU_WGPU_FILES += tests/gpu/test_texture_mipmaps.py
 GPU_WGPU_FILES +=  tests/gpu/test_ui_feasibility_backend.py
 GPU_WGPU_FILES += tests/gpu/test_viewcube.py
 GPU_WGPU_FILES += tests/gpu/test_value_rails.py
@@ -731,6 +742,22 @@ primitive-authoring:
 scene-editing-audit:
 	$(PY) -m mojive.tools.scene_editing_audit $(ARGS)
 
+.PHONY: material-workflow
+## Offscreen public API acceptance for box/floor materials, skybox, and editable grid.
+material-workflow:
+	$(PY) -m mojive.tools.material_workflow $(ARGS)
+
+.PHONY: viewer-compat
+viewer-compat:
+	$(PY) examples/mujoco_viewer.py $(ARGS)
+
+.PHONY: viewer-managed viewer-passive
+viewer-managed:
+	$(PY) examples/viewer_managed.py $(ARGS)
+
+viewer-passive:
+	$(PY) examples/viewer_passive.py $(ARGS)
+
 ## Material creation/copy/binding and 2D image import acceptance.
 material-authoring:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli editor test_scene $(ARGS)
@@ -863,6 +890,13 @@ mujoco-bvh:
 
 mujoco-convex-hull:
 	$(PY) -m mojive.tools.mujoco_convex_hull $(ARGS)
+
+.PHONY: geometry-views geometry-ui
+geometry-views:
+	$(PY) -m mojive.tools.geometry_views $(ARGS)
+
+geometry-ui:
+	$(PY) -m mojive.tools.geometry_views_ui $(ARGS)
 
 mujoco-rangefinder:
 	$(PY) -m mojive.cli view rangefinder --paused \

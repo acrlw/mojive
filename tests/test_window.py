@@ -30,7 +30,7 @@ from mojive.ui.app import (
     precise_input_status_hints,
 )
 from mojive.ui.clipping import scissor_rect_for_target
-from mojive.ui.gestures import Claim
+from mojive.ui.gestures import Claim, GestureRouter, InputState
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.viewport_widgets import DEFAULT_VIEWPORT_LABELS, ToolHint
 from mojive.ui.window import (
@@ -238,9 +238,7 @@ def test_background_focus_capture_is_not_an_active_widget_edit(monkeypatch, movi
     assert app._selection_clear_enabled() is (not moving)
 
 
-def test_scene_input_ignores_broad_imgui_keyboard_capture(monkeypatch):
-    """A focused panel must not reserve policy keys unless it is editing text."""
-
+def _input_app(monkeypatch):
     app = ViewerApp.__new__(ViewerApp)
     for attribute in (
         "_pending_document_action",
@@ -260,12 +258,58 @@ def test_scene_input_ignores_broad_imgui_keyboard_capture(monkeypatch):
     app._open_rename_popup = False
     app._popup_owned_frame = False
     app._consume_scene_pointer_until_release = False
-    io = SimpleNamespace(want_capture_keyboard=True, want_text_input=False)
+    app.router = GestureRouter()
+    app.gizmo = SimpleNamespace(using=False)
+    app.window = SimpleNamespace(style_scale=1.0)
+    io = SimpleNamespace(
+        want_capture_keyboard=True,
+        want_text_input=False,
+        mouse_down=[False] * 3,
+        mouse_pos=SimpleNamespace(x=0.0, y=0.0),
+    )
     monkeypatch.setattr(imgui, "get_io", lambda: io)
+    monkeypatch.setattr(imgui, "get_current_context", lambda: None)
     monkeypatch.setattr(imgui, "is_popup_open", lambda *_args: False)
+    return app, io
+
+
+def test_scene_input_ignores_broad_imgui_keyboard_capture(monkeypatch):
+    """A focused panel must not reserve policy keys unless it is editing text."""
+    app, io = _input_app(monkeypatch)
 
     assert not app._scene_input_blocked()
     io.want_text_input = True
+    assert app._scene_input_blocked()
+
+
+@pytest.mark.parametrize("surface", ["overlay", "notice"])
+@pytest.mark.parametrize(
+    "press",
+    [
+        InputState(left=True, over_viewport=True),
+        InputState(left=True, over_viewport=True, over_view_cube=True),
+        InputState(left=True, over_viewport=True, ctrl=True, has_selection=True),
+        InputState(left=True, over_viewport=True, gizmo_available=True, gizmo_hovered=True),
+    ],
+)
+def test_scene_drag_retains_ownership_across_overlay_and_notice(monkeypatch, surface, press):
+    app, io = _input_app(monkeypatch)
+    app.viewport_overlays = ViewportOverlayConfig(movable=True)
+    rect = (10.0, 20.0, 110.0, 60.0)
+    if surface == "overlay":
+        app._tool_widget_rect = rect
+    else:
+        app._status_notice_bounds = rect
+    claim = app.router.update(press)
+    io.mouse_down[0] = True
+    io.mouse_pos.x, io.mouse_pos.y = 12.0, 40.0
+    assert not app._scene_input_blocked()
+    assert app.router.update(press) == claim
+    # Explicit prompts still interrupt owned gestures.
+    app._popup_owned_frame = True
+    assert app._scene_input_blocked()
+    app._popup_owned_frame = False
+    app.router.abort()
     assert app._scene_input_blocked()
 
 

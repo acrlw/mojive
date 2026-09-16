@@ -24,6 +24,44 @@ def triangle():
     )
 
 
+def test_scene_override_names_share_state_across_undo():
+    from mojive.session import AuthoredSceneOverlay, SceneOverrides
+
+    assert AuthoredSceneOverlay is SceneOverrides
+    scene = Scene()
+    box = scene.box()
+    session = Session(StaticSceneAdapter(scene))
+    assert isinstance(session.scene_overrides, SceneOverrides)
+    assert session.authored_overlay is session.scene_overrides
+    assert session.submit(cmd.RenameSceneEntity(box.object_id, "changed")).ok
+    assert session.submit(cmd.Undo()).ok
+    assert session.authored_overlay is session.scene_overrides
+    session.release()
+
+
+@pytest.mark.parametrize(
+    "rotation", [[1, 2], np.full((3, 3), float("nan")), np.full((3, 3), 1e300)]
+)
+def test_rejected_pose_is_atomic_across_a_later_scene_rebuild(rotation):
+    scene = Scene()
+    box = scene.box(position=(1, 2, 3))
+    before = scene.frame.geom_xpos.copy()
+    with pytest.raises(ValueError):
+        box.set_pose((4, 5, 6), rotation)
+    np.testing.assert_array_equal(scene.frame.geom_xpos, before)
+    scene.add_camera("rebuild", CameraView())
+    np.testing.assert_array_equal(scene.frame.geom_xpos, before)
+
+
+@pytest.mark.parametrize("field", ["position", "size"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 1e300])
+def test_scene_creation_rejects_unrepresentable_geometry(field, value):
+    scene = Scene()
+    with pytest.raises(ValueError, match="finite"):
+        scene.box(**{field: [value, 1, 1]})
+    assert not scene.source.geom_mesh
+
+
 def test_undo_redo_preserves_programmatic_scene_and_handles():
     scene = Scene()
     box = scene.box()
@@ -232,6 +270,74 @@ def test_failed_command_rolls_back_the_entire_edit():
     assert not session.editing
 
 
+@pytest.mark.parametrize("command", [cmd.Undo(), cmd.Redo()])
+@pytest.mark.parametrize("raises", [False, True])
+def test_failed_history_restore_retains_record_for_retry(monkeypatch, command, raises):
+    scene = Scene()
+    box = scene.box()
+    session = Session(StaticSceneAdapter(scene))
+    assert session.submit(cmd.RenameSceneEntity(box.object_id, "renamed")).ok
+    if isinstance(command, cmd.Redo):
+        assert session.submit(cmd.Undo()).ok
+    revision, retained = session.document_revision, session.history_bytes
+    restore = session.adapter.restore_edit_state
+
+    def fail(_state):
+        if raises:
+            raise RuntimeError("temporary restore failure")
+        return False
+
+    monkeypatch.setattr(session.adapter, "restore_edit_state", fail)
+    result = session.submit(command)
+    assert not result.ok
+    if raises:
+        assert "temporary restore failure" in result.message
+    assert session.document_revision == revision and session.history_bytes == retained
+    assert session.can_undo if isinstance(command, cmd.Undo) else session.can_redo
+    monkeypatch.setattr(session.adapter, "restore_edit_state", restore)
+    assert session.submit(command).ok
+    assert scene.object("object" if isinstance(command, cmd.Undo) else "renamed") == box
+
+
+def test_edit_context_rolls_back_failed_history_capture(monkeypatch):
+    scene = Scene()
+    box = scene.box()
+    session = Session(StaticSceneAdapter(scene))
+    capture = session.adapter.capture_edit_state
+    calls = 0
+
+    def fail_after_edit():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("history capture failed")
+        return capture()
+
+    monkeypatch.setattr(session.adapter, "capture_edit_state", fail_after_edit)
+    with pytest.raises(RuntimeError, match="history capture failed"), session.edit():
+        assert session.submit(cmd.RenameSceneEntity(box.object_id, "temporary")).ok
+    assert scene.object("object") == box
+    assert not session.editing and not session.dirty and not session.can_undo
+
+
+def test_caught_command_exception_still_rolls_back_transaction(monkeypatch):
+    scene = Scene()
+    box = scene.box()
+    session = Session(StaticSceneAdapter(scene))
+    node = session.node_by_object_id(box.object_id)
+
+    def fail(*_args):
+        raise RuntimeError("pose write failed")
+
+    monkeypatch.setattr(session.adapter, "set_pose", fail)
+    with pytest.raises(RuntimeError, match="pose write failed"), session.edit():
+        assert session.submit(cmd.RenameSceneEntity(box.object_id, "temporary")).ok
+        with pytest.raises(RuntimeError, match="pose write failed"):
+            session.submit(cmd.SetPose(node.node_id, (1, 2, 3), np.eye(3)))
+    assert scene.object("object") == box
+    assert not session.editing and not session.dirty and not session.can_undo
+
+
 def test_cancelled_edit_preserves_the_redo_branch():
     scene = Scene()
     box = scene.box()
@@ -310,3 +416,20 @@ def test_document_operations_cannot_escape_an_active_edit(tmp_path, operation):
     assert scene.object("object") == box
     assert not path.exists()
     assert not session.dirty
+
+
+def test_material_base_color_undo_restores_inheritance():
+    from mojive.types import Material
+
+    scene = Scene()
+    scene.box(material=Material(rgba=np.array((1, 0, 0, 1), np.float32)))
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        assert session.submit(cmd.SetMaterial(0, Material(rgba=np.array((0, 0, 1, 1), np.float32))))
+        np.testing.assert_array_equal(session.source.geom_rgba[0], (0, 0, 1, 1))
+        assert session.submit(cmd.Undo())
+        np.testing.assert_array_equal(session.source.geom_rgba[0], (1, 0, 0, 1))
+        assert session.submit(cmd.Redo())
+        np.testing.assert_array_equal(session.source.geom_rgba[0], (0, 0, 1, 1))
+    finally:
+        session.release()

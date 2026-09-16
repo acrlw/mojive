@@ -9,6 +9,7 @@ import numpy as np
 
 from ...types import (
     DEFAULT_HEADLIGHT,
+    GeometryRole,
     InstancePoseSource,
     InstanceVisual,
     Light,
@@ -39,6 +40,7 @@ from .constants import (
 )
 from .deformables import build_deformables
 from .engine import mujoco
+from .geometry import geometry_roles
 from .spec import _numeric_values
 
 
@@ -97,6 +99,10 @@ class _SceneConversion:
         meshes: dict[MeshKey, MeshData] = {}
         mesh_keys: list[MeshKey] = []
         convex_mesh_keys: list[MeshKey] = []
+        collision_mesh_keys: list[MeshKey] = []
+        roles: list[int] = []
+        group_visibility: list[bool] = []
+        geom_roles, collision_candidates = geometry_roles(m)
         mats: list[int] = []
         sizes: list[np.ndarray] = []
         rgbas: list[np.ndarray] = []
@@ -131,12 +137,18 @@ class _SceneConversion:
             is_static: bool = False,
             island_body: int = -1,
             convex_mesh: MeshKey | None = None,
+            collision_mesh: MeshKey | None = None,
+            role: GeometryRole = GeometryRole.VISUAL,
+            group_visible: bool = True,
         ) -> None:
             for key, scale, cap_offset in parts:
                 if key.shape not in (MeshShape.ASSET, MeshShape.CONVEX_HULL) and key not in meshes:
                     meshes[key] = None
                 mesh_keys.append(key)
                 convex_mesh_keys.append(convex_mesh or key)
+                collision_mesh_keys.append(collision_mesh or key)
+                roles.append(int(role))
+                group_visibility.append(group_visible)
                 mats.append(mat_index)
                 sizes.append(np.asarray(scale, np.float32))
                 rgbas.append(rgba)
@@ -158,8 +170,6 @@ class _SceneConversion:
                 infinite.append(is_infinite)
 
         for gi in range(m.ngeom):
-            if int(m.geom_group[gi]) not in geom_groups:
-                continue
             gtype = int(m.geom_type[gi])
             size = np.asarray(m.geom_size[gi], np.float64)
             body = int(m.geom_bodyid[gi])
@@ -168,6 +178,7 @@ class _SceneConversion:
             mat_index = mat_of_matid[matid] if matid >= 0 else mat_of_matid[-1]
             is_infinite = False
             hull_key = None
+            collision_key = None
 
             if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
                 key = MeshKey(MeshShape.PLANE)
@@ -209,12 +220,15 @@ class _SceneConversion:
                 if key not in meshes:
                     meshes[key] = self._build_mesh(data_id)
                 parts = [(key, np.ones(3), None)]
-                if int(m.mesh_graphadr[data_id]) >= 0 and (
-                    int(m.geom_contype[gi]) or int(m.geom_conaffinity[gi])
-                ):
-                    hull_key = MeshKey(MeshShape.CONVEX_HULL, data_id)
-                    if hull_key not in meshes:
-                        meshes[hull_key] = self._build_convex_hull(data_id)
+                if int(m.mesh_graphadr[data_id]) >= 0:
+                    hull = MeshKey(MeshShape.CONVEX_HULL, data_id)
+                    if int(m.geom_contype[gi]) or int(m.geom_conaffinity[gi]):
+                        hull_key = hull
+                    # SDF collision uses the plugin surface, not a convex hull.
+                    if gtype == mujoco.mjtGeom.mjGEOM_MESH and collision_candidates[gi]:
+                        collision_key = hull
+                    if (hull_key or collision_key) and hull not in meshes:
+                        meshes[hull] = self._build_convex_hull(data_id)
             else:
                 skipped.add(gtype)
                 continue
@@ -233,6 +247,9 @@ class _SceneConversion:
                 is_static=int(m.body_weldid[body]) == 0,
                 island_body=body if int(m.body_dofnum[int(m.body_weldid[body])]) else -1,
                 convex_mesh=hull_key,
+                collision_mesh=collision_key,
+                role=GeometryRole(int(geom_roles[gi])),
+                group_visible=int(m.geom_group[gi]) in geom_groups,
             )
 
         for si in range(m.nsite):
@@ -274,7 +291,7 @@ class _SceneConversion:
                 is_static=int(m.body_weldid[body]) == 0,
             )
 
-        self._deformables = build_deformables(m, self._d, flex_groups, skin_groups)
+        self._deformables = build_deformables(m, self._d, set(range(6)), skin_groups)
         self._mesh_updates = {spec.key: spec.update_data for spec in self._deformables}
         for spec in self._deformables:
             meshes[spec.key] = spec.mesh
@@ -300,12 +317,20 @@ class _SceneConversion:
                 object_id=object_id,
                 visual=spec.visual,
                 island_body=self._flex_island_body(spec.key.index) if is_flex else -1,
+                role=GeometryRole.BOTH
+                if is_flex
+                and (m.flex_contype[spec.key.index] or m.flex_conaffinity[spec.key.index])
+                else GeometryRole.VISUAL,
+                group_visible=int(m.flex_group[spec.key.index]) in flex_groups if is_flex else True,
             )
 
         src.meshes = {k: v for k, v in meshes.items() if v is not None}
         src.dynamic_meshes = frozenset(spec.key for spec in self._deformables)
         src.geom_mesh = mesh_keys
         src.geom_convex_mesh = convex_mesh_keys
+        src.geom_collision_mesh = collision_mesh_keys
+        src.geom_role = np.asarray(roles, np.uint8)
+        src.geom_group_visible = np.asarray(group_visibility, bool)
         src.geom_material = mats
         n = len(mesh_keys)
         src.geom_size = np.stack(sizes) if n else np.zeros((0, 3), np.float32)
@@ -828,8 +853,6 @@ class _SceneConversion:
             parent = body_node[b]
             adr, num = int(m.body_geomadr[b]), int(m.body_geomnum[b])
             for gi in range(adr, adr + num):
-                if not self._visual_groups["geom"][int(m.geom_group[gi])]:
-                    continue
                 compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, gi)
                 gname = compiled_name or f"geom{gi}"
                 model_id, raw_name = self._model_element_name(
@@ -948,8 +971,6 @@ class _SceneConversion:
             nodes[self._site_nodes[si]].model_id = model_id
             self._node_element[self._site_nodes[si]] = (model_id, NodeType.SITE, raw_name)
         for fi in range(m.nflex):
-            if not self._visual_groups["flex"][int(m.flex_group[fi])]:
-                continue
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_FLEX, fi) or f"flex{fi}"
             self._flex_nodes[fi] = add(name, NodeType.FLEX, body_node[0], 0, object_id=m.nbody + fi)
         for si in range(m.nskin):

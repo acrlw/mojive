@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import tempfile
@@ -22,6 +23,18 @@ def _default_socket() -> Path:
 
 
 DEFAULT_SOCKET = _default_socket()
+
+
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("RPC JSON numbers must be finite")
+    return number
+
+
+def _decode_json(payload):
+    """Reject nonfinite constants and overflow before dispatch or correlation."""
+    return json.loads(payload, parse_float=_finite_float, parse_constant=_finite_float)
 
 
 def _validate_response(response, request_id: int) -> None:

@@ -390,3 +390,33 @@ def test_camera_light_and_capture_camera_keep_contract_values(service):
     with pytest.raises(RpcError, match="far"):
         invoke(service, "set_capture_camera", near=10, far=1)
     assert invoke(service, "get_capture_settings")["camera"]["near"] == camera.near
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"eye": [1e300, 0, 0]},
+        {"up": [0, 0, 1e300]},
+        {"distance": 1e300},
+        {"fov_y": 1e-300},
+        {"near": 1e300, "far": 2e300},
+        {"focal_length": [1, 1], "sensor_size": [1e-300, 1e-300]},
+    ],
+)
+def test_unrenderable_camera_update_preserves_previous_camera(service, params):
+    before = invoke(service, "get_capture_settings")["camera"]
+    with pytest.raises(RpcError) as error:
+        service.dispatch("set_capture_camera", params)
+    assert error.value.code == "invalid_params"
+    assert invoke(service, "get_capture_settings")["camera"] == before
+    invoke(service, "set_capture_camera", eye=[5, 1, 2])
+
+
+@pytest.mark.parametrize("field", ["position", "size"])
+def test_unrepresentable_object_values_do_not_create_scene_or_history(service, field):
+    before = invoke(service, "get_scene")
+    with pytest.raises(RpcError) as error:
+        invoke(service, "add_scene_object", shape="box", **{field: [1e300, 1, 1]})
+    assert error.value.code == "invalid_params"
+    assert invoke(service, "get_scene") == before
+    assert not service.session.can_undo

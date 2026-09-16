@@ -76,11 +76,17 @@ def cmd_keyframes(args: argparse.Namespace) -> int:
     try:
         for name in args.enable_render:
             viewer.backend.set_flag(RenderFlag(name), True)
-        count = len(viewer.session.keyframes)
-        if not count:
+        keyframe_ids = tuple(item.keyframe_id for item in viewer.session.keyframes)
+        if not keyframe_ids:
             print("Model has no keyframes", file=sys.stderr)
             return 1
-        viewer.session.submit(cmd.LoadKeyframe(0))
+
+        def load(index, current):
+            result = current.session.submit(cmd.LoadKeyframe(keyframe_ids[index]))
+            if not result.ok:
+                raise RuntimeError(result.message)
+
+        load(0, viewer)
         viewer.app.set_fixed_render_size(args.width, args.height)
         if args.camera:
             camera = next(
@@ -93,14 +99,9 @@ def cmd_keyframes(args: argparse.Namespace) -> int:
         if not args.camera:
             viewer.app.camera.distance *= args.camera_distance_scale
 
-        def load(index, current):
-            result = current.session.submit(cmd.LoadKeyframe(index))
-            if not result.ok:
-                raise RuntimeError(result.message)
-
         viewer.record(
             Path(args.output),
-            frames=count,
+            frames=len(keyframe_ids),
             fps=args.fps,
             before_frame=load,
             size=(args.width, args.height),

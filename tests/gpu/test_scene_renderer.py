@@ -63,3 +63,44 @@ def test_independent_renderers_can_alternate_without_losing_context(backend):
             np.testing.assert_array_equal(a.render(), expected)
             np.testing.assert_array_equal(b.render(), other)
         np.testing.assert_array_equal(a.render(), expected)
+
+
+@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
+def test_public_debug_layer_renders_without_editor_and_clears_by_id(backend):
+    from mojive import Occlusion
+
+    with SceneRenderer(width=96, height=72, samples=0, renderer=backend) as renderer:
+        before = renderer.render().copy()
+        layer = renderer.debug.layer("measurement", Occlusion.ALWAYS)
+        layer.line("length", (0, -1, 0), (0, 1, 0), (0, 1, 0, 1), 5)
+        after = renderer.render()
+        assert np.any(after != before, axis=2).sum() > 30
+        assert not renderer.render(product=RenderProduct.OBJECT_ID).any()
+        layer.erase("length")
+        np.testing.assert_array_equal(renderer.render(), before)
+    with pytest.raises(RuntimeError, match="closed"):
+        _ = renderer.debug
+
+
+@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
+def test_shared_material_color_and_instance_override_reach_offscreen_pixels(backend):
+    from mojive.types import Material
+
+    scene = Scene()
+    box = scene.box(material=Material(rgba=np.array((1, 0, 0, 1), np.float32)))
+    adapter = StaticSceneAdapter(scene)
+    with SceneRenderer(width=96, height=72, samples=0, renderer=backend) as renderer:
+        renderer.update_from(adapter)
+        red = renderer.render()[36, 48].copy()
+        assert red[0] > red[2] + 30
+        assert scene.set_material(0, Material(rgba=np.array((0, 0, 1, 1), np.float32)))
+        renderer.update_from(adapter)
+        blue = renderer.render()[36, 48].copy()
+        assert blue[2] > blue[0] + 30
+        box.set_color((0, 1, 0, 1))
+        renderer.update_from(adapter)
+        green = renderer.render()[36, 48].copy()
+        assert green[1] > green[2] + 30
+        box.set_color(None)
+        renderer.update_from(adapter)
+        np.testing.assert_array_equal(renderer.render()[36, 48], blue)

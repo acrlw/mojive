@@ -11,6 +11,7 @@ from mojive.capture import CaptureSurface
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
 from ...render.backend import DebugView, FrameMode, LabelMode, RenderFlag, ShadowQuality
+from ..geometry_view import draw_geometry_view
 from ..gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
@@ -90,7 +91,7 @@ _COLUMN_GAP_PT = 8.0
 _CATEGORY_SEARCH_TERMS = {
     "General": ("language", "ui font", "cjk font", "model realtime rebuild apply"),
     "Recording": (
-        "video capture countdown delay frame rate fps viewport layers quality crf bitrate encoding chroma",
+        "video capture clipboard copy countdown delay frame rate fps viewport layers quality crf bitrate encoding chroma",
     ),
     "Interaction": (
         "gizmo",
@@ -152,7 +153,13 @@ def render_flag_label(flag: RenderFlag, translate, *, localized: bool) -> str:
 
 
 def flag_groups() -> tuple[tuple[str, tuple[RenderFlag, ...]], ...]:
-    rest = tuple(f for f in RenderFlag if f not in _RND_FLAGS and f not in _VIS_FLAGS)
+    rest = tuple(
+        f
+        for f in RenderFlag
+        if f not in _RND_FLAGS
+        and f not in _VIS_FLAGS
+        and f not in (RenderFlag.VISUAL_GEOMETRY, RenderFlag.COLLISION_GEOMETRY)
+    )
     return (
         ("mjtRndFlag", _RND_FLAGS),
         ("mjtVisFlag", _VIS_FLAGS),
@@ -326,6 +333,14 @@ class SettingsPanel(Panel):
         if config is None:
             return
         if self._begin_properties("settings_recording"):
+            self._property(ctx.tr("Copy to clipboard"))
+            changed, value = imgui.checkbox("##capture_clipboard", config.copy_to_clipboard)
+            imgui.set_item_tooltip(
+                ctx.tr("Copy screenshots as images and videos as files after saving.")
+            )
+            if changed:
+                config = replace(config, copy_to_clipboard=value)
+                ctx.set_recording_config(config)
             self._property(ctx.tr("Run simulation when recording starts"))
             clock_control = ctx.session.adapter.caps.clock_control
             imgui.begin_disabled(not clock_control)
@@ -945,6 +960,8 @@ class SettingsPanel(Panel):
             imgui.text_wrapped(self._pointer_error)
 
     def _mujoco_visuals(self, ctx: PanelContext) -> None:
+        imgui.text(ctx.tr("Geometry view"))
+        draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme)
         self._visual_groups(ctx)
         self._bvh_depth(ctx)
 

@@ -33,7 +33,7 @@ def reload(self: Session, c: cmd.Reload) -> CommandResult:
     self._step_counter = 0
     self._perturb = PerturbState()
     self._active_keyframe = -1
-    self._authored.clear()
+    self._scene_overrides.clear()
     self._refresh_structure()
     self._reset_edit_history()
     return CommandResult.good("Scene reloaded")
@@ -51,7 +51,7 @@ def new_scene(self: Session, c: cmd.NewScene) -> CommandResult:
     self._asset_path = None
     self._selected = 0
     self._selected_node_id = -1
-    self._authored.clear()
+    self._scene_overrides.clear()
     self._refresh_structure()
     self._reset_edit_history()
     return CommandResult.good("New scene")
@@ -72,7 +72,7 @@ def open_scene(self: Session, c: cmd.OpenScene) -> CommandResult:
     self._asset_path = path
     self._selected = 0
     self._selected_node_id = -1
-    self._authored.clear()
+    self._scene_overrides.clear()
     self._refresh_structure()
     self._reset_edit_history()
     return CommandResult.good(f"Opened {path.name}")
@@ -113,7 +113,7 @@ def load_asset(self: Session, c: cmd.LoadAsset) -> CommandResult:
     self._selected_node_id = -1
     self._perturb = PerturbState()
     self._active_keyframe = -1
-    self._authored.clear()
+    self._scene_overrides.clear()
     self._refresh_structure()
     self._reset_edit_history()
     return CommandResult.good(f"Loaded {c.path.name}")

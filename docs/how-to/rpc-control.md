@@ -81,7 +81,10 @@ uv run --no-sync mojive control capture \
 
 ## Deadlines and recovery
 
-`RpcClient(timeout=5.0)` applies a deadline to each complete call. Requests include an optional
+`RpcClient(timeout=5.0)` applies one deadline to the complete call, including waiting for another
+call on the same client, connecting, writing, and reading. Expiry while waiting for that client
+returns `timeout` with "request was not sent" and leaves the active call's connection intact.
+Requests include an optional
 `deadline` field in host `time.monotonic()` seconds; the local AF_UNIX service shares this clock.
 `hello` advertises `deadline_clock: "monotonic"`. Protocol version 1 clients that omit the field
 retain their original behavior without a server execution deadline.

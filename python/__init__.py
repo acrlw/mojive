@@ -84,11 +84,13 @@ if TYPE_CHECKING:
         ShadowQuality,
     )
     from .render.debugdraw import DebugDraw, Layer, Occlusion
+    from .render.geometry import GeometryView
     from .types import (
         Bounds,
         CameraView,
         CenteredBounds,
         Environment,
+        GeometryRole,
         Light,
         LightSet,
         LightType,
@@ -179,12 +181,14 @@ _EXPORT_MODULES = {
         "ShadowQuality",
     ),
     ".render.debugdraw": ("DebugDraw", "Layer", "Occlusion"),
+    ".render.geometry": ("GeometryView",),
     ".scene": ("Scene", "SceneLight", "SceneObject"),
     ".types": (
         "Bounds",
         "CameraView",
         "CenteredBounds",
         "Environment",
+        "GeometryRole",
         "Light",
         "LightSet",
         "LightType",
@@ -244,6 +248,8 @@ __all__ = [
     "EqualityConstraintInfo",
     "FrameMode",
     "FrameNeeds",
+    "GeometryRole",
+    "GeometryView",
     "InputAction",
     "InputClaim",
     "InputContext",

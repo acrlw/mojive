@@ -147,7 +147,7 @@ class _Geometry:
             if not editable_size:
                 imgui.end_disabled()
             hint = (
-                "Full authored primitive dimensions"
+                "Full primitive dimensions"
                 if editable_size
                 else "Edit model geometry dimensions in its source"
             )
@@ -365,7 +365,7 @@ class _Geometry:
             imgui.pop_id()
             return
         if open_assets and ctx.panels is not None:
-            panel = ctx.panels.get("Assets")
+            panel = ctx.panels.load("Assets")
             focus = getattr(panel, "focus", None)
             if focus is not None:
                 focus(model_id, "material", material.name.removeprefix(prefix))
@@ -535,7 +535,7 @@ class _Geometry:
             if geom_type in ("mesh", "hfield") and edited.resource_name and ctx.panels is not None:
                 (open_assets,) = _property_button_row(ctx, "resource actions", ("Open in Assets",))
                 if open_assets:
-                    panel = ctx.panels.get("Assets")
+                    panel = ctx.panels.load("Assets")
                     focus = getattr(panel, "focus", None)
                     node = ctx.session.node(edited.node_id)
                     if focus is not None and node is not None:

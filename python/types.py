@@ -12,6 +12,15 @@ import numpy as np
 from . import math3d
 
 
+class GeometryView(enum.StrEnum):
+    """Default groups, appearance, collision shapes, or their comparison."""
+
+    DEFAULT = "default"
+    VISUAL = "visual"
+    COLLISION = "collision"
+    BOTH = "both"
+
+
 class Bounds(NamedTuple):
     """Axis-aligned bounds expressed as minimum and maximum coordinates."""
 
@@ -280,6 +289,14 @@ class InstancePoseSource(enum.IntEnum):
     GEOM = 0
     SITE = 1
     WORLD = 2
+
+
+class GeometryRole(enum.IntFlag):
+    """Independent presentation roles; a geometry may serve both purposes."""
+
+    VISUAL = 1
+    COLLISION = 2
+    BOTH = VISUAL | COLLISION
 
 
 class InstanceVisual(enum.IntEnum):

@@ -120,37 +120,35 @@ class SnapshotPublisher:
     def publish_structure(self, structure: RemoteStructure) -> None:
         """Reliably publish stable structure to current and future clients."""
         payload = pickle.dumps(structure, protocol=pickle.HIGHEST_PROTOCOL)
-        self._structure = payload
-        self._structure_revision = int(structure.structure_revision)
-        self._frame = None
         with self._clients_lock:
+            self._structure = payload
+            self._structure_revision = int(structure.structure_revision)
+            self._frame = None
             self._clients = [client for client in self._clients if not client.closed]
-            clients = tuple(self._clients)
-        for client in clients:
-            client.reliable(payload, clear_latest=True)
+            for client in self._clients:
+                client.reliable(payload, clear_latest=True)
 
     def publish_frame(self, frame: SceneFrame, debug_commands=None) -> int:
         """Publish a latest-only frame and return its sequence number."""
-        self._frame_sequence += 1
         with self._clients_lock:
+            self._frame_sequence += 1
             self._clients = [client for client in self._clients if not client.closed]
-            clients = tuple(self._clients)
-        # Retain one bootstrap frame for a future viewer, but do not serialize
-        # every training step while nobody is connected.
-        if not clients and self._frame is not None:
+            # Retain one bootstrap frame for a future viewer, but do not serialize
+            # every training step while nobody is connected.
+            if not self._clients and self._frame is not None:
+                return self._frame_sequence
+            commands = frame.debug_commands if debug_commands is None else debug_commands
+            packet = RemoteFrame(
+                frame_sequence=self._frame_sequence,
+                frame=frame,
+                debug_commands=tuple(commands or ()),
+                structure_revision=self._structure_revision,
+            )
+            payload = pickle.dumps(packet, protocol=pickle.HIGHEST_PROTOCOL)
+            self._frame = payload
+            for client in self._clients:
+                client.latest(payload)
             return self._frame_sequence
-        commands = frame.debug_commands if debug_commands is None else debug_commands
-        packet = RemoteFrame(
-            frame_sequence=self._frame_sequence,
-            frame=frame,
-            debug_commands=tuple(commands or ()),
-            structure_revision=self._structure_revision,
-        )
-        payload = pickle.dumps(packet, protocol=pickle.HIGHEST_PROTOCOL)
-        self._frame = payload
-        for client in clients:
-            client.latest(payload)
-        return self._frame_sequence
 
     def pump_commands(self, handler: Callable[[dict], Any], budget: int = 256) -> int:
         """Handle queued viewer commands on the publisher thread."""
@@ -179,11 +177,16 @@ class SnapshotPublisher:
                 return
             client = _LatestSender(connection)
             with self._clients_lock:
+                if self._closed:
+                    client.close()
+                    return
+                # Bootstrap must precede every update visible after registration.
+                # Sender methods only enqueue; socket writes use their own thread.
+                if self._structure is not None:
+                    client.reliable(self._structure)
+                if self._frame is not None:
+                    client.latest(self._frame)
                 self._clients.append(client)
-            if self._structure is not None:
-                client.reliable(self._structure)
-            if self._frame is not None:
-                client.latest(self._frame)
 
     def _accept_commands(self) -> None:
         while not self._closed:

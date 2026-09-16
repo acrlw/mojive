@@ -509,13 +509,13 @@ def test_keyframe_timeline_owns_the_wheel_while_zooming(viewer):
     click(viewer, io, point)
     hints = {hint.hint_id for hint in viewer.app._panel_status_hints}
     assert {"keyframes.zoom", "keyframes.pan"} <= hints
-    before_span = panel._view_end - panel._view_start
+    before_span = panel.editor.view_end - panel.editor.view_start
     before_scroll = float(window.scroll.y)
 
     io.add_mouse_wheel_event(0.0, -1.0)
     viewer.sync()
 
-    assert panel._view_end - panel._view_start > before_span
+    assert panel.editor.view_end - panel.editor.view_start > before_span
     assert float(window.scroll.y) == pytest.approx(before_scroll)
 
 
@@ -1109,8 +1109,8 @@ def _assert_viewport_has_no_padding(viewer):
                 viewer.sync()
             window = imgui.internal.find_window_by_name("Viewport")
             assert (window.window_padding.x, window.window_padding.y) == (0.0, 0.0)
-            origin = viewer.app._viewport_panel_position
-            size = viewer.app._viewport_panel_size
+            origin = viewer.app.viewport_surface.position
+            size = viewer.app.viewport_surface.size
             inner = window.inner_rect if window.dock_node else window.inner_clip_rect
             assert origin == pytest.approx((inner.min.x, inner.min.y), abs=1e-4)
             assert size == pytest.approx(
@@ -1181,7 +1181,7 @@ def test_floating_viewport_separates_window_and_scene_gestures(viewer):
         assert viewport.size.y == pytest.approx(size_before[1])
         assert v.app.camera.yaw == pytest.approx(yaw_before)
 
-        panel_size = v.app._viewport_panel_size
+        panel_size = v.app.viewport_surface.size
         original_begin = v.app._begin_viewport_panel
 
         def move_partly_offscreen():
@@ -1192,8 +1192,8 @@ def test_floating_viewport_separates_window_and_scene_gestures(viewer):
         try:
             v.sync()
             v.sync()
-            assert v.app._viewport_panel_position[0] < 0.0
-            assert v.app._viewport_panel_size == pytest.approx(panel_size)
+            assert v.app.viewport_surface.position[0] < 0.0
+            assert v.app.viewport_surface.size == pytest.approx(panel_size)
         finally:
             v.app._begin_viewport_panel = original_begin
     finally:

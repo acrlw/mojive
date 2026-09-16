@@ -229,7 +229,7 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.selection_padding == DEFAULT_SELECTION_PADDING
     assert state.corner_radius == OUTLINE_CORNER_RADIUS_PT
     assert not state.preview_icon_library
-    assert state.timeline_panel.follow_mode_icon_drawer is draw_icon_label
+    assert state.timeline_panel.toolbar.follow_mode_icon_drawer is draw_icon_label
     assert all(state.icon_stroke_for(group) == ICON_STROKE for group in ICON_GROUP_STROKE_DEFAULTS)
     assert state.icon_padding_for("Viewport tools") == 0.5
     assert state.icon_padding_for_glyph("tool-rotate") == 0.0

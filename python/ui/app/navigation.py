@@ -558,10 +558,7 @@ class _Navigation:
             hit_id = int(hit_id)
             hit_distance = float(hit_distance)
             hit_node = self.session.node_by_object_id(hit_id) if hit_id > 0 else None
-            hits_target = bool(
-                hit_id == node.body_index
-                or (hit_node is not None and hit_node.body_index == node.body_index)
-            )
+            hits_target = bool(hit_node is not None and hit_node.body_index == node.body_index)
             blocked = bool(
                 hit_id > 0
                 and not hits_target

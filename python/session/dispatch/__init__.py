@@ -65,6 +65,7 @@ _HANDLERS = {
     cmd.Select: transforms.select,
     cmd.SelectNode: transforms.select_node,
     cmd.SetVisible: transforms.set_visible,
+    cmd.SetGeometryView: transforms.set_geometry_view,
     cmd.SetVisualGroup: transforms.set_visual_group,
     cmd.SetPose: transforms.set_pose,
     cmd.SetScale: transforms.set_scale,

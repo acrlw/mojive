@@ -739,7 +739,8 @@ def _compose(
             backend = OpenGLBackend(None, fb_w, fb_h, samples)
 
         debug_bridge = DebugBridge(backend)
-        debug_bridge.serve()
+        if viewer_config is None or viewer_config.debug_server:
+            debug_bridge.serve()
 
         adapter = adapter_factory()
         session = Session(adapter, asset_path)

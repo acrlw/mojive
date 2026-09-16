@@ -13,6 +13,7 @@ also supported; new code can import from the defining modules directly.
 | `mojive.session` | Application state and routing | `Session`, `PerturbState` |
 | `mojive.render.offscreen` | Backend-neutral offscreen rendering | `SceneRenderer` |
 | `mojive.app.renderer` | MuJoCo-compatible offscreen rendering | `Renderer` |
+| `mojive.viewer` | MuJoCo-style interactive entry points | `launch`, `launch_passive`, `Handle` |
 | `mojive.render.debugdraw` | Debug primitives and layers | `DebugDraw`, `Layer`, `Occlusion` |
 | `mojive.geometry2d.curves` | Shared sampled paths and stroke profiles | `smooth_rect_points`, `smooth_capsule_points`, `arrow_points`, `capped_polyline_points` |
 | `mojive.geometry2d.drag_link` | Hollow-connector geometry | `drag_link_field`, `smooth_drag_link_mesh` |

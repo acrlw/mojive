@@ -21,6 +21,8 @@ class RenderScene:
     count: int = 0
 
     transforms: np.ndarray = field(default_factory=lambda: np.zeros((0, 4, 4), np.float32))
+    # Negative alpha encodes ordered coverage as -(1 + opacity). This renderer
+    # contract keeps diagnostic overlays instanced without alpha-sorting draws.
     colors: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
     material: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
@@ -175,12 +177,16 @@ class SceneBuilder:
         cube_coef: np.ndarray | None = None,
         infinite_plane: bool = False,
         segmentation: tuple[int, int] | np.ndarray = (-1, -1),
+        coverage: bool = False,
     ) -> int:
+        color = np.asarray(color, np.float32).reshape(4).copy()
+        if coverage:
+            color[3] = -(1.0 + np.clip(color[3], 0.0, 1.0))
         self._rows.append(
             {
                 "key": (mesh, matid),
                 "transform": np.asarray(transform, np.float32).reshape(4, 4),
-                "color": np.asarray(color, np.float32).reshape(4),
+                "color": color,
                 "material": np.asarray(material, np.float32).reshape(4),
                 "tex_coef": (
                     np.array([1.0, 1.0, 0.0, 0.0], np.float32)
@@ -219,7 +225,7 @@ class SceneBuilder:
         seen: dict[tuple[MeshKey, str | tuple[str, int] | None, bool, int], int] = {}
         row_bucket = np.empty(n, np.int32)
         for i, row in enumerate(self._rows):
-            transparent = float(row["color"][3]) < 1.0
+            transparent = 0.0 <= float(row["color"][3]) < 1.0
             mesh, matid = row["key"]
             binding: str | tuple[str, int] | None
             if 0 <= matid < len(self._materials):

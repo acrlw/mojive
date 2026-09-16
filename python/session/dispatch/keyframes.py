@@ -45,7 +45,7 @@ def load_keyframe(self: Session, c: cmd.LoadKeyframe) -> CommandResult:
 def add_model_keyframe(self: Session, c: cmd.AddModelKeyframe) -> CommandResult:
     caps = self._adapter.caps
     if not caps.topology_editing:
-        return CommandResult.bad(f"{caps.name} does not support keyframe authoring")
+        return CommandResult.bad(f"{caps.name} does not support keyframe editing")
     if caps.simulation and not self._paused:
         return CommandResult.bad("Pause the simulation before adding a keyframe")
     name = str(c.name).strip()
@@ -68,7 +68,7 @@ def add_model_keyframe(self: Session, c: cmd.AddModelKeyframe) -> CommandResult:
 def set_model_keyframe(self: Session, c: cmd.SetModelKeyframe) -> CommandResult:
     caps = self._adapter.caps
     if not caps.topology_editing:
-        return CommandResult.bad(f"{caps.name} does not support keyframe authoring")
+        return CommandResult.bad(f"{caps.name} does not support keyframe editing")
     if caps.simulation and not self._paused:
         return CommandResult.bad("Pause the simulation before editing a keyframe")
     current = self._adapter.keyframe_properties(c.keyframe_id)
@@ -132,7 +132,7 @@ def set_model_keyframe(self: Session, c: cmd.SetModelKeyframe) -> CommandResult:
 def remove_model_keyframe(self: Session, c: cmd.RemoveModelKeyframe) -> CommandResult:
     caps = self._adapter.caps
     if not caps.topology_editing:
-        return CommandResult.bad(f"{caps.name} does not support keyframe authoring")
+        return CommandResult.bad(f"{caps.name} does not support keyframe editing")
     if caps.simulation and not self._paused:
         return CommandResult.bad("Pause the simulation before removing a keyframe")
     if self._adapter.keyframe_properties(c.keyframe_id) is None:
