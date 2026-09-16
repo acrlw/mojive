@@ -33,6 +33,7 @@ from .engine import _IMPORT_ERROR, mujoco
 from .export import _MjcfExport
 from .keyframes import _Keyframes
 from .model_editing import _ModelEditing
+from .options import _PhysicsOptions
 from .properties import _ModelProperties
 from .source import _SceneConversion
 from .spec import _compiled_text_names, _load_editable_spec
@@ -47,6 +48,7 @@ class MuJoCoAdapter(
     _Diagnostics,
     _ModelProperties,
     _Keyframes,
+    _PhysicsOptions,
     SceneAdapterBase,
 ):
     """Own one model/data pair and expose backend-neutral scene contracts."""
@@ -67,6 +69,7 @@ class MuJoCoAdapter(
                 ("model.components", 1),
                 ("model.keyframe_edit", 1),
                 ("physics.perturb_point", 1),
+                *((("physics.options", 1),) if not external_clock else ()),
             ),
             simulation=True,
             external_clock=external_clock,
@@ -161,6 +164,8 @@ class MuJoCoAdapter(
         self._ray_geomgroup = self._visual_groups["geom"].astype(np.uint8)
 
         self._perturb = mujoco.MjvPerturb()
+        self._physics_options_cache = None
+        self._root_options_explicit = False
         self._perturb_body = -1
         self._perturb_jac = np.zeros((3, 0), np.float64)
         self._perturb_jac_m2 = np.zeros((3, 0), np.float64)
@@ -201,6 +206,7 @@ class MuJoCoAdapter(
         self._path = path
         self._root_path = path
         self._root_spec = spec
+        self._root_options_explicit = False
         self._root_edited = False
         self._attached_models.clear()
         self._reset_next_model_id()
@@ -215,6 +221,7 @@ class MuJoCoAdapter(
         self._path = None
         self._root_path = None
         self._root_spec = mujoco.MjSpec()
+        self._root_options_explicit = False
         self._root_edited = False
         self._attached_models.clear()
         self._reset_next_model_id()
@@ -236,6 +243,7 @@ class MuJoCoAdapter(
         self._path = None
         self._root_path = None
         self._root_spec = None
+        self._root_options_explicit = False
         self._root_edited = False
         self._attached_models.clear()
         self._reset_geometry_object_ids()
@@ -355,6 +363,7 @@ class MuJoCoAdapter(
         if self._model_edit_batch_depth and model is self._m:
             return
         self._keyframe_model = None
+        self._physics_options_cache = None
         # A compiled model is authoritative. Transient placement indices refer to
         # the previous model layout and must never survive an install.
         self._model_transform_preview = None

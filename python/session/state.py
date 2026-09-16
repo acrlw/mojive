@@ -185,6 +185,7 @@ _SCENE_EDIT_COMMANDS = (
     cmd.SetGeometryMaterial,
     cmd.SetLight,
     cmd.SetEnvironment,
+    cmd.SetPhysicsOptions,
     cmd.SetSkybox,
     cmd.SetMaterial,
     cmd.SetGeometryColor,

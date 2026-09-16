@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from mojive import commands as cmd
-from mojive.adapters.base import PointPerturbation
+from mojive.adapters.base import PhysicsOptions, PointPerturbation
 from mojive.commands import CommandResult
 
 if TYPE_CHECKING:
@@ -14,6 +14,18 @@ if TYPE_CHECKING:
 
 
 from ..state import PerturbState
+
+
+def set_physics_options(self: Session, c: cmd.SetPhysicsOptions) -> CommandResult:
+    try:
+        changed = cast(PhysicsOptions, self._adapter).set_physics_options(c.values)
+    except Exception as error:
+        return CommandResult.bad(str(error))
+    if not changed:
+        return CommandResult.bad("Physics options are unavailable")
+    self._sim_time_credit = 0.0
+    self._frame_history_dirty = True
+    return CommandResult.good("Physics options applied")
 
 
 def set_equality_enabled(self: Session, c: cmd.SetEqualityEnabled) -> CommandResult:

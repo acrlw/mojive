@@ -190,6 +190,27 @@ physics mutation when the extension is unavailable. MuJoCo uses the selected poi
 for effective mass, damping and moment arm, with the model's native viewer stiffness
 parameters. A zero-mobility pivot uses MuJoCo's `localmass=1` convention.
 
+### World physics options
+
+Advertise `("physics.options", 1)` and implement the optional `PhysicsOptions` protocol
+for runtime world settings. `physics_options()` returns immutable `PhysicsOption`
+descriptors with adapter-owned keys, groups, values, choice labels, and optional field/group help. The Inspector
+renders these descriptors without importing a physics engine. Unsupported adapters do
+not need new methods in `SceneAdapter`.
+
+`set_physics_options(values)` validates the complete patch before mutation, applies it
+atomically between steps, preserves integration state and time, and refreshes derived
+results. Persist the values in editable source when available. Session's
+`SetPhysicsOptions` command fences the simulation worker and participates in document
+history when the adapter advertises `edit_history`. Workspace forwards the extension
+and serializes the values after the models so the composed world retains its settings.
+
+MuJoCo maps these descriptors to `mjModel.opt`, including per-bit enable/disable keys
+such as `disableflags.gravity`. It updates `MjSpec.option`, calls `mj_forward`, and
+rebases the worker clock when timestep changes. Available options come from the loaded
+engine version. Externally clocked display adapters do not advertise write access;
+the caller must update its own model and synchronize the viewer.
+
 ### Local geometry scale
 
 Advertise `AdapterCaps.write_scale` and mark each supported geometry `SceneNode.scalable`.

@@ -26,6 +26,8 @@ from .base import (
     KeyframeProperties,
     ModelAssetInfo,
     NodeType,
+    PhysicsOption,
+    PhysicsOptions,
     PointPerturbation,
     SceneAdapter,
     SceneAdapterBase,
@@ -796,6 +798,16 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def apply_perturb(self, node_id: int, target_position, target_rotation, mode: str) -> bool:
         return self.primary.apply_perturb(node_id, target_position, target_rotation, mode)
+
+    def physics_options(self) -> tuple[PhysicsOption, ...]:
+        if not self.caps.supports("physics.options"):
+            return ()
+        return cast(PhysicsOptions, self.primary).physics_options()
+
+    def set_physics_options(self, values: dict[str, object]) -> bool:
+        if not self.caps.supports("physics.options"):
+            return False
+        return cast(PhysicsOptions, self.primary).set_physics_options(values)
 
     def apply_perturb_at_point(
         self, node_id: int, target_position, target_rotation, mode: str, local_position

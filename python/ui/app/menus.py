@@ -66,6 +66,7 @@ class _Menus:
         undo = False
         redo = False
         open_settings = False
+        open_physics_options = False
         open_recording_settings = False
         frame_scene = False
         capture_surface: CaptureSurface | None = None
@@ -238,6 +239,12 @@ class _Menus:
                         self.panels.open(panel_id)
                 imgui.separator()
                 reset_layout, _ = imgui.menu_item(t("Reset Layout"), "", False)
+                open_physics_options, _ = imgui.menu_item(
+                    t("Physics Options..."),
+                    "",
+                    False,
+                    caps.simulation or caps.supports("physics.options"),
+                )
                 imgui.end_menu()
             if self._begin_main_menu(t("Help")):
                 open_help, _ = imgui.menu_item(t("Interaction Reference"), "F1", False)
@@ -258,6 +265,8 @@ class _Menus:
             imgui.end_main_menu_bar()
         imgui.pop_style_var()
 
+        if open_physics_options:
+            self.show_physics_options()
         if new_scene:
             self._request_document_action("new_scene")
         if undo:
@@ -318,6 +327,14 @@ class _Menus:
             self._queue_model_load("reload", self.session.asset_path)
         if quit_viewer:
             self._request_document_action("quit")
+
+    def show_physics_options(self) -> None:
+        """Reveal the environment's physics controls from the Window menu."""
+        node = next((n for n in self.session.nodes if n.type is NodeType.ENVIRONMENT), None)
+        if node is not None:
+            self.session.submit(cmd.SelectNode(node.node_id))
+            self.panels.open_panel("Inspector")
+            self.panels.get("Inspector").show_environment_physics()
 
     def _draw_entity_menu(self, shortcut: str, enabled: bool) -> None:
         t = self.localizer.text

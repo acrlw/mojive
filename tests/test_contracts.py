@@ -184,6 +184,8 @@ def test_mujoco_schema_audit_classifies_every_attributed_path():
     assert set(rows) == expected
     assert rows["mujoco"]["status"] == "structured"
     assert rows["mujoco/compiler"]["status"] == "raw-mjcf-only"
+    assert rows["mujoco/option"]["status"] == "structured"
+    assert rows["mujoco/option/flag"]["status"] == "structured"
     assert rows["mujoco/asset/hfield"]["status"] == "structured-partial"
     assert rows["mujoco/asset/material/layer"]["status"] == "raw-mjcf-only"
     assert rows["mujoco/asset/skin"]["status"] == "runtime-only"

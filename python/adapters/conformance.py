@@ -359,6 +359,7 @@ _CAPABILITY_WRITES = {
     "write_ctrl": ("set_ctrl", "set_ctrl_vector"),
     "perturb": ("apply_perturb", "clear_perturb"),
     "physics.perturb_point": ("apply_perturb_at_point",),
+    "physics.options": ("physics_options", "set_physics_options"),
     "raycast": ("raycast",),
     "state_snapshots": ("capture_state", "restore_state"),
     "equality_constraints": ("set_equality_enabled",),

@@ -79,6 +79,7 @@ class _ModelComposition:
             dict(self._geometry_object_ids),
             self._next_geometry_object_id,
             dict(self._component_entries),
+            self._root_options_explicit,
         )
 
     def restore_edit_state(self, state: object) -> bool:
@@ -99,6 +100,7 @@ class _ModelComposition:
         ]
         self._root_spec = state.root_spec.copy()
         self._root_edited = state.root_edited
+        self._root_options_explicit = state.root_options_explicit
         self._geometry_object_ids = dict(state.geometry_object_ids)
         self._next_geometry_object_id = state.next_geometry_object_id
         self._component_entries = dict(state.component_entries)
@@ -499,7 +501,8 @@ class _ModelComposition:
                     item.rotation,
                 )
             if index == 0 and self._root_path is None:
-                spec.option = child.option
+                if not self._root_options_explicit:
+                    spec.option = child.option
                 spec.visual = child.visual
                 spec.stat = child.stat
                 spec.compiler = child.compiler

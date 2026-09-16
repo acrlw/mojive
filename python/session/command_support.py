@@ -103,6 +103,7 @@ _REQUIREMENTS = {
     ),
     cmd.LoadKeyframe: ("keyframes",),
     cmd.Perturb: ("perturb",),
+    cmd.SetPhysicsOptions: ("physics.options",),
     **dict.fromkeys((cmd.SetCtrl, cmd.SetCtrlVector), ("write_ctrl",)),
     **dict.fromkeys((cmd.SetQpos, cmd.SetQposBatch), ("write_qpos",)),
     cmd.SetEqualityEnabled: ("equality_constraints",),

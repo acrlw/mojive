@@ -60,6 +60,8 @@ def _schema_path_coverage(path: tuple[str, ...]) -> tuple[str, str]:
             "plugin-out-of-scope",
             "excluded from the core completion gate; loading remains MuJoCo-dependent",
         )
+    if path in (("mujoco", "option"), ("mujoco", "option", "flag")):
+        return "structured", "world physics options are editable in the environment Inspector"
     if path in _STRUCTURED_GLOBAL_PATHS:
         return "structured", "model identity is editable in Inspector"
     if len(path) >= 3 and path[1] in _STRUCTURED_COMPONENT_SECTIONS:
