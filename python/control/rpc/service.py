@@ -98,7 +98,7 @@ class ControlService:
             )
         request_id = request.get("id")
         version = request.get("version")
-        if version != PROTOCOL_VERSION:
+        if type(version) is not int or version != PROTOCOL_VERSION:
             return _response(
                 request_id,
                 error={

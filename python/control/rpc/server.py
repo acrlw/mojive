@@ -10,7 +10,7 @@ from concurrent.futures import Future
 from contextlib import suppress
 from pathlib import Path
 
-from .protocol import _request_deadline, _response
+from .protocol import _decode_json, _request_deadline, _response
 from .service import ControlService
 from .waiting import wait_response
 
@@ -46,7 +46,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             if not line.endswith(b"\n"):
                 return
             try:
-                request = json.loads(line)
+                request = _decode_json(line)
                 response = self.server.service.submit(
                     request,
                     request_bytes=len(line),
@@ -153,7 +153,17 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         encoder fast path; decoded response objects and its temporary string are
         application-owned allocations, outside the wire byte budget.
         """
-        encoded = json.dumps(response, separators=(",", ":"), allow_nan=False) + "\n"
+        try:
+            encoded = json.dumps(response, separators=(",", ":"), allow_nan=False) + "\n"
+        except (TypeError, ValueError, OverflowError) as error:
+            response = _response(
+                response.get("id"),
+                error={
+                    "code": "internal_error",
+                    "message": f"Cannot serialize RPC response: {error}; the operation may have completed",
+                },
+            )
+            encoded = json.dumps(response, separators=(",", ":"), allow_nan=False) + "\n"
         if len(encoded) > self.limits.max_response_bytes:
             self.stats.increment("oversize_responses")
             response = _response(
