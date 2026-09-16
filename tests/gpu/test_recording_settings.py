@@ -29,6 +29,9 @@ def test_encoding_controls_switch_modes_and_persist_without_losing_values(
     ) as viewer:
         viewer.app.set_language(language)
         show_settings(viewer)
+        assert viewer.app.recording_config.copy_to_clipboard
+        _click(viewer, _item_center(viewer, "checkbox", "##capture_clipboard"))
+        assert not viewer.app.recording_config.copy_to_clipboard
 
         def choose(control, label):
             _click(viewer, _item_center(viewer, "begin_combo", control))
@@ -69,6 +72,7 @@ def test_encoding_controls_switch_modes_and_persist_without_losing_values(
         with pytest.raises(AssertionError):
             _item_rect(viewer, "input_float", "##recording_bitrate")
         for title, function, control in (
+            ("Copy to clipboard", "checkbox", "##capture_clipboard"),
             ("Quality (CRF)", "slider_int", "##recording_crf"),
             ("Encoding speed", "begin_combo", "##recording_preset"),
             ("Color sampling", "begin_combo", "##recording_pixel_format"),

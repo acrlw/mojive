@@ -226,6 +226,9 @@ class _Menus:
                     )
                     if clicked:
                         panel.toggle()
+                for panel_id, title in self.panels.unloaded_builtins():
+                    if imgui.menu_item(t(title), "", False)[0]:
+                        self.panels.open(panel_id)
                 imgui.separator()
                 reset_layout, _ = imgui.menu_item(t("Reset Layout"), "", False)
                 imgui.end_menu()

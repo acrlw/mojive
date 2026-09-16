@@ -28,10 +28,10 @@ def set_light(self: Session, c: cmd.SetLight) -> CommandResult:
     node = next((node for node in self._nodes if node.light_index == index), None)
     object_id = int(node.object_id) if node is not None else 0
     override_key = object_id if object_id > 0 else -(index + 1)
-    if self._preserve_authored_override(writeback):
-        self._authored.lights[override_key] = _LightOverride(object_id, index, c.light)
+    if self._retain_scene_override(writeback):
+        self._scene_overrides.lights[override_key] = _LightOverride(object_id, index, c.light)
     else:
-        self._authored.lights.pop(override_key, None)
+        self._scene_overrides.lights.pop(override_key, None)
     lights = list(self._source.lights.lights)
     lights[index] = c.light
     self._source.lights = replace(self._source.lights, lights=tuple(lights))
@@ -48,8 +48,8 @@ def set_environment(self: Session, c: cmd.SetEnvironment) -> CommandResult:
     if self._source is None:
         return CommandResult.bad("environment is unavailable")
     writeback = self._adapter.set_environment(c.environment)
-    self._authored.environment = (
-        c.environment if self._preserve_authored_override(writeback) else None
+    self._scene_overrides.environment = (
+        c.environment if self._retain_scene_override(writeback) else None
     )
     self._source.lights = self._source.lights.with_environment(c.environment)
     self._compose_lights()
@@ -87,10 +87,10 @@ def set_material(self: Session, c: cmd.SetMaterial) -> CommandResult:
     if self._source is None or not 0 <= index < len(self._source.materials):
         return CommandResult.bad(f"material index {index} is unavailable")
     writeback = self._adapter.set_material(index, c.material)
-    if self._preserve_authored_override(writeback):
-        self._authored.materials[index] = c.material
+    if self._retain_scene_override(writeback):
+        self._scene_overrides.materials[index] = c.material
     else:
-        self._authored.materials.pop(index, None)
+        self._scene_overrides.materials.pop(index, None)
     self._source.materials[index] = c.material
     self._structure_generation += 1
     message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
@@ -110,18 +110,18 @@ def set_geometry_color(self: Session, c: cmd.SetGeometryColor) -> CommandResult:
         )
     rgba = np.asarray(c.rgba, np.float32).reshape(4).copy()
     writeback = self._adapter.set_geometry_color(node_id, rgba)
-    if self._preserve_authored_override(writeback):
-        self._authored.geometry_colors[node_id] = rgba
+    if self._retain_scene_override(writeback):
+        self._scene_overrides.geometry_colors[node_id] = rgba
         node = self.node(node_id)
-        self._authored.geometry_color_targets[node_id] = (
+        self._scene_overrides.geometry_color_targets[node_id] = (
             int(self._source.geom_object_id[instances[0]]),
             node.model_id,
             node.type,
             node.name,
         )
     else:
-        self._authored.geometry_colors.pop(node_id, None)
-        self._authored.geometry_color_targets.pop(node_id, None)
+        self._scene_overrides.geometry_colors.pop(node_id, None)
+        self._scene_overrides.geometry_color_targets.pop(node_id, None)
     self._source.geom_rgba[instances] = rgba
     self._structure_generation += 1
     message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
@@ -156,10 +156,10 @@ def set_scene_camera(self: Session, c: cmd.SetSceneCamera) -> CommandResult:
     cameras = list(self._source.cameras)
     cameras[slot] = c.camera
     self._source.cameras = tuple(cameras)
-    if self._preserve_authored_override(writeback):
-        self._authored.cameras[camera_id] = c.camera
+    if self._retain_scene_override(writeback):
+        self._scene_overrides.cameras[camera_id] = c.camera
     else:
-        self._authored.cameras.pop(camera_id, None)
+        self._scene_overrides.cameras.pop(camera_id, None)
     self._compose_cameras()
     message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"
     return CommandResult.good(message)
@@ -168,7 +168,7 @@ def set_scene_camera(self: Session, c: cmd.SetSceneCamera) -> CommandResult:
 def add_scene_object(self: Session, c: cmd.AddSceneObject) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     object_id = self._adapter.add_scene_object(
         c.shape, c.name, c.size, c.position, c.rotation, c.color, c.material
     )
@@ -181,7 +181,7 @@ def add_scene_object(self: Session, c: cmd.AddSceneObject) -> CommandResult:
 def remove_scene_object(self: Session, c: cmd.RemoveSceneObject) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     if not self._adapter.remove_scene_object(c.object_id):
         return CommandResult.bad(f"object {c.object_id} is unavailable")
     if self._selected == c.object_id:
@@ -194,7 +194,7 @@ def remove_scene_object(self: Session, c: cmd.RemoveSceneObject) -> CommandResul
 def add_scene_light(self: Session, c: cmd.AddSceneLight) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     light_id = self._adapter.add_scene_light(c.name, c.light)
     if light_id < 0:
         return CommandResult.bad("Light creation failed")
@@ -205,7 +205,7 @@ def add_scene_light(self: Session, c: cmd.AddSceneLight) -> CommandResult:
 def remove_scene_light(self: Session, c: cmd.RemoveSceneLight) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     if not self._adapter.remove_scene_light(c.light_id):
         return CommandResult.bad(f"light {c.light_id} is unavailable")
     self._refresh_structure()
@@ -215,7 +215,7 @@ def remove_scene_light(self: Session, c: cmd.RemoveSceneLight) -> CommandResult:
 def add_scene_camera(self: Session, c: cmd.AddSceneCamera) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     camera_id = self._adapter.add_scene_camera(c.name, c.camera)
     if camera_id < 0:
         return CommandResult.bad("Camera creation failed")
@@ -226,10 +226,10 @@ def add_scene_camera(self: Session, c: cmd.AddSceneCamera) -> CommandResult:
 def remove_scene_camera(self: Session, c: cmd.RemoveSceneCamera) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     if not self._adapter.remove_scene_camera(c.camera_id):
         return CommandResult.bad(f"camera {c.camera_id} is unavailable")
-    self._authored.cameras.pop(c.camera_id, None)
+    self._scene_overrides.cameras.pop(c.camera_id, None)
     self._refresh_structure()
     return CommandResult.good("Camera removed", c.camera_id)
 
@@ -237,7 +237,7 @@ def remove_scene_camera(self: Session, c: cmd.RemoveSceneCamera) -> CommandResul
 def duplicate_scene_entity(self: Session, c: cmd.DuplicateSceneEntity) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     object_id = self._adapter.duplicate_scene_entity(c.object_id)
     if not object_id:
         return CommandResult.bad(f"entity {c.object_id} cannot be duplicated")
@@ -250,7 +250,7 @@ def duplicate_scene_entity(self: Session, c: cmd.DuplicateSceneEntity) -> Comman
 def remove_scene_entity(self: Session, c: cmd.RemoveSceneEntity) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     if not self._adapter.remove_scene_entity(c.object_id):
         return CommandResult.bad(f"entity {c.object_id} cannot be removed")
     if self._selected == c.object_id:
@@ -263,7 +263,7 @@ def remove_scene_entity(self: Session, c: cmd.RemoveSceneEntity) -> CommandResul
 def rename_scene_entity(self: Session, c: cmd.RenameSceneEntity) -> CommandResult:
     caps = self._adapter.caps
     if not caps.scene_authoring:
-        return CommandResult.bad(f"{caps.name} does not support scene authoring")
+        return CommandResult.bad(f"{caps.name} does not support scene editing")
     if not self._adapter.rename_scene_entity(c.object_id, c.name):
         return CommandResult.bad(f"entity {c.object_id} cannot be renamed")
     self._refresh_structure()

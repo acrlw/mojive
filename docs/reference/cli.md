@@ -32,7 +32,18 @@ Accepted values are `shadow`, `wireframe`, `reflection`, `additive`, `skybox`, `
 `rangefinder`, `constraint`, `static`, `skin`, `flex_face`, `flex_skin`, `flex_vertex`,
 `flex_edge`, `contactpoint`, `contactforce`, `contactsplit`, `island`, `autoconnect`, `tendon`,
 `transparent`, `com`, `inertia`, `scaled_inertia`, `body_bvh`, `mesh_bvh`, `outline`, `tonemap`,
-and `msaa`.
+`msaa`, `visual_geometry`, and `collision_geometry`.
+
+Enable `visual_geometry` for appearance only, `collision_geometry` for collision shapes only,
+or both flags for a comparison overlay. Leaving both off preserves the default visual groups.
+These display presets do not modify simulation collisions. For example:
+
+```bash
+mojive capture geometry_views -o collision.png --enable-render collision_geometry
+```
+
+See [geometry views](../tutorials/mujoco-viewer.md#visual-and-collision-geometry) for shared
+geometry, hidden groups, and role overrides.
 
 ## Interactive commands
 

@@ -21,6 +21,8 @@ def viewer(tmp_path, monkeypatch, request):
         imgui.get_io().config_mac_osx_behaviors = request.param
         for _ in range(12):
             viewer.sync()
+        imgui.internal.focus_window(imgui.internal.find_window_by_name("Viewport"))
+        viewer.sync()
         viewer.session.submit(cmd.Select(box.object_id))
         yield viewer, box
 

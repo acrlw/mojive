@@ -9,7 +9,7 @@ from imgui_bundle import imgui
 from mojive import PassiveAction, RecordingConfig, ViewerConfig, build
 from mojive.app.passive_input import PassiveInput
 from mojive.tools.keyframe_timeline import show_settings
-from mojive.tools.ui_runtime import _click, _item_center
+from mojive.tools.ui_runtime import _activate_panel, _click, _item_center
 from mojive.ui import ToolHint
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
@@ -35,7 +35,9 @@ def test_external_control_capability_gates_native_actuator_slider(viewer, monkey
         return result
 
     monkeypatch.setattr(imgui, "slider_float", observe)
-    viewer.sync()
+    for _ in range(3):
+        viewer.sync()
+    _activate_panel(viewer, "Control")
     before = float(viewer.session.frame.ctrl[0])
     point = _item_center(viewer, "slider_float", "##control-actuator-0")
     _click(viewer, (point[0] + 20, point[1]))

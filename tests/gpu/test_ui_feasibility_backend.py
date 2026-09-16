@@ -142,7 +142,7 @@ def test_live_tuning_reaches_redesign_and_production_panels(backend_name):
             state.geometry_tab = "Workspaces"
             pixels = capture()
             assert state.timeline_session is not None
-            assert state.timeline_panel.follow_mode_icon_drawer is not None
+            assert state.timeline_panel.toolbar.follow_mode_icon_drawer is not None
             Image.fromarray(pixels).save(OUTPUT / f"{backend_name}-keyframes.png")
         finally:
             if state.timeline_session is not None:

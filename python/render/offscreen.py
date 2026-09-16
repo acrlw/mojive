@@ -18,6 +18,7 @@ from mojive.render.backend import (
     ShadowQuality,
 )
 from mojive.render.context import _select_backend
+from mojive.render.geometry import GeometryView, set_geometry_view
 from mojive.types import CameraView
 
 
@@ -56,6 +57,9 @@ class SceneRenderer:
                 self._backend.set_scene(source if source is not None else SceneSource())
                 self._backend.set_background((0.0, 0.0, 0.0, 1.0))
                 self._backend.set_camera(self._camera.with_aspect(width / height))
+                if source is None:
+                    # Bootstrap the empty scene so debug-only rendering works on every backend.
+                    self._backend.update(SceneFrame())
                 if not self._backend.set_shadow_quality(quality) and (
                     self._backend.caps.shadows or quality != ShadowQuality.BALANCED
                 ):
@@ -75,6 +79,16 @@ class SceneRenderer:
                 yield
 
     @property
+    def debug(self):
+        """Return retained 3D diagnostics without creating an interactive viewer."""
+        if self._closed:
+            raise RuntimeError("SceneRenderer is closed")
+        draw = getattr(self._backend, "debug", None)
+        if draw is None:
+            raise RuntimeError("the active backend does not provide debug drawing")
+        return draw
+
+    @property
     def canvas2d(self):
         """Return the retained XY canvas sharing this renderer's debug pass."""
         if self._closed:
@@ -82,7 +96,7 @@ class SceneRenderer:
         if self._canvas2d is None:
             from mojive.render.canvas import Canvas2D
 
-            self._canvas2d = Canvas2D(self._backend.debug)
+            self._canvas2d = Canvas2D(self.debug)
         return self._canvas2d
 
     @property
@@ -114,6 +128,11 @@ class SceneRenderer:
         """Set a renderer feature, returning whether the backend supports it."""
         with self._current():
             return self._backend.set_flag(RenderFlag(flag), enabled)
+
+    def set_geometry_view(self, view: GeometryView | str) -> bool:
+        """Select default, visual, collision, or both without changing physics."""
+        with self._current():
+            return set_geometry_view(self._backend, view)
 
     def set_debug_view(self, view: DebugView | str) -> bool:
         """Select an RGB diagnostic view without changing data-product formats."""

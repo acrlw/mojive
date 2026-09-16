@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from mojive import ViewerConfig, build
+from mojive import InputClaim, ViewerConfig, build
 from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds
 from mojive.scene.assets import resolve
@@ -42,7 +42,7 @@ def test_ruler_numbers_are_left_aligned_and_ink_centered(tmp_path, monkeypatch, 
         viewer.app.set_language(language)
         show_timeline(viewer)
         panel = viewer.panels.get("Keyframes")
-        panel._view_start, panel._view_end, panel._view_needs_fit = 0, 0.5, False
+        panel.editor.view_start, panel.editor.view_end, panel.editor.view_needs_fit = 0, 0.5, False
         viewer.sync()
         lo, hi = _item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
         actual_scale = viewer.window.style_scale
@@ -115,34 +115,34 @@ def test_timeline_without_models_preserves_drag_and_view_range(backend, tmp_path
         show_timeline(viewer)
         session, panel = viewer.session, viewer.panels.get("Keyframes")
         assert not session.scene_models and not session.state_take_times
-        panel._set_follow_mode("off")
-        start, end = panel._view_start, panel._view_end
+        panel.editor.set_follow_mode("off")
+        start, end = panel.editor.view_start, panel.editor.view_end
         span = end - start
         drag(
             viewer,
             timeline_point(viewer, start + span * 0.2),
             timeline_point(viewer, start + span * 0.8),
         )
-        assert panel._playhead == pytest.approx(start + span * 0.8, abs=span * 0.002)
-        assert not panel._pointer_mode
-        chosen_time = panel._playhead
+        assert panel.editor.playhead == pytest.approx(start + span * 0.8, abs=span * 0.002)
+        assert not panel.editor.pointer_mode
+        chosen_time = panel.editor.playhead
         drag(
             viewer,
             timeline_point(viewer, start + span * 0.6),
             timeline_point(viewer, start + span * 0.4),
             button=1,
         )
-        assert panel._view_start != pytest.approx(start)
-        view_range = panel._view_start, panel._view_end
+        assert panel.editor.view_start != pytest.approx(start)
+        view_range = panel.editor.view_start, panel.editor.view_end
         for _ in range(4):
             viewer.sync()
-        assert (panel._view_start, panel._view_end) == view_range
-        assert panel._playhead == chosen_time
+        assert (panel.editor.view_start, panel.editor.view_end) == view_range
+        assert panel.editor.playhead == chosen_time
         assert session.paused and session.frame.time == 0
         _click(viewer, _item_center(viewer, "invisible_button", "##take-first"))
         for _ in range(3):
             viewer.sync()
-        assert panel._playhead == 0
+        assert panel.editor.playhead == 0
 
 
 @pytest.fixture
@@ -163,9 +163,9 @@ def viewer(tmp_path, monkeypatch, request):
         populate_take(viewer, 900)
         show_timeline(viewer)
         panel = viewer.panels.get("Keyframes")
-        panel._view_start, panel._view_end = 0, 30
-        panel._view_needs_fit = False
-        panel._set_follow_mode("off")
+        panel.editor.view_start, panel.editor.view_end = 0, 30
+        panel.editor.view_needs_fit = False
+        panel.editor.set_follow_mode("off")
         yield viewer
 
 
@@ -176,7 +176,7 @@ def test_ruler_click_and_drag_seek_recorded_pose_and_stay_at_the_chosen_frame(vi
     for _ in range(5):
         viewer.sync()
     assert session.state_take_cursor == expected
-    assert panel._playhead == session.state_take_times[expected]
+    assert panel.editor.playhead == session.state_take_times[expected]
     assert session.adapter.data.time == pytest.approx(session.state_take_times[expected])
     drag(viewer, timeline_point(viewer, 8), timeline_point(viewer, 17))
     expected = nearest_take_frame(session.state_take_times, 17)
@@ -195,6 +195,7 @@ def test_take_menu_opens_and_clears_recording_without_a_binding_error(viewer):
 
 
 def test_status_changes_between_track_selection_and_ruler_navigation(viewer):
+    _click(viewer, timeline_point(viewer, 5, "take"))
     for row, hint_id in (
         ("take", "keyframes.select_all"),
         ("ruler", "keyframes.playhead"),
@@ -256,7 +257,7 @@ def test_take_menu_uses_one_row_and_restarts_names_after_deleting_all_takes(view
     _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
     menu_width = None
     for take in session.state_takes:
-        name = viewer.panels.get("Keyframes")._take_name(viewer.app._panel_context(), take)
+        name = viewer.panels.get("Keyframes").toolbar.take_name(viewer.app._panel_context(), take)
         row_lo, row_hi = _item_rect(viewer, "selectable", f"{name}##take-{take.take_id}")
         menu_width = row_hi[0] - row_lo[0]
         cross_lo, cross_hi = _item_rect(viewer, "invisible_button", f"##remove-take-{take.take_id}")
@@ -274,7 +275,8 @@ def test_take_menu_uses_one_row_and_restarts_names_after_deleting_all_takes(view
     viewer.app.localizer.set_language("zh_CN", persist=False)
     for _ in range(3):
         viewer.sync()
-    assert viewer.panels.get("Keyframes")._take_label(viewer.app._panel_context()) == "片段 1"
+    panel = viewer.panels.get("Keyframes")
+    assert panel.toolbar.take_label(panel.editor, viewer.app._panel_context()) == "片段 1"
 
 
 @pytest.mark.parametrize("viewer", ["workspace"], indirect=True)
@@ -288,20 +290,20 @@ def test_track_selection_delete_and_ctrl_a_never_cross_model_and_take_tracks(vie
     keys = tuple(session.keyframes)
     times = tuple(session.state_take_times)
     drag(viewer, timeline_point(viewer, 10, "take"), timeline_point(viewer, 15, "take"))
-    first, last = panel._take_selection
+    first, last = panel.editor.take_selection
     assert first < last
     _key(viewer, imgui.Key.delete)
     assert tuple(session.state_take_times) == times[:first] + times[last + 1 :]
     assert tuple(session.keyframes) == keys
-    assert panel._take_selection is None
+    assert panel.editor.take_selection is None
     _key(viewer, imgui.Key.a, ctrl=True)
-    assert panel._take_selection == (0, len(session.state_take_times) - 1)
+    assert panel.editor.take_selection == (0, len(session.state_take_times) - 1)
     _key(viewer, imgui.Key.delete)
     assert not session.state_take_times and tuple(session.keyframes) == keys
     assert len(session.state_takes) == 1
     _click(viewer, timeline_point(viewer, 12, "model"))
     _key(viewer, imgui.Key.a, ctrl=True)
-    assert panel._selected_keyframes == {key.keyframe_id for key in keys}
+    assert panel.editor.selected_keyframes == {key.keyframe_id for key in keys}
     _key(viewer, imgui.Key.delete)
     draft = viewer.app.model_edits
     assert len(draft.commands) == len(keys)
@@ -315,6 +317,40 @@ def test_track_selection_delete_and_ctrl_a_never_cross_model_and_take_tracks(vie
     assert [key.name for key in session.keyframes] == [key.name for key in keys]
     assert session.submit(cmd.Redo())
     assert not session.keyframes
+
+
+@pytest.mark.parametrize(
+    ("key", "ctrl", "claim"),
+    [
+        (imgui.Key.delete, False, InputClaim(keyboard=True)),
+        (imgui.Key.delete, False, InputClaim(keys={"delete"})),
+        (imgui.Key.backspace, False, InputClaim(keys={"backspace"})),
+        (imgui.Key.escape, False, InputClaim(keyboard=True)),
+        (imgui.Key.escape, False, InputClaim(keys={"escape"})),
+        (imgui.Key.a, True, InputClaim(keyboard=True)),
+        (imgui.Key.a, True, InputClaim(keys={"a"})),
+        (imgui.Key.a, True, InputClaim(keys={"ctrl"})),
+    ],
+)
+def test_timeline_editor_keys_respect_embedding_claims(viewer, key, ctrl, claim):
+    session, panel = viewer.session, viewer.panels.get("Keyframes")
+    drag(viewer, timeline_point(viewer, 10, "take"), timeline_point(viewer, 15, "take"))
+    selection = panel.editor.take_selection
+    times = tuple(session.state_take_times)
+    viewer.set_input_handler(lambda context: claim)
+    _key(viewer, key, ctrl=ctrl)
+    assert panel.editor.take_selection == selection
+    assert tuple(session.state_take_times) == times
+    viewer.set_input_handler(None)
+    _key(viewer, key, ctrl=ctrl)
+    if ctrl:
+        assert panel.editor.take_selection == (0, len(times) - 1)
+    elif key == imgui.Key.escape:
+        assert panel.editor.take_selection is None
+        assert tuple(session.state_take_times) == times
+    else:
+        first, last = selection
+        assert tuple(session.state_take_times) == times[:first] + times[last + 1 :]
 
 
 def test_model_additive_click_and_text_edit_shortcuts_preserve_take_selection_scope(viewer):
@@ -333,12 +369,12 @@ def test_model_additive_click_and_text_edit_shortcuts_preserve_take_selection_sc
     _click(viewer, timeline_point(viewer, keys[1].time, "model"))
     io.add_key_event(modifier, False)
     viewer.sync()
-    assert panel._selected_keyframes == {key.keyframe_id for key in keys}
+    assert panel.editor.selected_keyframes == {key.keyframe_id for key in keys}
     _click(viewer, timeline_point(viewer, keys[0].time, "model"))
     _click(viewer, _item_center(viewer, "input_text", "##keyframe-name"))
     _key(viewer, imgui.Key.a, ctrl=True)
     _key(viewer, imgui.Key.delete)
-    assert panel._name == ""
+    assert panel.editor.name == ""
     assert tuple(session.keyframes) == keys and tuple(session.state_take_times) == times
     assert not viewer.app.model_edits.active
 
@@ -395,22 +431,24 @@ def test_model_selector_uses_the_lane_header_without_scrubbing_the_take(viewer):
 
 def test_toolbar_reuses_caption_layouts_and_refreshes_state_and_language(viewer):
     panel = viewer.panels.get("Keyframes")
-    before = dict(panel._command_layouts)
+    before = dict(panel.toolbar.command_layouts)
     assert len(before) == 3
     for _ in range(3):
         viewer.sync()
-    assert all(panel._command_layouts[key] is value for key, value in before.items())
+    assert all(panel.toolbar.command_layouts[key] is value for key, value in before.items())
     assert viewer.session.submit(cmd.StartStateTakeRecording())
     viewer.sync()
-    assert panel._command_layouts["##take-record"][1] == "Stop Recording"
+    assert panel.toolbar.command_layouts["##take-record"][1] == "Stop Recording"
     viewer.app.localizer.set_language("zh_CN", persist=False)
     for _ in range(3):
         viewer.sync()
-    assert panel._command_layouts["##take-record"][1] == viewer.app.localizer.text("Stop Recording")
-    assert panel._command_layouts["##capture-snapshot"][1] == viewer.app.localizer.text(
+    assert panel.toolbar.command_layouts["##take-record"][1] == viewer.app.localizer.text(
+        "Stop Recording"
+    )
+    assert panel.toolbar.command_layouts["##capture-snapshot"][1] == viewer.app.localizer.text(
         "Capture Snapshot"
     )
-    assert len(panel._command_layouts) == 3
+    assert len(panel.toolbar.command_layouts) == 3
     assert viewer.session.submit(cmd.StopStateTakeRecording())
 
 
@@ -428,7 +466,7 @@ def test_first_and_last_buttons_seek_endpoints_while_step_buttons_move_one_frame
 def test_selected_range_navigation_and_repeat_button_remain_independent(
     tmp_path, monkeypatch, scale, language
 ):
-    from mojive.ui.panels import keyframes
+    from mojive.ui.keyframe_editor import toolbar as keyframes
 
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
@@ -464,7 +502,7 @@ def test_selected_range_navigation_and_repeat_button_remain_independent(
 def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(viewer):
     session, panel = viewer.session, viewer.panels.get("Keyframes")
     before = session.camera
-    view_range = panel._view_start, panel._view_end
+    view_range = panel.editor.view_start, panel.editor.view_end
     drag(viewer, timeline_point(viewer, 18), timeline_point(viewer, 9), shift=True)
     expected = (
         nearest_take_frame(session.state_take_times, 9),
@@ -472,7 +510,7 @@ def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(v
     )
     assert session.state_take_loop == expected
     assert session.state_take_loop_enabled
-    assert (panel._view_start, panel._view_end) == view_range
+    assert (panel.editor.view_start, panel.editor.view_end) == view_range
     np.testing.assert_allclose(session.camera.eye, before.eye)
     drag(
         viewer,
@@ -491,7 +529,7 @@ def test_shift_left_range_drag_and_shift_right_or_escape_clear_without_panning(v
     viewer.sync()
     assert session.state_take_loop is None
     assert not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
-    assert (panel._view_start, panel._view_end) == view_range
+    assert (panel.editor.view_start, panel.editor.view_end) == view_range
 
 
 def test_selecting_another_range_reenables_loop_after_manually_disabling_it(viewer):
@@ -534,12 +572,12 @@ def test_record_stop_rewinds_and_selects_only_the_latest_recording_pass(
     _click(viewer, _item_center(viewer, "invisible_button", "##take-record"))
     viewer.sync()
     assert session.state_take_cursor == first
-    assert panel._playhead == session.state_take_times[first]
-    assert panel._take_selection == (first, len(session.state_take_times) - 1)
+    assert panel.editor.playhead == session.state_take_times[first]
+    assert panel.editor.take_selection == (first, len(session.state_take_times) - 1)
     count = len(session.state_take_times) - first
     assert panel.status_detail(str) == f"Selected frames: {count}"
     assert details[-1] == panel.status_detail(viewer.app.localizer.text)
-    _right_click(viewer, timeline_point(viewer, panel._playhead, "take"))
+    _right_click(viewer, timeline_point(viewer, panel.editor.playhead, "take"))
     _click(viewer, _item_center(viewer, "menu_item", viewer.app.localizer.text("Delete selection")))
     assert len(session.state_take_times) == first
     assert panel.status_detail(str) == ""
@@ -554,16 +592,16 @@ def test_playhead_keeps_moving_through_deleted_gaps_until_the_final_frame(viewer
     session.tick(FrameNeeds.none(), wall_dt=1.0)
     viewer.sync()
     assert session.state_take_playing and session.state_take_cursor == 99
-    assert before + 1 <= panel._playhead < session.state_take_times[100]
+    assert before + 1 <= panel.editor.playhead < session.state_take_times[100]
     assert session.submit(cmd.PauseStateTake())
     _click(viewer, _item_center(viewer, "invisible_button", "##take-first"))
     viewer.sync()
-    assert panel._playhead == session.state_take_times[0]
+    assert panel.editor.playhead == session.state_take_times[0]
     assert session.submit(cmd.PlayStateTake())
     session.tick(FrameNeeds.none(), wall_dt=30)
     viewer.sync()
     assert not session.state_take_playing
-    assert panel._playhead == session.state_take_times[-1]
+    assert panel.editor.playhead == session.state_take_times[-1]
 
 
 def test_loop_survives_panel_close_and_space_resumes_replay(viewer):
@@ -592,7 +630,7 @@ def test_viewport_play_starts_simulation_but_timeline_play_replays_take(viewer):
     assert not session.paused and session.playback_source == "simulation"
     session.tick(FrameNeeds.none(), wall_dt=31)
     viewer.sync()
-    assert viewer.panels.get("Keyframes")._playhead > original[-1]
+    assert viewer.panels.get("Keyframes").editor.playhead > original[-1]
     assert not session.paused and not session.state_take_playing
     assert tuple(session.state_take_times) == original
 
@@ -614,8 +652,8 @@ def test_viewport_take_recording_rewinds_and_selects_the_same_range_as_keyframes
     assert not session.state_take_recording and session.paused
     assert session.active_state_take_id == take_id
     assert session.state_take_cursor == 60
-    assert panel._playhead == session.state_take_times[60]
-    assert panel._take_selection == (60, len(session.state_take_times) - 1)
+    assert panel.editor.playhead == session.state_take_times[60]
+    assert panel.editor.take_selection == (60, len(session.state_take_times) - 1)
 
 
 def test_end_checkbox_persists_and_continues_the_playhead_without_physics(viewer):
@@ -635,7 +673,7 @@ def test_end_checkbox_persists_and_continues_the_playhead_without_physics(viewer
     session.tick(FrameNeeds.none(), wall_dt=31)
     viewer.sync()
     assert session.state_take_playing and session.paused
-    assert panel._playhead > session.state_take_times[-1]
+    assert panel.editor.playhead > session.state_take_times[-1]
     assert session.frame.time == session.state_take_times[-1]
 
 
@@ -643,19 +681,19 @@ def test_playhead_pages_at_edge_and_stays_stationary_when_locked(viewer):
     session, panel = viewer.session, viewer.panels.get("Keyframes")
     assert session.submit(cmd.SeekStateTake(360))
     viewer.sync()
-    panel._view_start, panel._view_end = 1, 11
+    panel.editor.view_start, panel.editor.view_end = 1, 11
     choose_follow(viewer, "page")
-    assert panel._view_start < panel._playhead < panel._view_start + 1
-    assert panel._view_end - panel._view_start == pytest.approx(10)
+    assert panel.editor.view_start < panel.editor.playhead < panel.editor.view_start + 1
+    assert panel.editor.view_end - panel.editor.view_start == pytest.approx(10)
     choose_follow(viewer, "locked")
-    fraction = (panel._playhead - panel._view_start) / 10
+    fraction = (panel.editor.playhead - panel.editor.view_start) / 10
     for index in (400, 450, 200):
         session.submit(cmd.SeekStateTake(index))
         viewer.sync()
-        assert (panel._playhead - panel._view_start) / 10 == pytest.approx(fraction)
-    point = timeline_point(viewer, panel._playhead)
+        assert (panel.editor.playhead - panel.editor.view_start) / 10 == pytest.approx(fraction)
+    point = timeline_point(viewer, panel.editor.playhead)
     drag(viewer, point, (point[0] + 50, point[1]), button=1)
-    assert panel._follow_mode == "off"
+    assert panel.editor.follow_mode == "off"
 
 
 def test_escape_clears_range_without_clearing_scene_selection(viewer):
@@ -679,7 +717,7 @@ def test_escape_clears_range_without_clearing_scene_selection(viewer):
 
 
 def test_transport_status_geometry_stays_stable_across_time_and_frame_digits(viewer, monkeypatch):
-    from mojive.ui.panels import keyframes
+    from mojive.ui.keyframe_editor import toolbar as keyframes
 
     original = keyframes._toolbar_status
     rows = []

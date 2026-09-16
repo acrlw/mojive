@@ -57,13 +57,13 @@ class _Source:
         return self._adapter.camera_hint()
 
     def camera_view(self, camera_id: int) -> CameraView | None:
-        """Return an authored override or adapter camera by stable ID."""
+        """Return a scene override or adapter camera by stable ID."""
         i = int(camera_id)
-        if i in self._authored.cameras:
-            return self._authored.cameras[i]
+        if i in self._scene_overrides.cameras:
+            return self._scene_overrides.cameras[i]
         return self._adapter.camera_view(i) if self._adapter.caps.model_cameras else None
 
-    def _preserve_authored_override(self, writeback: bool) -> bool:
+    def _retain_scene_override(self, writeback: bool) -> bool:
         caps = self._adapter.caps
         return not writeback or caps.external_clock or caps.model_composition
 
@@ -84,39 +84,41 @@ class _Source:
         self._mesh_bounds_cache.clear()
         self._scene_bounds = None
         self._source = self._adapter.scene_source()
-        if self._authored.environment is not None:
-            self._source.lights = self._source.lights.with_environment(self._authored.environment)
-        for material_index, material in self._authored.materials.items():
+        if self._scene_overrides.environment is not None:
+            self._source.lights = self._source.lights.with_environment(
+                self._scene_overrides.environment
+            )
+        for material_index, material in self._scene_overrides.materials.items():
             if material_index < len(self._source.materials):
                 self._source.materials[material_index] = material
-        if self._authored.geometry_colors:
-            # Hierarchy indices can shift when model geometry is inserted before authored
+        if self._scene_overrides.geometry_colors:
+            # Hierarchy indices can shift when model geometry is inserted before scene
             # objects. Resolve retained colors by object identity across rebuilds and Undo.
             by_object = dict(zip(self._source.geom_object_id, self._source.geom_node, strict=True))
             by_name = {(n.model_id, n.type, n.name): n.node_id for n in self._source.nodes}
             colors, targets = {}, {}
-            for node_id, color in self._authored.geometry_colors.items():
-                target = self._authored.geometry_color_targets.get(node_id)
+            for node_id, color in self._scene_overrides.geometry_colors.items():
+                target = self._scene_overrides.geometry_color_targets.get(node_id)
                 if target is not None:
                     node_id = by_object.get(target[0]) if target[0] else by_name.get(target[1:])
                 if node_id is not None:
                     colors[node_id] = color
                     if target is not None:
                         targets[node_id] = target
-            self._authored.geometry_colors = colors
-            self._authored.geometry_color_targets = targets
+            self._scene_overrides.geometry_colors = colors
+            self._scene_overrides.geometry_color_targets = targets
             _apply_geometry_color_overrides(self._source, colors)
         self._nodes = [
             replace(node, children=list(node.children)) for node in self._adapter.nodes()
         ]
-        if self._authored.lights:
+        if self._scene_overrides.lights:
             light_nodes = {
                 node.object_id: node
                 for node in self._nodes
                 if node.object_id > 0 and node.light_index >= 0
             }
             lights = list(self._source.lights.lights)
-            for override in self._authored.lights.values():
+            for override in self._scene_overrides.lights.values():
                 node = light_nodes.get(override.object_id) if override.object_id > 0 else None
                 index = node.light_index if node is not None else override.light_index
                 if 0 <= index < len(lights):
@@ -142,7 +144,6 @@ class _Source:
             if 0 <= node.light_index < len(self._source.lights.lights):
                 node.visible = self._source.lights.lights[node.light_index].active
         self._refresh_joint_metadata()
-
         self._actuators = self._adapter.actuators()
         actuators_by_joint: dict[int, list[ActuatorInfo]] = {}
         for actuator in self._actuators:
@@ -154,9 +155,9 @@ class _Source:
         self._camera_slot_by_id = {
             camera.camera_id: slot for slot, camera in enumerate(self._cameras)
         }
-        if self._authored.cameras:
+        if self._scene_overrides.cameras:
             cameras = list(self._source.cameras)
-            for camera_id, camera in self._authored.cameras.items():
+            for camera_id, camera in self._scene_overrides.cameras.items():
                 slot = self._camera_slot(camera_id)
                 if 0 <= slot < len(cameras):
                     cameras[slot] = camera
@@ -206,6 +207,28 @@ class _Source:
         self._compose_lights()
         self._compose_cameras()
 
+    def refresh_control_metadata(self) -> None:
+        """Refresh parameters in an unchanged joint/actuator layout.
+
+        Panel row caches retain metadata objects until a structural refresh, so
+        update their live parameters in place without resetting UI state.
+        """
+        joints, actuators = self._adapter.joints(), self._adapter.actuators()
+        if [j.joint_id for j in joints] != [j.joint_id for j in self._joints] or [
+            a.actuator_id for a in actuators
+        ] != [a.actuator_id for a in self._actuators]:
+            raise ValueError("Control layout changed; refresh scene structure first")
+        for current, updated in zip(self._joints, joints, strict=True):
+            current.limited = updated.limited
+            current.range = updated.range
+            current.axis = updated.axis
+            current.damping = updated.damping
+            current.stiffness = updated.stiffness
+        for current, updated in zip(self._actuators, actuators, strict=True):
+            current.ctrl_range = updated.ctrl_range
+            current.ctrl_limited = updated.ctrl_limited
+            current.gain = updated.gain
+
     def _refresh_joint_metadata(self) -> None:
         """Refresh joint lookup tables without rebuilding stable scene geometry."""
         self._joints = self._adapter.joints()
@@ -215,7 +238,7 @@ class _Source:
         self._joints_by_body = {body: tuple(joints) for body, joints in joints_by_body.items()}
 
     def _compose_lights(self) -> None:
-        """Combine Mojive-authored light settings with backend-driven transforms.
+        """Combine scene light settings with backend-driven transforms.
 
         A physics backend may move a body-attached light and publish its world
         position/direction in ``SceneFrame``.  Color, intensity, range, fog and
@@ -223,16 +246,18 @@ class _Source:
         """
         if self._source is None:
             return
-        authored = self._source.lights
+        configured = self._source.lights
         driven = self._frame.lights
-        if driven is None or len(driven.lights) != len(authored.lights):
-            self._frame.lights = authored
+        if driven is None or driven is configured or len(driven.lights) != len(configured.lights):
+            self._frame.lights = configured
             return
         lights = tuple(
-            replace(light, position=dynamic.position, direction=dynamic.direction)
-            for light, dynamic in zip(authored.lights, driven.lights, strict=True)
+            light
+            if light is dynamic
+            else replace(light, position=dynamic.position, direction=dynamic.direction)
+            for light, dynamic in zip(configured.lights, driven.lights, strict=True)
         )
-        self._frame.lights = replace(authored, lights=lights)
+        self._frame.lights = replace(configured, lights=lights)
 
     def _sync_equality_state(self) -> None:
         values = self._frame.equality_enabled
@@ -248,7 +273,7 @@ class _Source:
         if self._source is None:
             return
         driven = self._frame.cameras
-        if not self._authored.cameras:
+        if not self._scene_overrides.cameras:
             if driven is None or len(driven) != len(self._source.cameras):
                 self._frame.cameras = self._source.cameras
             return
@@ -257,7 +282,7 @@ class _Source:
             if driven is not None and len(driven) == len(self._source.cameras)
             else self._source.cameras
         )
-        for camera_id, camera in self._authored.cameras.items():
+        for camera_id, camera in self._scene_overrides.cameras.items():
             slot = self._camera_slot(camera_id)
             if 0 <= slot < len(cameras):
                 cameras[slot] = camera

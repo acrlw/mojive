@@ -344,7 +344,7 @@ def test_loading_overlay_preserves_the_docked_viewport(viewer, monkeypatch):
 
     for _ in range(3):
         viewer.sync()
-    before_panel = viewer.app._viewport_panel_size
+    before_panel = viewer.app.viewport_surface.size
     before_rect = viewer.app._viewport_rect
     path = resolve("test_scene.xml")
     viewer.app._model_load_job = _ModelLoadJob("load", path, cmd.LoadAsset(path))
@@ -354,7 +354,7 @@ def test_loading_overlay_preserves_the_docked_viewport(viewer, monkeypatch):
         viewer.sync()
         loading = imgui.internal.find_window_by_name("Loading###model_loading")
         assert loading is not None
-        assert viewer.app._viewport_panel_size == pytest.approx(before_panel, abs=1.0)
+        assert viewer.app.viewport_surface.size == pytest.approx(before_panel, abs=1.0)
         assert viewer.app._viewport_rect == pytest.approx(before_rect, abs=1.0)
         x, y, width, height = viewer.app._viewport_rect
         center = loading.pos + loading.size * 0.5

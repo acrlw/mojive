@@ -41,4 +41,24 @@ def test_dense_take_marks_merge_but_leave_visible_gaps_between_samples():
     take = LongTake()
     spans = list(recorded_take_spans(take, 0, 100_000 / 30, 0, 1000))
     assert spans == [(0, 1000)]
-    assert take.reads < 1100
+    assert take.reads < 18000
+
+
+def test_dense_take_sampling_preserves_isolated_frames_and_actual_gaps():
+    times = (0.0,) * 10001 + (0.5, 1.0)
+    assert list(recorded_take_spans(times, 0, 1, 0, 100)) == [(0, 1), (49, 51), (99, 100)]
+
+
+def test_take_spans_match_full_sample_coverage_with_uneven_density():
+    import numpy as np
+
+    rng = np.random.default_rng(37)
+    times = sorted([*rng.uniform(0, 0.1, 10000), *rng.uniform(0.1, 1, 100)])
+    expected = []
+    for time in times:
+        left, right = max(0, time * 100 - 1), min(100, time * 100 + 1)
+        if expected and left <= expected[-1][1]:
+            expected[-1] = expected[-1][0], right
+        else:
+            expected.append((left, right))
+    assert list(recorded_take_spans(times, 0, 1, 0, 100)) == pytest.approx(expected)

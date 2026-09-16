@@ -378,6 +378,17 @@ fn sample_albedo(uv: vec2f) -> vec4f {
     return color / taps;
 }
 
+// Alpha = -(1 + opacity) selects batched diagnostic coverage.
+fn coverage_alpha(alpha: f32, pixel: vec2f) -> f32 {
+    if alpha >= 0.0 { return alpha; }
+    let lo = vec2u(pixel) & vec2u(1u);
+    let hi = (vec2u(pixel) >> vec2u(1u)) & vec2u(1u);
+    let low = 2u * (lo.x ^ lo.y) + lo.y;
+    let high = 2u * (hi.x ^ hi.y) + hi.y;
+    if -alpha - 1.0 <= (f32(4u * low + high) + 0.5) / 16.0 { discard; }
+    return 1.0;
+}
+
 fn scene_surface(in: SceneOut) -> SurfaceSample {
     var texel: vec4f;
     if in.cube_on > 0.5 {
@@ -390,7 +401,7 @@ fn scene_surface(in: SceneOut) -> SurfaceSample {
         surface = gamma_encode(surface);
         texel = vec4f(linear_to_srgb3(texel.rgb), texel.a);
     }
-    var base = vec4f(surface * texel.rgb, in.color.a * texel.a);
+    var base = vec4f(surface * texel.rgb, coverage_alpha(in.color.a, in.clip.xy) * texel.a);
     if in.selected > 0.5 {
         let albedo = mix(base.rgb, frame.highlight_color.xyz, frame.highlight.x);
         base = vec4f(albedo, base.a);
@@ -487,14 +498,14 @@ fn fs_albedo(in: SceneOut) -> @location(0) vec4f {
 
 @fragment
 fn fs_normal(in: SceneOut) -> @location(0) vec4f {
-    return vec4f(normalize(in.normal) * 0.5 + 0.5, in.color.a);
+    return vec4f(normalize(in.normal) * 0.5 + 0.5, coverage_alpha(in.color.a, in.clip.xy));
 }
 
 @fragment
 fn fs_depth(in: SceneOut) -> @location(0) vec4f {
     let range = max(frame.shading.w - frame.shading.z, 1e-6);
     let d = clamp((in.view_depth - frame.shading.z) / range, 0.0, 1.0);
-    return vec4f(vec3f(1.0 - d), in.color.a);
+    return vec4f(vec3f(1.0 - d), coverage_alpha(in.color.a, in.clip.xy));
 }
 
 // ---- wireframe variant --------------------------------------------------------
@@ -578,6 +589,7 @@ const OVERDRAW_STEP: f32 = 1.0 / 16.0;
 
 @fragment
 fn fs_overdraw(in: SceneOut) -> @location(0) vec4f {
+    coverage_alpha(in.color.a, in.clip.xy);
     return vec4f(vec3f(OVERDRAW_STEP), 0.0);
 }
 
@@ -588,6 +600,7 @@ struct ExportOut {
     @location(0) view_depth: f32,
     @location(1) @interpolate(flat) object_id: u32,
     @location(2) @interpolate(flat) segmentation: vec2i,
+    @location(3) @interpolate(flat) alpha: f32,
 };
 
 @vertex
@@ -603,6 +616,7 @@ fn vs_export(
     out.view_depth = -(frame.view * world).z;
     out.object_id = identity.object_id;
     out.segmentation = identity.segmentation;
+    out.alpha = instance_visual[instance_index].color.a;
     return out;
 }
 
@@ -614,6 +628,7 @@ struct ExportFrag {
 
 @fragment
 fn fs_export(in: ExportOut) -> ExportFrag {
+    coverage_alpha(in.alpha, in.clip.xy);
     var out: ExportFrag;
     out.depth = in.view_depth;
     out.object_id = in.object_id;

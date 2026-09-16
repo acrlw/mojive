@@ -338,7 +338,7 @@ class BgfxRenderer final : public Renderer {
             for (const auto &batch : scene.batches) {
                 mDrawIndices.clear();
                 for (auto index : batch.instances) {
-                    if (scene.instances[index][19] < 1)
+                    if (scene.instances[index][19] >= 0 && scene.instances[index][19] < 1)
                         continue;
                     if (frustum.intersects(scene.worldBounds[index])) {
                         mDrawIndices.push_back(index);
@@ -477,7 +477,7 @@ class BgfxRenderer final : public Renderer {
             mDrawIndices.clear();
             for (auto index : batch.instances)
                 if (scene.source.instances[index].objectId == style.selectedId &&
-                    scene.instances[index][19] > 0)
+                    scene.instances[index][19] != 0)
                     mDrawIndices.push_back(index);
             uint32_t count = mDrawIndices.size();
             if (!count)
@@ -1780,10 +1780,13 @@ class BgfxRenderer final : public Renderer {
                 auto *destination = buffer + i * stride;
                 const auto &source = current.instances[indices[i]];
                 std::memcpy(destination, source.data(), 12 * sizeof(float));
-                if (pass)
+                if (pass) {
                     std::memcpy(destination + 12 * sizeof(float), source.data() + 20,
                                 8 * sizeof(float));
-                else {
+                    // Six packed ID words leave the next slot free for coverage alpha.
+                    std::memcpy(destination + 18 * sizeof(float), source.data() + 19,
+                                sizeof(float));
+                } else {
                     std::memcpy(destination + 12 * sizeof(float), source.data() + 16,
                                 4 * sizeof(float));
                     std::memcpy(destination + 16 * sizeof(float), source.data() + 28,
@@ -1929,7 +1932,8 @@ class BgfxRenderer final : public Renderer {
                     continue;
                 mDrawIndices.clear();
                 for (auto index : batch.instances)
-                    if (current.instances[index][19] >= 1 && visible(index))
+                    if ((current.instances[index][19] >= 1 || current.instances[index][19] < 0) &&
+                        visible(index))
                         mDrawIndices.push_back(index);
                 draw(batch.mesh, batch.material, mDrawIndices, 0, false);
             }
@@ -1948,7 +1952,7 @@ class BgfxRenderer final : public Renderer {
                 mDrawIndices.clear();
                 for (auto index : batch.instances) {
                     float alpha = current.instances[index][19];
-                    if ((alpha >= 1 ||
+                    if ((alpha >= 1 || alpha < 0 ||
                          (pass && current.style.transparentIds && current.style.transparent)) &&
                         visible(index))
                         mDrawIndices.push_back(index);

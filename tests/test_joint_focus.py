@@ -97,10 +97,11 @@ def test_hinge_focus_targets_the_anchor_from_the_nearest_readable_oblique_view()
     assert app._pending_joint_focus_id is None
 
 
-def test_joint_focus_can_avoid_an_occluder_with_a_small_nearby_turn() -> None:
+@pytest.mark.parametrize(("blocker_id", "target_id"), [(2, 1), (1, 42)])
+def test_joint_focus_can_avoid_an_occluder_with_a_small_nearby_turn(blocker_id, target_id) -> None:
     target = SceneNode(7, "elbow", NodeType.JOINT, body_index=1, joint_index=0)
-    blocker = SceneNode(8, "torso", NodeType.LINK, object_id=2, body_index=2)
-    target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=1, body_index=1)
+    blocker = SceneNode(8, "torso", NodeType.LINK, object_id=blocker_id, body_index=2)
+    target_link = SceneNode(9, "forearm", NodeType.LINK, object_id=target_id, body_index=1)
     app = object.__new__(ViewerApp)
     app._camera_transition = None
     app.camera = OrbitCamera(pivot=np.zeros(3), distance=3.0, yaw=0.0)

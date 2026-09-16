@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import ArrayLike
 
+from mojive import math3d
 from mojive.adapters.base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
@@ -35,6 +36,10 @@ from mojive.types import (
     TextureType,
 )
 
+_DEFAULT_SCENE_MATERIAL = replace(
+    DEFAULT_MATERIAL, rgba=np.array((0.65, 0.68, 0.72, 1.0), np.float32)
+)
+
 
 @dataclass(frozen=True)
 class SceneObject:
@@ -57,7 +62,7 @@ class SceneObject:
         self.scene.set_object_material(self.object_id, material)
 
     def set_color(self, rgba) -> None:
-        """Set the object's RGBA color."""
+        """Override the object's RGBA color, or pass None to follow its material."""
         self.scene.set_object_color(self.object_id, rgba)
 
     def set_size(self, size) -> None:
@@ -100,12 +105,16 @@ class _Item:
     name: str
     mesh: MeshKey
     size: np.ndarray
-    color: np.ndarray
+    color: np.ndarray | None
     material: Material
     position: np.ndarray
     rotation: np.ndarray
     initial_position: np.ndarray
     initial_rotation: np.ndarray
+
+    @property
+    def rgba(self) -> np.ndarray:
+        return self.material.rgba if self.color is None else self.color
 
 
 @dataclass
@@ -217,8 +226,8 @@ class Scene:
         size: ArrayLike = (0.5, 0.5, 0.5),
         position: ArrayLike = (0.0, 0.0, 0.0),
         rotation: ArrayLike | None = None,
-        color: ArrayLike = (0.65, 0.68, 0.72, 1.0),
-        material: Material = DEFAULT_MATERIAL,
+        color: ArrayLike | None = None,
+        material: Material = _DEFAULT_SCENE_MATERIAL,
     ) -> SceneObject:
         """Add one render object and return an editing handle.
 
@@ -228,7 +237,7 @@ class Scene:
             size: Three shape dimensions in world units.
             position: World-space XYZ position.
             rotation: Optional row-major 3x3 world rotation.
-            color: Linear RGBA object multiplier.
+            color: RGBA object override; None follows the material base color.
             material: Immutable material parameters.
         """
         key = shape if isinstance(shape, MeshKey) else MeshKey(shape)
@@ -242,7 +251,7 @@ class Scene:
                 name=name,
                 mesh=key,
                 size=_vec3(size),
-                color=np.asarray(color, np.float32).reshape(4).copy(),
+                color=None if color is None else np.asarray(color, np.float32).reshape(4).copy(),
                 material=material,
                 position=pos,
                 rotation=rot,
@@ -407,9 +416,11 @@ class Scene:
     def set_pose(self, object_id: int, position, rotation=None) -> None:
         """Set an object's world pose by object ID."""
         item = self._item(object_id)
-        item.position[:] = _vec3(position)
+        position = _vec3(position)
+        rotation = _mat3(rotation) if rotation is not None else None
+        item.position[:] = position
         if rotation is not None:
-            item.rotation[:] = _mat3(rotation)
+            item.rotation[:] = rotation
         if self._built_revision == self._revision:
             self._write_pose(self._oid_to_index[object_id], item)
 
@@ -427,9 +438,9 @@ class Scene:
         self._revision += 1
 
     def set_object_color(self, object_id: int, rgba) -> None:
-        """Set an object's RGBA color by object ID."""
+        """Set an RGBA override, or None to use the material's base color."""
         item = self._item(object_id)
-        item.color[:] = np.asarray(rgba, np.float32).reshape(4)
+        item.color = None if rgba is None else np.asarray(rgba, np.float32).reshape(4).copy()
         self._revision += 1
 
     def set_object_size(self, object_id: int, size) -> None:
@@ -502,10 +513,12 @@ class Scene:
         if not 0 <= i < len(self._source.materials):
             return False
         current = self._source.materials[i]
-        for item in self._items:
+        for row, item in enumerate(self._items):
             if item.material is current:
                 item.material = material
+                self._source.geom_rgba[row] = item.rgba
         self._source.materials[i] = material
+        self._revision += 1
         return True
 
     def set_geometry_color(self, node_id: int, rgba) -> bool:
@@ -514,9 +527,10 @@ class Scene:
         if object_id is None:
             return False
         item = self._item(object_id)
-        item.color[:] = np.asarray(rgba, np.float32).reshape(4)
+        item.color = np.asarray(rgba, np.float32).reshape(4).copy()
         if self._built_revision == self._revision:
-            self._source.geom_rgba[self._oid_to_index[object_id]] = item.color
+            self._source.geom_rgba[self._oid_to_index[object_id]] = item.rgba
+        self._revision += 1
         return True
 
     def remove(self, object_id: int) -> None:
@@ -718,7 +732,7 @@ class Scene:
             geom_mesh=[x.mesh for x in self._items],
             geom_material=geom_material,
             geom_size=np.array([x.size for x in self._items], np.float32).reshape(n, 3),
-            geom_rgba=np.array([x.color for x in self._items], np.float32).reshape(n, 4),
+            geom_rgba=np.array([x.rgba for x in self._items], np.float32).reshape(n, 4),
             geom_object_id=np.array([x.object_id for x in self._items], np.uint32),
             geom_body=np.arange(1, n + 1, dtype=np.int32),
             geom_source=np.arange(n, dtype=np.int32),
@@ -749,7 +763,7 @@ class Scene:
 
 
 def _vec3(value) -> np.ndarray:
-    return np.asarray(value, np.float32).reshape(3).copy()
+    return math3d.as_finite_float32(value).reshape(3).copy()
 
 
 def _immutable_array(value: np.ndarray) -> np.ndarray:
@@ -783,5 +797,5 @@ def _mat3(value) -> np.ndarray:
     return (
         np.eye(3, dtype=np.float32)
         if value is None
-        else np.asarray(value, np.float32).reshape(3, 3).copy()
+        else math3d.as_finite_float32(value).reshape(3, 3).copy()
     )

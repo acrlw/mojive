@@ -39,6 +39,7 @@ from mojive.ui.camera import (
 )
 from mojive.ui.camera_preview import CameraPreview
 from mojive.ui.camera_tracking import CameraTracker
+from mojive.ui.clipboard import CaptureClipboard
 from mojive.ui.gizmo import ObjectGizmo, PreciseGizmoInput
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from mojive.ui.layers import visible_debug_layers
@@ -57,6 +58,7 @@ from mojive.ui.scene_entities import SceneEntityHelpers
 from mojive.ui.take_video import TakeVideo
 from mojive.ui.theme import THEME, Theme
 from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING, ViewCube
+from mojive.ui.viewport_surface import ViewportSurface
 from mojive.ui.viewport_widgets import (
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
     MAX_VIEWPORT_CAPSULE_SCALE,
@@ -84,7 +86,6 @@ from .resource_dialogs import _ResourceDialogs
 from .status import _Status
 from .support import (
     _NO_INPUT_CLAIM,
-    _fit_image_rect,
     _FrameRateDisplay,
     _GizmoHintHoverState,
     _JointLimitHoverState,
@@ -229,7 +230,9 @@ class ViewerApp(
         # Kept as a direct public alias for callers that only customize hints.
         self.tool_hints = self.viewport_chrome.tool_hints
         self.output = OutputBuffer()
-        self.panels = PanelManager(config=dict(viewer_config.panels))
+        self.panels = PanelManager(
+            config=dict(viewer_config.panels), builtin_ids=viewer_config.builtin_panels
+        )
         if os.environ.get("MOJIVE_OPEN_SETTINGS") == "1":
             self.panels.open_panel("Settings")
         self._started = False
@@ -237,8 +240,7 @@ class ViewerApp(
         self._frame_index = 0
         self._last_time = time.perf_counter()
         self._viewport_rect = (0.0, 0.0, 640.0, 480.0)
-        self._viewport_panel_position = (0.0, 0.0)
-        self._viewport_panel_size = (640.0, 480.0)
+        self.viewport_surface = ViewportSurface()
         self._viewport_image: ViewportImage | None = None
         self._dt = 0.0
         self._frame_rate = _FrameRateDisplay()
@@ -323,7 +325,8 @@ class ViewerApp(
         self._output_sink_id: int | None = None
         self._seen_message_revision = int(getattr(session, "message_revision", 0))
         self._snap_latched = False
-        self._capture_request: tuple[Path, CaptureSurface] | None = None
+        self._capture_clipboard = CaptureClipboard()
+        self._capture_requests: list[tuple[Path, CaptureSurface]] = []
         self._capture_tasks: list[
             tuple[Path | None, CaptureSurface, Future, np.ndarray | None]
         ] = []
@@ -589,6 +592,7 @@ class ViewerApp(
             if not future.done():
                 future.set_exception(RuntimeError("The viewer closed before capture completed"))
         self._capture_tasks = []
+        self._capture_requests = []
         executor = getattr(self, "_model_load_executor", None)
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
@@ -611,6 +615,11 @@ class ViewerApp(
             self._release_resource(self.debug_bridge, "close", "debug bridge")
             self.debug_bridge = None
         self._stop_viewport_recording(report=False)
+        clipboard = getattr(self, "_capture_clipboard", None)
+        if clipboard is not None:
+            result = clipboard.close()
+            if result is not None and result.error:
+                log.warning("Clipboard copy failed for {}: {}", result.path, result.error)
         self._release_resource(self.camera_preview, "release", "camera preview")
         self._release_resource(self._scene_capture, "release", "scene capture")
         self._release_resource(self.backend, "release", "render backend")
@@ -744,6 +753,7 @@ class ViewerApp(
             # preview surface even while that surface is hidden. A checkbox
             # must not change authored camera helper geometry.
             selected_camera_aspect=preview_size[0] / preview_size[1],
+            enabled=self.viewport_layers.helpers,
         )
         self._publish_selection_style()
         self._publish_gizmo()
@@ -872,8 +882,10 @@ class ViewerApp(
         needs = FrameNeeds(poses=True).merge(self.panels.frame_needs())
         interactions = getattr(self, "interactions", None)
         selection_style = getattr(self, "selection_style", None)
-        if (interactions is None or interactions.gizmo) and (
-            selection_style is None or selection_style.gizmo
+        if (
+            (interactions is None or interactions.gizmo)
+            and (selection_style is None or selection_style.gizmo)
+            and self.viewport_layers.gizmos
         ):
             needs = needs.merge(self.gizmo.frame_needs(self.session))
         if getattr(self, "_pending_joint_focus_id", None) is not None:
@@ -947,7 +959,7 @@ class ViewerApp(
         image = self._viewport_image
         if image is not None:
             return max(1, int(image.width)), max(1, int(image.height))
-        width, height = self.window.points_to_pixels(self._viewport_panel_size)
+        width, height = self.window.points_to_pixels(self.viewport_surface.size)
         return max(1, int(width)), max(1, int(height))
 
     def _sync_viewport_size(self) -> None:
@@ -955,16 +967,12 @@ class ViewerApp(
             self.backend.resize(*self._fixed_render_size)
             self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
         else:
-            settled = self.window.poll_render_size(self._viewport_panel_size)
+            settled = self.window.poll_render_size(self.viewport_surface.size)
             if settled is not None:
                 sw, sh = settled
                 self.backend.resize(sw, sh)
                 self.camera.set_aspect(max(sw, 1) / max(sh, 1))
-        self._viewport_rect = _fit_image_rect(
-            self._viewport_panel_position,
-            self._viewport_panel_size,
-            self._current_viewport_render_size(),
-        )
+        self._viewport_rect = self.viewport_surface.image_rect(self._current_viewport_render_size())
 
     def _sync_display_scale(self) -> None:
         generation = self.window.scale_generation

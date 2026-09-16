@@ -412,3 +412,23 @@ def test_native_close_from_readback_callback_preserves_queued_images():
     with Renderer(model, height=64, width=64) as peer:
         peer.update_scene(data)
         assert peer.render().shape == expected.shape
+
+
+def test_public_debug_draw_survives_scene_updates_and_rejects_closed_renderer():
+    from mojive import Occlusion
+
+    model = _model()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    with Renderer(model, width=128, height=96) as renderer:
+        renderer.update_scene(data, camera="fixed")
+        before = renderer.render().copy()
+        layer = renderer.debug.layer("measurement", Occlusion.ALWAYS)
+        layer.line("length", (-0.8, 0, 0.5), (0.8, 0, 0.5), (0, 1, 0, 1), 5)
+        renderer.update_scene(data, camera="fixed")
+        after = renderer.render()
+        assert np.any(after != before, axis=2).sum() > 30
+        layer.clear()
+        np.testing.assert_array_equal(renderer.render(), before)
+    with pytest.raises(RuntimeError, match="after close"):
+        _ = renderer.debug

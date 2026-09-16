@@ -27,6 +27,7 @@ from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimens
 from mojive.session import Session
 from mojive.types import MeshShape
 from mojive.ui.compound_fields import draw_joined_field_frame
+from mojive.ui.keyframe_editor import controls as keyframes_module
 from mojive.ui.localization import _ZH_CN, Language, Localizer, parse_language, render_note_text
 from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import (
@@ -44,7 +45,6 @@ from mojive.ui.panels import (
     state_vector_text,
     validate_panels,
 )
-from mojive.ui.panels import keyframes as keyframes_module
 from mojive.ui.panels.assets import (
     AssetsPanel,
     filter_assets,
@@ -133,7 +133,9 @@ def test_dense_keyframe_hit_testing_keeps_markers_omitted_from_the_draw_buckets(
     drawn = decimated_marker_ids(tuple(markers.items()), 0.0, 11.0, 4.0)
     omitted = next(keyframe_id for keyframe_id in markers if keyframe_id not in drawn)
 
-    hit = KeyframesPanel._hit_marker(markers, 20.0, 0.5, (markers[omitted], 20.0))
+    from mojive.ui.keyframe_editor.track import hit_marker
+
+    hit = hit_marker(markers, 20.0, 0.5, (markers[omitted], 20.0))
 
     assert hit == omitted
     assert hit in decimated_marker_ids(tuple(markers.items()), 0.0, 11.0, 4.0, (hit,))
@@ -167,14 +169,14 @@ def test_structure_generation_invalidates_panel_metadata_caches() -> None:
     first = SimpleNamespace(model_id=0, keyframe_id=1, time=1.0)
     second = SimpleNamespace(model_id=0, keyframe_id=2, time=2.0)
     keyframes = KeyframesPanel()
-    keyframes._model_id = 0
+    keyframes.editor.model_id = 0
     session.keyframes = (first,)
-    cached, by_id = keyframes._keyframes(ctx)
+    cached, by_id = keyframes.editor.keyframes(ctx)
     assert cached == (first,)
     assert by_id == {1: first}
     session.structure_generation = 3
     session.keyframes = (second,)
-    cached, by_id = keyframes._keyframes(ctx)
+    cached, by_id = keyframes.editor.keyframes(ctx)
     assert cached == (second,)
     assert by_id == {2: second}
 
@@ -623,6 +625,29 @@ def test_hierarchy_clear_selection_drops_multi_selection_state():
     panel.clear_selection()
 
     assert panel._batch_selected == set()
+
+
+@pytest.mark.parametrize("budget", [512, 1500])
+def test_hierarchy_expands_deep_trees_in_order_with_a_row_budget(monkeypatch, budget):
+    panel = HierarchyPanel()
+    count = 1500
+    nodes = [
+        SceneNode(i, str(i), NodeType.LINK, parent=i - 1, children=[i + 1] if i + 1 < count else [])
+        for i in range(count)
+    ]
+    panel._by_id = {node.node_id: node for node in nodes}
+    panel._row_budget = budget
+    rows = []
+
+    def row(_ctx, node, *, depth, **_kwargs):
+        panel._rows_drawn += 1
+        rows.append((node.node_id, depth))
+        return True
+
+    monkeypatch.setattr(panel, "_row", row)
+    panel._subtree(None, nodes[0], 0)
+    assert rows == [(i, i) for i in range(budget)]
+    assert panel._rows_truncated == (budget < count)
 
 
 def test_settings_is_a_dockable_panel(panels: PanelSet):

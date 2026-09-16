@@ -112,8 +112,8 @@ def _capture_editor(output: Path, width: int, height: int) -> dict:
                 raise RuntimeError(f"Could not capture keyframe {name}")
         session.submit(cmd.SeekStateTake(120))
         timeline = viewer.panels.get("Keyframes")
-        timeline._view_start, timeline._view_end = -0.5, 9.0
-        timeline._follow_mode = "off"
+        timeline.editor.view_start, timeline.editor.view_end = -0.5, 9.0
+        timeline.editor.set_follow_mode("off")
         viewer.panels.get("Joints")._angular_degrees = True
         selected = next(node for node in session.nodes if node.name == "hinge_body")
         session.submit(cmd.SelectNode(selected.node_id))

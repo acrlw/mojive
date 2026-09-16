@@ -9,6 +9,7 @@ from functools import lru_cache
 from imgui_bundle import imgui
 
 from mojive.geometry2d.curves import CORNER_SMOOTHING, smooth_polygon_corners
+from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.text_layout import text_line_y
 
@@ -97,6 +98,9 @@ class HierarchyPanel(Panel):
         self._roots: list[SceneNode] = []
         self._by_id: dict[int, SceneNode] = {}
         self._search_names: tuple[str, ...] = ()
+        self._search_key: tuple[int, str, str, int] | None = None
+        self._search_hits: tuple[SceneNode, ...] = ()
+        self._search_truncated = False
         self._type_counts: dict[str, int] = {}
         self._default_open_depth = 2
         self._row_budget = _VISIBLE_ROW_BUDGET
@@ -153,6 +157,9 @@ class HierarchyPanel(Panel):
         )
 
         self._draw_type_filters(ctx)
+        if len(s.source.geom_role):
+            imgui.text_disabled(ctx.tr("Geometry view"))
+            draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme)
 
         removable = self._batch_removable_roots()
         if len(self._batch_selected) > 1:
@@ -212,15 +219,7 @@ class HierarchyPanel(Panel):
         self._rows_truncated = False
         self._text_line_offset = text_line_y(ImguiDraw2D(), 0.0)
         if self._filter or self._type_filter != "all":
-            needle = self._filter.casefold()
-            hits = []
-            for node, name in zip(s.nodes, self._search_names, strict=True):
-                type_matches = self._type_filter == "all" or node.type.value == self._type_filter
-                if type_matches and needle in name:
-                    if len(hits) >= self._row_budget:
-                        self._rows_truncated = True
-                        break
-                    hits.append(node)
+            hits, self._rows_truncated = self._filtered_nodes(s.nodes)
             clipper = imgui.ListClipper()
             clipper.begin(len(hits))
             while clipper.step():
@@ -263,6 +262,25 @@ class HierarchyPanel(Panel):
         if clicked is not None:
             self._type_filter = "all" if clicked == self._type_filter else clicked
 
+    def _filtered_nodes(self, nodes) -> tuple[tuple[SceneNode, ...], bool]:
+        """Cache one bounded query until its text, type or scene structure changes."""
+        needle = self._filter.casefold()
+        key = (self._cache_generation, needle, self._type_filter, self._row_budget)
+        if key != self._search_key:
+            hits = []
+            truncated = False
+            for node, name in zip(nodes, self._search_names, strict=True):
+                type_matches = self._type_filter == "all" or node.type.value == self._type_filter
+                if type_matches and needle in name:
+                    if len(hits) >= self._row_budget:
+                        truncated = True
+                        break
+                    hits.append(node)
+            self._search_key = key
+            self._search_hits = tuple(hits)
+            self._search_truncated = truncated
+        return self._search_hits, self._search_truncated
+
     def _refresh(self, ctx: PanelContext) -> None:
         gen = ctx.session.structure_generation
         if gen == self._cache_generation:
@@ -284,23 +302,22 @@ class HierarchyPanel(Panel):
         }
 
     def _subtree(self, ctx: PanelContext, node: SceneNode, depth: int) -> None:
-        if self._rows_drawn >= self._row_budget:
-            self._rows_truncated = True
-            return
-        children = [self._by_id[c] for c in node.children if c in self._by_id]
-        opened = self._row(
-            ctx,
-            node,
-            leaf=not children,
-            depth=depth,
-            default_open=depth < self._default_open_depth,
-        )
-        if children and opened:
-            for child in children:
-                if self._rows_drawn >= self._row_budget:
-                    self._rows_truncated = True
-                    break
-                self._subtree(ctx, child, depth + 1)
+        pending = [(node, depth)]
+        while pending:
+            if self._rows_drawn >= self._row_budget:
+                self._rows_truncated = True
+                return
+            node, depth = pending.pop()
+            children = [self._by_id[c] for c in node.children if c in self._by_id]
+            opened = self._row(
+                ctx,
+                node,
+                leaf=not children,
+                depth=depth,
+                default_open=depth < self._default_open_depth,
+            )
+            if opened:
+                pending.extend((child, depth + 1) for child in reversed(children))
 
     def _row(
         self,

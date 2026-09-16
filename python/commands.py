@@ -11,6 +11,7 @@ from .types import (
     DEFAULT_MATERIAL,
     CameraView,
     Environment,
+    GeometryView,
     Light,
     Material,
     MeshKey,
@@ -378,7 +379,7 @@ class RemoveModelComponent(Command):
 
 @dataclass(frozen=True)
 class NewScene(Command):
-    """Create an empty authored scene document."""
+    """Create an empty scene document."""
 
 
 @dataclass(frozen=True)
@@ -508,7 +509,7 @@ class SetScale(Command):
     """Bake positive local XYZ factors into geometry, returning scale to identity.
 
     UI drafts replace earlier factors for the same node and preview without a rebuild.
-    Direct submission applies the factors once to the current authored dimensions.
+    Direct submission applies the factors once to the current source dimensions.
     """
 
     node_id: int
@@ -576,7 +577,7 @@ class SetSceneCamera(Command):
 
 @dataclass(frozen=True)
 class AddSceneObject(Command):
-    """Add a primitive or mesh object to an authored scene."""
+    """Add a primitive or mesh object to a scene."""
 
     shape: MeshShape | MeshKey
     name: str = "object"
@@ -589,14 +590,14 @@ class AddSceneObject(Command):
 
 @dataclass(frozen=True)
 class RemoveSceneObject(Command):
-    """Remove an authored scene object by object ID."""
+    """Remove a scene object by object ID."""
 
     object_id: int
 
 
 @dataclass(frozen=True)
 class AddSceneLight(Command):
-    """Add a named light to an authored scene."""
+    """Add a named light to a scene."""
 
     name: str
     light: Light
@@ -604,14 +605,14 @@ class AddSceneLight(Command):
 
 @dataclass(frozen=True)
 class RemoveSceneLight(Command):
-    """Remove an authored light by light ID."""
+    """Remove a scene light by light ID."""
 
     light_id: int
 
 
 @dataclass(frozen=True)
 class AddSceneCamera(Command):
-    """Add a named camera to an authored scene."""
+    """Add a named camera to a scene."""
 
     name: str
     camera: CameraView
@@ -619,28 +620,28 @@ class AddSceneCamera(Command):
 
 @dataclass(frozen=True)
 class RemoveSceneCamera(Command):
-    """Remove an authored camera by camera ID."""
+    """Remove a scene camera by camera ID."""
 
     camera_id: int
 
 
 @dataclass(frozen=True)
 class DuplicateSceneEntity(Command):
-    """Duplicate an authored object, light, or camera."""
+    """Duplicate a scene object, light, or camera."""
 
     object_id: int
 
 
 @dataclass(frozen=True)
 class RemoveSceneEntity(Command):
-    """Remove an authored object, light, or camera by object ID."""
+    """Remove a scene object, light, or camera by object ID."""
 
     object_id: int
 
 
 @dataclass(frozen=True)
 class RenameSceneEntity(Command):
-    """Rename an authored object, light, or camera."""
+    """Rename a scene object, light, or camera."""
 
     object_id: int
     name: str
@@ -664,7 +665,7 @@ class SetQposBatch(Command):
 
 @dataclass(frozen=True)
 class SetJointProperties(Command):
-    """Set authored axis, limits, damping, and stiffness for one model joint."""
+    """Set source axis, limits, damping, and stiffness for one model joint."""
 
     joint_id: int
     axis: np.ndarray
@@ -928,6 +929,14 @@ class SetVisualGroup(Command):
     category: str
     group: int
     visible: bool
+
+
+@dataclass(frozen=True)
+class SetGeometryView(Command):
+    """Override one link's geometry presentation; None follows the scene view."""
+
+    node_id: int
+    view: GeometryView | None
 
 
 @dataclass(frozen=True)

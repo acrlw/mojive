@@ -75,6 +75,8 @@ def update_camera(current: CameraView, params: dict, session) -> tuple[CameraVie
         direction = np.array(
             [np.cos(pitch) * np.cos(yaw), np.cos(pitch) * np.sin(yaw), np.sin(pitch)]
         )
-        view = replace(view, eye=np.asarray(view.target + direction * distance, np.float32))
+        # camera_value owns the checked float32 conversion, including overflow
+        # in an orbit update derived from otherwise finite JSON parameters.
+        view = replace(view, eye=np.asarray(view.target, np.float64) + direction * distance)
         view = camera_value({name: json_value(getattr(view, name)) for name in CAMERA_FIELDS})
     return view, -1

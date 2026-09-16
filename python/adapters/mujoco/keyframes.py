@@ -1,6 +1,8 @@
-"""Model-local keyframe identity and authoring."""
+"""Model-local keyframe identity, queries and editing."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -12,11 +14,36 @@ from ..base import (
 from .engine import mujoco
 
 
+@dataclass
+class _KeyframeModel:
+    revision: int
+    model_id: int
+    spec: object
+    model: object
+
+
 class _Keyframes:
-    """Model-local keyframe identity and authoring.
+    """Model-local keyframe identity, queries and editing.
 
     Private implementation of MuJoCoAdapter; owns no independent model or lifecycle.
     """
+
+    def _local_keyframe_model(self, model_id: int, spec):
+        if self._model_edit_batch_depth:
+            # Batched component edits can mutate a spec in place before publishing
+            # a new structure revision. Only cache committed document state.
+            return spec.copy().compile()
+        cached = self._keyframe_model
+        if (
+            cached is None
+            or cached.revision != self._structure_revision
+            or cached.model_id != model_id
+            or cached.spec is not spec
+        ):
+            # Bound retained compiled data to the last queried model.
+            cached = _KeyframeModel(self._structure_revision, model_id, spec, spec.copy().compile())
+            self._keyframe_model = cached
+        return cached.model
 
     def keyframes(self) -> list[KeyframeInfo]:
         m = self._m
@@ -52,7 +79,7 @@ class _Keyframes:
         spec = self._spec_for_model(model_id)
         if spec is None or spec.key(name) is None:
             return None
-        local_model = spec.copy().compile()
+        local_model = self._local_keyframe_model(model_id, spec)
         local_key = mujoco.mj_name2id(local_model, mujoco.mjtObj.mjOBJ_KEY, name)
         if local_key < 0:
             return None
@@ -110,7 +137,7 @@ class _Keyframes:
         spec = self._spec_for_model(model_id)
         if spec is None:
             return None
-        local = spec.copy().compile()
+        local = self._local_keyframe_model(model_id, spec)
         model_position, model_rotation = self._model_transform(model_id)
         joint_offset = self._model_object_offset(model_id, local, mujoco.mjtObj.mjOBJ_JOINT, "njnt")
         actuator_offset = self._model_object_offset(
@@ -234,7 +261,7 @@ class _Keyframes:
         source_spec = self._spec_for_model(model_id)
         if source_spec is None:
             return False
-        local = source_spec.copy().compile()
+        local = self._local_keyframe_model(model_id, source_spec)
         expected = (
             local.nq,
             local.nv,

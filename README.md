@@ -100,6 +100,12 @@ UI scale and language default to the system settings; override them with `MOJIVE
 
 ## Python
 
+`Renderer` replaces the offscreen `mujoco.Renderer` workflow: it returns scene images without UI.
+For `mujoco.viewer` call patterns, use `mojive.viewer.launch(...)` or
+`mojive.viewer.launch_passive(model, data)`; see the [migration guide](docs/tutorials/mujoco-viewer.md)
+for supported APIs and current differences. Interactive viewers expose the full desktop tools by
+default. Reduced configurations are an explicit user choice.
+
 Create and render a scene without a physics engine or editor window:
 
 ```python
