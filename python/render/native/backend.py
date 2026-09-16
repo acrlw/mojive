@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ...types import CameraView, LightType, MeshKey, MeshShape, ViewportImage
+from ...types import CameraView, GeometryStyle, LightType, MeshKey, MeshShape, ViewportImage
 from ..backend import (
     BackendCaps,
     DebugView,
@@ -199,6 +199,7 @@ class NativeBackend:
         self._gizmo = None
         self._gizmo_planner = GizmoPlanner()
         self._gizmo_meshes = {}
+        self._geometry_style = GeometryStyle()
         self._builder = SceneSourceBuilder()
         self._scene = self._builder.scene
         self._external_scene = False
@@ -610,6 +611,9 @@ class NativeBackend:
         self._camera = camera.with_aspect(self.target.width / self.target.height)
         self._render_state_dirty = True
 
+    def get_background(self) -> tuple[float, float, float, float]:
+        return tuple(self._style.background)
+
     def set_background(self, rgba):
         self._style.background = tuple(rgba)
         self.runtime.configure(self._scene_handle, self._style)
@@ -750,6 +754,17 @@ class NativeBackend:
             self._sync_instance_visibility()
         return True
 
+    def set_geometry_style(self, style: GeometryStyle) -> bool:
+        if not isinstance(style, GeometryStyle):
+            raise TypeError("style must be a GeometryStyle")
+        if style != self._geometry_style:
+            self._geometry_style = style
+            self._sync_instance_visibility()
+        return True
+
+    def get_geometry_style(self) -> GeometryStyle:
+        return self._geometry_style
+
     def _sync_instance_visibility(self):
         if self._source is not None:
             self._builder.set_visual_options(
@@ -760,6 +775,7 @@ class NativeBackend:
                 convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
                 visual_geometry=self.get_flag(RenderFlag.VISUAL_GEOMETRY),
                 collision_geometry=self.get_flag(RenderFlag.COLLISION_GEOMETRY),
+                geometry_style=self._geometry_style,
                 island=self.get_flag(RenderFlag.ISLAND),
             )
             self._sync_scene()

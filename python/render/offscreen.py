@@ -19,7 +19,7 @@ from mojive.render.backend import (
 )
 from mojive.render.context import _select_backend
 from mojive.render.geometry import GeometryView, set_geometry_view
-from mojive.types import CameraView
+from mojive.types import CameraView, GeometryStyle
 
 
 class SceneRenderer:
@@ -133,6 +133,11 @@ class SceneRenderer:
         """Select default, visual, collision, or both without changing physics."""
         with self._current():
             return set_geometry_view(self._backend, view)
+
+    def set_geometry_style(self, style: GeometryStyle) -> bool:
+        """Set collision color and independent Both-mode opacity without changing physics."""
+        with self._current():
+            return self._backend.set_geometry_style(style)
 
     def set_debug_view(self, view: DebugView | str) -> bool:
         """Select an RGB diagnostic view without changing data-product formats."""

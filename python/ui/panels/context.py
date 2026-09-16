@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from mojive.render.backend import RenderBackend, ShadowQuality
     from mojive.session import Session
     from mojive.text.sources import FontReport
-    from mojive.types import CameraView
+    from mojive.types import CameraView, GeometryStyle
     from mojive.ui.camera import OrbitCamera
     from mojive.ui.camera_preview import CameraPreview
     from mojive.ui.gizmo import ObjectGizmo
@@ -108,6 +108,7 @@ class PanelContext:
     translate: Callable[[str], str] | None = None
     set_language: Callable[[str], None] | None = None
     set_shadow_quality: Callable[[ShadowQuality | str], bool] | None = None
+    set_geometry_style: Callable[[GeometryStyle], bool] | None = None
     interactions: InteractionConfig | None = None
     set_interactions: Callable[[InteractionConfig], None] | None = None
     selection_style: SelectionStyle | None = None

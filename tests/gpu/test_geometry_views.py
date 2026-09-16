@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mojive import GeometryView, Renderer, RenderProduct, Scene, SceneRenderer
+from mojive import GeometryStyle, GeometryView, Renderer, RenderProduct, Scene, SceneRenderer
 from mojive.adapters.base import FrameNeeds
 from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.render.backend import RenderFlag
@@ -152,6 +152,13 @@ def test_scene_screenshots_and_video_frames_follow_geometry_mode(backend):
                     with view._current():
                         pixels = capture.read(view._backend, session, camera)
                     np.testing.assert_array_equal(pixels, expected)
+                default = expected.copy()
+                view.set_geometry_style(GeometryStyle((0.25, 0.5, 0.7), 0.9, 0.2))
+                expected = view.render().copy()
+                assert np.count_nonzero(expected != default) > 100
+                with view._current():
+                    pixels = capture.read(view._backend, session, camera)
+                np.testing.assert_array_equal(pixels, expected)
             finally:
                 with view._current():
                     capture.release()
@@ -185,9 +192,120 @@ def test_comparison_coverage_matches_color_depth_and_picking(backend):
             ids = view.render(product=RenderProduct.OBJECT_ID)[60:100, 60:100]
             depth = view.render(product=RenderProduct.METRIC_DEPTH)[60:100, 60:100]
             red = rgb[..., 0] > rgb[..., 1]
-            assert 0.2 < red.mean() < 0.4
+            assert 0.55 < red.mean() < 0.75
             assert set(np.unique(ids)) == {1, 2}
             np.testing.assert_array_equal(red, ids == 1)
             np.testing.assert_array_equal(red, depth < 5)
     finally:
         adapter.release()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_capture_retains_mujoco_visuals_and_custom_comparison_style(backend):
+    from mojive.render.backend import DebugView, FrameMode, LabelMode
+
+    model = mujoco.MjModel.from_xml_string("""
+    <mujoco><worldbody>
+      <geom type="plane" size="2 2 .1" rgba=".1 .1 .1 1"/>
+      <body name="subject" pos="0 0 .2"><freejoint/>
+        <inertial pos="0 0 .4" mass="1" diaginertia=".2 .3 .4"/>
+        <geom type="box" size=".3 .2 .25" rgba=".2 .5 .8 1"/>
+      </body>
+      <geom name="grouped" type="sphere" pos=".7 0 .3" size=".2" group="3" rgba=".8 .2 .2 1"/>
+    </worldbody></mujoco>""")
+    adapter = MuJoCoAdapter()
+    adapter.load_model(model)
+    adapter.prepare_frame(FrameNeeds(bvh=True))
+    camera = CameraView(
+        eye=np.array((2, -3, 2), np.float32), target=np.array((0, 0, 0.2), np.float32), aspect=1.5
+    )
+    capture = SceneCapture()
+    try:
+        source = adapter.scene_source()
+        frame = adapter.frame(FrameNeeds(diagnostics=True, contacts=True, bvh=True))
+        assert len(frame.contacts)
+        session = SimpleNamespace(source=source, frame=frame, structure_generation=0)
+        with SceneRenderer(source, width=300, height=200, renderer=backend, camera=camera) as view:
+
+            def capture_image():
+                with view._current():
+                    return capture.read(view._backend, session, camera)
+
+            try:
+                view.update(frame)
+                baseline = view.render().copy()
+                cases = [
+                    (RenderFlag.INERTIA, RenderFlag.SCLINERTIA),
+                    (RenderFlag.CONTACTPOINT, RenderFlag.CONTACTFORCE),
+                    (RenderFlag.BODYBVH,),
+                ]
+                for flags in cases:
+                    for flag in flags:
+                        view.set_flag(flag, True)
+                    view.update(frame)
+                    displayed = view.render().copy()
+                    assert np.count_nonzero(displayed != baseline) > 20, flags
+                    np.testing.assert_array_equal(capture_image(), displayed)
+                    for flag in flags:
+                        view.set_flag(flag, False)
+                view._backend.set_label_mode(LabelMode.BODY)
+                view._backend.set_frame_mode(FrameMode.BODY)
+                view.update(frame)
+                displayed = view.render().copy()
+                assert np.count_nonzero(displayed != baseline) > 20
+                np.testing.assert_array_equal(capture_image(), displayed)
+                view._backend.set_label_mode(LabelMode.NONE)
+                view._backend.set_frame_mode(FrameMode.NONE)
+                for visible in (True, False):
+                    assert adapter.set_visual_group("geom", 3, visible)
+                    session.source = adapter.scene_source()
+                    session.frame = adapter.frame(
+                        FrameNeeds(diagnostics=True, contacts=True, bvh=True)
+                    )
+                    session.structure_generation += 1
+                    view.set_scene(session.source)
+                    view.update(session.frame)
+                    displayed = view.render().copy()
+                    np.testing.assert_array_equal(capture_image(), displayed)
+                    assert (np.count_nonzero(displayed != baseline) > 20) == visible
+                view.set_geometry_view(GeometryView.BOTH)
+                style = GeometryStyle((0.2, 0.6, 0.8), 0.9, 0.15)
+                view.set_geometry_style(style)
+                view.update(frame)
+                np.testing.assert_array_equal(capture_image(), view.render())
+                assert capture._backend.get_geometry_style() == style
+                view.set_debug_view(DebugView.NORMAL)
+                np.testing.assert_array_equal(capture_image(), view.render())
+            finally:
+                with view._current():
+                    capture.release()
+    finally:
+        adapter.release()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_independent_opacity_keeps_inner_collision_visible_and_pickable(backend):
+    from mojive import GeometryRole
+
+    scene = Scene()
+    scene.box(name="shell", position=(0, -0.5, 0), size=(2, 0.1, 2), color=(1, 0, 0, 1))
+    scene.box(name="collision", position=(0, 0.5, 0), size=(2, 0.1, 2))
+    source = scene.source
+    source.geom_role = np.array((GeometryRole.VISUAL, GeometryRole.COLLISION), np.uint8)
+    camera = CameraView(eye=np.array((0, -5, 0), np.float32), target=np.zeros(3, np.float32))
+    with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
+        view.update(scene.frame)
+        view.set_geometry_view(GeometryView.BOTH)
+        for visual, collision in ((0.75, 0.25), (1, 0), (0, 0.25), (0, 0)):
+            view.set_geometry_style(GeometryStyle((0, 1, 1), visual, collision))
+            rgb = view.render()[60:100, 60:100]
+            ids = view.render(product=RenderProduct.OBJECT_ID)[60:100, 60:100]
+            depth = view.render(product=RenderProduct.METRIC_DEPTH)[60:100, 60:100]
+            red = rgb[..., 0] > rgb[..., 1]
+            cyan = rgb[..., 1] > rgb[..., 0]
+            assert red.mean() == pytest.approx(visual, abs=0.01)
+            assert cyan.mean() == pytest.approx(collision, abs=0.01)
+            np.testing.assert_array_equal(ids == source.geom_object_id[0], red)
+            np.testing.assert_array_equal(ids == source.geom_object_id[1], cyan)
+            if red.any() and cyan.any():
+                assert depth[red].max() < depth[cyan].min()

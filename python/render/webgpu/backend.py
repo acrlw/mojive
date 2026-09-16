@@ -17,7 +17,7 @@ from mojive.interaction.gizmo import GizmoFrame
 
 from ...adapters.base import SceneFrame, SceneSource
 from ...log import get_logger
-from ...types import CameraView, ShadingModel, ViewportImage
+from ...types import CameraView, GeometryStyle, ShadingModel, ViewportImage
 from ..backend import (
     BackendCaps,
     DebugView,
@@ -356,6 +356,7 @@ class WgpuBackend:
 
         self._source: SceneSource | None = None
         self._scene: RenderScene | None = None
+        self._geometry_style = GeometryStyle()
         self._builder: SceneSourceBuilder | None = None
         # Tendon publishing state, mirroring OpenGLBackend: per-source lookup
         # tables captured in set_scene plus reusable capsule packing buffers.
@@ -414,6 +415,9 @@ class WgpuBackend:
         )
 
     # -- scene contract -------------------------------------------------------
+
+    def get_background(self) -> tuple[float, float, float, float]:
+        return self._background
 
     def set_background(self, rgba: tuple[float, float, float, float]) -> None:
         self._background = tuple(float(c) for c in rgba)
@@ -1307,6 +1311,17 @@ class WgpuBackend:
             self._sync_instance_visibility()
         return True
 
+    def set_geometry_style(self, style: GeometryStyle) -> bool:
+        if not isinstance(style, GeometryStyle):
+            raise TypeError("style must be a GeometryStyle")
+        if style != self._geometry_style:
+            self._geometry_style = style
+            self._sync_instance_visibility()
+        return True
+
+    def get_geometry_style(self) -> GeometryStyle:
+        return self._geometry_style
+
     def _sync_instance_visibility(self) -> None:
         if self._builder is None:
             return
@@ -1319,6 +1334,7 @@ class WgpuBackend:
             convex_hull=self.get_flag(RenderFlag.CONVEXHULL),
             visual_geometry=self.get_flag(RenderFlag.VISUAL_GEOMETRY),
             collision_geometry=self.get_flag(RenderFlag.COLLISION_GEOMETRY),
+            geometry_style=self._geometry_style,
         )
         if changed:
             self.set_render_scene(self._builder.scene)

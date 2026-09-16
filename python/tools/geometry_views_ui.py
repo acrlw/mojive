@@ -5,13 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 
 def capture(output: Path, language: str, scale: float, panel_width: int) -> dict:
-    os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+    if sys.platform.startswith("linux"):
+        os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
     import moderngl
     from imgui_bundle import imgui
     from imgui_bundle.python_backends.opengl_backend_programmable import (
@@ -22,25 +24,35 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
     from mojive import commands as cmd
     from mojive.adapters.mujoco import MuJoCoAdapter
     from mojive.render.backend import NullBackend, RenderFlag
+    from mojive.render.context import _create_context
     from mojive.render.geometry import GeometryView, geometry_view, set_geometry_flags
     from mojive.scene.assets import resolve
     from mojive.session import Session
     from mojive.ui import fonts, theme
+    from mojive.ui.app.core import ViewerApp
     from mojive.ui.app.menus import _Menus
     from mojive.ui.localization import Localizer
     from mojive.ui.panels import PanelContext
     from mojive.ui.panels.hierarchy import HierarchyPanel
     from mojive.ui.panels.inspector import InspectorPanel
+    from mojive.ui.panels.settings import SettingsPanel
 
     class Backend(NullBackend):
+        def set_geometry_style(self, style):
+            self._geometry_style = style
+            return True
+
         def set_geometry_view(self, view):
             set_geometry_flags(self._flags, view)
             return True
 
     output.mkdir(parents=True, exist_ok=True)
     context = imgui.create_context()
-    gl = moderngl.create_standalone_context(backend="egl")
     width, height = round(panel_width * 2 * scale), round(700 * scale)
+    graphics = _create_context(width, height)
+    current = graphics.current()
+    current.__enter__()
+    gl = graphics.gl_context or moderngl.create_context(require=330)
     target = gl.simple_framebuffer((width, height))
     io = imgui.get_io()
     io.set_ini_filename(None)
@@ -65,7 +77,14 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
     menu.panels = ()
     positions = {}
     current_panel = "menu"
-    originals = (imgui.button, imgui.begin_combo, imgui.selectable, imgui.begin_menu)
+    originals = (
+        imgui.button,
+        imgui.begin_combo,
+        imgui.selectable,
+        imgui.begin_menu,
+        imgui.slider_float,
+        imgui.color_edit3,
+    )
 
     def remember(key):
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
@@ -94,11 +113,32 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
             remember("Help")
         return result
 
-    imgui.button, imgui.begin_combo, imgui.selectable, imgui.begin_menu = (
+    def slider(label, *args, **kwargs):
+        result = originals[4](label, *args, **kwargs)
+        if label in ("##visual_opacity", "##collision_opacity"):
+            remember(label)
+        return result
+
+    def color(label, *args, **kwargs):
+        result = originals[5](label, *args, **kwargs)
+        if label == "##collision_color":
+            remember(label)
+        return result
+
+    (
+        imgui.button,
+        imgui.begin_combo,
+        imgui.selectable,
+        imgui.begin_menu,
+        imgui.slider_float,
+        imgui.color_edit3,
+    ) = (
         button,
         combo,
         selectable,
         begin_menu,
+        slider,
+        color,
     )
 
     def frame():
@@ -166,7 +206,33 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
         Image.frombytes("RGB", (width, height), target.read(components=3)).transpose(
             Image.Transpose.FLIP_TOP_BOTTOM
         ).save(path)
+        settings = SettingsPanel()
+        settings._category = "MuJoCo Visuals"
+        panels = (settings,)
+        owner = SimpleNamespace(backend=backend, localizer=localizer)
+        ctx.set_geometry_style = lambda style: ViewerApp.set_geometry_style(owner, style)
+        for _ in range(3):
+            frame()
+        for label, name in (
+            ("##visual_opacity", "visual_opacity"),
+            ("##collision_opacity", "collision_opacity"),
+        ):
+            before = getattr(backend.get_geometry_style(), name)
+            click("settings", label)
+            assert getattr(backend.get_geometry_style(), name) != before
+            assert localizer.preference("geometry_style")[name] == getattr(
+                backend.get_geometry_style(), name
+            )
+        for label in ("##visual_opacity", "##collision_opacity", "##collision_color"):
+            x0, y0, x1, y1 = positions[("settings", label)]
+            assert 0 <= x0 < x1 <= width / 2 and 0 <= y0 < y1 <= height
+        settings_path = output / f"settings-{language}-{scale}-{panel_width}.png"
+        Image.frombytes("RGB", (width, height), target.read(components=3)).transpose(
+            Image.Transpose.FLIP_TOP_BOTTOM
+        ).crop((0, 0, width // 2, height)).save(settings_path)
         return {
+            "settings_image": str(settings_path),
+            "style_controls_and_persistence": True,
             "language": language,
             "scale": scale,
             "panel_width": panel_width,
@@ -181,10 +247,20 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
         ).save(output / "failure.png")
         raise
     finally:
-        imgui.button, imgui.begin_combo, imgui.selectable, imgui.begin_menu = originals
+        (
+            imgui.button,
+            imgui.begin_combo,
+            imgui.selectable,
+            imgui.begin_menu,
+            imgui.slider_float,
+            imgui.color_edit3,
+        ) = originals
         renderer.shutdown()
         target.release()
-        gl.release()
+        if graphics.gl_context is None:
+            gl.release()
+        current.__exit__(None, None, None)
+        graphics.close()
         session.release()
         imgui.destroy_context(context)
 

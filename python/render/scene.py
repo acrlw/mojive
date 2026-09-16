@@ -21,8 +21,8 @@ class RenderScene:
     count: int = 0
 
     transforms: np.ndarray = field(default_factory=lambda: np.zeros((0, 4, 4), np.float32))
-    # Negative alpha encodes ordered coverage as -(1 + opacity). This renderer
-    # contract keeps diagnostic overlays instanced without alpha-sorting draws.
+    # Negative alpha encodes ordered coverage: -(1 + opacity) for visual surfaces,
+    # -(3 + opacity) for complementary collision surfaces. Both remain instanced.
     colors: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
     material: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
@@ -178,10 +178,11 @@ class SceneBuilder:
         infinite_plane: bool = False,
         segmentation: tuple[int, int] | np.ndarray = (-1, -1),
         coverage: bool = False,
+        collision_coverage: bool = False,
     ) -> int:
         color = np.asarray(color, np.float32).reshape(4).copy()
         if coverage:
-            color[3] = -(1.0 + np.clip(color[3], 0.0, 1.0))
+            color[3] = -((3.0 if collision_coverage else 1.0) + np.clip(color[3], 0.0, 1.0))
         self._rows.append(
             {
                 "key": (mesh, matid),

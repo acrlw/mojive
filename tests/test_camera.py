@@ -7,7 +7,7 @@ from mojive import math3d
 from mojive.adapters.base import CameraInfo, NodeType, SceneFrame, SceneNode, SceneSource
 from mojive.commands import SetCamera
 from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag, RenderProduct
-from mojive.types import CameraView
+from mojive.types import CameraView, GeometryStyle
 from mojive.ui.camera import (
     FOCUS_DURATION,
     ISO_PITCH,
@@ -706,6 +706,12 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def set_flag(self, flag, value) -> None:
             self.flags[flag] = value
 
+        def set_background(self, value):
+            self.background = value
+
+        def set_geometry_style(self, value):
+            self.geometry_style = value
+
         def set_shadow_quality(self, value) -> None:
             self.shadow_quality = value
 
@@ -746,6 +752,12 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def get_flag(self, flag):
             return flag is RenderFlag.HAZE
 
+        def get_background(self):
+            return (0.1, 0.2, 0.3, 1.0)
+
+        def get_geometry_style(self):
+            return GeometryStyle((0.2, 0.4, 0.6), 0.9, 0.2)
+
         def get_shadow_quality(self):
             return "high"
 
@@ -767,6 +779,8 @@ def test_camera_preview_copies_the_main_render_state() -> None:
 
     assert peer.flags == {RenderFlag.HAZE: True, RenderFlag.SHADOW: False}
     assert peer.shadow_quality == "high"
+    assert peer.background == (0.1, 0.2, 0.3, 1.0)
+    assert peer.geometry_style == Main().get_geometry_style()
     assert peer.debug_view is DebugView.NORMAL
     assert peer.label_mode is LabelMode.BODY
     assert peer.frame_mode is FrameMode.WORLD

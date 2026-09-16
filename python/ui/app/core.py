@@ -29,7 +29,7 @@ from mojive.render.backend import FrameMode, LabelMode, RenderFlag, ShadowQualit
 from mojive.scene.queries import node_world_pose
 from mojive.scene.workspace import MissingResource
 from mojive.session.model_edits import ModelEditDraft, model_edit_scope
-from mojive.types import ViewportImage
+from mojive.types import GeometryStyle, ViewportImage
 from mojive.ui import gestures as gs
 from mojive.ui.camera import (
     CameraOut,
@@ -185,6 +185,13 @@ class ViewerApp(
         self._selection_bounds_corners = np.empty((8, 3), np.float32)
         self._selection_bounds_starts = np.empty((12, 3), np.float32)
         self._selection_bounds_ends = np.empty((12, 3), np.float32)
+        geometry_style = viewer_config.geometry_style
+        if geometry_style is None:
+            try:
+                geometry_style = GeometryStyle(**self.localizer.preference("geometry_style", {}))
+            except (TypeError, ValueError):
+                geometry_style = GeometryStyle()
+        self.backend.set_geometry_style(geometry_style)
         requested_shadow_quality = (
             viewer_config.shadow_quality
             if viewer_config.shadow_quality is not None
@@ -368,6 +375,13 @@ class ViewerApp(
     def set_language(self, language: str) -> None:
         self.localizer.set_language(language)
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
+
+    def set_geometry_style(self, style: GeometryStyle, *, persist: bool = True) -> bool:
+        if not self.backend.set_geometry_style(style):
+            return False
+        if persist:
+            self.localizer.set_preferences({"geometry_style": asdict(style)})
+        return True
 
     def set_shadow_quality(self, quality: ShadowQuality | str, *, persist: bool = True) -> bool:
         try:
@@ -1044,6 +1058,7 @@ class ViewerApp(
             translate=self.localizer.text,
             set_language=self.set_language,
             set_shadow_quality=self.set_shadow_quality,
+            set_geometry_style=self.set_geometry_style,
             interactions=self.interactions,
             set_interactions=self.set_interactions,
             selection_style=self.selection_style,

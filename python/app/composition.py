@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from mojive.render.canvas import Canvas2D
     from mojive.scene import Scene
     from mojive.session import Session
+    from mojive.types import GeometryStyle
     from mojive.ui.app import ViewerApp
     from mojive.ui.theme import Theme
     from mojive.ui.viewport_widgets import ToolHint, ToolHintRegistry
@@ -274,6 +275,16 @@ class Viewer:
         if len(matches) != 1:
             raise ValueError(f"Expected one body matching {body!r}, found {len(matches)}")
         self.track_node(matches[0].node_id)
+
+    @property
+    def geometry_style(self) -> GeometryStyle:
+        """Return the active geometry comparison colors and opacity."""
+        return self.backend.get_geometry_style()
+
+    def configure_geometry_style(self, value: GeometryStyle, *, persist: bool = False) -> None:
+        """Apply a GeometryStyle, optionally saving it as a desktop preference."""
+        if not self.app.set_geometry_style(value, persist=persist):
+            raise RuntimeError(f"The {self.backend.caps.name} backend rejected geometry style")
 
     def configure_shadow_quality(self, value, *, persist: bool = False) -> None:
         """Set shadow quality for this viewer."""

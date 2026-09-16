@@ -21,7 +21,7 @@ from mojive.adapters.base import (
 )
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.config import PanelConfig
-from mojive.render.backend import RenderFlag, ShadowQuality
+from mojive.render.backend import NullBackend, RenderFlag, ShadowQuality
 from mojive.scene import Scene
 from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimensions
 from mojive.session import Session
@@ -865,7 +865,7 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
         }
     )
 
-    app = ViewerApp(Session(StaticSceneAdapter(Scene())), SimpleNamespace())
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), NullBackend())
 
     assert not app.gizmo.remember_precise_input_choices
     assert app._precise_gizmo_preferred_absolute
@@ -883,7 +883,7 @@ def test_viewer_restores_and_persists_shadow_quality(tmp_path, monkeypatch):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
     Localizer.load().set_preferences({"shadow_quality": "high"})
 
-    class Backend:
+    class Backend(NullBackend):
         quality = ShadowQuality.BALANCED
 
         def set_shadow_quality(self, quality):
@@ -916,7 +916,7 @@ def test_viewer_restores_and_persists_viewport_input_bindings(tmp_path, monkeypa
         }
     )
 
-    app = ViewerApp(Session(StaticSceneAdapter(Scene())), SimpleNamespace())
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), NullBackend())
 
     assert app.input_bindings.key_id(InputAction.FRAME_SCENE) == "g"
     assert app.input_bindings.key_id(InputAction.GIZMO_TRANSLATE) == "f"
@@ -935,7 +935,7 @@ def test_viewer_restores_and_persists_status_metric(tmp_path, monkeypatch):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
     Localizer.load().set_preferences({"status_metric": "steps"})
 
-    app = ViewerApp(Session(StaticSceneAdapter(Scene())), SimpleNamespace())
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), NullBackend())
     assert app._status_metric_mode == "steps"
 
     app._toggle_status_metric()
@@ -953,7 +953,7 @@ def test_take_end_policy_persists_without_changing_recording_defaults(tmp_path, 
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     Localizer.load().set_preferences({"take_pause_at_end": False})
     session = Session(StaticSceneAdapter(Scene()))
-    app = ViewerApp(session, SimpleNamespace())
+    app = ViewerApp(session, NullBackend())
     assert not session.state_take_pause_at_end
     assert not app.recording_config.run_simulation
     app.set_take_pause_at_end(True)

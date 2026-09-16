@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 
 from mojive.capture import CaptureSurface
 
+from .types import GeometryStyle
+
 if TYPE_CHECKING:
     from .render.backend import ShadowQuality
 
@@ -334,6 +336,7 @@ class ViewerConfig:
     # None retains the desktop panel set; an empty tuple loads no panels.
     builtin_panels: tuple[str, ...] | None = None
     debug_server: bool = True
+    geometry_style: GeometryStyle | None = None
 
     @classmethod
     def minimal(cls, *panels: str) -> ViewerConfig:

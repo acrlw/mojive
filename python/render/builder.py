@@ -10,6 +10,7 @@ import numpy as np
 from ..types import (
     DEFAULT_MATERIAL,
     GeometryRole,
+    GeometryStyle,
     GeometryView,
     InstancePoseSource,
     InstanceVisual,
@@ -90,6 +91,7 @@ class SceneSourceBuilder:
         self._show_island = False
         self._show_convex_hull = False
         self._geometry_view = 0
+        self._geometry_style = GeometryStyle()
         self._last_frame = None
         self._last_instance_rgba = None
         self._planes: list[_InfinitePlane] = []
@@ -173,6 +175,7 @@ class SceneSourceBuilder:
         convex_hull: bool = False,
         visual_geometry: bool = False,
         collision_geometry: bool = False,
+        geometry_style: GeometryStyle | None = None,
     ) -> bool:
         options = (
             bool(static),
@@ -182,6 +185,7 @@ class SceneSourceBuilder:
             bool(island),
             bool(convex_hull),
             int(visual_geometry) | (int(collision_geometry) << 1),
+            self._geometry_style if geometry_style is None else geometry_style,
         )
         current = (
             self._show_static,
@@ -191,6 +195,7 @@ class SceneSourceBuilder:
             self._show_island,
             self._show_convex_hull,
             self._geometry_view,
+            self._geometry_style,
         )
         if options == current:
             return False
@@ -202,6 +207,7 @@ class SceneSourceBuilder:
             self._show_island,
             self._show_convex_hull,
             self._geometry_view,
+            self._geometry_style,
         ) = options
         self.rebuild()
         return True
@@ -218,7 +224,9 @@ class SceneSourceBuilder:
         materials = src.materials or [DEFAULT_MATERIAL]
         untextured = tuple(replace(material, texture=None) for material in materials)
         colors = self._linear_color(src.geom_rgba)
-        collision_color = self._linear_color((1.0, 0.55, 0.12, 1.0))
+        style = self._geometry_style
+        collision_rgba = (*style.collision_color, 1.0)
+        collision_color = self._linear_color(collision_rgba)
         count = src.instance_count
         if len(src.geom_local) >= count:
             local_transforms = np.asarray(src.geom_local[:count], np.float32)
@@ -247,21 +255,22 @@ class SceneSourceBuilder:
             color = colors[i]
             if collision:
                 mat = DEFAULT_MATERIAL
-                rgba = np.array((1.0, 0.55, 0.12, 1.0), np.float32)
+                rgba = np.array(collision_rgba, np.float32)
                 color = collision_color
-                if (
-                    view == int(GeometryRole.BOTH)
-                    and int(src.geom_role[i]) & int(GeometryRole.VISUAL)
-                    and len(src.geom_collision_mesh) == src.instance_count
-                    and src.geom_collision_mesh[i] != src.geom_mesh[i]
-                ):
-                    rgba[3] = 0.35
+                if view == int(GeometryRole.BOTH):
+                    rgba[3] = style.collision_opacity
             elif view == int(GeometryRole.BOTH) and (
                 len(src.geom_role) == src.instance_count
-                and int(src.geom_role[i]) == int(GeometryRole.VISUAL)
+                and (
+                    int(src.geom_role[i]) == int(GeometryRole.VISUAL)
+                    or (
+                        len(src.geom_collision_mesh) == src.instance_count
+                        and src.geom_collision_mesh[i] != src.geom_mesh[i]
+                    )
+                )
             ):
                 rgba = rgba.copy()
-                rgba[3] *= 0.3
+                rgba[3] *= style.visual_opacity
             if (
                 self._show_island
                 and not view
@@ -332,6 +341,7 @@ class SceneSourceBuilder:
                 cube_coef=cube,
                 infinite_plane=infinite,
                 coverage=view == int(GeometryRole.BOTH) and float(rgba[3]) < 1,
+                collision_coverage=collision,
             )
             slots.append(int(src.geom_source[i]) if len(src.geom_source) > i else i)
             source_instances.append(i)
