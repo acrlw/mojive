@@ -143,6 +143,7 @@ class _Capture:
         return path
 
     def _advance_recording_countdown(self) -> None:
+        self._poll_recording()
         if self._viewport_recording_phase is not RecordingPhase.COUNTDOWN:
             return
         if (
@@ -340,6 +341,64 @@ class _Capture:
             )
         return path
 
+    def _request_recording_stop(self) -> Path | None:
+        """Finalize UI recordings in the background; keep public stop synchronous."""
+        from mojive.capture.video_queue import BufferedVideoRecorder
+
+        recorder = self._viewport_recorder
+        if recorder is None:
+            return self.stop_recording()
+        if self._viewport_recording_phase is RecordingPhase.FINALIZING:
+            return self._viewport_recording_path
+        if not isinstance(recorder, BufferedVideoRecorder):
+            recorder = self._viewport_recorder = BufferedVideoRecorder(recorder)
+        self._viewport_recording_phase = RecordingPhase.FINALIZING
+        self._recording_run_simulation = False
+        take, self._take_video = getattr(self, "_take_video", None), None
+        if take is not None and self.session.state_take_playing:
+            self.session.submit(cmd.PauseStateTake())
+        recorder.begin_close()
+        return self._viewport_recording_path
+
+    def _poll_recording(self) -> None:
+        from mojive.capture.video_queue import BufferedVideoRecorder
+
+        recorder = getattr(self, "_viewport_recorder", None)
+        if not isinstance(recorder, BufferedVideoRecorder):
+            return
+        if self._viewport_recording_phase is RecordingPhase.FINALIZING:
+            if recorder.poll_close():
+                self.stop_recording()
+            return
+        try:
+            recorder.check()
+        except Exception:
+            # close() preserves encoder and finalization errors in one receipt.
+            self._request_recording_stop()
+        else:
+            self._start_recording_simulation()
+
+    def _start_recording_simulation(self) -> None:
+        if getattr(self, "_model_load_future", None) is not None or getattr(
+            self, "_model_load_queue", ()
+        ):
+            return
+        if (
+            not getattr(self, "_recording_run_simulation", False)
+            or self._viewport_recording_phase is not RecordingPhase.RECORDING
+        ):
+            return
+        recorder = self._viewport_recorder
+        if recorder is None or recorder.written_frames == 0:
+            return
+        # Acknowledging the initial pose preserves start ordering without making
+        # the viewer wait for FFmpeg to consume its first pipe buffer.
+        self._recording_run_simulation = False
+        result = self.session.submit(cmd.Play())
+        if not result.ok:
+            self.stop_recording(report=False)
+            self.session.report_message(result.message, level="error")
+
     def _needs_presented_readback(self, dt: float) -> bool:
         requested = getattr(self, "_capture_request", None)
         if requested is not None and requested[1] is not CaptureSurface.SCENE:
@@ -510,6 +569,10 @@ class _Capture:
                     if h264 or config.encoder_preset != "medium"
                     else None,
                 )
+                if take is None:
+                    from mojive.capture.video_queue import BufferedVideoRecorder
+
+                    self._viewport_recorder = BufferedVideoRecorder(self._viewport_recorder)
             elif tuple(self._viewport_recorder.size) != (image.shape[1], image.shape[0]):
                 raise RuntimeError("capture size changed while recording")
             for _ in range(count):
@@ -533,18 +596,11 @@ class _Capture:
                 self.stop_recording()
         else:
             self._viewport_record_elapsed -= count * period
-            if self._recording_run_simulation:
-                # Encode the initial pose successfully before starting physics.
-                # This action belongs to the recording start, not every resume.
-                self._recording_run_simulation = False
-                result = self.session.submit(cmd.Play())
-                if not result.ok:
-                    self.stop_recording(report=False)
-                    self.session.report_message(result.message, level="error")
+            self._start_recording_simulation()
 
     def _toggle_viewport_recording(self) -> None:
         if self.recording.active:
-            self.stop_recording()
+            self._request_recording_stop()
             return
         try:
             self.start_recording()

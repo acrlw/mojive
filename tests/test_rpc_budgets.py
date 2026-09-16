@@ -166,3 +166,26 @@ def test_diagnostics_are_bounded_and_do_not_change_the_document(make_service):
     assert result["limits"]["requests_per_pump"] == 8
     assert session.document_revision == before
     assert not service.stats.snapshot()["counters"]["inflight_requests"]
+
+
+def test_deferred_document_write_holds_following_requests_and_preserves_failure(
+    make_service, monkeypatch
+):
+    service, session = make_service()
+    source = Future()
+    dispatch = service._core.dispatch
+
+    def deferred(method, params):
+        return source if method == "save_scene" else dispatch(method, params)
+
+    monkeypatch.setattr(service._core, "dispatch", deferred)
+    first = service.submit(request("save_scene", {"path": "unused"}))
+    following = service.submit(request())
+    assert service.pump() == 1
+    assert service.pump() == 0 and session.frame.step == 0
+    from mojive.control.errors import ControlError
+
+    source.set_exception(ControlError("command_failed", "save fixture failed"))
+    assert first.result()["error"] == {"code": "command_failed", "message": "save fixture failed"}
+    assert service.pump() == 1 and session.frame.step == 1
+    assert following.result()["error"] is None

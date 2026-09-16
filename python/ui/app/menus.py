@@ -48,7 +48,10 @@ class _Menus:
         caps = self.session.adapter.caps
         can_load = bool(_model_filters(caps))
         can_edit = bool(caps.scene_authoring)
-        can_scene_files = bool(caps.scene_files)
+        can_new = caps.supports("scene_new")
+        can_open = caps.supports("scene_open")
+        can_save = caps.supports("scene_save")
+        can_scene_files = can_new or can_open or can_save
         shortcut = "Cmd" if sys.platform == "darwin" else "Ctrl"
         new_scene = False
         open_scene = False
@@ -81,14 +84,16 @@ class _Menus:
         if imgui.begin_main_menu_bar():
             imgui.set_cursor_pos_x(4.0 * self.window.style_scale)
             if self._begin_main_menu(t("File")):
-                if can_scene_files:
+                if can_new:
                     new_scene, _ = imgui.menu_item(t("New Scene"), f"{shortcut}+N", False)
+                if can_open:
                     open_scene, _ = imgui.menu_item(
                         t("Open Scene..."),
                         f"{shortcut}+O",
                         False,
                         self._scene_dialog is None,
                     )
+                if can_save:
                     save_scene, _ = imgui.menu_item(
                         t("Save"), f"{shortcut}+S", False, self.session.dirty
                     )
@@ -100,7 +105,7 @@ class _Menus:
                         imgui.separator()
                     open_model, _ = imgui.menu_item(
                         t("Open Model..."),
-                        f"{shortcut}+O" if not can_scene_files else "",
+                        f"{shortcut}+O" if not can_open else "",
                         False,
                         self._model_dialog is None,
                     )
@@ -124,7 +129,7 @@ class _Menus:
                         False,
                         caps.reload and self.session.asset_path is not None,
                     )
-                if can_scene_files and imgui.begin_menu(t("Resource Directories")):
+                if can_edit and imgui.begin_menu(t("Resource Directories")):
                     add_resource_root, _ = imgui.menu_item(
                         t("Add Directory..."), "", False, self._resource_dialog is None
                     )
@@ -172,6 +177,8 @@ class _Menus:
                     stop_recording, _ = imgui.menu_item(
                         t("Cancel Recording"), f"{shortcut}+Shift+R", False
                     )
+                elif self.recording.phase is RecordingPhase.FINALIZING:
+                    imgui.menu_item(t("Finalizing recording"), "", False, False)
                 elif self.recording.active:
                     if self._viewport_recording_phase is RecordingPhase.PAUSED:
                         pause_recording, _ = imgui.menu_item(t("Resume Recording"), "", False)
@@ -276,7 +283,7 @@ class _Menus:
             else:
                 self.pause_recording()
         if stop_recording:
-            self.stop_recording()
+            self._request_recording_stop()
         if reset_layout:
             self.reset_layout()
         if open_help:

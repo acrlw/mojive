@@ -7,6 +7,7 @@ import pickle
 import subprocess
 import tempfile
 import warnings
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -195,6 +196,16 @@ class VideoRecorder:
                 f"permissions. Original error: {exc}"
             ) from exc
         self.frames = 0
+        # Retain the process during close(), so a producer can interrupt a
+        # blocked pipe write or flush without touching the worker-owned stream.
+        self._abort_process = self._process
+
+    def abort(self) -> None:
+        """Interrupt the owned encoder; its writer remains responsible for close()."""
+        process = self._abort_process
+        if process is not None and process.poll() is None:
+            with suppress(ProcessLookupError):
+                process.kill()
 
     def append(self, frame: np.ndarray) -> None:
         """Encode one uint8 RGB image matching the configured frame size."""
@@ -250,6 +261,7 @@ class VideoRecorder:
                 process.kill()
                 process.wait()
             self._stderr.close()
+            self._abort_process = None
         if process.returncode or reason or self.frames == 0:
             raise RuntimeError(
                 f"Video recording failed for {self.path} (FFmpeg exit {process.returncode}, "

@@ -185,7 +185,7 @@ class _Status:
                 if imgui.invisible_button(
                     "##status_recording_stop", imgui.ImVec2(x1 - x0, y1 - y0)
                 ):
-                    self.stop_recording()
+                    self._request_recording_stop()
                 if imgui.is_item_hovered():
                     imgui.set_tooltip(
                         self.localizer.text(
@@ -201,12 +201,14 @@ class _Status:
         empty = not self._has_scene_content()
         notice = self._model_drop_notice if time.monotonic() < self._model_drop_notice_until else ""
         caps = self.session.adapter.caps
-        dragging = self.window.file_drag_active and (bool(_model_filters(caps)) or caps.scene_files)
+        dragging = self.window.file_drag_active and (
+            bool(_model_filters(caps)) or caps.supports("scene_open")
+        )
         if not empty and not notice and not dragging:
             return
         empty_hint = (
             "Drop a .mojive.json scene here\nFile > Open Scene...  ·  Entity > Create"
-            if caps.scene_files
+            if caps.supports("scene_open")
             else (
                 "Drop a supported model here\nFile > Open Model..."
                 if _model_filters(caps)

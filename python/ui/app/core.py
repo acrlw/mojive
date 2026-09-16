@@ -14,6 +14,7 @@ from imgui_bundle import imgui
 
 from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.capture import CaptureSurface, RecordingPhase
+from mojive.commands import CommandResult
 from mojive.config import (
     CameraTrackingConfig,
     InteractionConfig,
@@ -593,14 +594,26 @@ class ViewerApp(
         if executor is not None:
             executor.shutdown(wait=True, cancel_futures=True)
             self._model_load_executor = None
+            job = self._model_load_job
+            if job is not None and job.completed is not None:
+                # A started command may have committed before shutdown. Return
+                # its actual result; do not report a completed write as cancelled.
+                try:
+                    result = self._model_load_future.result()
+                except Exception as exc:
+                    result = CommandResult.bad(str(exc))
+                job.completed(result)
             self._model_load_future = None
             self._model_load_job = None
-            self._model_load_queue.clear()
             self._model_prepared_resources = None
+        self._cancel_model_load_queue("The viewer closed before the document operation started")
         for attribute in (
             "_model_dialog",
             "_scene_dialog",
             "_resource_dialog",
+            "_texture_dialog",
+            "_geometry_resource_dialog",
+            "_model_asset_dialog",
             "_resource_repair_dialog",
         ):
             dialog = getattr(self, attribute)
@@ -656,7 +669,7 @@ class ViewerApp(
             self._present_frame(dt)
             self._frame_index += 1
             return
-        if self._rpc_service is not None:
+        if self._rpc_service is not None and self._model_load_completion is None:
             with model_edit_scope(self.session, None):
                 self._rpc_service.pump()
         self._poll_model_dialog()
@@ -1040,7 +1053,7 @@ class ViewerApp(
             recording=self.recording,
             take_video_active=self._take_video is not None,
             start_take_video=self.start_take_video,
-            stop_recording=self.stop_recording,
+            stop_recording=self._request_recording_stop,
             set_viewport_overlays=self.set_viewport_overlays,
             set_viewport_capsule_scale=self.set_viewport_capsule_scale,
             input_bindings=self.input_bindings,

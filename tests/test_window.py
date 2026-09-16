@@ -507,7 +507,8 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch, capsys) ->
     app.start_recording(surface=CaptureSurface.SCENE, countdown=0)
     assert app._viewport_recorder is None
     app._record_viewport_frame(0.0)
-    recorder = app._viewport_recorder
+    assert app._viewport_recorder.started.wait(2)
+    recorder = app._viewport_recorder.recorder
     assert recorder is not None and recorder.size == (2, 1) and recorder.fps == 60.0
     assert recorder.frames == 1
     assert app.recording.phase is RecordingPhase.RECORDING
@@ -516,8 +517,11 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch, capsys) ->
     assert recorder.frames == 1
     assert app.resume_recording()
     app._record_viewport_frame(0.0)
-    assert recorder.frames == 2
+    assert app.recording.frames == 2
     app._toggle_viewport_recording()
+    assert app.recording.phase is RecordingPhase.FINALIZING
+    app.stop_recording()
+    assert recorder.frames == 2
 
     assert recorder.closed
     assert app._viewport_recorder is None
@@ -867,14 +871,17 @@ def test_video_start_action_follows_first_encoded_frame_and_never_repeats(
     app._advance_recording_countdown()
     assert events == []
     app._finish_capture_and_recording(None, 0)
+    assert app._viewport_recorder.started.wait(2)
+    app._poll_recording()
     assert events == (["frame", "Play"] if run_simulation and clock_control else ["frame"])
     assert app.pause_recording()
     assert app.resume_recording()
     app._finish_capture_and_recording(None, 0)
-    assert events[-1] == "frame"
+    assert app.recording.frames == 2
     assert events.count("Play") == int(run_simulation and clock_control)
     app.stop_recording(report=False)
     assert events[-1] == "close"
+    assert events.count("frame") == 2
     assert not any(name in events for name in ("Pause", "Reset", "PlayStateTake"))
 
 
@@ -918,6 +925,13 @@ def test_failed_or_canceled_video_start_does_not_run_an_unrecorded_action(
     else:
         app._advance_recording_countdown()
         app._finish_capture_and_recording(None, 0)
+        recorder = app._viewport_recorder
+        if recorder is not None:
+            assert recorder.started.wait(2)
+            app._poll_recording()
+            if app.recording.active:
+                assert recorder._finished.wait(2)
+                app._poll_recording()
     assert not app.recording.active and not app._recording_run_simulation
     if failure == "simulation":
         assert events == ["frame", "Play", "close", "simulation unavailable"]
@@ -994,3 +1008,125 @@ def test_encoding_settings_are_frozen_at_start_and_refreshed_for_the_next_video(
         "pixel_format": "yuv420p",
     }
     app.stop_recording(report=False)
+
+
+def test_recording_finalization_keeps_ui_available_until_worker_finishes(tmp_path, capsys):
+    import threading
+
+    from mojive.capture.video_queue import BufferedVideoRecorder
+
+    entered, release = threading.Event(), threading.Event()
+    messages = []
+
+    class Recorder:
+        size = (2, 2)
+
+        def close(self):
+            entered.set()
+            assert release.wait(2)
+
+    app = ViewerApp.__new__(ViewerApp)
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    app.session = SimpleNamespace(report_message=lambda message, **kw: messages.append(message))
+    app._viewport_recorder = BufferedVideoRecorder(Recorder())
+    app._viewport_recording_path = tmp_path / "video.mp4"
+    app._viewport_recording_phase = RecordingPhase.PAUSED
+    app._viewport_recording_frames = 1
+    recorder = app._viewport_recorder
+    try:
+        path = app._request_recording_stop()
+        assert entered.wait(1)
+        app._poll_recording()
+        assert app.recording.phase is RecordingPhase.FINALIZING
+        assert app._request_recording_stop() == path
+        assert not app.pause_recording() and not app.resume_recording()
+        with pytest.raises(RuntimeError, match="already active"):
+            app.start_recording(tmp_path / "second.mp4")
+        assert not messages and not capsys.readouterr().out
+    finally:
+        release.set()
+        assert recorder._finished.wait(2)
+        app._poll_recording()
+    assert not app.recording.active and not recorder._worker.is_alive()
+    assert len(messages) == 1 and "Saved video" in capsys.readouterr().out
+
+
+def test_paused_recording_reports_worker_failure_without_another_frame(tmp_path, capsys):
+    from mojive.capture.video_queue import BufferedVideoRecorder
+
+    class Broken:
+        size = (2, 2)
+
+        def append(self, image):
+            raise RuntimeError("paused encoder failed")
+
+        def close(self):
+            pass
+
+    app = ViewerApp.__new__(ViewerApp)
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    messages = []
+    app.session = SimpleNamespace(report_message=lambda message, **kw: messages.append(message))
+    recorder = app._viewport_recorder = BufferedVideoRecorder(Broken())
+    app._viewport_recording_path = tmp_path / "video.mp4"
+    app._viewport_recording_phase = RecordingPhase.PAUSED
+    app._viewport_recording_frames = 1
+    recorder.append(np.zeros((2, 2, 3), np.uint8))
+    assert recorder._finished.wait(2)
+    app._poll_recording()
+    app._poll_recording()
+    assert not app.recording.active
+    assert "paused encoder failed" in app.recording.error
+    assert len(messages) == 1 and "failed" in messages[0]
+    assert not capsys.readouterr().out
+
+
+def test_first_video_write_does_not_block_ui_or_start_physics_before_ack(monkeypatch, tmp_path):
+    import threading
+
+    from mojive import RecordingConfig
+    from mojive import commands as cmd
+    from mojive.capture import recording
+
+    entered, release = threading.Event(), threading.Event()
+    actions = []
+
+    class Recorder:
+        def __init__(self, path, size, fps, **encoding):
+            self.size = size
+
+        def append(self, image):
+            entered.set()
+            assert release.wait(2)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    app = ViewerApp.__new__(ViewerApp)
+    app.recording_config = RecordingConfig(countdown=0, run_simulation=True)
+    app._surface_image = lambda *args: np.zeros((2, 2, 3), np.uint8)
+    app.session = SimpleNamespace(
+        adapter=SimpleNamespace(caps=SimpleNamespace(clock_control=True)),
+        submit=lambda command: actions.append(type(command).__name__) or cmd.CommandResult.good(""),
+        report_message=lambda *args, **kw: None,
+    )
+    app.start_recording(tmp_path / "video.mp4")
+    app._advance_recording_countdown()
+    try:
+        app._finish_capture_and_recording(None, 0)
+        assert entered.wait(1)
+        app._poll_recording()
+        assert not actions and app.recording.frames == 1
+        assert app.pause_recording()
+        release.set()
+        assert app._viewport_recorder.started.wait(2)
+        app._poll_recording()
+        assert not actions
+        assert app.resume_recording()
+        app._poll_recording()
+        app._poll_recording()
+        assert actions == ["Play"]
+    finally:
+        release.set()
+        app.stop_recording(report=False)

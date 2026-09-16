@@ -200,7 +200,7 @@ def draw_status(
 ) -> StatusLayout:
     x, y = origin
     running = state in {"running", "replaying"}
-    recording = recording_phase in {"countdown", "recording", "paused"}
+    recording = recording_phase in {"countdown", "recording", "paused", "finalizing"}
     draw.rect_filled((x, y), (x + width, y + height), (*theme.bg_child[:3], 1.0))
     top_divider_width = 1.0 * scale
     top_divider_y = y + top_divider_width * 0.5
@@ -267,7 +267,9 @@ def draw_status(
             "window": labels.recording_window,
         }.get(recording_surface, labels.recording)
         record_text = (
-            f"{surface_label} {max(0, math.ceil(countdown_remaining))} s"
+            labels.recording_finalizing
+            if recording_phase == "finalizing"
+            else f"{surface_label} {max(0, math.ceil(countdown_remaining))} s"
             if recording_phase == "countdown"
             else f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
         )
@@ -275,7 +277,7 @@ def draw_status(
         cursor += 7.0 * scale
         button_size = min(height - 5.0 * scale, 19.0 * scale)
         button_y = cy - button_size * 0.5
-        if recording_phase != "countdown":
+        if recording_phase not in {"countdown", "finalizing"}:
             recording_pause_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
             draw.rect_filled(
                 recording_pause_rect[:2],
@@ -307,21 +309,22 @@ def draw_status(
                         1.8 * scale,
                     )
             cursor += button_size + 4.0 * scale
-        recording_stop_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
-        draw.rect_filled(
-            recording_stop_rect[:2],
-            recording_stop_rect[2:],
-            theme.bg_frame,
-            rounding=3.0 * scale,
-        )
-        inset = 5.5 * scale
-        draw.rect_filled(
-            (cursor + inset, button_y + inset),
-            (cursor + button_size - inset, button_y + button_size - inset),
-            accent,
-            rounding=1.0 * scale,
-        )
-        cursor += button_size
+        if recording_phase != "finalizing":
+            recording_stop_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
+            draw.rect_filled(
+                recording_stop_rect[:2],
+                recording_stop_rect[2:],
+                theme.bg_frame,
+                rounding=3.0 * scale,
+            )
+            inset = 5.5 * scale
+            draw.rect_filled(
+                (cursor + inset, button_y + inset),
+                (cursor + button_size - inset, button_y + button_size - inset),
+                accent,
+                rounding=1.0 * scale,
+            )
+            cursor += button_size
 
     metric_text = ""
     metric_exact = ""
