@@ -223,22 +223,62 @@ def test_npot_texture_minification_preserves_cross_backend_color(compared_backen
     assert captures[0].std() > 5, "Minification must retain visible texture detail"
 
 
-def test_opengl_uploads_complete_linear_light_npot_mips(gl_ctx, require_opengl):
+def test_opengl_uploads_complete_linear_light_npot_mips():
     from mojive.render.opengl.resources import TextureStore
     from mojive.render.texture import mip_chain
 
     pixels = np.zeros((3, 5, 4), np.uint8)
     pixels[-1] = [255, 180, 90, 30]
     pixels[:, -1] = [80, 255, 200, 240]
-    store = TextureStore(gl_ctx)
-    try:
-        store.sync({"npot": TextureData("npot", TextureType.TWO_D, pixels, srgb=True)})
-        texture = store.get("npot")
-        for level, expected in enumerate(mip_chain(pixels[None], srgb=True)):
-            actual = np.frombuffer(texture.read(level=level, alignment=1), np.uint8)
-            np.testing.assert_array_equal(actual, expected.ravel())
-    finally:
-        store.release()
+    with SceneRenderer(width=32, height=32, renderer="opengl") as renderer, renderer._current():
+        store = TextureStore(renderer._backend.ctx)
+        try:
+            store.sync({"npot": TextureData("npot", TextureType.TWO_D, pixels, srgb=True)})
+            texture = store.get("npot")
+            for level, expected in enumerate(mip_chain(pixels[None], srgb=True)):
+                actual = np.frombuffer(texture.read(level=level, alignment=1), np.uint8)
+                np.testing.assert_array_equal(actual, expected.ravel())
+        finally:
+            store.release()
+
+
+@pytest.mark.parametrize("shape", [(1, 8), (32, 64)])
+@pytest.mark.parametrize("components", [1, 2, 3, 4])
+@pytest.mark.parametrize("srgb", [False, True])
+def test_opengl_power_of_two_mips_keep_color_and_alpha_without_cpu_regeneration(
+    shape, components, srgb, monkeypatch
+):
+    from mojive.render.opengl import resources
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Power-of-two texture loading redundantly regenerated mips on the CPU")
+
+    monkeypatch.setattr(resources, "mip_chain", forbidden)
+    pixels = np.zeros((*shape, components), np.uint8)
+    pixels[:, 1::2] = 255
+    with SceneRenderer(width=32, height=32, renderer="opengl") as renderer, renderer._current():
+        store = resources.TextureStore(renderer._backend.ctx)
+        try:
+            data = TextureData("checker", TextureType.TWO_D, pixels, srgb=srgb)
+            store.sync({data.name: data})
+            texture = store.get(data.name)
+            np.testing.assert_array_equal(
+                np.frombuffer(texture.read(alignment=1), np.uint8), pixels.ravel()
+            )
+            expected = np.full(components, 188 if srgb and components >= 3 else 128)
+            if components == 4:
+                expected[3] = 128
+            for level in range(1, max(shape).bit_length()):
+                actual = np.frombuffer(texture.read(level=level, alignment=1), np.uint8)
+                np.testing.assert_allclose(
+                    actual.reshape(-1, components),
+                    np.broadcast_to(expected, (actual.size // components, components)),
+                    atol=1,
+                )
+            store.sync({data.name: data})
+            assert store.get(data.name) is texture
+        finally:
+            store.release()
 
 
 @pytest.mark.skipif("bgfx" not in BACKENDS, reason="native development build not selected")
