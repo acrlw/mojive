@@ -894,12 +894,17 @@ class SetCtrlVector(Command):
 
 @dataclass(frozen=True)
 class Perturb(Command):
-    """Apply a world-space translation or rotation perturbation target."""
+    """Apply a world-space body-pose target for physical perturbation.
+
+    A body-frame grab point requires ``physics.perturb_point`` revision 1.
+    Omitting it retains the adapter's original perturbation behavior.
+    """
 
     node_id: int
     target_position: np.ndarray = field(default_factory=lambda: np.zeros(3, np.float32))
     target_rotation: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=np.float32))
     mode: str = "translate"
+    local_position: np.ndarray | None = None
 
 
 @dataclass(frozen=True)

@@ -806,6 +806,12 @@ settings:
 perturb:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.cli view gizmo $(ARGS)
 
+.PHONY: perturb-check
+## Native viewer force parity and held Control drags with captured viewport feedback.
+perturb-check:
+	$(PYTEST) -q -m physics tests/test_mujoco_perturb.py
+	MOJIVE_PERTURB_CAPTURE=output/perturb-check $(PYTEST) -q -m gpu tests/gpu/test_perturb_drag.py
+
 ## Selection outline acceptance across multiple geoms and occlusion.
 outline:
 	$(PY) -m mojive.cli view outline --paused

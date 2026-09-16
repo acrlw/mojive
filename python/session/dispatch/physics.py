@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from mojive import commands as cmd
+from mojive.adapters.base import PointPerturbation
 from mojive.commands import CommandResult
 
 if TYPE_CHECKING:
@@ -49,7 +50,12 @@ def perturb(self: Session, c: cmd.Perturb) -> CommandResult:
     caps = self._adapter.caps
     if not caps.perturb:
         return CommandResult.bad(f"{caps.name} does not support perturbation")
-    ok = self._adapter.apply_perturb(c.node_id, c.target_position, c.target_rotation, c.mode)
+    if c.local_position is None:
+        ok = self._adapter.apply_perturb(c.node_id, c.target_position, c.target_rotation, c.mode)
+    else:
+        ok = cast(PointPerturbation, self._adapter).apply_perturb_at_point(
+            c.node_id, c.target_position, c.target_rotation, c.mode, c.local_position
+        )
     if ok:
         self._frame_history_dirty = True
     return CommandResult.good("") if ok else CommandResult.bad("Perturbation failed")

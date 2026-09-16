@@ -4,6 +4,7 @@ import ast
 import importlib
 import sys
 import types
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,7 @@ from mojive.adapters.base import (
     SceneNode,
     SceneSource,
 )
-from mojive.commands import ClearPerturb, Select
+from mojive.commands import ClearPerturb, Perturb, Select
 from mojive.log import configure
 from mojive.scene.bounds import _node_local_bounds, _node_world_bounds
 from mojive.session import Session
@@ -270,6 +271,43 @@ def test_rotate_mode_submits_a_target_not_a_teleport():
     assert np.linalg.norm(target_rot - np.eye(3)) > 0.0
     assert np.allclose(target_pos, 0.0)
     assert np.allclose(adapter.body_xmat[1], np.eye(3))
+
+
+def test_grab_point_extension_keeps_the_press_body_frame(monkeypatch):
+    session, adapter = make_session()
+    adapter.caps = replace(adapter.caps, features=(("physics.perturb_point", 1),))
+    adapter.body_xpos[1] = [1, 2, 3]
+    adapter.body_xmat[1] = math3d.rotvec_to_mat3([0, 0, 0.7])
+    session.tick(FrameNeeds())
+    local = np.array([0.2, -0.1, 0.05])
+    point = adapter.body_xpos[1] + adapter.body_xmat[1] @ local
+    calls = []
+    monkeypatch.setattr(
+        adapter, "apply_perturb_at_point", lambda *args: calls.append(args) or True, raising=False
+    )
+    controller = P.PerturbController()
+    controller.begin(session, side_camera(), session.selected_node, point, "translate")
+    for offset in (0, 0.1):
+        adapter.body_xpos[1] += offset
+        session.tick(FrameNeeds())
+        controller.apply(session)
+        np.testing.assert_allclose(calls[-1][-1], local, atol=2e-7)
+    assert not adapter.perturbs
+    session.release()
+
+
+def test_explicit_grab_point_requires_opt_in_but_legacy_drag_still_works():
+    session, adapter = make_session()
+    try:
+        result = session.submit(Perturb(1, local_position=np.ones(3)))
+        assert not result.ok and "physics.perturb_point" in result.message
+        assert not adapter.perturbs
+        controller = P.PerturbController()
+        controller.begin(session, side_camera(), session.selected_node, np.ones(3), "translate")
+        controller.apply(session)
+        assert len(adapter.perturbs) == 1
+    finally:
+        session.release()
 
 
 def test_silhouette_has_six_edges_from_a_general_viewpoint():

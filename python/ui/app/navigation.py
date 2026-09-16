@@ -286,6 +286,15 @@ class _Navigation:
             grab_point = pos
             if ray is not None:
                 grab_point = cursor_grab_point(cam, pos, ray[0], ray[1])
+                hit, distance = self.session.query(cmd.Pick(origin=ray[0], direction=ray[1]))
+                hit_node = self.session.query(cmd.NodeAt(hit)) if hit else None
+                if (
+                    hit_node is not None
+                    and hit_node.body_index == node.body_index
+                    and np.isfinite(distance)
+                    and distance >= 0
+                ):
+                    grab_point = ray[0] + ray[1] * distance
             self.perturb.begin(
                 self.session,
                 cam,

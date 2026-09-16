@@ -130,6 +130,12 @@ def unavailable_reason(caps: AdapterCaps, command: cmd.Command) -> str | None:
         return "Physics clock control belongs to the external caller"
     if isinstance(command, cmd.SetSpeed) and caps.external_clock:
         return "Simulation speed belongs to the external clock owner"
+    if (
+        isinstance(command, cmd.Perturb)
+        and command.local_position is not None
+        and not caps.supports("physics.perturb_point")
+    ):
+        return f"{caps.name} does not support physics.perturb_point (revision 1)"
     if isinstance(command, (cmd.LoadAsset, cmd.AddSceneModel)) and not caps.accepts_model(
         command.path
     ):

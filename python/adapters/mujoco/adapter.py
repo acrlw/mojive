@@ -62,7 +62,12 @@ class MuJoCoAdapter(
             name="mujoco",
             backend_version=mujoco.__version__,
             model_formats=(".xml", ".mjcf", ".urdf"),
-            features=(("mujoco.mjcf", 1), ("model.components", 1), ("model.keyframe_edit", 1)),
+            features=(
+                ("mujoco.mjcf", 1),
+                ("model.components", 1),
+                ("model.keyframe_edit", 1),
+                ("physics.perturb_point", 1),
+            ),
             simulation=True,
             external_clock=external_clock,
             clock_control=not external_clock,
@@ -873,15 +878,40 @@ class MuJoCoAdapter(
     def apply_perturb(
         self, node_id: int, target_position: np.ndarray, target_rotation: np.ndarray, mode: str
     ) -> bool:
+        return self._apply_perturb(node_id, target_position, target_rotation, mode, None)
+
+    def apply_perturb_at_point(
+        self,
+        node_id: int,
+        target_position: np.ndarray,
+        target_rotation: np.ndarray,
+        mode: str,
+        local_position: np.ndarray,
+    ) -> bool:
+        return self._apply_perturb(node_id, target_position, target_rotation, mode, local_position)
+
+    def _apply_perturb(
+        self, node_id: int, target_position, target_rotation, mode: str, local_position
+    ) -> bool:
         body = self._node_body.get(int(node_id), -1)
-        if body <= 0:
+        if body <= 0 or mode not in ("translate", "rotate"):
             return False
         if int(self._m.body_weldid[body]) == 0:
             return False
 
+        position = np.asarray(target_position, np.float64).reshape(3)
+        rotation = np.asarray(target_rotation, np.float64).reshape(3, 3)
+        local = 0.0 if local_position is None else np.asarray(local_position, np.float64).reshape(3)
+        if not (
+            np.isfinite(position).all() and np.isfinite(rotation).all() and np.isfinite(local).all()
+        ):
+            return False
         pert = self._perturb
-        if self._perturb_body != body:
-            point = np.asarray(self._d.xpos[body], np.float64)
+        if self._perturb_body != body or np.any(pert.localpos != local):
+            if self._perturb_body >= 0 and self._perturb_body != body:
+                self._d.xfrc_applied[self._perturb_body] = 0.0
+            pert.localpos[:] = local
+            point = self._d.xpos[body] + self._d.xmat[body].reshape(3, 3) @ pert.localpos
             np.sqrt(self._d.qLDiagInv, out=self._perturb_sqrt_inv_d)
             mujoco.mj_jac(self._m, self._d, self._perturb_jac, None, point, body)
             mujoco.mj_solveM2(
@@ -891,23 +921,26 @@ class MuJoCoAdapter(
                 self._perturb_jac,
                 self._perturb_sqrt_inv_d,
             )
-            invmass = float(np.sum(self._perturb_jac_m2 * self._perturb_jac_m2))
-            pert.localmass = 3.0 / max(invmass, 1e-15)
+            flat = self._perturb_jac_m2.ravel()
+            invmass = float(np.dot(flat, flat))
+            # Match mjv_initPerturb: a fixed hinge/ball pivot has zero linear
+            # mobility. Dividing by epsilon here creates a catastrophic spring.
+            pert.localmass = 1.0 if invmass == 0 else 3.0 / max(invmass, mujoco.mjMINVAL)
             pert.select = body
-            pert.localpos[:] = 0.0
             self._perturb_body = body
 
         pert.active2 = 0
         if mode == "translate":
             pert.active = int(mujoco.mjtPertBit.mjPERT_TRANSLATE)
-            pert.refselpos[:] = np.asarray(target_position, np.float64).reshape(3)
+            pert.refselpos[:] = position + rotation @ pert.localpos
         elif mode == "rotate":
             pert.active = int(mujoco.mjtPertBit.mjPERT_ROTATE)
-            body_quat = np.asarray(math3d.mat3_to_quat(target_rotation), np.float64)
+            body_quat = np.asarray(math3d.mat3_to_quat(rotation), np.float64)
             mujoco.mju_mulQuat(self._perturb_quat, body_quat, self._m.body_iquat[body])
             pert.refquat[:] = self._perturb_quat
-        else:
-            return False
+        # Native rotation writes only torque; a previous translation must not
+        # leave its force behind when callers switch mode without releasing.
+        self._d.xfrc_applied[body] = 0.0
         mujoco.mjv_applyPerturbForce(self._m, self._d, pert)
         return True
 

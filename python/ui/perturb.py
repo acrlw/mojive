@@ -342,6 +342,11 @@ class PerturbController:
                 target_position=np.asarray(st.target_pos, np.float32),
                 target_rotation=np.asarray(st.target_mat, np.float32),
                 mode=st.mode,
+                local_position=(
+                    grab_point_local(st)
+                    if session.adapter.caps.supports("physics.perturb_point")
+                    else None
+                ),
             )
         )
         if not result.ok:
