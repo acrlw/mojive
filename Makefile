@@ -472,6 +472,10 @@ startup-profile:
 ui-frame-profile:
 	$(PY) -m mojive.tools.ui_frame_profile $(ARGS)
 
+.PHONY: editor-profile
+editor-profile:
+	$(PY) -m mojive.tools.editor_profile --renderer $(BACKEND) $(ARGS)
+
 .PHONY: hierarchy-benchmark
 hierarchy-benchmark:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.hierarchy_benchmark $(ARGS)
