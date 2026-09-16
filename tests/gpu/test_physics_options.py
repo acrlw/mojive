@@ -46,7 +46,7 @@ def _enter(viewer):
 def _groups(viewer, monkeypatch, *groups):
     """Expose each section without depending on persisted window scroll position."""
     native = imgui.collapsing_header
-    labels = {viewer.app.localizer.text(group) for group in groups}
+    labels = set(groups)
 
     def header(label, *args, **kwargs):
         imgui.set_next_item_open(label in labels, imgui.Cond_.always)
@@ -89,8 +89,8 @@ def test_menu_and_live_physics_controls(tmp_path, monkeypatch, scale, language):
         assert viewer.session.selected_node.type is NodeType.ENVIRONMENT
         adapter = getattr(viewer.session.adapter, "primary", viewer.session.adapter)
         _click(viewer, _item_center(viewer, "begin_combo", "##physics-integrator"))
-        _click(viewer, _item_center(viewer, "selectable", "RK4"))
-        assert int(adapter.model.opt.integrator) == 1
+        _click(viewer, _item_center(viewer, "selectable", "Euler"))
+        assert int(adapter.model.opt.integrator) == 0
         _text(viewer, "timestep", "5e-3")
         assert adapter.model.opt.timestep == 0.002
         _enter(viewer)
