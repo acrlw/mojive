@@ -954,3 +954,29 @@ def test_invalid_screen_arrow_does_not_replace_retained_geometry():
     with pytest.raises(ValueError, match="finite pixel coordinates"):
         layer.arrow_2d("a", (0, 0), (float("nan"), 0), (1, 1, 1, 1))
     assert layer.positions_of(PrimitiveType.SCREEN_TRIANGLE) == pytest.approx(before)
+
+
+@pytest.mark.parametrize("closed", (False, True))
+@pytest.mark.parametrize("per_path_color", (False, True))
+def test_batched_polylines_preserve_independent_joins_colors_and_retained_updates(
+    closed, per_path_color
+):
+    points = np.array(((A, B, C), (A + 5, C + 5, B + 5)), np.float32)
+    colors = np.array((RED, (0.1, 0.8, 0.2, 0.4)), np.float32)
+    reference, batched = DebugDraw(), DebugDraw()
+    old, new = reference.layer("paths"), batched.layer("paths")
+    for i, path in enumerate(points):
+        old.polyline(str(i), path, colors[i] if per_path_color else RED, 3, closed=closed)
+    for _ in range(3):
+        new.polylines("all", points, colors if per_path_color else RED, 3, closed=closed)
+    assert len(new._index) == 1
+    assert batched.primitives == reference.primitives
+    for field in ("positions", "colors", "sizes"):
+        a = getattr(old._stores[PrimitiveType.STROKE], field)[: reference.primitives]
+        b = getattr(new._stores[PrimitiveType.STROKE], field)[: batched.primitives]
+        np.testing.assert_array_equal(a, b)
+    with pytest.raises(ValueError, match="finite"):
+        new.polylines("all", points * np.nan, RED)
+    assert batched.primitives == reference.primitives
+    new.polylines("all", np.empty((0, 3, 3)), RED)
+    assert batched.primitives == 0
