@@ -112,7 +112,8 @@ def _capture_interaction_chrome(viewer, folder: Path) -> None:
     countdown = imgui.internal.find_window_by_name("##recording_countdown")
     assert countdown.pos.y >= playback[3]
     Image.fromarray(viewer.capture_array(surface="window")).save(folder / "recording-countdown.png")
-    viewer.stop_recording()
+    viewer.app.stop_recording(report=False)
+    _capture_recording_finalization(viewer, folder)
     _activate_panel(viewer, "Output")
     _click(viewer, _item_center(viewer, "button", "##output-collapse"))
     _settle(viewer, 3)
@@ -125,6 +126,40 @@ def _capture_interaction_chrome(viewer, folder: Path) -> None:
     _save_window_crop(viewer, "Hierarchy", folder / "hierarchy-filter-joint.png", padding=0)
     _click(viewer, _item_center(viewer, "button", "##hierarchy-type-all"))
     _settle(viewer, 3)
+
+
+def _capture_recording_finalization(viewer, folder: Path) -> None:
+    """Hold only encoder completion while capturing the production finalizing UI."""
+    import threading
+
+    from PIL import Image
+
+    from mojive.capture import RecordingPhase
+    from mojive.capture.recording import VideoRecorder
+
+    entered, release = threading.Event(), threading.Event()
+    close = VideoRecorder.close
+
+    def held_close(recorder):
+        entered.set()
+        if not release.wait(10):
+            raise TimeoutError("Finalization capture did not release its encoder")
+        close(recorder)
+
+    with patch.object(VideoRecorder, "close", held_close):
+        viewer.start_recording(folder / "finalizing.mp4", countdown=0)
+        try:
+            _settle(viewer, 3)
+            viewer.app._request_recording_stop()
+            assert entered.wait(3)
+            assert viewer.recording.phase is RecordingPhase.FINALIZING
+            Image.fromarray(viewer.capture_array(surface="window")).save(
+                folder / "recording-finalizing.png"
+            )
+        finally:
+            release.set()
+            viewer.stop_recording()
+    assert not viewer.recording.error
 
 
 def capture(output: Path, scale: float, language: str) -> list[dict]:
@@ -294,7 +329,7 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
                     record = _item_rect(viewer, "invisible_button", "##take-record")
                     options = _item_rect(viewer, "invisible_button", "##timeline-options")
                     assert abs(record[0][1] - options[0][1]) < 1, (width, record, options)
-                panel._selected_id = viewer.session.keyframes[0].keyframe_id
+                panel._editor.selected_id = viewer.session.keyframes[0].keyframe_id
                 panel._selection_generation = -1
                 _settle(viewer, 3)
                 _save_window_crop(

@@ -338,6 +338,26 @@ predicates during fading, without relying on machine-dependent timing thresholds
 
 ## Composed-model editor latency
 
+`make hierarchy-benchmark` checks browsing and filtering of 1,500 authored objects (3,002
+hierarchy nodes), scrolls to the last object, clicks it, and captures the resulting Inspector.
+It records panel CPU time, submitted rows, and whole `sync()` time under
+`output/hierarchy-benchmark/`. The window is hidden with VSync disabled; run it separately from
+other benchmarks and GPU tests. `ARGS="--objects 5000 --frames 240"` increases the workload.
+Browse and filtered results must both retain the last object; clipping limits drawing work,
+not the number of accessible nodes. These timings do not measure display scanout latency.
+
+`make timeline-benchmark` exercises 20,000 model keyframes in the production panel, including
+overview, zoomed, panning and hover cases. It records panel and whole-frame median/p95 timings,
+projected marker counts, framebuffer scale and captures under `output/timeline-benchmark/`.
+`ARGS="--markers 50000 --frames 240"` increases the workload. Compare runs with the same
+framebuffer scale and workload; stationary caching results do not describe panning costs.
+
+`make recording-benchmark` compares paced camera motion with and without full-window interactive
+recording. Reports include frame percentiles, encoder write and buffer-submission timings,
+late frames, initial capture and finalization cost, and the encoded dimensions. Video and JSON
+are written under `output/recording-benchmark/`. Run both benchmarks separately from GPU tests
+and other timed workloads. These are diagnostic measurements, not hardware-independent limits.
+
 `make native-editor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` creates an empty
 workspace, adds a floor and MS-Human-700, then selects, previews placement, captures/loads/removes
 keyframes, composes Go2, applies MJCF, removes a model, and exercises Undo/Redo. Use
@@ -387,3 +407,15 @@ production presets with dynamic icon fitting. Inspect JSON and images under
 README media uses isolated settings, the real jointed scene and fixed-size captures. Inspect
 all three files under `output/readme-media/` before delivery. The documentation gate checks
 local links, including the README image paths; the capture command checks identical dimensions.
+
+## Dense timeline and recording lifecycle
+
+`make timeline-benchmark ARGS="--editable --markers 20000"` uses real MuJoCo presets
+and measures held drag, area selection, and release separately from static browsing. Marker-only
+runs omit `--editable`. These timings measure application work, not display scanout latency.
+
+`make recording-benchmark ARGS="--width 1920 --height 1080 --fps 60 --preset slow"` reports
+first-frame submission, encoder writes, bounded-buffer waits, stop-request latency and UI frames
+during finalization. Vary dimensions, FPS and preset in separate output directories; run without
+competing GPU work. Queue and lifecycle tests include initial-write ordering, paused failures,
+finalization failures, full-buffer ownership and stalled encoder shutdown.
