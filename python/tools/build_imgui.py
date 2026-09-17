@@ -7,9 +7,11 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -17,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 VERSION = "1.92.900"
 URL = "https://files.pythonhosted.org/packages/18/47/ff477f7258baddf0c02bbcf6406099c7ed78ebd63f3b9cebce899e6cf79a/imgui_bundle-1.92.900.tar.gz"
 SHA256 = "1476409b76c7f600d0da472aed87e96382444df50695280b3ed9acd5065cb6c2"
+FREETYPE_URL = "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3"
+FREETYPE_SHA256 = "bc5c898e4756d373e0d991bab053036c5eb2aa7c0d5c67e8662ddc6da40c4103"
 # Restore every historically patched file before applying a changed recipe.
 # This also removes obsolete patches from an existing incremental build.
 RESTORED_FILES = (
@@ -34,7 +38,36 @@ RESTORED_FILES = (
     "external/glfw/glfw/src/wl_init.c",
     "external/glfw/glfw/src/wl_window.c",
     "bindings/imgui_bundle/_glfw_set_search_path.py",
+    "external/hello_imgui/hello_imgui/hello_imgui_cmake/hello_imgui_build_lib.cmake",
 )
+
+
+def _archive_matches(archive: Path) -> bool:
+    if not archive.is_file():
+        return False
+    with archive.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest() == SHA256
+
+
+def ensure_source_archive(archive: Path) -> None:
+    """Reuse verified sources and atomically replace incomplete downloads."""
+    if _archive_matches(archive):
+        return
+    if archive.exists():
+        print(f"Cached source archive is incomplete or corrupt; downloading again: {archive}")
+    else:
+        print(f"Downloading imgui-bundle {VERSION} source archive")
+    # A failed transfer must never become the reusable archive. Keep an existing
+    # cache untouched until its replacement passes the pinned upstream checksum.
+    with tempfile.TemporaryDirectory(prefix=".imgui-download-", dir=archive.parent) as directory:
+        candidate = Path(directory) / archive.name
+        with urllib.request.urlopen(URL, timeout=60) as response, candidate.open("wb") as stream:
+            shutil.copyfileobj(response, stream)
+        if not _archive_matches(candidate):
+            raise RuntimeError(
+                "Downloaded imgui-bundle source archive checksum mismatch; cache was not replaced"
+            )
+        candidate.replace(archive)
 
 
 def patch(source: Path) -> None:
@@ -48,6 +81,14 @@ def patch(source: Path) -> None:
         path.write_text(content.replace(old, new, count))
 
     imgui = "external/imgui/imgui/"
+    # Preserve Bundle's FreeType version without fetching the complete Git history.
+    change(
+        "external/hello_imgui/hello_imgui/hello_imgui_cmake/hello_imgui_build_lib.cmake",
+        "                GIT_REPOSITORY https://github.com/freetype/freetype.git\n"
+        "                GIT_TAG        VER-2-13-3\n"
+        "                GIT_PROGRESS TRUE",
+        f"                URL {FREETYPE_URL}\n                URL_HASH SHA256={FREETYPE_SHA256}",
+    )
     change(
         "external/glfw/glfw/src/wl_init.c",
         "if (wl_seat_get_version(_glfw.wl.seat) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)",
@@ -269,10 +310,7 @@ def main() -> None:
     build = ROOT / "build/imgui"
     build.mkdir(parents=True, exist_ok=True)
     archive = build / f"imgui_bundle-{VERSION}.tar.gz"
-    if not archive.exists():
-        urllib.request.urlretrieve(URL, archive)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != SHA256:
-        raise RuntimeError("imgui-bundle source archive checksum mismatch")
+    ensure_source_archive(archive)
     source = build / f"imgui_bundle-{VERSION}"
     if not source.exists():
         with tarfile.open(archive) as tf:
