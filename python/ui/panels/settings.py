@@ -7,6 +7,7 @@ from dataclasses import replace
 from imgui_bundle import imgui
 
 from mojive.capture import CaptureSurface
+from mojive.config import CAMERA_FOCUS_EASINGS, CAMERA_NAVIGATION_RANGES, CameraNavigationConfig
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
@@ -84,12 +85,15 @@ _VIS_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.MESHBVH,
 )
 
-_CATEGORIES = ("General", "Interaction", "Rendering", "Recording", "MuJoCo Visuals")
+_CATEGORIES = ("General", "Camera", "Interaction", "Rendering", "Recording", "MuJoCo Visuals")
 _CATEGORY_WIDTH_PT = 132.0
 _PAGE_MIN_WIDTH_PT = 224.0
 _COLUMN_GAP_PT = 8.0
 _CATEGORY_SEARCH_TERMS = {
     "General": ("language", "ui font", "cjk font", "model realtime rebuild apply"),
+    "Camera": (
+        "focus distance margin transition duration easing curve zoom speed mode minimum maximum limits 相机 聚焦 距离 过渡 时长 曲线 缩放 速度 上限 下限",
+    ),
     "Recording": (
         "video capture clipboard copy countdown delay frame rate fps viewport layers quality crf bitrate encoding chroma",
     ),
@@ -244,6 +248,8 @@ class SettingsPanel(Panel):
             return
         if self._category == "General":
             self._general(ctx)
+        elif self._category == "Camera":
+            self._camera_navigation(ctx)
         elif self._category == "Interaction":
             self._interaction(ctx)
         elif self._category == "Rendering":
@@ -327,6 +333,119 @@ class SettingsPanel(Panel):
         if category in _CATEGORIES:
             self._category = category
             self._search = ""
+
+    def _camera_navigation(self, ctx: PanelContext) -> None:
+        if ctx.camera is None or ctx.set_camera_navigation is None:
+            return
+        t = ctx.tr
+        config = ctx.camera.navigation
+        defaults = CameraNavigationConfig()
+
+        def number(name, label, speed, fmt, tooltip):
+            nonlocal config
+            self._property(t(label))
+            low, high = CAMERA_NAVIGATION_RANGES[name]
+            if name == "min_distance":
+                high = config.max_distance
+            elif name == "max_distance":
+                low = config.min_distance
+            changed, value = imgui.drag_float(
+                f"##camera_{name}",
+                getattr(config, name),
+                speed,
+                low,
+                high,
+                fmt,
+                imgui.SliderFlags_.always_clamp,
+            )
+            committed = imgui.is_item_deactivated_after_edit()
+            reset = imgui.is_item_hovered() and pointer_pressed(ctx, PointerAction.VALUE_RESET)
+            if reset:
+                changed, value = True, min(high, max(low, getattr(defaults, name)))
+            imgui.set_item_tooltip(t(tooltip))
+            if changed:
+                try:
+                    config = replace(config, **{name: value})
+                except ValueError as error:
+                    ctx.report(str(error))
+                else:
+                    ctx.set_camera_navigation(config, persist=False)
+            if committed or reset:
+                ctx.set_camera_navigation(config)
+
+        def choice(name, label, choices):
+            nonlocal config
+            self._property(t(label))
+            current = getattr(config, name)
+            if imgui.begin_combo(f"##camera_{name}", dict(choices)[current]):
+                for value, text in choices:
+                    if imgui.selectable(text, current == value)[0]:
+                        config = replace(config, **{name: value})
+                        ctx.set_camera_navigation(config)
+                imgui.end_combo()
+
+        self._group_heading(t("Focus"))
+        if self._begin_properties("settings_camera_focus"):
+            number(
+                "focus_margin",
+                "Focus distance",
+                0.01,
+                "%.2fx",
+                "1x fits the object tightly; larger values leave more space around it.",
+            )
+            number(
+                "focus_duration",
+                "Transition duration",
+                0.01,
+                "%.2f s",
+                "Duration of object and joint focus. Set to 0 for an instant transition.",
+            )
+            choice(
+                "focus_easing",
+                "Transition curve",
+                tuple(
+                    zip(
+                        CAMERA_FOCUS_EASINGS,
+                        ("Linear", "Smoothstep", "Smootherstep", "Ease out cubic"),
+                        strict=True,
+                    )
+                ),
+            )
+            imgui.end_table()
+        self._group_heading(t("Zoom"))
+        if self._begin_properties("settings_camera_zoom"):
+            choice(
+                "zoom_mode", "Zoom mode", (("proportional", "Proportional"), ("linear", "Linear"))
+            )
+            imgui.set_item_tooltip(
+                t(
+                    "Proportional slows near the pivot. Linear uses a fixed step based on the framed scene size."
+                )
+            )
+            number(
+                "zoom_speed",
+                "Zoom speed",
+                0.05,
+                "%.2fx",
+                "Applies to the mouse wheel and zoom dragging.",
+            )
+            number(
+                "min_distance",
+                "Minimum distance",
+                0.001,
+                "%.4g",
+                "World units; orthographic zoom uses the equivalent perspective distance.",
+            )
+            number(
+                "max_distance",
+                "Maximum distance",
+                1.0,
+                "%.4g",
+                "World units; orthographic zoom uses the equivalent perspective distance.",
+            )
+            imgui.end_table()
+        if imgui.button(t("Reset camera navigation")):
+            ctx.set_camera_navigation(defaults)
 
     def _recording(self, ctx: PanelContext) -> None:
         config = ctx.recording_config

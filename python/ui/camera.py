@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
@@ -10,6 +11,7 @@ import numpy as np
 
 from .. import math3d
 from ..commands import SetCamera
+from ..config import CameraNavigationConfig
 from ..math3d import camera_basis
 from ..types import CameraView
 
@@ -82,6 +84,23 @@ def _smoothstep(t: float) -> float:
 
     t = min(1.0, max(0.0, t))
     return t * t * (3.0 - 2.0 * t)
+
+
+def _linear(t: float) -> float:
+    return min(1.0, max(0.0, t))
+
+
+def _smootherstep(t: float) -> float:
+    t = _linear(t)
+    return t * t * t * (t * (6 * t - 15) + 10)
+
+
+_FOCUS_EASINGS = {
+    "linear": _linear,
+    "smoothstep": _smoothstep,
+    "smootherstep": _smootherstep,
+    "ease_out_cubic": _ease_out_cubic,
+}
 
 
 def _wrap_deg(a: float) -> float:
@@ -370,13 +389,16 @@ class OrbitCamera:
         aspect: float = 1.0,
         orthographic: bool = False,
         ortho_height: float = 4.0,
+        navigation: CameraNavigationConfig = CameraNavigationConfig(),
     ) -> None:
+        self.navigation = navigation
+        self._zoom_extent = 1.0
         self._pivot = (
             np.zeros(3, np.float64)
             if pivot is None
             else np.asarray(pivot, np.float64).reshape(3).copy()
         )
-        self._distance = float(distance)
+        self._distance = self._bounded_distance(distance)
         self._yaw = float(yaw)
         self._pitch = float(np.clip(pitch, -PITCH_LIMIT, PITCH_LIMIT))
         self._fov_y = float(np.radians(fov_y_deg))
@@ -438,9 +460,38 @@ class OrbitCamera:
 
     @distance.setter
     def distance(self, value: float) -> None:
-        self._distance = max(MIN_DISTANCE, float(value))
+        self._distance = self._bounded_distance(value)
         self._stop_anim()
         self._touch()
+
+    def _bounded_distance(self, value: float) -> float:
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("camera distance must be finite")
+        return min(self.navigation.max_distance, max(self.navigation.min_distance, value))
+
+    def configure_navigation(self, value: CameraNavigationConfig) -> None:
+        if not isinstance(value, CameraNavigationConfig):
+            raise TypeError("navigation must be a CameraNavigationConfig")
+        limits_changed = (self.navigation.min_distance, self.navigation.max_distance) != (
+            value.min_distance,
+            value.max_distance,
+        )
+        self.navigation = value
+        if limits_changed:
+            scale = 2 * math.tan(self._fov_y * 0.5)
+            distance = self.ortho_height / scale if self._orthographic else self._distance
+            goal = (
+                distance
+                if self._anim is None
+                else (
+                    self._anim.ortho_height / scale if self._orthographic else self._anim.distance
+                )
+            )
+            if any(
+                not value.min_distance <= item <= value.max_distance for item in (distance, goal)
+            ):
+                self.dolly(0)
 
     @property
     def aspect(self) -> float:
@@ -613,11 +664,37 @@ class OrbitCamera:
         self._touch()
 
     def dolly(self, steps: float) -> None:
-        self._distance = max(MIN_DISTANCE, self._distance * float(np.exp(-steps * DOLLY_PER_STEP)))
+        steps = float(steps)
+        if not math.isfinite(steps):
+            return
+        exact = self._exact_view
+        config = self.navigation
+        # Bound before exponentiation: neither extreme device deltas nor repeated
+        # zoom-out can poison the camera and the infinite ground's texture transforms.
+        steps = min(1e6, max(-1e6, steps)) * DOLLY_PER_STEP * config.zoom_speed
+        height_per_distance = 2.0 * math.tan(self._fov_y * 0.5)
+        distance = self.ortho_height / height_per_distance if self._orthographic else self._distance
+        if config.zoom_mode == "linear":
+            distance = self._bounded_distance(distance - steps * self._zoom_extent)
+        else:
+            log_distance = min(
+                math.log(config.max_distance),
+                max(math.log(config.min_distance), math.log(max(distance, MIN_DISTANCE)) - steps),
+            )
+            distance = self._bounded_distance(math.exp(log_distance))
+        self._distance = distance
         if self._orthographic:
-            self.ortho_height = self.matched_ortho_height()
+            self.ortho_height = distance * height_per_distance
         self._stop_anim()
         self._touch()
+        if exact is not None:
+            self._exact_view = replace(
+                exact,
+                eye=self.pivot - exact.forward() * distance,
+                target=self.pivot.copy(),
+                ortho_height=self.ortho_height,
+                orthographic_blend=None,
+            )
 
     def fly(self, dt: float, forward: float = 0.0, right: float = 0.0, up: float = 0.0) -> None:
         speed = self._distance * FLY_RATE * float(dt)
@@ -644,8 +721,8 @@ class OrbitCamera:
         if on:
             self.ortho_height = self.matched_ortho_height()
         else:
-            self._distance = max(
-                MIN_DISTANCE, self.ortho_height * 0.5 / float(np.tan(self._fov_y * 0.5))
+            self._distance = self._bounded_distance(
+                self.ortho_height * 0.5 / float(np.tan(self._fov_y * 0.5))
             )
         self._orthographic = on
         self._projection.set(on, animate=animate)
@@ -666,6 +743,7 @@ class OrbitCamera:
         radius = float(np.linalg.norm(hi - lo) * 0.5)
         if not np.isfinite(radius) or radius < 1e-6:
             radius = 0.5
+        self._zoom_extent = 2 * radius
         distance, ortho_height = self._framing_distance(radius, FRAME_MARGIN)
 
         if clip is None:
@@ -727,7 +805,7 @@ class OrbitCamera:
         half_extents,
         sink: CameraSink,
         *,
-        margin: float = FRAME_MARGIN,
+        margin: float | None = None,
         animate: bool = True,
     ) -> CameraView:
         """Center world bounds along a straight eye path, retaining the displayed orientation."""
@@ -738,7 +816,7 @@ class OrbitCamera:
         start = self.view()
         right, up, forward = camera_basis(start)
         backward = -forward
-        padding = max(1.0, float(margin))
+        padding = self.navigation.focus_margin if margin is None else max(1.0, float(margin))
         perspective = replace(start, orthographic=False, orthographic_blend=None).proj_matrix()
         horizontal = perspective[0, 0] * right + perspective[0, 2] * backward
         vertical = perspective[1, 1] * up + perspective[1, 2] * backward
@@ -753,11 +831,14 @@ class OrbitCamera:
             ),
             float(np.abs(backward) @ half) + MIN_DISTANCE,
         )
+        distance = self._bounded_distance(distance)
         height = max(
             MIN_DISTANCE,
             2 * padding * float(np.abs(up) @ half),
             2 * padding * float(np.abs(right) @ half) / max(start.aspect, 1e-3),
         )
+        height_per_distance = 2 * math.tan(start.fov_y * 0.5)
+        height = self._bounded_distance(height / height_per_distance) * height_per_distance
         target = center.copy()
         if not start.orthographic:
             # Keep calibrated lenses intact while centering on the viewport's
@@ -785,7 +866,7 @@ class OrbitCamera:
             yaw=self.yaw,
             pitch=self.pitch,
             ortho_height=height,
-            duration=FOCUS_DURATION,
+            duration=self.navigation.focus_duration,
             view=view,
             focus_start_span=(
                 start.ortho_height
@@ -793,7 +874,11 @@ class OrbitCamera:
                 else float(np.dot(center - start.eye, forward))
             ),
         )
-        self._apply_goal(goal, animate=animate, easing=_smoothstep)
+        self._apply_goal(
+            goal,
+            animate=animate and goal.duration > 0,
+            easing=_FOCUS_EASINGS[self.navigation.focus_easing],
+        )
         return self.publish(sink)
 
     def focus_target(
@@ -815,7 +900,9 @@ class OrbitCamera:
         target_radius = max(float(radius), 1e-6)
         if not np.isfinite(target).all() or not np.isfinite(target_radius):
             return self.look_from(yaw, pitch, sink, animate=animate)
-        distance, ortho_height = self._framing_distance(target_radius, margin)
+        distance, ortho_height = self._framing_distance(
+            target_radius, margin * self.navigation.focus_margin / FRAME_MARGIN
+        )
         self.near = min(self.near, max(MIN_NEAR, (distance - target_radius) * 0.25))
         self.far = max(self.far, (distance + target_radius) * 2.0)
         goal = _Anim(
@@ -824,9 +911,13 @@ class OrbitCamera:
             yaw=yaw,
             pitch=float(np.clip(pitch, -PITCH_LIMIT, PITCH_LIMIT)),
             ortho_height=ortho_height,
-            duration=FOCUS_DURATION,
+            duration=self.navigation.focus_duration,
         )
-        self._apply_goal(goal, animate=animate, easing=_ease_out_cubic)
+        self._apply_goal(
+            goal,
+            animate=animate and goal.duration > 0,
+            easing=_FOCUS_EASINGS[self.navigation.focus_easing],
+        )
         return self.publish(sink)
 
     def _framing_distance(self, radius: float, margin: float) -> tuple[float, float]:
@@ -837,6 +928,7 @@ class OrbitCamera:
             MIN_DISTANCE,
             float(radius) / max(float(np.sin(min(half_y, half_x))), 1e-3) * padding,
         )
+        distance = self._bounded_distance(distance)
         return distance, 2.0 * distance * float(np.tan(half_y))
 
     def look_from(self, yaw: float, pitch: float, sink: CameraSink, *, animate: bool = True):

@@ -357,6 +357,9 @@ class CameraPanel(Panel):
                 angular = attr in ("yaw", "pitch", "fov_y_deg")
                 factor = math.pi / 180.0 if angular else 1.0
                 initial = self._initial_distance if initial is None else initial
+                editor_distance = attr == "distance" and camera is ctx.camera
+                if editor_distance:
+                    lo, hi = camera.navigation.min_distance, camera.navigation.max_distance
                 self._property_label(ctx.tr(attr))
                 edit = value_rail(
                     ctx,
@@ -369,6 +372,7 @@ class CameraPanel(Panel):
                     unit="rad" if angular else "m",
                     angular_degrees=self._angular_degrees,
                     toggle_unit=self._toggle_angle_unit,
+                    logarithmic=editor_distance,
                 )
                 if edit.changed:
                     setattr(camera, attr, edit.value / factor)

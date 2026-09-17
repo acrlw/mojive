@@ -129,3 +129,50 @@ def test_layout_policy_can_isolate_an_embedded_viewer(tmp_path) -> None:
     assert _viewer_layout_path(isolated, vsync=True) == ""
     assert _viewer_layout_path(custom, vsync=True) == str(tmp_path / "policy-eval.ini")
     assert _viewer_layout_path(custom, vsync=False) == ""
+
+
+def test_camera_navigation_preferences_round_trip_and_recover_invalid_saved_values():
+    from mojive import CameraNavigationConfig
+
+    config = CameraNavigationConfig(
+        focus_margin=1.8,
+        focus_duration=0.6,
+        focus_easing="smootherstep",
+        zoom_mode="linear",
+        zoom_speed=2,
+        min_distance=0.05,
+        max_distance=500,
+    )
+    assert CameraNavigationConfig.from_mapping(asdict(config)) == config
+    assert (
+        CameraNavigationConfig.from_mapping(
+            {
+                "focus_margin": float("nan"),
+                "focus_duration": float("inf"),
+                "focus_easing": [],
+                "zoom_speed": "bad",
+                "zoom_mode": "unknown",
+                "min_distance": 1000,
+                "max_distance": 1,
+            }
+        )
+        == CameraNavigationConfig()
+    )
+    assert ViewerConfig(navigation=config).navigation == config
+
+
+def test_camera_navigation_configuration_rejects_invalid_runtime_limits():
+    import pytest
+
+    from mojive import CameraNavigationConfig
+
+    for values in (
+        {"min_distance": 2, "max_distance": 1},
+        {"max_distance": float("inf")},
+        {"focus_duration": -1},
+        {"focus_margin": float("nan")},
+        {"focus_easing": "invalid"},
+        {"zoom_speed": 0},
+    ):
+        with pytest.raises(ValueError):
+            CameraNavigationConfig(**values)

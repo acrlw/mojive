@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from mojive.capture import RecordingInfo
     from mojive.commands import Command, CommandResult
     from mojive.config import (
+        CameraNavigationConfig,
         CameraTrackingConfig,
         InteractionConfig,
         RecordingConfig,
@@ -48,6 +49,10 @@ class TextureImport(Protocol):
     ) -> None: ...
 
 
+class CameraNavigationSetter(Protocol):
+    def __call__(self, value: CameraNavigationConfig, *, persist: bool = True) -> None: ...
+
+
 @dataclass
 class PanelContext:
     """Per-frame panel dependencies; document changes route through Session commands."""
@@ -55,6 +60,7 @@ class PanelContext:
     session: Session
     backend: RenderBackend
     camera: OrbitCamera | None = None
+    set_camera_navigation: CameraNavigationSetter | None = None
 
     model_camera_id: int = -1
     model_camera_view: CameraView | None = None

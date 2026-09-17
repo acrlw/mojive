@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from .adapters.toy import ToyPhysicsAdapter
     from .config import (
         CameraInputConfig,
+        CameraNavigationConfig,
         CameraTrackingConfig,
         InteractionConfig,
         LayoutConfig,
@@ -156,6 +157,7 @@ _EXPORT_MODULES = {
     ),
     ".config": (
         "CameraInputConfig",
+        "CameraNavigationConfig",
         "CameraTrackingConfig",
         "InteractionConfig",
         "LayoutConfig",
@@ -233,6 +235,7 @@ __all__ = [
     "Bounds",
     "CameraInfo",
     "CameraInputConfig",
+    "CameraNavigationConfig",
     "CameraTrackingConfig",
     "CameraView",
     "Canvas2D",

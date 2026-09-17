@@ -16,6 +16,7 @@ from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.capture import CaptureSurface, RecordingPhase
 from mojive.commands import CommandResult
 from mojive.config import (
+    CameraNavigationConfig,
     CameraTrackingConfig,
     InteractionConfig,
     RecordingConfig,
@@ -209,7 +210,15 @@ class ViewerApp(
         self._status_metric_mode = "steps" if metric_mode == "steps" else "time"
         self._panel_status_hints: tuple[ToolHint, ...] = ()
         self._status_panel = "Viewport"
-        self.camera = OrbitCamera()
+        self.camera = OrbitCamera(
+            navigation=(
+                viewer_config.navigation
+                if explicit_config
+                else CameraNavigationConfig.from_mapping(
+                    self.localizer.preference("camera_navigation", {})
+                )
+            )
+        )
 
         self.camera_out = CameraOut(backend=backend, session=session)
         self.camera.attach(self.camera_out)
@@ -394,6 +403,12 @@ class ViewerApp(
         if persist:
             self.localizer.set_preferences({"shadow_quality": quality.value})
         return True
+
+    def set_camera_navigation(self, value: CameraNavigationConfig, *, persist: bool = True) -> None:
+        """Apply focus and zoom preferences to the editor camera."""
+        self.camera.configure_navigation(value)
+        if persist:
+            self.localizer.set_preferences({"camera_navigation": asdict(value)})
 
     def set_camera_tracking(self, value: CameraTrackingConfig, *, persist: bool = True) -> None:
         """Change tracking axes or smoothing without moving the camera immediately."""
@@ -1023,6 +1038,7 @@ class ViewerApp(
             backend=self.backend,
             painter=self.window.painter,
             camera=self.camera,
+            set_camera_navigation=self.set_camera_navigation,
             model_camera_id=self._model_camera_id,
             model_camera_view=self._model_camera_view,
             select_model_camera=self._select_model_camera_animated,

@@ -61,6 +61,72 @@ class CameraInputConfig:
 
 
 @dataclass(frozen=True)
+class CameraNavigationConfig:
+    """Focus framing and bounded editor zoom, independent of the scene's cameras.
+
+    Focus margin is relative to a tight fit; duration is in seconds. Linear zoom
+    advances a fixed fraction of the last framed scene extent per wheel step.
+    Distance limits are world units, including the equivalent perspective
+    distance for orthographic zoom. These limits do not edit authored cameras.
+    """
+
+    focus_margin: float = 1.15
+    focus_duration: float = 0.36
+    focus_easing: str = "smoothstep"
+    zoom_mode: str = "proportional"
+    zoom_speed: float = 1.0
+    min_distance: float = 0.001
+    max_distance: float = 1e6
+
+    def __post_init__(self) -> None:
+        for name, (low, high) in CAMERA_NAVIGATION_RANGES.items():
+            value = getattr(self, name)
+            if not math.isfinite(value) or not low <= value <= high:
+                raise ValueError(f"{name} must be finite and between {low:g} and {high:g}")
+        if self.min_distance >= self.max_distance:
+            raise ValueError("minimum camera distance must be less than maximum distance")
+        if self.focus_easing not in CAMERA_FOCUS_EASINGS:
+            raise ValueError("unsupported focus easing")
+        if self.zoom_mode not in ("proportional", "linear"):
+            raise ValueError("unsupported zoom mode")
+
+    @classmethod
+    def from_mapping(cls, value: object) -> CameraNavigationConfig:
+        source = value if isinstance(value, Mapping) else {}
+        defaults = cls()
+        values = {}
+        for name, (low, high) in CAMERA_NAVIGATION_RANGES.items():
+            try:
+                number = float(source.get(name, getattr(defaults, name)))
+            except (TypeError, ValueError, OverflowError):
+                number = getattr(defaults, name)
+            values[name] = (
+                number
+                if math.isfinite(number) and low <= number <= high
+                else getattr(defaults, name)
+            )
+        if values["min_distance"] >= values["max_distance"]:
+            values.update(min_distance=defaults.min_distance, max_distance=defaults.max_distance)
+        for name, choices in (
+            ("focus_easing", CAMERA_FOCUS_EASINGS),
+            ("zoom_mode", ("proportional", "linear")),
+        ):
+            candidate = source.get(name, getattr(defaults, name))
+            values[name] = candidate if candidate in choices else getattr(defaults, name)
+        return cls(**values)
+
+
+CAMERA_FOCUS_EASINGS = ("linear", "smoothstep", "smootherstep", "ease_out_cubic")
+CAMERA_NAVIGATION_RANGES = {
+    "focus_margin": (1.0, 5.0),
+    "focus_duration": (0.0, 5.0),
+    "zoom_speed": (0.05, 20.0),
+    "min_distance": (0.001, 1e9),
+    "max_distance": (0.001, 1e9),
+}
+
+
+@dataclass(frozen=True)
 class CameraTrackingConfig:
     """World axes and position smoothing for the editor camera's tracking target.
 
@@ -337,6 +403,7 @@ class ViewerConfig:
     builtin_panels: tuple[str, ...] | None = None
     debug_server: bool = True
     geometry_style: GeometryStyle | None = None
+    navigation: CameraNavigationConfig = field(default_factory=CameraNavigationConfig)
 
     @classmethod
     def minimal(cls, *panels: str) -> ViewerConfig:
@@ -360,6 +427,7 @@ class ViewerConfig:
 
 __all__ = [
     "CameraInputConfig",
+    "CameraNavigationConfig",
     "CameraTrackingConfig",
     "InteractionConfig",
     "LayoutConfig",
