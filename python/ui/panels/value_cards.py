@@ -121,6 +121,7 @@ def value_rail(
     unit="",
     angular_degrees=False,
     toggle_unit=None,
+    logarithmic=False,
 ):
     """Thin bounded rail plus numeric entry; unbounded values use only numeric entry.
 
@@ -160,7 +161,12 @@ def value_rail(
             imgui.push_style_color(slot, imgui.ImVec4(0, 0, 0, 0))
         imgui.push_style_var(imgui.StyleVar_.grab_min_size, 10 * scale)
         imgui.set_next_item_width(rail_width)
-        changed, current = imgui.slider_float(label, value, lo, hi, "", imgui.SliderFlags_.no_input)
+        flags = imgui.SliderFlags_.no_input
+        if logarithmic:
+            if not 0 < lo < hi:
+                raise ValueError("logarithmic rails require positive increasing bounds")
+            flags |= imgui.SliderFlags_.logarithmic
+        changed, current = imgui.slider_float(label, value, lo, hi, "", flags)
         disabled = bool(imgui.get_item_flags() & imgui.ItemFlags_.disabled)
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         imgui.pop_style_var()
@@ -173,7 +179,12 @@ def value_rail(
         # Match SliderBehavior's two-point padding and half-grab endpoints.
         radius = min(5 * scale, max(0, (b.x - a.x - 4) * 0.5))
         left, right, cy = a.x + 2 + radius, b.x - 2 - radius, (a.y + b.y) * 0.5
-        fraction = min(1.0, max(0.0, (value - lo) / (hi - lo)))
+        fraction = (
+            math.log(max(lo, value) / lo) / math.log(hi / lo)
+            if logarithmic
+            else (value - lo) / (hi - lo)
+        )
+        fraction = min(1.0, max(0.0, fraction))
         position = left + (right - left) * fraction
         hovered, pressed = imgui.is_item_hovered(), imgui.is_item_active()
         draw_value_rail(

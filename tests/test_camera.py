@@ -449,8 +449,8 @@ def test_elevated_focus_view_keeps_azimuth_and_enforces_iso_elevation():
     np.testing.assert_allclose(direction[:2] / np.linalg.norm(direction[:2]), (0.6, -0.8))
 
 
-def test_focus_target_uses_a_moderate_ease_out_and_requested_direction():
-    from mojive.ui.camera import _ease_out_cubic
+def test_focus_target_uses_smooth_endpoints_and_requested_direction():
+    from mojive.ui.camera import _smoothstep
 
     cam = OrbitCamera(pivot=np.zeros(3), distance=6.0, yaw=180.0)
     sink = RecordingSink()
@@ -459,8 +459,7 @@ def test_focus_target_uses_a_moderate_ease_out_and_requested_direction():
     cam.focus_target(target, 0.5, (0.0, 1.0, 0.0), sink, animate=True)
     cam.advance(FOCUS_DURATION * 0.25, sink)
 
-    assert cam.pivot == pytest.approx(target * _ease_out_cubic(0.25))
-    assert 0.5 < _ease_out_cubic(0.25) < 0.65
+    assert cam.pivot == pytest.approx(target * _smoothstep(0.25))
     cam.advance(FOCUS_DURATION, sink)
     assert cam.pivot == pytest.approx(target)
     assert cam.direction() == pytest.approx((0.0, 1.0, 0.0), abs=1e-6)
@@ -994,3 +993,159 @@ def test_focus_bounds_screen_motion_uses_smoothstep_even_for_large_zoom(orthogra
         eased = progress * progress * (3 - 2 * progress)
         expected = initial_pixel * (1 - eased) + np.array((600, 400)) * eased
         assert project(camera.view(), [center], rect)[0, :2] == pytest.approx(expected, abs=1e-3)
+
+
+@pytest.mark.parametrize("orthographic", [False, True])
+def test_repeated_zoom_out_never_overflows_and_reverses_at_the_limit(orthographic):
+    import warnings
+
+    camera = OrbitCamera(distance=5, orthographic=orthographic)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        for _ in range(1000):
+            camera.dolly(-10)
+            view = camera.view()
+            assert np.isfinite(view.eye).all()
+            assert np.isfinite(view.proj_matrix()).all()
+        maximum = camera.distance
+        camera.dolly(-10)
+        assert camera.distance == maximum
+        camera.dolly(1)
+        assert camera.distance < maximum
+        camera.dolly(1e300)
+        assert 0 < camera.distance < maximum
+        camera.dolly(-1e300)
+        assert camera.distance == pytest.approx(maximum)
+
+
+@pytest.mark.parametrize(
+    "curve,progress",
+    [
+        ("linear", 0.25),
+        ("smoothstep", 0.15625),
+        ("smootherstep", 0.103515625),
+        ("ease_out_cubic", 0.578125),
+    ],
+)
+def test_focus_preferences_control_screen_progress_duration_and_fit(curve, progress):
+    from mojive import CameraNavigationConfig
+    from mojive.interaction.gizmo import project
+
+    config = CameraNavigationConfig(focus_margin=2, focus_duration=0.8, focus_easing=curve)
+    camera = OrbitCamera(distance=6, aspect=1.5, navigation=config)
+    sink = RecordingSink()
+    center, half = np.array((2, -1.5, 1)), np.full(3, 0.2)
+    rect = (0, 0, 1200, 800)
+    initial = project(camera.view(), [center], rect)[0, :2]
+    camera.focus_bounds(center, half, sink)
+    camera.advance(0.2, sink)
+    assert camera.animating
+    expected = initial * (1 - progress) + np.array((600, 400)) * progress
+    assert project(camera.view(), [center], rect)[0, :2] == pytest.approx(expected, abs=1e-3)
+    camera.advance(0.6, sink)
+    assert not camera.animating
+    pixels = project(camera.view(), corners(center - half, center + half), rect)[:, :2]
+    assert np.abs(pixels / (1200, 800) * 2 - 1).max() == pytest.approx(0.5, abs=1e-5)
+
+
+@pytest.mark.parametrize("joint", [False, True])
+def test_zero_focus_duration_is_immediate_and_retains_configuration(joint):
+    from mojive import CameraNavigationConfig
+
+    camera = OrbitCamera(navigation=CameraNavigationConfig(focus_duration=0))
+    sink = RecordingSink()
+    if joint:
+        camera.focus_target((1, 2, 3), 0.2, (1, 0, 0), sink)
+    else:
+        camera.focus_bounds((1, 2, 3), (0.2, 0.2, 0.2), sink)
+    assert not camera.animating
+    assert sink.views[-1].target == pytest.approx((1, 2, 3))
+
+
+def test_linear_zoom_keeps_a_constant_step_at_near_and_far_distances():
+    from mojive import CameraNavigationConfig
+
+    camera = OrbitCamera(navigation=CameraNavigationConfig(zoom_mode="linear", zoom_speed=2))
+    camera.frame_scene(((-1, -1, -1), (1, 1, 1)), RecordingSink(), animate=False)
+    movements = []
+    for distance in (1000, 10, 2):
+        camera.distance = distance
+        camera.dolly(1)
+        movements.append(distance - camera.distance)
+        camera.dolly(-1)
+        assert camera.distance == pytest.approx(distance)
+    assert movements == pytest.approx([movements[0]] * 3)
+    assert movements[0] > 0.1
+
+
+@pytest.mark.parametrize("orthographic", [False, True])
+@pytest.mark.parametrize("mode", ["proportional", "linear"])
+def test_zoom_honors_custom_limits_and_ignores_nonfinite_device_input(orthographic, mode):
+    from mojive import CameraNavigationConfig
+
+    camera = OrbitCamera(orthographic=orthographic)
+    camera.configure_navigation(
+        CameraNavigationConfig(zoom_mode=mode, min_distance=0.2, max_distance=10)
+    )
+    camera.dolly(-1e300)
+    assert camera.distance == pytest.approx(10)
+    for invalid in (float("nan"), float("inf"), -float("inf")):
+        camera.dolly(invalid)
+        assert camera.distance == pytest.approx(10)
+    camera.dolly(1e300)
+    assert camera.distance == pytest.approx(0.2)
+    camera.dolly(-1)
+    assert camera.distance > 0.2
+
+
+def test_orthographic_zoom_scales_the_displayed_height_without_an_initial_jump():
+    camera = OrbitCamera(distance=100, orthographic=True, ortho_height=2)
+    camera.dolly(1)
+    assert camera.view().ortho_height == pytest.approx(2 * np.exp(-0.12))
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), -float("inf")])
+def test_camera_distance_rejects_nonfinite_values_without_changing_state(invalid):
+    camera = OrbitCamera(distance=4)
+    with pytest.raises(ValueError, match="finite"):
+        camera.distance = invalid
+    assert camera.distance == 4
+
+
+def test_changing_zoom_limits_retains_an_in_range_focus_animation():
+    from mojive import CameraNavigationConfig
+
+    camera = OrbitCamera(distance=6)
+    sink = RecordingSink()
+    camera.focus_bounds((2, -1, 1), (0.2, 0.2, 0.2), sink)
+    camera.advance(0.1, sink)
+    before = camera.view()
+    camera.configure_navigation(CameraNavigationConfig(max_distance=50))
+    assert camera.animating
+    assert camera.view().eye == pytest.approx(before.eye)
+    assert camera.view().view_matrix() == pytest.approx(before.view_matrix())
+    camera.configure_navigation(CameraNavigationConfig(min_distance=10, max_distance=50))
+    assert not camera.animating
+    assert camera.distance == pytest.approx(10)
+
+
+def test_zoom_and_limit_clamping_retain_the_displayed_roll_and_intrinsics():
+    from mojive import CameraNavigationConfig
+
+    view = CameraView(
+        eye=np.array((5, 0, 0)),
+        target=np.zeros(3),
+        up=np.array((0, 1, 1)),
+        focal_length=np.array((1.2, 0.8)),
+        sensor_size=np.ones(2),
+        principal_offset=np.array((0.1, -0.05)),
+    )
+    camera = OrbitCamera()
+    camera.adopt(view, exact=True)
+    camera.dolly(1)
+    assert camera.distance < 5
+    camera.configure_navigation(CameraNavigationConfig(max_distance=2))
+    assert camera.distance == pytest.approx(2)
+    current = camera.view()
+    assert current.view_matrix()[:3, :3] == pytest.approx(view.view_matrix()[:3, :3])
+    assert current.proj_matrix() == pytest.approx(view.proj_matrix())

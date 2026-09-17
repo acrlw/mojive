@@ -269,6 +269,29 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
     renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
 ```
 
+## Camera navigation
+
+**Settings > Camera** controls double-click focus and editor zoom. Changes apply immediately
+and persist across launches. Field labels follow the UI language; curve and mode names remain English.
+
+- **Focus distance** is framing padding: `1x` tightly fits the object's bounds; larger values
+  leave more space. Joint focus retains its additional space for the joint axis and controls.
+- **Transition duration** is in seconds; `0` focuses immediately. **Transition curve** selects
+  `Linear`, `Smoothstep` (default), `Smootherstep`, or `Ease out cubic`. Object focus applies the
+  curve to screen motion while retaining its straight camera path.
+- **Proportional** zoom changes distance by a ratio, making each step smaller near the pivot.
+  **Linear** moves a fixed fraction of the last framed scene's extent per step. **Zoom speed**
+  scales both wheel and drag input.
+- **Minimum distance** and **Maximum distance** bound editor zoom in world units (defaults
+  `0.001` and `1e6`). Orthographic zoom uses its equivalent perspective distance. Limits also
+  constrain focus framing; a maximum smaller than the distance needed to fit an object can crop it.
+  The Camera panel uses the same limits with a logarithmic distance slider.
+
+Programmatic viewers can use `ViewerConfig(navigation=CameraNavigationConfig(...))` or
+`viewer.configure_navigation(CameraNavigationConfig(...), persist=False)`. Import
+`CameraNavigationConfig` from `mojive`. Explicit configuration overrides saved preferences for
+that viewer; `persist=True` saves it. These preferences do not edit authored scene cameras.
+
 ## Camera tracking
 
 Open **Camera > Tracking** (`F6`), choose a body in **Target**, or select a scene object and

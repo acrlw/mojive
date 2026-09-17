@@ -28,6 +28,11 @@ timeline-profile:
 camera-tracking:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
 
+.PHONY: camera-navigation
+## Exercise saved focus/zoom settings and extreme native wheel input.
+camera-navigation: camera-focus
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_camera_navigation.py
+
 .PHONY: camera-focus
 ## Capture ordinary object focus and verify dedicated joint/camera/light focus.
 camera-focus:

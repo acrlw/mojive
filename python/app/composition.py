@@ -14,6 +14,7 @@ import numpy as np
 
 from mojive.capture import CaptureSurface, RecordingInfo
 from mojive.config import (
+    CameraNavigationConfig,
     CameraTrackingConfig,
     InteractionConfig,
     LayoutConfig,
@@ -250,6 +251,10 @@ class Viewer:
         at the current view. Orbit, zoom, and pan remain available while following.
         """
         self.app.track_node(node_id)
+
+    def configure_navigation(self, value: CameraNavigationConfig, *, persist: bool = False) -> None:
+        """Configure focus distance, duration, easing, and bounded editor zoom."""
+        self.app.set_camera_navigation(value, persist=persist)
 
     def configure_tracking(self, value: CameraTrackingConfig, *, persist: bool = False) -> None:
         """Set world axes and smoothing half-life in seconds for camera following."""
