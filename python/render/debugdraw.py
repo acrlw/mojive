@@ -747,6 +747,37 @@ class Layer:
         """Create or replace a solid unit cylinder transformed into world space."""
         self._solid(PrimitiveType.CYLINDER, ident, transform4x4, color, duration)
 
+    def spheres(self, ident: str, transforms, color, duration: float = NEVER) -> None:
+        """Create or replace batched unit spheres with shared or per-instance colors."""
+        self._solids(PrimitiveType.SPHERE, ident, transforms, color, duration)
+
+    def cylinders(self, ident: str, transforms, color, duration: float = NEVER) -> None:
+        """Create or replace batched unit cylinders with shared or per-instance colors."""
+        self._solids(PrimitiveType.CYLINDER, ident, transforms, color, duration)
+
+    def _solids(self, primitive_type, ident, transforms, color, duration) -> None:
+        matrices = np.asarray(transforms, np.float32)
+        if matrices.ndim != 3 or matrices.shape[1:] != (4, 4) or not np.isfinite(matrices).all():
+            raise ValueError("Solid transforms must be finite [N, 4, 4]")
+        count = len(matrices)
+        colors = np.asarray(color, np.float32)
+        if colors.shape == (3,):
+            colors = _rgba(color)
+        if colors.shape not in ((4,), (count, 4)) or not np.isfinite(colors).all():
+            raise ValueError("Solid colors must be finite RGBA or [N, 4]")
+        if not math.isfinite(duration):
+            raise ValueError("Solid duration must be finite")
+        if not count:
+            self._remove(ident)
+            return
+        i = self._alloc(primitive_type, ident, count, duration)
+        if i < 0:
+            return
+        st = self._stores[primitive_type]
+        st.transforms[i : i + count] = matrices
+        st.positions[i : i + count, 0] = matrices[:, :3, 3]
+        st.colors[i : i + count] = colors
+
     def solid_arrow(self, ident: str, transform4x4, color, duration: float = NEVER) -> None:
         """Create or replace a solid arrow transformed into world space."""
         self._solid(PrimitiveType.SOLID_ARROW, ident, transform4x4, color, duration)

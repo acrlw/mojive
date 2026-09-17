@@ -29,6 +29,11 @@ camera-tracking:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.camera_tracking $(ARGS)
 
 .PHONY: camera-navigation
+.PHONY: contact-style
+## Capture contact shapes/colors and exercise their settings and scene capture.
+contact-style: $(if $(filter bgfx,$(BACKEND)),native-python-build)
+	$(if $(filter bgfx,$(BACKEND)),MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))") MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_contact_style.py
+
 ## Exercise saved focus/zoom settings and extreme native wheel input.
 camera-navigation: camera-focus
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_camera_navigation.py

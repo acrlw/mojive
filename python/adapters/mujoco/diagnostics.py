@@ -723,6 +723,8 @@ class _Diagnostics:
             constraint_connect_rgba=np.asarray(m.vis.rgba.connect, np.float32).copy(),
             constraint_rgba=np.asarray(m.vis.rgba.constraint, np.float32).copy(),
             contact_point_rgba=np.asarray(m.vis.rgba.contactpoint, np.float32).copy(),
+            contact_point_radius=meansize * float(m.vis.scale.contactwidth),
+            contact_point_half_height=meansize * float(m.vis.scale.contactheight),
             contact_force_rgba=np.asarray(m.vis.rgba.contactforce, np.float32).copy(),
             contact_friction_rgba=np.asarray(m.vis.rgba.contactfriction, np.float32).copy(),
             contact_force_scale=float(m.vis.map.force) / meanmass if meanmass > 0.0 else 0.0,

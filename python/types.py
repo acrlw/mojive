@@ -47,6 +47,35 @@ class GeometryStyle:
             object.__setattr__(self, name, value)
 
 
+@dataclass(frozen=True)
+class ContactStyle:
+    """Display-only contact markers, shared by all renderers.
+
+    Solid dimensions use the adapter's contact radius and half height, multiplied
+    by ``scale``. Point uses a four-pixel radius at scale 1. Island colors take
+    precedence when enabled; ``use_model_color`` restores the adapter's color.
+    """
+
+    shape: str = "cylinder"
+    color: tuple[float, float, float, float] = (0.9, 0.15, 0.15, 1.0)
+    scale: float = 1.0
+    use_model_color: bool = False
+
+    def __post_init__(self) -> None:
+        if self.shape not in ("point", "sphere", "cylinder"):
+            raise ValueError("contact shape must be point, sphere, or cylinder")
+        color = tuple(float(value) for value in self.color)
+        if len(color) != 4 or not all(np.isfinite(v) and 0 <= v <= 1 for v in color):
+            raise ValueError("contact color must contain four finite values in [0, 1]")
+        scale = float(self.scale)
+        if not np.isfinite(scale) or not 0.1 <= scale <= 10:
+            raise ValueError("contact scale must be finite and between 0.1 and 10")
+        if not isinstance(self.use_model_color, bool):
+            raise ValueError("use_model_color must be a bool")
+        object.__setattr__(self, "color", color)
+        object.__setattr__(self, "scale", scale)
+
+
 class Bounds(NamedTuple):
     """Axis-aligned bounds expressed as minimum and maximum coordinates."""
 

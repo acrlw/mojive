@@ -14,7 +14,7 @@ from mojive.interaction.gizmo import GizmoFrame
 
 from ...adapters.base import SceneFrame, SceneSource
 from ...log import get_logger
-from ...types import CameraView, GeometryStyle, MeshKey, ViewportImage
+from ...types import CameraView, ContactStyle, GeometryStyle, MeshKey, ViewportImage
 from ..backend import (
     BackendCaps,
     DebugView,
@@ -573,6 +573,15 @@ class OpenGLBackend:
             self._geometry_style = style
             self._sync_instance_visibility()
         return True
+
+    def set_contact_style(self, style: ContactStyle) -> bool:
+        if not isinstance(style, ContactStyle):
+            raise TypeError("style must be a ContactStyle")
+        self._overlay.contact_style = style
+        return True
+
+    def get_contact_style(self) -> ContactStyle:
+        return self._overlay.contact_style
 
     def get_geometry_style(self) -> GeometryStyle:
         return self._geometry_style

@@ -10,7 +10,15 @@ from pathlib import Path
 
 import numpy as np
 
-from ...types import CameraView, GeometryStyle, LightType, MeshKey, MeshShape, ViewportImage
+from ...types import (
+    CameraView,
+    ContactStyle,
+    GeometryStyle,
+    LightType,
+    MeshKey,
+    MeshShape,
+    ViewportImage,
+)
 from ..backend import (
     BackendCaps,
     DebugView,
@@ -769,6 +777,15 @@ class NativeBackend:
             self._geometry_style = style
             self._sync_instance_visibility()
         return True
+
+    def set_contact_style(self, style: ContactStyle) -> bool:
+        if not isinstance(style, ContactStyle):
+            raise TypeError("style must be a ContactStyle")
+        self._overlay.contact_style = style
+        return True
+
+    def get_contact_style(self) -> ContactStyle:
+        return self._overlay.contact_style
 
     def get_geometry_style(self) -> GeometryStyle:
         return self._geometry_style

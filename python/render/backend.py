@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
-from ..types import CameraView, GeometryStyle, ViewportImage
+from ..types import CameraView, ContactStyle, GeometryStyle, ViewportImage
 
 if TYPE_CHECKING:
     from mojive.interaction.gizmo import GizmoFrame
@@ -360,6 +360,14 @@ class RenderBackend(Protocol):
         """Set display-only collision color and Both-mode opacity."""
         ...
 
+    def set_contact_style(self, style: ContactStyle) -> bool:
+        """Set display-only contact marker shape, color, and size."""
+        ...
+
+    def get_contact_style(self) -> ContactStyle:
+        """Return the current contact marker style."""
+        ...
+
     def get_geometry_style(self) -> GeometryStyle:
         """Return the current geometry display style."""
         ...
@@ -510,6 +518,7 @@ class NullBackend:
         self._frame_mode = FrameMode.NONE
         self._shadow_quality = ShadowQuality.BALANCED
         self._geometry_style = GeometryStyle()
+        self._contact_style = ContactStyle()
 
     def set_scene(self, source) -> None: ...
     def update(self, frame) -> None: ...
@@ -552,6 +561,12 @@ class NullBackend:
 
     def set_geometry_style(self, style: GeometryStyle) -> bool:
         return False
+
+    def set_contact_style(self, style: ContactStyle) -> bool:
+        return False
+
+    def get_contact_style(self) -> ContactStyle:
+        return self._contact_style
 
     def get_geometry_style(self) -> GeometryStyle:
         return self._geometry_style

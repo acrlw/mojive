@@ -620,6 +620,8 @@ class DiagnosticSource:
     bvh_control_rgba: np.ndarray = field(
         default_factory=lambda: np.array([0.5, 0.5, 0.5, 1.0], np.float32)
     )
+    contact_point_radius: float = 0.01
+    contact_point_half_height: float = 0.005
 
 
 @dataclass

@@ -211,7 +211,7 @@ def test_mujoco_visuals_reach_the_gpu_pipeline(backend_name, request):
 
         assert backend.stats.instances > adapter.model.ngeom
         assert _tendon_pass(backend).capsule_count >= 2
-        assert backend.debug.layer("physics.contact.points").count_of(PrimitiveType.POINT) >= 1
+        assert backend.debug.layer("physics.contact.points").count_of(PrimitiveType.CYLINDER) >= 1
         assert backend.debug.layer("physics.contact.forces").count_of(PrimitiveType.ARROW) >= 1
         joints = backend.debug.layer("physics.joints")
         assert joints.count_of(PrimitiveType.BOX) == 1

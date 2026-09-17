@@ -23,7 +23,7 @@ from ..adapters.base import (
     SceneFrame,
     SceneSource,
 )
-from ..types import CameraView, LightType
+from ..types import CameraView, ContactStyle, LightType
 from .backend import FrameMode, LabelMode, RenderFlag
 from .debugdraw import DebugDraw, Occlusion
 
@@ -86,6 +86,8 @@ class OverlayPublisher:
         self._node_by_object_id = {}
         self._actuator_palette = np.zeros((0, 4), np.float32)
         self._contact_ends = np.zeros((0, 3), np.float32)
+        self._contact_transforms = np.zeros((0, 4, 4), np.float32)
+        self.contact_style = ContactStyle()
         self._tendon_label_sums = np.zeros((0, 3), np.float32)
         self._tendon_label_counts = np.zeros(0, np.int32)
 
@@ -134,9 +136,13 @@ class OverlayPublisher:
                 color = (
                     frame.contact_island_rgba
                     if self.get_flag(RenderFlag.ISLAND) and frame.contact_island_rgba is not None
-                    else contact_source.contact_point_rgba
+                    else (
+                        contact_source.contact_point_rgba
+                        if self.contact_style.use_model_color
+                        else self.contact_style.color
+                    )
                 )
-                points.points("contacts", contacts[:, :3], color, 4.0)
+                self._contact_markers(points, contacts, color)
             else:
                 points.erase("contacts")
             if self.get_flag(RenderFlag.CONTACTFORCE):
@@ -189,6 +195,43 @@ class OverlayPublisher:
                     )
             else:
                 forces.clear()
+
+    def _contact_markers(self, layer, contacts: np.ndarray, color) -> None:
+        style = self.contact_style
+        if style.shape == "point":
+            layer.points("contacts", contacts[:, :3], color, 4.0 * style.scale)
+            return
+        count = len(contacts)
+        if count > len(self._contact_transforms):
+            capacity = max(count, 2 * len(self._contact_transforms), 64)
+            self._contact_transforms = np.zeros((capacity, 4, 4), np.float32)
+        matrices = self._contact_transforms[:count]
+        matrices.fill(0)
+        matrices[:, 3, 3] = 1
+        matrices[:, :3, 3] = contacts[:, :3]
+        radius = self._source.diagnostics.contact_point_radius * style.scale
+        if style.shape == "sphere":
+            matrices[:, 0, 0] = matrices[:, 1, 1] = matrices[:, 2, 2] = radius
+            layer.spheres("contacts", matrices, color)
+            return
+        # MuJoCo's contact cylinder has its local Z axis along the contact normal.
+        # Batch the basis and retain transform storage as contact counts change.
+        x, y, z = (matrices[:, :3, axis] for axis in range(3))
+        z[:] = contacts[:, 3:6]
+        lengths = np.linalg.norm(z, axis=1)
+        valid = lengths > 1e-12
+        np.divide(z, lengths[:, None], out=z, where=valid[:, None])
+        z[~valid] = (0, 0, 1)
+        use_y = np.abs(z[:, 0]) > 0.9
+        x[:, 0] = np.where(use_y, z[:, 2], 0)
+        x[:, 1] = np.where(use_y, 0, -z[:, 2])
+        x[:, 2] = np.where(use_y, -z[:, 0], z[:, 1])
+        x /= np.linalg.norm(x, axis=1)[:, None]
+        y[:] = np.cross(z, x)
+        x *= radius
+        y *= radius
+        z *= self._source.diagnostics.contact_point_half_height * style.scale
+        layer.cylinders("contacts", matrices, color)
 
     def _publish_flex_debug(self, frame: SceneFrame) -> None:
         vertices = frame.flex_vertices

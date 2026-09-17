@@ -8,6 +8,7 @@ from imgui_bundle import imgui
 
 from mojive.capture import CaptureSurface
 from mojive.config import CAMERA_FOCUS_EASINGS, CAMERA_NAVIGATION_RANGES, CameraNavigationConfig
+from mojive.types import ContactStyle
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds
@@ -121,7 +122,7 @@ _CATEGORY_SEARCH_TERMS = {
     "MuJoCo Visuals": (
         "visual groups bvh depth geometry both collision color opacity",
         "mjt rnd flag shadow wireframe reflection additive skybox fog haze cull face",
-        "mjt vis flag joint actuator camera light contact force split inertia bvh",
+        "mjt vis flag joint actuator camera light contact force split inertia bvh contact color shape sphere cylinder point 接触点 颜色 样式 球 圆柱",
     ),
 }
 
@@ -1082,6 +1083,7 @@ class SettingsPanel(Panel):
         imgui.text(ctx.tr("Geometry view"))
         draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme)
         self._geometry_style(ctx)
+        self._contact_style(ctx)
         self._visual_groups(ctx)
         self._bvh_depth(ctx)
 
@@ -1095,6 +1097,55 @@ class SettingsPanel(Panel):
         if self._message:
             imgui.separator()
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._message)
+
+    def _contact_style(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        if not imgui.collapsing_header(
+            f"{t('Contact points')}###contact_style", imgui.TreeNodeFlags_.default_open
+        ):
+            return
+        style = ctx.backend.get_contact_style()
+        if self._begin_properties("contact_style_properties"):
+            self._property(t("Show contact points"))
+            changed, enabled = themed_checkbox(
+                "##contact_enabled", ctx.backend.get_flag(RenderFlag.CONTACTPOINT), ctx.theme
+            )
+            if changed:
+                ctx.backend.set_flag(RenderFlag.CONTACTPOINT, enabled)
+            self._property(t("Shape"))
+            if imgui.begin_combo("##contact_shape", style.shape.title()):
+                for shape in ("cylinder", "sphere", "point"):
+                    if imgui.selectable(shape.title(), style.shape == shape)[0]:
+                        style = replace(style, shape=shape)
+                imgui.end_combo()
+            self._property(t("Use model color"))
+            changed, use_model_color = themed_checkbox(
+                "##contact_model_color", style.use_model_color, ctx.theme
+            )
+            if changed:
+                style = replace(style, use_model_color=use_model_color)
+            self._property(t("Color"))
+            imgui.begin_disabled(style.use_model_color)
+            changed, color = imgui.color_edit4("##contact_color", style.color)
+            imgui.end_disabled()
+            if changed:
+                style = replace(style, color=tuple(color))
+            imgui.set_item_tooltip(t("Island visualization overrides contact colors."))
+            self._property(t("Size"))
+            changed, scale = imgui.slider_float(
+                "##contact_scale", style.scale, 0.1, 10, "%.2fx", imgui.SliderFlags_.always_clamp
+            )
+            if changed:
+                try:
+                    style = replace(style, scale=scale)
+                except ValueError as error:
+                    ctx.report(str(error))
+            imgui.end_table()
+        if imgui.button(t("Reset contact style")):
+            style = ContactStyle()
+        if style != ctx.backend.get_contact_style():
+            setter = ctx.set_contact_style or ctx.backend.set_contact_style
+            setter(style)
 
     def _geometry_style(self, ctx: PanelContext) -> None:
         if not imgui.collapsing_header(

@@ -30,7 +30,7 @@ from mojive.render.backend import FrameMode, LabelMode, RenderFlag, ShadowQualit
 from mojive.scene.queries import node_world_pose
 from mojive.scene.workspace import MissingResource
 from mojive.session.model_edits import ModelEditDraft, model_edit_scope
-from mojive.types import GeometryStyle, ViewportImage
+from mojive.types import ContactStyle, GeometryStyle, ViewportImage
 from mojive.ui import gestures as gs
 from mojive.ui.camera import (
     CameraOut,
@@ -193,6 +193,13 @@ class ViewerApp(
             except (TypeError, ValueError):
                 geometry_style = GeometryStyle()
         self.backend.set_geometry_style(geometry_style)
+        contact_style = viewer_config.contact_style
+        if contact_style is None:
+            try:
+                contact_style = ContactStyle(**self.localizer.preference("contact_style", {}))
+            except (TypeError, ValueError):
+                contact_style = ContactStyle()
+        self.backend.set_contact_style(contact_style)
         requested_shadow_quality = (
             viewer_config.shadow_quality
             if viewer_config.shadow_quality is not None
@@ -384,6 +391,13 @@ class ViewerApp(
     def set_language(self, language: str) -> None:
         self.localizer.set_language(language)
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
+
+    def set_contact_style(self, style: ContactStyle, *, persist: bool = True) -> bool:
+        if not self.backend.set_contact_style(style):
+            return False
+        if persist:
+            self.localizer.set_preferences({"contact_style": asdict(style)})
+        return True
 
     def set_geometry_style(self, style: GeometryStyle, *, persist: bool = True) -> bool:
         if not self.backend.set_geometry_style(style):
@@ -1075,6 +1089,7 @@ class ViewerApp(
             set_language=self.set_language,
             set_shadow_quality=self.set_shadow_quality,
             set_geometry_style=self.set_geometry_style,
+            set_contact_style=self.set_contact_style,
             interactions=self.interactions,
             set_interactions=self.set_interactions,
             selection_style=self.selection_style,
