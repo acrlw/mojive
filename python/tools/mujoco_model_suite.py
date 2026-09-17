@@ -525,7 +525,7 @@ def _parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="+", type=Path, help="model directories or MJCF/URDF files")
-    parser.add_argument("--backend", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--backend", choices=("opengl", "bgfx"), default="opengl")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--camera-count", type=int, default=len(_CAMERA_POSES))
     parser.add_argument("--width", type=int, default=240)

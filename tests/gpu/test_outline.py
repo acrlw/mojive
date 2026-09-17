@@ -5,11 +5,8 @@ GL-internals outline tests live in test_id_outline.py (opengl only).  Scene
 setup follows test_id_outline.py: an orthographic camera looking straight at
 Z=0 boxes so silhouettes map to axis-aligned rectangles.
 
-Tolerances account for the deliberate mask difference: opengl rasterizes the
-selection mask into 4x MSAA (subpixel coverage), the wgpu backend uses a
-single-sampled mask (see webgpu/shaders/outline.wgsl).  Both backends
-antialias the ring's outer edge in the dilation shader, so only the ring's
-exact outer pixel counts may differ by a hair.
+Tolerances account for differences in selection-mask rasterization and
+antialiasing between the two backends.
 """
 
 from __future__ import annotations
@@ -112,10 +109,6 @@ def _make_backend(backend_name: str, request, samples: int = 4):
         from mojive.render.native.backend import NativeBackend
 
         return NativeBackend(W, H, samples=samples)
-    if backend_name == "wgpu":
-        from mojive.render.webgpu.backend import WgpuBackend
-
-        return WgpuBackend(W, H, samples=samples)
     from mojive.render.opengl import passes
     from mojive.render.opengl.backend import OpenGLBackend
 
@@ -132,10 +125,7 @@ def rig(backend_name, request):
 
 def _set_outline_color(backend, rgba) -> None:
     """Outline color lives on the pass in both backends (no public API)."""
-    if backend.caps.name == "wgpu":
-        backend._outline.color = rgba
-    else:
-        backend._passes["outline"].color = rgba
+    backend._passes["outline"].color = rgba
 
 
 def _box(center_x=0.0, half=(0.35, 0.35, 0.1), occluder=False):

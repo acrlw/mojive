@@ -37,13 +37,12 @@ class OffscreenHarness:
         configure_adapter: Callable[[object], None] | None = None,
     ) -> None:
         renderer = render_backend_name()
-        use_wgpu = renderer == "wgpu"
         use_native = renderer == "bgfx"
 
-        # The wgpu backend owns its device and needs no GL context or window.
+        # The native backend owns its device and needs no GL context or window.
         self._glfw = None
         self.window = None
-        if not (use_wgpu or use_native):
+        if not use_native:
             import glfw
 
             self._glfw = glfw
@@ -75,10 +74,6 @@ class OffscreenHarness:
             from ..render.native.backend import NativeBackend
 
             self.backend = NativeBackend(width=width, height=height, samples=samples)
-        elif use_wgpu:
-            from ..render.webgpu.backend import WgpuBackend
-
-            self.backend = WgpuBackend(width=width, height=height, samples=samples)
         else:
             self.backend = OpenGLBackend(None, width, height, samples)
         self.builder = SceneSourceBuilder()

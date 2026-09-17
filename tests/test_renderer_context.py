@@ -162,6 +162,6 @@ def test_macos_worker_context_fails_before_glfw_initialization(monkeypatch):
     monkeypatch.setattr(context.sys, "platform", "darwin")
     with (
         ThreadPoolExecutor(max_workers=1) as pool,
-        pytest.raises(RuntimeError, match="MOJIVE_RENDERER=wgpu"),
+        pytest.raises(RuntimeError, match="MOJIVE_RENDERER=bgfx"),
     ):
         pool.submit(context._GLFWContext, 64, 48).result()

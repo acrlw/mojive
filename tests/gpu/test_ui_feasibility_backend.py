@@ -16,7 +16,7 @@ from mojive.ui.window import WindowConfig
 
 pytestmark = pytest.mark.gpu
 OUTPUT = Path(__file__).resolve().parents[2] / "output/canvas2d/ui-regression"
-WINDOW_TYPES = {"opengl": "Window", "wgpu": "WgpuWindow", "bgfx": "NativeWindow"}
+WINDOW_TYPES = {"opengl": "Window", "bgfx": "NativeWindow"}
 
 
 @pytest.mark.parametrize("scale", (1.0, 1.5))

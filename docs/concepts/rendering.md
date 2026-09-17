@@ -3,7 +3,7 @@
 ## Public entry points
 
 `SceneRenderer` renders backend-neutral scene data. `Renderer` provides the MuJoCo-compatible
-`update_scene(data)` interface. Both accept `renderer="opengl"`, `"wgpu"`, or `"bgfx"`.
+`update_scene(data)` interface. Both accept `renderer="opengl"` or `"bgfx"`.
 Explicit selection overrides `MOJIVE_RENDERER`; `MOJIVE_BACKEND` is a legacy fallback.
 Interactive builders use the same selection policy. Scene adapters are selected independently.
 
@@ -41,10 +41,10 @@ array with the exact shape and dtype, including strided destinations. `resize()`
 dimensions and camera aspect.
 
 `render_async()` returns a `concurrent.futures.Future`. Retain exclusive access to a supplied
-`out` array until completion. OpenGL currently returns a completed future; wgpu and bgfx use
-bounded asynchronous readback. WebGPU drains pending work during target changes. Native bgfx
-cancels outstanding results on resize or scene replacement, retaining staging storage until the
-GPU finishes. Handle future errors and backpressure explicitly; asynchronous output is not
+`out` array until completion. OpenGL currently returns a completed future; native bgfx uses
+bounded asynchronous readback and cancels outstanding results on resize or scene replacement,
+retaining staging storage until the GPU finishes. Handle future errors and backpressure explicitly;
+asynchronous output is not
 unbounded storage or a multi-world rendering API.
 
 ## Pipeline and ownership
@@ -65,7 +65,7 @@ skybox / tendons / transparency / debug / outline / gizmo
 presentation or image readback
 ```
 
-`python/render/` owns shared contracts and preparation. `opengl/`, `webgpu/` and `native/` own
+`python/render/` owns shared contracts and preparation. `opengl/` and `native/` own
 backend implementations; `cpp/src/` contains native resources and GPU submission. Render modules
 consume scene contracts, without depending on UI panels or a physics implementation.
 
@@ -81,16 +81,18 @@ readback is requested by capture, recording and explicit image consumers.
 
 ## Backend differences
 
+OpenGL is the default for fast application and interaction validation. bgfx is the native
+rendering path; both backends implement the same public scene and image contracts.
+
 | Backend | Implementation | Setup |
 |---|---|---|
 | OpenGL | Python/ModernGL, OpenGL 3.3+ core | Default after `make setup` |
-| wgpu | Python WebGPU, Metal/Vulkan/DX12 | `wgpu` extra, included by `make setup` |
 | bgfx | Private C++ runtime, platform graphics API | [Native backend build](../how-to/native-viewer.md) |
 
 OpenGL can use shared multisampled color/ID attachments when supported, or separate targets when
 integer MSAA is unavailable. On drivers limited to one-pixel native lines, wide lines expand to
-triangles. WebGPU uses export passes for data products, barycentric wireframe and plane-discard
-reflection clipping. Backend-specific details stay behind the shared image contracts.
+triangles. Native bgfx uses typed export targets for data products. Backend-specific details
+stay behind the shared image contracts.
 
 Mojive-authored scenes shade in linear light and encode for display after tone mapping.
 MuJoCo sources select `mujoco-classic` shading to preserve their display-domain lighting model.

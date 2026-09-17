@@ -20,7 +20,7 @@ including the current padding, stroke, alignment, and shape overrides.
 make ui-feasibility BACKEND=bgfx ARGS="--ui-scale 1.5 --page geometry --geometry-tab icons"
 ```
 
-Use `BACKEND=opengl` or `BACKEND=wgpu` for the other renderers. Direct module invocations accept
+Use `BACKEND=opengl` for the OpenGL path. Direct module invocations accept
 `--renderer`; otherwise they use `MOJIVE_RENDERER`, then OpenGL. Captures use the selected
 window's framebuffer. Use `make ui-icon-concepts` for multi-size icon captures.
 
@@ -41,7 +41,7 @@ The tool can also be run as `python -m mojive.tools.ui_feasibility`.
 | Add reusable corners, arrows, or stroke caps | `mojive.geometry2d.curves` | Pure geometry, sampling, local shape caches |
 | Change hollow-origin connectors | `mojive.geometry2d.drag_link` | Shared implicit field and indexed CPU mesh |
 | Publish retained diagnostics | `mojive.render.debugdraw.Layer` | IDs, lifetime, primitive budgets and packing |
-| Implement a new GPU primitive | `render/opengl/passes/debug.py`, `render/webgpu/passes/debug.py`, and the native debug pass | Matching packed layout and shaders |
+| Implement a new GPU primitive | `render/opengl/passes/debug.py` and the native debug pass | Matching packed layout and shaders |
 | Change gizmo interaction or hit regions | `mojive.ui.gizmo` and `mojive.interaction.gizmo` | Interaction state and projected handles |
 | Change native ImGui colors, radii, or spacing | `mojive.ui.theme` | Standard ImGui style settings |
 | Maintain bulk drawing bindings or slider/focus fixes | `python/tools/build_imgui.py` | Minimal source patch and platform wheel build |
@@ -168,8 +168,7 @@ support is source/backend-level, not a portable public shader-plugin API:
 | Backend | Existing mechanism | Boundary |
 | --- | --- | --- |
 | OpenGL | `OpenGLBackend(shader_dir=...)`, `ProgramSpec`/`ProgramCache`, fixed-slot pass factories, shader hot reload | Backend-level GLSL integration; `register_pass` rejects new names such as `bloom` and is process-global |
-| WebGPU | WGSL pass implementations and shader hot reload | Fixed backend source locations and pipeline layouts; no public custom-pass registration |
-| bgfx | Compiled shader programs and asynchronous hot reload | Native program layouts and shader build targets must match; not runtime GLSL/WGSL insertion |
+| bgfx | Compiled shader programs and asynchronous hot reload | Native program layouts and shader build targets must match; not runtime shader-source insertion |
 
 `viewer.backend.enable_hot_reload(True)` enables the existing backend reload mechanism;
 it does not create a new material type or insert a render pass. See
@@ -177,7 +176,7 @@ it does not create a new material type or insert a render pass. See
 OpenGL's alternate shader directory is not a `ViewerConfig` option and must contain the
 sources/includes expected by the selected passes. Replacing a built-in pass also entails its
 resource, depth, object-ID, capture, and release contracts. A GLSL implementation does not
-automatically work with WGSL or native bgfx programs.
+automatically work with native bgfx programs.
 
 A future public shader extension would need explicit insertion points, uniform/texture and
 render-product contracts, input ownership, and failure-safe reload/release behavior. Those

@@ -169,7 +169,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--renderer",
-        choices=("opengl", "wgpu", "bgfx"),
+        choices=("opengl", "bgfx"),
         default=None,
         help="Window renderer; defaults to MOJIVE_RENDERER or OpenGL",
     )

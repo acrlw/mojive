@@ -13,7 +13,7 @@ def main():
     parser.add_argument(
         "--model", type=Path, default=Path(__file__).resolve().parents[1] / "assets/joint_types.xml"
     )
-    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
     args = parser.parse_args()
     model = mujoco.MjModel.from_xml_path(str(args.model))
     data = mujoco.MjData(model)

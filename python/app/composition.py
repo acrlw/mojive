@@ -549,7 +549,7 @@ def build(
             cannot take ownership of an external clock.
         backend_name: Legacy positional alias for ``adapter_name``.
         adapter_name: Scene adapter name, such as ``"mujoco"`` (the default).
-        renderer: ``"opengl"`` or ``"wgpu"``; defaults to environment settings.
+        renderer: ``"opengl"`` or ``"bgfx"``; defaults to environment settings.
         paused: Start physics in the paused state.
         vsync: Synchronize presentation to the display.
         width: Initial logical window width.
@@ -744,10 +744,6 @@ def _compose(
             from mojive.render.native.backend import NativeBackend
 
             backend = NativeBackend(fb_w, fb_h, samples)
-        elif renderer == "wgpu":
-            from mojive.render.webgpu.backend import WgpuBackend
-
-            backend = WgpuBackend(fb_w, fb_h, samples, device=window.device)
         else:
             from mojive.render.opengl.backend import OpenGLBackend
 
@@ -811,9 +807,9 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
     try:
         viewer = build(asset, backend_name, paused=False, vsync=False, width=960, height=720)
         caps = viewer.backend.caps
-        is_wgpu = caps.name == "wgpu"
+        is_opengl = caps.name == "opengl"
 
-        if is_wgpu:
+        if not is_opengl:
             checks.append(("GPU device", True, caps.renderer))
         else:
             gl = viewer.backend.gl_caps
@@ -847,8 +843,8 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
             )
         )
         if last_image is not None:
-            # WebGPU color targets are top-row-first; the GL resolve texture is not.
-            expect_flip = not is_wgpu
+            # Native targets are top-row-first; the GL resolve texture is not.
+            expect_flip = is_opengl
             checks.append(
                 ("flip_y", last_image.flip_y is expect_flip, f"flip_y={last_image.flip_y}")
             )
@@ -865,7 +861,7 @@ def doctor(asset: Path, backend_name: str = "mujoco", frames: int = 90) -> dict:
         f = viewer.session.frame
         checks.append(("simulation step", f.step > 0, f"step={f.step} time={f.time:.3f}s"))
 
-        if not is_wgpu:
+        if is_opengl:
             from mojive.render.opengl import gl_native as G
 
             err = G.native().drain_errors()

@@ -57,7 +57,7 @@ def capture(backend, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--backend", choices=("opengl", "bgfx"), default="opengl")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     print(

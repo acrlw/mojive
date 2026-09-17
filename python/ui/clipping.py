@@ -14,8 +14,8 @@ def scissor_rect_for_target(
 
     A native resize may land after ImGui generated draw data but before the
     command encoder is finished. In that frame, draw-space and target-space
-    dimensions differ; WGPU requires every scissor rectangle to remain inside
-    the attachment that is actually being encoded.
+    dimensions differ; keep every scissor rectangle inside the attachment
+    that is actually being encoded.
     """
 
     draw_w, draw_h = draw_size

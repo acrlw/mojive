@@ -115,32 +115,6 @@ def test_opengl_render_plan_prunes_unrequested_products():
     assert "id" not in combined.passes
 
 
-def test_wgpu_render_plan_separates_scene_and_export_workloads():
-    from mojive.render.backend import DebugView, RenderProduct, RenderRequest
-    from mojive.render.webgpu.backend import compile_render_plan
-
-    viewport = compile_render_plan(None)
-    assert viewport.color and viewport.export_identity and viewport.export
-    assert not viewport.export_depth
-
-    color = compile_render_plan(RenderRequest.color())
-    assert color.color and not color.export
-
-    debug_ids = compile_render_plan(RenderRequest.color(), DebugView.IDCOLOR)
-    assert debug_ids.color and debug_ids.export_identity
-
-    depth = compile_render_plan(RenderRequest.metric_depth())
-    assert not depth.color and depth.export_depth and depth.export
-
-    segmentation = compile_render_plan(RenderRequest.segmentation())
-    assert not segmentation.color and segmentation.export_identity and segmentation.export
-
-    combined = compile_render_plan(
-        RenderRequest(RenderProduct.COLOR | RenderProduct.METRIC_DEPTH | RenderProduct.SEGMENTATION)
-    )
-    assert combined.color and combined.export_depth and combined.export_identity
-
-
 def test_debug_outputs_are_not_exposed_as_independent_render_flags():
     from mojive.render.backend import DebugView, RenderFlag
 
@@ -442,7 +416,7 @@ import sys
 from importlib.abc import MetaPathFinder
 class BlockRuntime(MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {{'imgui_bundle', 'glfw', 'moderngl', 'mujoco', 'wgpu'}}:
+        if fullname.split('.')[0] in {{'imgui_bundle', 'glfw', 'moderngl', 'mujoco'}}:
             raise AssertionError('Unexpected runtime dependency: ' + fullname)
 sys.meta_path.insert(0, BlockRuntime())
 {imports}

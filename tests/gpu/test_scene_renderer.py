@@ -11,12 +11,11 @@ from mojive.adapters.static import StaticSceneAdapter
 pytestmark = pytest.mark.gpu
 
 
-@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
-def test_authored_scene_outputs_follow_pose_and_structure(backend):
+def test_authored_scene_outputs_follow_pose_and_structure(backend_name):
     scene = Scene()
     box = scene.box(color=(1, 0, 0, 1))
     adapter = StaticSceneAdapter(scene)
-    with SceneRenderer(width=96, height=72, samples=0, renderer=backend) as renderer:
+    with SceneRenderer(width=96, height=72, samples=0, renderer=backend_name) as renderer:
         renderer.update_from(adapter)
         rgb = renderer.render()
         assert rgb.shape == (72, 96, 3) and rgb.dtype == np.uint8
@@ -48,15 +47,16 @@ def test_authored_scene_outputs_follow_pose_and_structure(backend):
     renderer.close()
 
 
-@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
-def test_independent_renderers_can_alternate_without_losing_context(backend):
+def test_independent_renderers_can_alternate_without_losing_context(backend_name):
     red, green = Scene(), Scene()
     red.box(color=(1, 0, 0, 1))
     green.box(color=(0, 1, 0, 1))
-    with SceneRenderer(red.source, width=64, height=48, samples=0, renderer=backend) as a:
+    with SceneRenderer(red.source, width=64, height=48, samples=0, renderer=backend_name) as a:
         a.update(red.frame)
         expected = a.render()
-        with SceneRenderer(green.source, width=64, height=48, samples=0, renderer=backend) as b:
+        with SceneRenderer(
+            green.source, width=64, height=48, samples=0, renderer=backend_name
+        ) as b:
             b.update(green.frame)
             other = b.render()
             assert other[24, 32, 1] > other[24, 32, 0]
@@ -65,11 +65,10 @@ def test_independent_renderers_can_alternate_without_losing_context(backend):
         np.testing.assert_array_equal(a.render(), expected)
 
 
-@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
-def test_public_debug_layer_renders_without_editor_and_clears_by_id(backend):
+def test_public_debug_layer_renders_without_editor_and_clears_by_id(backend_name):
     from mojive import Occlusion
 
-    with SceneRenderer(width=96, height=72, samples=0, renderer=backend) as renderer:
+    with SceneRenderer(width=96, height=72, samples=0, renderer=backend_name) as renderer:
         before = renderer.render().copy()
         layer = renderer.debug.layer("measurement", Occlusion.ALWAYS)
         layer.line("length", (0, -1, 0), (0, 1, 0), (0, 1, 0, 1), 5)
@@ -82,14 +81,13 @@ def test_public_debug_layer_renders_without_editor_and_clears_by_id(backend):
         _ = renderer.debug
 
 
-@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
-def test_shared_material_color_and_instance_override_reach_offscreen_pixels(backend):
+def test_shared_material_color_and_instance_override_reach_offscreen_pixels(backend_name):
     from mojive.types import Material
 
     scene = Scene()
     box = scene.box(material=Material(rgba=np.array((1, 0, 0, 1), np.float32)))
     adapter = StaticSceneAdapter(scene)
-    with SceneRenderer(width=96, height=72, samples=0, renderer=backend) as renderer:
+    with SceneRenderer(width=96, height=72, samples=0, renderer=backend_name) as renderer:
         renderer.update_from(adapter)
         red = renderer.render()[36, 48].copy()
         assert red[0] > red[2] + 30

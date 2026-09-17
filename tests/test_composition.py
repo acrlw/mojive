@@ -256,12 +256,12 @@ def test_explicit_adapter_and_renderer_selection_reaches_composition(monkeypatch
 
     def compose(factory, **kwargs):
         assert factory() is sentinel
-        assert kwargs["renderer"] == "wgpu"
+        assert kwargs["renderer"] == "bgfx"
         return sentinel
 
     monkeypatch.setattr(composition, "_compose", compose)
     path = tmp_path / "scene.xml"
-    assert composition.build(path, adapter_name="toy", renderer="wgpu") is sentinel
+    assert composition.build(path, adapter_name="toy", renderer="bgfx") is sentinel
     assert calls == [("toy", path)]
     with pytest.raises(ValueError, match="conflicts"):
         composition.build(path, "mujoco", adapter_name="toy")
@@ -270,11 +270,22 @@ def test_explicit_adapter_and_renderer_selection_reaches_composition(monkeypatch
 def test_renderer_selection_prefers_explicit_then_named_then_legacy_environment(monkeypatch):
     from mojive.render.selection import render_backend_name
 
-    monkeypatch.setenv("MOJIVE_BACKEND", "wgpu")
+    monkeypatch.setenv("MOJIVE_BACKEND", "bgfx")
     monkeypatch.delenv("MOJIVE_RENDERER", raising=False)
-    assert render_backend_name() == "wgpu"
+    assert render_backend_name() == "bgfx"
     monkeypatch.setenv("MOJIVE_RENDERER", "opengl")
     assert render_backend_name() == "opengl"
-    assert render_backend_name("webgpu") == "wgpu"
+    assert render_backend_name("bgfx") == "bgfx"
     with pytest.raises(ValueError, match="Unsupported renderer"):
         render_backend_name("missing")
+
+
+@pytest.mark.parametrize("renderer", ["wgpu", "webgpu"])
+def test_retired_renderer_is_rejected_for_explicit_and_environment_selection(monkeypatch, renderer):
+    from mojive.render.selection import render_backend_name
+
+    monkeypatch.setenv("MOJIVE_RENDERER", renderer)
+    with pytest.raises(ValueError, match="expected 'opengl' or 'bgfx'"):
+        render_backend_name()
+    with pytest.raises(ValueError, match="Unsupported renderer"):
+        render_backend_name(renderer)

@@ -1,4 +1,4 @@
-"""Matched native/OpenGL/WebGPU product captures and numerical acceptance."""
+"""Matched native/OpenGL product captures and numerical acceptance."""
 
 from __future__ import annotations
 
@@ -332,7 +332,7 @@ def run(output, selected="", check=False):
         directory.mkdir(parents=True, exist_ok=True)
         captures = {}
         baselines = {}
-        for backend in ("opengl", "wgpu", "bgfx"):
+        for backend in ("opengl", "bgfx"):
             with SceneRenderer(
                 source, width=320, height=240, samples=0, renderer=backend, camera=camera
             ) as renderer:
@@ -394,7 +394,7 @@ def run(output, selected="", check=False):
             backend: compare(
                 captures["opengl"], captures[backend], infinite_ground="horizon" in name
             )
-            for backend in ("wgpu", "bgfx")
+            for backend in ("bgfx",)
         }
         if "horizon" in name:
             for backend, result in metrics.items():
@@ -415,7 +415,7 @@ def run(output, selected="", check=False):
                 )
         report[name] = metrics
         comparison = np.concatenate(
-            [captures[backend][RenderProduct.COLOR] for backend in ("opengl", "wgpu", "bgfx")],
+            [captures[backend][RenderProduct.COLOR] for backend in ("opengl", "bgfx")],
             axis=1,
         )
         Image.fromarray(comparison).save(directory / "comparison.png")

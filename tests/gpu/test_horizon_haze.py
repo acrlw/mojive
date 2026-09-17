@@ -187,7 +187,7 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
 
         target = viewer.backend.target.read_color(flip=True)
         # The capture API reads before buffer swap. GL_BACK after sync can still
-        # hold the previous frame, unlike WebGPU's retained presentation texture.
+        # hold the previous frame.
         window = np.asarray(Image.open(capture).convert("RGB"))
         x, y, width, height = viewer.window.points_to_pixels(viewer.app._viewport_rect)
         x0, y0, x1, y1 = map(round, (x, y, x + width, y + height))

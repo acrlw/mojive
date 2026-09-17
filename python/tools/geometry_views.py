@@ -78,7 +78,7 @@ def capture(output: Path, backend: str) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("output/geometry-views"))
-    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
     args = parser.parse_args()
     print(json.dumps(capture(args.output, args.renderer), indent=2))
     return 0

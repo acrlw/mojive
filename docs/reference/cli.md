@@ -12,15 +12,15 @@ status 0; diagnostic acceptance failures can exit with status 1. Interrupts exit
 
 Mojive has two independent backend choices:
 
-- `MOJIVE_RENDERER=opengl|wgpu|bgfx` selects the renderer. OpenGL is the default;
+- `MOJIVE_RENDERER=opengl|bgfx` selects the renderer. OpenGL is the default;
   `MOJIVE_BACKEND` remains a compatible fallback.
 - `--adapter` on model commands selects the scene/physics adapter. The default is `mujoco`;
   `-b/--backend` remain compatible aliases.
 
-For example, this loads a MuJoCo model through the MuJoCo adapter and renders it through wgpu:
+For example, this loads a MuJoCo model through the MuJoCo adapter and renders it through bgfx:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive view test_scene --adapter mujoco
+MOJIVE_RENDERER=bgfx uv run --no-sync mojive view test_scene --adapter mujoco
 ```
 
 Asset arguments accept a filesystem path or a bundled asset name. The extension is optional for
@@ -256,8 +256,9 @@ The default socket is `$XDG_RUNTIME_DIR/mojive/control.sock`. Without `XDG_RUNTI
 it is `mojive-<uid>/control.sock` under the system temporary directory. Viewer `--rpc-socket`
 without a path uses this same default; omit the flag to leave viewer RPC disabled.
 
-On macOS, start the service with `MOJIVE_RENDERER=wgpu` when using `capture`; RPC requests run on
+On macOS, start the service with `MOJIVE_RENDERER=bgfx` when using `capture`; RPC requests run on
 worker threads and the platform OpenGL context path is main-thread-only. Linux can use OpenGL.
+The bgfx selection requires the [native runtime and shaders](../how-to/native-viewer.md).
 
 ### `control`
 

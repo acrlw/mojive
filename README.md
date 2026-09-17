@@ -9,7 +9,7 @@
 
 Mojive stands for **Mo**del/**J**oint **I**nteractive **V**iewer & **E**ditor.
 It supports MJCF and URDF models, scenes created in Python, custom simulations, and remote streams.
-Rendering uses OpenGL, WebGPU (`wgpu`), or bgfx. The choice of renderer does not depend on the
+Rendering uses OpenGL or bgfx. The choice of renderer does not depend on the
 physics adapter.
 
 - **Scene editing:** model composition, geometry, materials, lights, cameras, Undo/Redo, and MJCF export.
@@ -54,10 +54,11 @@ See [installation](docs/getting-started.md) for dependency details.
 
 ## Render backends
 
-OpenGL is the default. To use another renderer:
+Mainline maintains two renderers: OpenGL is the default for fast application and interaction
+validation; bgfx provides native rendering. Both use the same scene, editor, and capture APIs.
+To run bgfx:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive view joint_types
 make native-viewer SCENE=joint_types
 ```
 
@@ -68,6 +69,9 @@ See [native backend setup](docs/how-to/native-viewer.md) for `MOJIVE_RENDERER=bg
 On Linux, offscreen OpenGL rendering uses EGL and requires a GPU driver and EGL installation.
 Set `MOJIVE_GL=egl` to disable fallback to a hidden GLFW window, which requires a desktop session.
 See [backend requirements](docs/reference/configuration.md#render-backend-requirements).
+
+The previous wgpu implementation, documentation, and skill are preserved on
+[`archive/wgpu-backend`](https://github.com/acrlw/mojive/tree/archive/wgpu-backend).
 
 ## Editor
 

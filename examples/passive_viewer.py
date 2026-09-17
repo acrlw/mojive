@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument("--physics-hz", type=float, default=1000)
     parser.add_argument("--display-fps", type=float, default=60)
     parser.add_argument("--seconds", type=float, default=3)
-    parser.add_argument("--renderer", choices=("opengl", "wgpu"))
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"))
     parser.add_argument("--hidden", action="store_true")
     parser.add_argument("--record", action="store_true", help="Record live video during simulation")
     parser.add_argument("--width", type=int, default=1600)

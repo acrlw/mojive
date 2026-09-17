@@ -3,7 +3,7 @@
 Split of ``render.opengl.text``: the PIL atlas building (JetBrains Mono primary
 with a CJK fallback for codepoints >= U+2E80) and the per-frame glyph record
 layout are pure CPU work shared by both render backends.  GPU upload and draw
-stay per-backend (``render.opengl.text.TextRenderer`` and the webgpu debug
+stay per-backend (``render.opengl.text.TextRenderer`` and the native debug
 pass); both consume the same 17-float records:
 
     anchor(3) offset_px(2) rect(4) uv_rect(4) color(4)

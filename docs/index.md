@@ -4,7 +4,7 @@
 
 Mojive is a backend-neutral 3D viewer, editor, and renderer for robotics and simulation.
 It supports MJCF and URDF models, scenes created in Python, custom simulations, remote streams,
-and recordings. Rendering uses OpenGL, WebGPU (`wgpu`), or bgfx, independently of the physics adapter.
+and recordings. Rendering uses OpenGL or bgfx, independently of the physics adapter.
 
 ## User guide
 

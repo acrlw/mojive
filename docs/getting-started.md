@@ -13,7 +13,6 @@ make setup
 Optional dependencies are grouped into the following extras:
 
 - `mujoco` loads MJCF/URDF, runs simulation, and enables the compatible `Renderer` API;
-- `wgpu` enables the Metal/Vulkan/DX12 render backend;
 - `dev` installs pytest and Ruff; and
 - `docs` installs the documentation build tools.
 
@@ -77,11 +76,11 @@ The viewer starts paused by default. Pass `--play` to start simulation immediate
 
 ## Choose a render backend
 
-OpenGL is the default. The same scene can use any installed renderer:
+OpenGL is the default for fast scene and editor validation; bgfx provides native rendering.
+The same scene works with either renderer:
 
 ```bash
 MOJIVE_RENDERER=opengl uv run --no-sync mojive view joint_types
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive view joint_types
 make native-viewer SCENE=joint_types
 ```
 
@@ -94,7 +93,6 @@ To check that a renderer can create a window and render frames:
 
 ```bash
 uv run --no-sync mojive doctor joint_types
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive doctor joint_types
 ```
 
 ## Configure the UI
@@ -135,7 +133,7 @@ with Renderer(model, width=640, height=480) as renderer:
 ```
 
 See the [MuJoCo rendering tutorial](tutorials/mujoco-rendering.md) for metric depth,
-segmentation, multiple cameras, and wgpu.
+segmentation, multiple cameras, and renderer selection.
 
 ## Run a headless check
 

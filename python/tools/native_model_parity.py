@@ -25,7 +25,7 @@ def run(output, humanoids=None):
     output.mkdir(parents=True, exist_ok=True)
     for path in paths:
         captures = {}
-        for backend in ("opengl", "wgpu", "bgfx"):
+        for backend in ("opengl", "bgfx"):
             adapter = make_adapter("mujoco", path)
             try:
                 needs = FrameNeeds(poses=True, deformables=True, tendons=True)
@@ -103,7 +103,7 @@ def run(output, humanoids=None):
                 adapter.release()
         for key, rows in captures.items():
             report[key] = {}
-            for backend in ("wgpu", "bgfx"):
+            for backend in ("bgfx",):
                 metrics = compare(rows["opengl"], rows[backend])
                 metrics["alpha_mean"] = float(
                     np.abs(rows[backend]["alpha"].astype(float) - rows["opengl"]["alpha"]).mean()
@@ -111,7 +111,7 @@ def run(output, humanoids=None):
                 report[key][backend] = metrics
             Image.fromarray(
                 np.concatenate(
-                    [rows[name][RenderProduct.COLOR] for name in ("opengl", "wgpu", "bgfx")], axis=1
+                    [rows[name][RenderProduct.COLOR] for name in ("opengl", "bgfx")], axis=1
                 )
             ).save(output / f"{key}-comparison.png")
             print(key, json.dumps(report[key]), flush=True)

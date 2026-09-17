@@ -427,7 +427,7 @@ class TextureData:
 
 @dataclass(frozen=True)
 class Material:
-    """Mojive material parameters shared by OpenGL and WebGPU backends.
+    """Mojive material parameters shared by OpenGL and bgfx backends.
 
     Values follow MuJoCo's Phong-style material model. ``texture`` refers to a
     :class:`TextureData` name in the same scene source.
@@ -458,7 +458,7 @@ DEFAULT_MATERIAL = Material(name="__default__")
 class ViewportImage:
     """Resolved render target presented inside the editor viewport.
 
-    ``texture_id`` identifies an Mojive texture. WebGPU backends store the resolved texture view
+    ``texture_id`` identifies a Mojive texture. The native backend stores its texture handle
     in ``payload``. ``flip_y`` describes the image orientation expected by presentation code.
     """
 
@@ -467,8 +467,8 @@ class ViewportImage:
     height: int
     flip_y: bool = True
     # Backend-specific presentation payload: the GL path presents texture_id
-    # directly and leaves this None; the wgpu path carries the GPUTextureView
-    # of the resolved color target for the window's imgui renderer.
+    # directly and leaves this None; the native path carries the resolved
+    # color target's handle for the window's ImGui renderer.
     payload: Any = None
 
     @property

@@ -64,7 +64,7 @@ physics-concurrency:
 passive-viewer:
 	$(PY) examples/passive_viewer.py $(ARGS)
 
-.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-wgpu egl p0 p1 renderer-api renderer-api-wgpu renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas canvas-2d lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-quality shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
+.PHONY: help setup check lint fmt docs docs-check docs-serve examples-check test test-fast test-integration test-physics test-all gpu gpu-bgfx egl p0 p1 renderer-api renderer-benchmark renderer-benchmark-full golden golden-accept parity calibrate gallery ui-feasibility ui-runtime readme-media ui-frame-profile ui-gallery tool-icons mouse-icons gizmo-gallery hidpi-gallery model-loading model-composition mjcf-roundtrip editor-performance stability rpc-soak format-validation scene-io editor-files entity-edit undo-redo remote-authoring additive bench showcase probe reverse viewer egl-viewer hidpi empty editor settings workspace-edit canvas canvas-2d lighting image-light many-lights material-parity material-parity-accept texture-minification local-shadow-precision shadow-quality shadow-scheduling scene-icons scene-entities text-overlay capture record serve attach live-view snapshot-record snapshot-replay camera-state scene-snapshot cli rpc toy-physics adapter-conformance inspector gizmo joint-gizmo primitive-authoring material-authoring contact-authoring body-authoring resource-authoring asset-browser joint-site-authoring model-component-authoring keyframe-authoring batch-editing perturb reflect outline robot mujoco-physics mujoco-audit mujoco-model-suite mujoco-visuals mujoco-debug mujoco-actuators mujoco-slider-crank mujoco-solver-diagnostics mujoco-islands mujoco-bvh mujoco-convex-hull mujoco-rangefinder mujoco-constraints mujoco-editing mujoco-overlays cameras camera-intrinsics geom-groups deformables assets backends doctor clean
 
 help:
 	@printf '%s\n' \
@@ -73,7 +73,7 @@ help:
 		'  make native-viewer      build and launch the C++/bgfx Viewer' \
 		'  make native-wayland-viewer interactive viewer in a nested Wayland desktop' \
 		'  make native-editor      C++/bgfx scene editor' \
-		'  make native-parity      compare native/OpenGL/wgpu render products' \
+		'  make native-parity      compare native/OpenGL render products' \
 		'  make native-model-parity verify live rigid, skin, and flex scenes' \
 		'  make native-wheel-test  build, install, and verify the native wheel' \
 		'  make passive-viewer     independent physics and display rates with captures' \
@@ -177,12 +177,11 @@ help:
 		'  make check             lint plus fast and integration CPU tests' \
 		'  make test-all          CPU, physics, and both real GPU backends' \
 		'  make gpu               real OpenGL tests' \
-		'  make gpu-wgpu          real WebGPU tests' \
+		'  make gpu-bgfx          native bgfx GPU tests' \
 		'  make egl               Linux EGL Renderer and wireframe contract' \
 		'  make scene-renderer    authored RGB, depth, and object-ID images' \
 		'  make renderer-api      public Renderer CPU and GPU contract' \
-		'  make renderer-api-wgpu public Renderer contract over wgpu' \
-		'  make renderer-benchmark MuJoCo/OpenGL/wgpu public API timing comparison' \
+		'  make renderer-benchmark MuJoCo/OpenGL/bgfx public API timing comparison' \
 		'  make renderer-benchmark-full complete resolution and output-mode matrix' \
 		'  make physics-render-benchmark same-process physics/render concurrency experiment' \
 		'  make physics-concurrency default editor runtime, including 100 humanoids' \
@@ -207,18 +206,18 @@ help:
 		'  make docs-serve        serve the documentation locally' \
 		'' \
 		'Display and backend options:' \
-		'  make editor BACKEND=wgpu' \
+		'  make editor BACKEND=opengl' \
 		'  make editor LANGUAGE=zh_CN                 simplified Chinese UI' \
 		'  MOJIVE_UI_SCALE=2 make editor' \
 		'  MOJIVE_CJK_FONT=/path/font.otf make editor' \
-		'  make hidpi BACKEND=wgpu UI_SCALE=2' \
-		'  MOJIVE_UI_SCALE=1.5 make viewer BACKEND=wgpu SCENE=gizmo ARGS="--paused"' \
+		'  make hidpi BACKEND=opengl UI_SCALE=2' \
+		'  MOJIVE_UI_SCALE=1.5 make viewer BACKEND=opengl SCENE=gizmo ARGS="--paused"' \
 		'  make egl-viewer                   Linux GLFW EGL context' \
 		'' \
-		'BACKEND accepts opengl, wgpu or bgfx (requires native build). Leave UI scale unset for automatic scaling.'
+		'BACKEND accepts opengl or bgfx (requires native build). Leave UI scale unset for automatic scaling.'
 
 setup:
-	uv sync --python 3.11 --extra dev --extra mujoco --extra wgpu --extra native
+	uv sync --python 3.11 --extra dev --extra mujoco --extra native
 	$(MAKE) setup-imgui
 	$(MAKE) native-editable
 
@@ -256,7 +255,6 @@ ui-corners-gallery:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces -o output/g3-controls/workspaces.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page panels -o output/g3-controls/panels.png
 	MOJIVE_BACKEND=opengl $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
-	MOJIVE_BACKEND=wgpu $(PYTEST) -q -m gpu tests/gpu/test_debugdraw.py -k screen_arrows
 
 ## Lint, formatting, and CPU tests.
 check: lint test
@@ -303,7 +301,7 @@ test: test-fast test-integration
 test-physics:
 	$(PYTEST) -q -m physics
 
-test-all: test test-physics gpu gpu-wgpu
+test-all: test test-physics gpu gpu-bgfx
 
 mjcf-roundtrip:
 	$(PYTEST) -q -m physics tests/test_workspace.py -k 'mjcf_export or exports_formatted or export_current_pose'
@@ -311,24 +309,6 @@ mjcf-roundtrip:
 ## Isolate files because OpenGL and physics libraries own process-global registries.
 gpu:
 	@for f in $$(ls tests/gpu/test_*.py); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
-
-GPU_WGPU_FILES := tests/gpu/test_input_ownership.py tests/gpu/test_scene_renderer.py tests/gpu/test_renderer_api.py tests/gpu/test_control_rpc_capture.py tests/gpu/test_hidpi.py tests/gpu/test_horizon_haze.py tests/gpu/test_shading.py tests/gpu/test_shadows.py tests/gpu/test_reflection.py tests/gpu/test_outline.py tests/gpu/test_tendon.py tests/gpu/test_debugdraw.py tests/gpu/test_gizmo.py tests/gpu/test_pipeline.py tests/gpu/test_viewer_wgpu.py tests/gpu/test_static_viewer.py tests/gpu/test_model_loading.py tests/gpu/test_ui_interaction.py tests/gpu/test_ui_layout_input.py tests/gpu/test_wgpu_shader_reload.py
-GPU_WGPU_FILES += tests/gpu/test_passive.py
-GPU_WGPU_FILES += tests/gpu/test_camera_tracking.py tests/gpu/test_input_mapping.py
-GPU_WGPU_FILES += tests/gpu/test_keyframe_timeline.py tests/gpu/test_ui_refinement.py tests/gpu/test_ui_redesign.py tests/gpu/test_take_video.py tests/gpu/test_ui_corner_controls.py
-GPU_WGPU_FILES += tests/gpu/test_scene_capture.py
-GPU_WGPU_FILES += tests/gpu/test_mujoco_viewer.py
-GPU_WGPU_FILES += tests/gpu/test_geometry_views.py
-GPU_WGPU_FILES += tests/gpu/test_texture_mipmaps.py
-GPU_WGPU_FILES +=  tests/gpu/test_ui_feasibility_backend.py
-GPU_WGPU_FILES += tests/gpu/test_viewcube.py
-GPU_WGPU_FILES += tests/gpu/test_value_rails.py
-GPU_WGPU_FILES += tests/gpu/test_default_layout.py
-GPU_WGPU_FILES += tests/gpu/test_control_scale.py tests/gpu/test_canvas2d.py
-## Per-file GPU tests against the wgpu backend; extend GPU_WGPU_FILES as coverage grows.
-## test_viewer_wgpu.py opens real (hidden-then-shown) windows and needs a display server, like the GL window tests.
-gpu-wgpu:
-	@export MOJIVE_RENDERER=wgpu; for f in $(GPU_WGPU_FILES); do echo "--- $$f"; $(PYTEST) -q -m "gpu or physics" $$f || exit 1; done
 
 .PHONY: gpu-bgfx
 gpu-bgfx: native-python-build setup-imgui
@@ -348,12 +328,6 @@ renderer-api:
 	$(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
 	$(PY) -m mojive.tools.renderer_api
 
-## Same Renderer API checks against the wgpu backend.
-renderer-api-wgpu:
-	MOJIVE_RENDERER=wgpu $(PYTEST) -q tests/test_renderer_api.py
-	MOJIVE_RENDERER=wgpu $(PYTEST) -q -m gpu tests/gpu/test_renderer_api.py
-	MOJIVE_RENDERER=wgpu $(PY) -m mojive.tools.renderer_api
-
 renderer-benchmark:
 	$(PY) -m mojive.tools.renderer_benchmark $(ARGS)
 
@@ -363,7 +337,7 @@ renderer-benchmark-full:
 
 p0: renderer-api
 
-p1: check p0 renderer-api-wgpu mujoco-physics camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu gpu-wgpu
+p1: check p0 mujoco-physics camera-state scene-snapshot rpc material-parity shadow-scheduling mujoco-audit golden parity reverse gpu gpu-bgfx
 	$(MAKE) adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables
 
 ## Compare golden images. ARGS selects cases; the agent reviews differences before accepting.
@@ -1065,11 +1039,6 @@ cpp-python-test: cpp-python
 	cmake --build $(CPP_PYTHON_BUILD) --target mojive_geometry2d_test mojive_tessellator_test --parallel $(NATIVE_JOBS)
 	ctest --test-dir $(CPP_PYTHON_BUILD) -R '^geometry2d' --output-on-failure
 	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(CPP_PYTHON_BUILD))" $(PYTEST) -q tests/native/test_native.py tests/native/test_native_mesh_processing.py tests/native/test_native_geometry2d.py tests/native/test_native_tessellation.py tests/native/test_native_stroke.py
-
-.PHONY: ui-upload-benchmark
-## Compare the current and upstream WebGPU ImGui upload paths on identical buffers.
-ui-upload-benchmark:
-	$(PY) -m mojive.tools.benchmark_ui_upload $(ARGS)
 
 .PHONY: cpp-python-gpu
 cpp-python-gpu:

@@ -13,7 +13,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-RENDERERS = ("mujoco", "mojive-opengl", "mojive-wgpu", "mojive-bgfx")
+RENDERERS = ("mujoco", "mojive-opengl", "mojive-bgfx")
 WORKLOADS = (
     "primitives",
     "many_objects",

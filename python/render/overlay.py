@@ -4,8 +4,7 @@ Port of ``OpenGLBackend._publish_*``: pure CPU work that turns a ``SceneFrame``
 (joints, COM, inertia, actuators, rangefinders, constraints, BVH, contacts,
 flex debug, camera/light icons, labels, and coordinate frames) into retained
 ``DebugDraw`` primitives.  Both render backends run the same publisher from
-``update()``; only the GPU upload differs (``render.opengl.passes.debug`` vs
-``render.webgpu.passes.debug``).
+``update()``; GPU uploads belong to the OpenGL and native debug passes.
 """
 
 from __future__ import annotations

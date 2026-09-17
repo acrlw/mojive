@@ -16,7 +16,7 @@ def main():
     parser.add_argument(
         "--model", type=Path, default=Path(__file__).resolve().parents[1] / "assets/joint_types.xml"
     )
-    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
     parser.add_argument(
         "--seconds", type=float, default=0, help="Close after this duration; 0 waits for the window"
     )

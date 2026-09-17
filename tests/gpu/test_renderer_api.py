@@ -47,11 +47,7 @@ def _model():
     )
 
 
-def test_wgpu_rgb_packing_handles_partial_four_pixel_group() -> None:
-    from mojive.render.selection import render_backend_name
-
-    if render_backend_name() != "wgpu":
-        pytest.skip("WebGPU RGB packing contract")
+def test_renderer_rgb_handles_odd_dimensions() -> None:
     model = _model()
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
@@ -120,25 +116,13 @@ def test_renderer_rgb_camera_out_and_lifecycle():
     assert not strided_out.flags.c_contiguous
     assert renderer.render(out=strided_out) is strided_out
     assert np.array_equal(strided_out, image)
-    if renderer._backend.caps.name == "wgpu":
-        assert renderer._backend.target._readbacks is None
     async_image = renderer.render_async().result(timeout=10.0)
     assert np.array_equal(async_image, image)
-    if renderer._backend.caps.name == "wgpu":
-        assert renderer._backend.target._readbacks is not None
     queued = [renderer.render_async() for _ in range(5)]
     assert all(np.array_equal(future.result(timeout=10.0), image) for future in queued)
     async_cast_out = np.empty(image.shape, np.float32)
     assert renderer.render_async(out=async_cast_out).result(timeout=10.0) is async_cast_out
     assert np.array_equal(async_cast_out, image)
-    if renderer._backend.caps.name == "wgpu":
-        target = renderer._backend.target
-        packed_size = ((renderer.width * renderer.height + 3) // 4) * 12
-        assert target._rgb_packer._size == packed_size
-        assert target._sync_readback._capacity >= packed_size
-        assert {slot.capacity for slot in target._readbacks._slots if slot.buffer is not None} == {
-            packed_size
-        }
     with pytest.raises(ValueError, match=r"out\.shape"):
         renderer.render(out=np.empty((96, 128), np.uint8))
 

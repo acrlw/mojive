@@ -99,7 +99,7 @@ def capture(output: Path, renderer: str = "opengl") -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("output/material-workflow"))
-    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
     args = parser.parse_args()
     print(json.dumps(capture(args.output, args.renderer), indent=2))
     return 0

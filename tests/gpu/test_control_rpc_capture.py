@@ -27,7 +27,7 @@ def standalone_capture_backend(monkeypatch):
     # Cocoa context creation must stay on the main thread. Standalone RPC
     # capture owns a graphics worker; attached-viewer tests exercise OpenGL.
     if sys.platform == "darwin":
-        monkeypatch.setenv("MOJIVE_RENDERER", "wgpu")
+        monkeypatch.setenv("MOJIVE_RENDERER", "bgfx")
 
 
 @pytest.mark.parametrize("mode", ["rgb", "depth", "object_id", "segmentation"])
@@ -363,7 +363,7 @@ def test_unsupported_worker_opengl_capture_returns_error_without_killing_service
     thread.start()
     try:
         with RpcClient(server.socket_path) as client:
-            with pytest.raises(RpcError, match="MOJIVE_RENDERER=wgpu"):
+            with pytest.raises(RpcError, match="MOJIVE_RENDERER=bgfx"):
                 client.call("capture", {"output": str(tmp_path / "unsupported.png")})
             assert client.hello()["service"] == "mojive.control"
             assert client.call("get_scene")["objects"]

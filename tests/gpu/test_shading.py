@@ -115,10 +115,6 @@ def _make_backend(backend_name: str, request, samples: int = 4):
         from mojive.render.native.backend import NativeBackend
 
         return NativeBackend(WIDTH, HEIGHT, samples=samples)
-    if backend_name == "wgpu":
-        from mojive.render.webgpu.backend import WgpuBackend
-
-        return WgpuBackend(WIDTH, HEIGHT, samples=samples)
     passes.load_all()
     return OpenGLBackend(request.getfixturevalue("gl_ctx"), WIDTH, HEIGHT, samples=samples)
 
@@ -562,12 +558,7 @@ def test_highlight_needs_the_emission_term(rig, monkeypatch):
         # Native emission is compiled into the shader, without a Python override.
         assert 40.0 < lit - plain < 100.0
         return
-    if rig.backend.caps.name == "wgpu":
-        from mojive.render.webgpu import backend as webgpu_backend
-
-        monkeypatch.setattr(webgpu_backend, "HIGHLIGHT_EMISSION", 0.0)
-    else:
-        monkeypatch.setattr(opaque_pass, "HIGHLIGHT_EMISSION", 0.0)
+    monkeypatch.setattr(opaque_pass, "HIGHLIGHT_EMISSION", 0.0)
     mix_only = float(Rig.center(rig.draw([quad], ambient=dark, selected=1))[:3].mean())
 
     # Selection remains obvious in a dark scene without bleaching the surface.

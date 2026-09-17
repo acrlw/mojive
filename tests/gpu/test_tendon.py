@@ -71,7 +71,7 @@ def harness(tmp_path, backend_name):
 
 def _capsule_count(backend) -> int:
     """Segment count lives on the tendon pass in both backends (no public API)."""
-    if backend.caps.name in {"wgpu", "bgfx"}:
+    if backend.caps.name == "bgfx":
         return backend._tendons.capsule_count
     return backend._passes["tendon"].capsule_count
 

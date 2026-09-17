@@ -13,7 +13,7 @@ def srgb_to_linear_u8(pixels: np.ndarray) -> np.ndarray:
 
 
 def box_reduce_axis(pixels: np.ndarray, axis: int) -> np.ndarray:
-    """Area-average one image axis to the next legal WebGPU mip extent."""
+    """Area-average one image axis to the next mip extent."""
 
     size = pixels.shape[axis]
     target = max(1, size // 2)

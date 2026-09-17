@@ -161,10 +161,6 @@ def _make_backend(backend_name: str, request, samples: int = 4):
         from mojive.render.native.backend import NativeBackend
 
         return NativeBackend(W, H, samples=samples)
-    if backend_name == "wgpu":
-        from mojive.render.webgpu.backend import WgpuBackend
-
-        return WgpuBackend(W, H, samples=samples)
     from mojive.render.opengl import passes
     from mojive.render.opengl.backend import OpenGLBackend
 

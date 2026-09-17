@@ -11,7 +11,7 @@ uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 ```
 
-This example exposes `--renderer opengl|wgpu` (`--backend` is its legacy alias).
+This example exposes `--renderer opengl|bgfx` (`--backend` is its legacy alias).
 Library code also accepts `renderer="bgfx"` with the native build, or selects a default through
 `MOJIVE_RENDERER`. On Linux, offscreen OpenGL creates an EGL context by default.
 If initialization fails, see [context troubleshooting](../reference/configuration.md#render-backend-requirements):

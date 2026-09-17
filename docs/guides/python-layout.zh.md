@@ -24,7 +24,7 @@
 | `render/canvas.py` | Canvas2D 保留式接口，复用 DebugDraw 的 ID、图层、生命周期和 GPU pass | `canvas_geometry.py` 负责有上限的 CPU 路径缓存 |
 | `text/` | UI 字体来源发现 | `sources.py`；世界标签继续使用 `render/text.py` 的现有 glyph atlas |
 | `adapters/` | 场景与物理后端适配 | `base.py`、`mujoco/`、`static/`、`toy/` |
-| `render/` | 渲染契约、后端、离屏渲染及场景调试 Canvas | `backend.py`、`offscreen.py`、`canvas.py`、`opengl/`、`webgpu/`、`native/` |
+| `render/` | 渲染契约、后端、离屏渲染及场景调试 Canvas | `backend.py`、`offscreen.py`、`canvas.py`、`opengl/`、`native/` |
 | `cli/` | 命令行解析及命令实现 | `parser.py`、`inspection.py`、`viewer.py`、`control.py`、`capture.py` |
 | `tools/` | 可执行的诊断、性能测量和验收场景 | 相应 Make target 指向的模块 |
 
@@ -88,7 +88,7 @@ Icon Library 继续动态计算可调参数。修改图标默认参数后运行 
 使用以下入口测量启动时间：
 
 ```bash
-make startup-profile ARGS="--backend opengl wgpu bgfx --repeats 3 --compare-icons"
+make startup-profile ARGS="--backend opengl bgfx --repeats 3 --compare-icons"
 ```
 
 每次试验使用新的 Python 进程，交替测量顺序，复制当前布局到输出目录，并在四帧后退出。
@@ -98,7 +98,7 @@ make startup-profile ARGS="--backend opengl wgpu bgfx --repeats 3 --compare-icon
 其额外开销不应混入正常启动速度结论。
 
 验证要求以[测试矩阵](testing.md#change-mapping)为准。常用入口为 `make check`、
-`make test-physics`、`make gpu`、`make gpu-wgpu`、`make native-features-test` 和
+`make test-physics`、`make gpu`、`make gpu-bgfx`、`make native-features-test` 和
 `make docs-check`。GPU 与窗口验收串行运行。性能比较也应在这些测试结束后单独进行。
 公共导入兼容测试在 `test_package_layout.py`，依赖边界在 `test_layering.py`；
 针对内部函数的测试监测点应指向实际实现模块，不能只修改兼容入口的同名导出。

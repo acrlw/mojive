@@ -51,7 +51,6 @@ CONFIG_ENV_MODULES = (
     "python/ui/fonts.py",
     "python/ui/localization.py",
     "python/ui/window.py",
-    "python/ui/window_wgpu.py",
 )
 MOJIVE_ENV = re.compile(r'["\'](MOJIVE_[A-Z0-9_]+)["\']')
 

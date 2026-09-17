@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-o", "--output", type=Path, default=Path("output/model-loading"))
     parser.add_argument("--offscreen", action="store_true", help="Capture one model without a UI")
     parser.add_argument("--asset", type=Path, help="Model to capture with --offscreen")
-    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"))
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"))
     parser.add_argument("--profile", action="store_true", help="Profile offscreen resource loading")
     args = parser.parse_args(argv)
     if (args.asset or args.profile) and not args.offscreen:

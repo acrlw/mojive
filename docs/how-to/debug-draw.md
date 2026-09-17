@@ -110,7 +110,7 @@ Run `make debug-draw` to inspect both shapes, or capture two camera angles:
 
 ```bash
 make debug-draw ARGS='--capture-dir output/debug-draw/opengl'
-make debug-draw BACKEND=wgpu ARGS='--capture-dir output/debug-draw/wgpu'
+make debug-draw BACKEND=bgfx ARGS='--capture-dir output/debug-draw/bgfx'
 ```
 
 ## UI-style screen arrows
