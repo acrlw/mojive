@@ -65,8 +65,11 @@ bgfx does not generate widget geometry. The tracked `imgui/` tree is currently c
 `make setup-imgui` runs `python/tools/build_imgui.py`, which downloads a pinned ImGui Bundle source
 archive and builds the Mojive wheel. The recipe contains checked patches for bulk geometry
 submission, slider/focus geometry and platform support. Its source/build cache lives under
-`output/g3-ui/build`; it is not an additional dependency to commit. The package version and
-Dear ImGui core version are distinct: the current recipe uses Bundle `1.92.900`, with core
+`build/imgui`; it is not an additional dependency to commit. Downloads enter the reusable cache
+only after checksum verification; an incomplete cached archive is downloaded again automatically.
+Bundle's FreeType dependency remains `VER-2-13-3`; the recipe downloads its checksum-verified
+source archive instead of cloning the full Git history. The package version and Dear ImGui
+core version are distinct: the current recipe uses Bundle `1.92.900`, with core
 `1.92.9`, whereas this tracked core baseline is `1.92.9b-docking`.
 
 `cpp/bindings/ImguiCallbacks.hpp` supplies read-only callback classification for the Python
