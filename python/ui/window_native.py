@@ -60,7 +60,7 @@ class NativeWindow(Window):
         if not glfw.init():
             raise RuntimeError("GLFW initialization failed")
         # Share the GL window module's live-window count so glfw.terminate()
-        # runs when the last GLFW or wgpu window closes.
+        # runs when the last GLFW or native window closes.
         _window_module._live_windows += 1
         self._counted_window = True
         self._wayland = (

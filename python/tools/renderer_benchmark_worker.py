@@ -447,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--renderer",
-        choices=("mujoco", "mojive-opengl", "mojive-wgpu", "mojive-bgfx"),
+        choices=("mujoco", "mojive-opengl", "mojive-bgfx"),
         required=True,
     )
     parser.add_argument("--workload", choices=tuple(_WORKLOADS), required=True)
@@ -465,8 +465,6 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["MOJIVE_BACKEND"] = "opengl"
     elif args.renderer == "mojive-bgfx":
         os.environ["MOJIVE_BACKEND"] = "bgfx"
-    elif args.renderer == "mojive-wgpu":
-        os.environ["MOJIVE_BACKEND"] = "wgpu"
     else:
         os.environ.pop("MOJIVE_BACKEND", None)
 

@@ -17,7 +17,7 @@ from mojive.ui.scene_capture import SceneCapture
 mujoco = pytest.importorskip("mujoco")
 pytestmark = pytest.mark.gpu
 ASSET = Path(__file__).parents[2] / "assets/geometry_views.xml"
-BACKENDS = ["opengl", "wgpu"] + (["bgfx"] if os.environ.get("MOJIVE_RENDERER") == "bgfx" else [])
+BACKENDS = ["opengl"] + (["bgfx"] if os.environ.get("MOJIVE_RENDERER") == "bgfx" else [])
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

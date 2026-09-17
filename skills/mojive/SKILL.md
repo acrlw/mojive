@@ -5,6 +5,9 @@ description: Inspect, author, control, and capture Mojive scenes through public 
 
 # Mojive
 
+Supported renderers are `opengl` for fast scene/editor validation and `bgfx` for native rendering.
+OpenGL is the default. For bgfx, prepare the [native runtime and shaders](../../docs/how-to/native-viewer.md).
+
 Choose the state owner before choosing an API:
 
 - Existing viewer: connect to its RPC socket. `hello` must report `viewer_attached: true`.

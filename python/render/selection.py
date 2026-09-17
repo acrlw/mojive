@@ -14,9 +14,7 @@ def render_backend_name(renderer: str | None = None) -> str:
             os.environ.get("MOJIVE_BACKEND", os.environ.get("FORGE_VIEWER_BACKEND", "")),
         )
     requested = requested.strip().lower()
-    requested = {"forge": "opengl", "webgpu": "wgpu"}.get(requested, requested)
-    if requested not in {"", "opengl", "wgpu", "bgfx"}:
-        raise ValueError(
-            f"Unsupported renderer: {requested!r}; expected 'opengl', 'wgpu' or 'bgfx'"
-        )
+    requested = {"forge": "opengl"}.get(requested, requested)
+    if requested not in {"", "opengl", "bgfx"}:
+        raise ValueError(f"Unsupported renderer: {requested!r}; expected 'opengl' or 'bgfx'")
     return requested or "opengl"

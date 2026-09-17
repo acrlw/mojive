@@ -325,7 +325,7 @@ Output targets lease view IDs per GPU submission instead of retaining a fixed tw
 Views are reused only after advancing the submitted frame. Allocation is still bounded by bgfx
 resource handles and GPU memory; it is not an unlimited-target guarantee.
 
-OpenGL, WebGPU and bgfx use the same bounded anisotropic footprint in their albedo shaders
+OpenGL and bgfx use the same bounded anisotropic footprint in their albedo shaders
 and the same linear-light area filter for 2D mip levels, including odd texture dimensions.
 Hardware anisotropy stays disabled for those 2D samplers to avoid applying the filter twice.
 Vulkan and Metal use bottom-left rasterization for offscreen targets, including viewport, scissor
@@ -333,7 +333,7 @@ and winding conversion. This matches OpenGL edge ownership with standard MSAA sa
 programmable sample locations are not required. Window surfaces retain presentation coordinates.
 
 `make gpu-bgfx` exercises the shared rendering, picking, gizmo, debug drawing, physics and
-UI tests with the native backend. Tests that inspect private OpenGL or WebGPU pass objects
+UI tests with the native backend. Tests that inspect private OpenGL pass objects
 remain specific to those implementations. Automated composition tests hide their windows;
 run explicit shown-window lifecycle tools on a separate display when desktop focus must
 remain uninterrupted.

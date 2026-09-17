@@ -61,12 +61,13 @@ Run the relevant mode from the repository checkout:
 ```bash
 make agent-control
 make agent-viewer ARGS='--output output/agent-viewer'
-MOJIVE_RENDERER=wgpu make agent-control ARGS='--output output/agent-control-wgpu'
+MOJIVE_RENDERER=bgfx make agent-control ARGS='--output output/agent-control-bgfx'
 ```
 
-For standalone RPC capture on macOS, use the wgpu command: its graphics worker cannot own a macOS
-OpenGL context. The attached-viewer mode renders on the UI thread. These are mode/backend choices,
-not three mandatory runs for every edit; select them using the [verification matrix](../guides/testing.md#change-mapping).
+The bgfx command requires the [native runtime and shaders](native-viewer.md). Use it for standalone
+RPC capture on macOS, where the graphics worker cannot create an OpenGL context. An attached
+OpenGL viewer renders on the UI thread. Select the relevant mode and renderer using the
+[verification matrix](../guides/testing.md#change-mapping).
 
 The example creates an isolated authored scene and service, discovers its object and camera IDs,
 hides a box, verifies that its selection pixels disappear, then restores it. The plane and sphere

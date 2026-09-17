@@ -157,7 +157,7 @@ def test_offline_catalog_does_not_start_application_or_graphics():
 import sys
 from mojive.cli import main
 assert main(['operations', 'set_camera', '--json']) == 0
-for name in ('mojive.control.application', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl', 'wgpu'):
+for name in ('mojive.control.application', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl'):
     assert name not in sys.modules, name
 """,
         ],

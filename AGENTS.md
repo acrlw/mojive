@@ -2,9 +2,10 @@
 
 ## Project scope
 
-Mojive is a backend-neutral 3D viewer for simulation and tooling. OpenGL is the default rendering
-backend; WebGPU is available through the optional wgpu backend. MuJoCo, custom physics engines,
-programmatic scenes, remote publishers, and snapshot replay enter through scene adapters.
+Mojive is a backend-neutral 3D viewer for simulation and tooling. Mainline maintains OpenGL for
+fast application and interaction validation, and bgfx for native rendering. OpenGL remains the
+default. MuJoCo, custom physics engines, programmatic scenes, remote publishers, and snapshot
+replay enter through scene adapters.
 
 ## Execution
 

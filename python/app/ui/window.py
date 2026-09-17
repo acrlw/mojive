@@ -18,10 +18,6 @@ def create_window(config: WindowConfig, renderer: str | None = None) -> Window:
         from mojive.ui.window_native import NativeWindow
 
         return NativeWindow(config, device_factory=acquire_device)
-    if renderer == "wgpu":
-        from mojive.ui.window_wgpu import WgpuWindow
-
-        return WgpuWindow(config)
     from mojive.ui.window import Window
 
     return Window(config)

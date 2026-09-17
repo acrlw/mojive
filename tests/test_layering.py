@@ -146,7 +146,6 @@ def test_shared_vocabulary_is_dependency_free():
         "glfw",
         "imgui",
         "imgui_bundle",
-        "wgpu",
     )
     bad = {}
     for name in ("types.py", "math3d.py", "commands.py"):
@@ -170,7 +169,6 @@ def test_geometry_and_text_are_independent_of_draw_adapters_and_interaction(pack
         "imgui_bundle",
         "glfw",
         "moderngl",
-        "wgpu",
     )
     bad = {}
     for path in _files(package):

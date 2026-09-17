@@ -14,7 +14,7 @@ import mojive.viewer as viewer
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=float, default=10.0)
-    parser.add_argument("--renderer", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
     args = parser.parse_args()
     model = mujoco.MjModel.from_xml_path("assets/joint_types.xml")
     data = mujoco.MjData(model)

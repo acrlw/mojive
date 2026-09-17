@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--camera", help="Fixed model camera name; omit for the free view")
-    parser.add_argument("--renderer", "--backend", dest="backend", choices=("opengl", "wgpu"))
+    parser.add_argument("--renderer", "--backend", dest="backend", choices=("opengl", "bgfx"))
     parser.add_argument("--pixel-format", choices=("yuv420p", "yuv444p"), default="yuv420p")
     parser.add_argument("--label", default="", help="Add a label and simulation timestamp to RGB")
     args = parser.parse_args()

@@ -12,15 +12,14 @@ matrix; other agent guidance links here.
 | Integration | `make test-integration` | files, serialization, protocols, processes, composition |
 | Physics | `make test-physics` | model compilation and live physics worlds |
 | OpenGL GPU | `make gpu` | real OpenGL contexts and rendered output |
-| WebGPU | `make gpu-wgpu` | Metal, Vulkan, or DX12 backend behavior |
 | Native bgfx GPU | `make gpu-bgfx` | shared renderer, interaction, capture and UI contracts with the native backend |
 | Native probe | `make native-test`, `make native-probe` | optional C++ contracts and real GPU output/lifetime checks; choose `NATIVE_BACKEND=sdl` for SDL GPU |
 | Native composition and lifecycle | `make native-composition`, `make native-windows` | texture dependencies, alpha/scissor output, repeated native surface lifecycle |
 | Native live runtime | `make native-runtime` | native MuJoCo serial/parallel comparison with bounded output queues |
 | Private native runtime | `make cpp-python-test`, `make cpp-python-gpu` | native logging, GLM compatibility, NumPy ownership, real GPU products and runtime teardown |
 | Native Viewer | `make native-viewer-test HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | public Python products, independent scenes, asynchronous readback, window lifecycle and advancing dense physics |
-| Native Wayland input | `make native-wayland-test` | isolated compositor presentation, native pointer/keyboard events, focus, clipboard transfers, and external file drops across bgfx, OpenGL, and wgpu |
-| Native render parity | `make native-parity`, `make native-model-parity HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | matched OpenGL/wgpu/bgfx color, depth, identity, feature effects, deformable updates and pose restoration |
+| Native Wayland input | `make native-wayland-test` | isolated compositor presentation, native pointer/keyboard events, focus, clipboard transfers, and external file drops across bgfx and OpenGL |
+| Native render parity | `make native-parity`, `make native-model-parity HUMANOIDS_MODEL=/path/to/100_humanoids.xml` | matched OpenGL/bgfx color, depth, identity, feature effects, deformable updates and pose restoration |
 | Native motion and corpus | `make native-motion-parity`, `make native-corpus-parity MENAGERIE_ROOT=/path/to/mujoco_menagerie` | continuous close panning/orbit/zoom, object color checks, all local model loads and eight-view comparisons |
 | Native UI parity | `make native-ui-parity` | fractional axis-label motion, CJK/Latin atlas filtering and ImGui antialiasing at normal and 150% scale |
 | Native load latency | `make native-load-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie` | isolated model processes, source/resource/first-frame timings and repeated loads against OpenGL |
@@ -29,7 +28,7 @@ matrix; other agent guidance links here.
 | Native distribution | `make native-spirv`, `make native-wheel-test` | Vulkan shader compilation and installed platform wheel rendering without development paths |
 | Native bindings | `make native-bindings-test` | isolated pybind11/nanobind behavior, MuJoCo coexistence, ownership, and GIL release |
 | Golden | `make golden` | reviewed image baselines |
-| Full | `make test-all` | CPU, physics, OpenGL, and WebGPU layers |
+| Full | `make test-all` | CPU, physics, OpenGL, and bgfx layers |
 
 ## Change mapping
 
@@ -43,7 +42,7 @@ workflow. Space pauses/resumes the caller's simulation; the example closes after
 See the [migration guide](../tutorials/mujoco-viewer.md) for supported signatures and limitations.
 The minimal comparison programs are `make viewer-managed` and `make viewer-passive`.
 
-`make geometry-views ARGS='--renderer opengl'` (or `wgpu` / `bgfx`) captures the four geometry
+`make geometry-views ARGS='--renderer opengl'` (or `bgfx`) captures the four geometry
 views using `assets/geometry_views.xml`. Inspect the hidden transparent capsule proxy and the
 shared concave mesh/hull comparison. `tests/test_geometry_views.py` checks classification and
 state preservation; `tests/gpu/test_geometry_views.py` verifies real colors, depth, IDs, resource
@@ -77,7 +76,7 @@ Pure prose, link, and metadata edits use their own rows instead of the CPU or GP
 | MuJoCo adapter or MJCF authoring | focused physics test | `make test-physics`, `make mujoco-audit`, and `make adapter-conformance ADAPTER=mujoco CONFORMANCE_ASSET=deformables` |
 | Public renderer performance | isolated quick matrix | `make renderer-benchmark` |
 | MuJoCo model loading | one XML path with the model-suite module | `make mujoco-model-suite` |
-| Rendering behavior, render pass, or shader | one GPU test file | `make gpu`, `make gpu-wgpu`, and relevant visual output |
+| Rendering behavior, render pass, or shader | one GPU test file | `make gpu`, `make gpu-bgfx`, and relevant visual output |
 | Visual interaction or settings layout | focused UI GPU test | relevant scripted gallery or interactive Make target with captured evidence |
 | Custom UI icon geometry | family-focused CPU test and production multi-size gallery | `make check`, focused UI GPU test, and inspected capture following the [icon design guide](../how-to/ui-icons.md#verify-geometry-and-raster-output) |
 | Native renderer probe or its shader | `make native-test`, `make native-probe` | `make check`, relevant `make native-gallery` or `make native-benchmark` evidence; Python rendering changes also use the rendering row above |
@@ -163,7 +162,7 @@ MOJIVE_UI_SCALE=2.5 make native-wayland-viewer SCENE=joint_gizmo
 
 This opens a nested Weston desktop window on the current X11 or Wayland desktop. Mojive inside
 it uses native Wayland. Move, resize, or maximize the Mojive window using its title bar, then
-exercise its viewport and controls normally. The default renderer is bgfx; `--renderer wgpu`
+exercise its viewport and controls normally. The default renderer is bgfx; `--renderer opengl`
 is also available. Desktop dimensions can be set with `ARGS='--width 1920 --height 1200'`;
 flags after `--` are forwarded to `mojive view`. Close Mojive, close Weston, or press Ctrl+C
 in the launching terminal to stop both. Settings are isolated for each launch; logs remain in
@@ -177,7 +176,7 @@ Pixman, and xkbcommon development headers. A headless EGL compositor owns a virt
 the viewer still receives real `wl_pointer`, `wl_keyboard`, and `wl_data_device` events.
 No window, input handle, or display connection is attached to the user's desktop.
 
-The target runs bgfx, OpenGL, and wgpu in separate processes. It checks picking, camera drag and
+The target runs bgfx and OpenGL in separate processes. It checks picking, camera drag and
 zoom, pause shortcuts, paired modifier keys, focus loss, input ownership across ImGui contexts,
 simultaneous windows and peer closure,
 external Unicode clipboard transfers, and dragging a model from a path containing spaces and
@@ -213,9 +212,7 @@ The output directory contains `model.png`, `report.json`, and, with `--profile`,
 them separately from other tests. This measures the resource path used by runtime loading;
 window presentation and UI responsiveness still require the windowed target.
 `tests/gpu/test_backend_parity.py` checks OpenGL power-of-two texture filtering without redundant
-CPU mipmap generation. `tests/gpu/test_texture_mipmaps.py` reads back WebGPU mip levels for 2D
-and cube textures, checking sRGB, alpha, narrow extents, resource reuse, and GPU-only generation
-for power-of-two sizes. Non-power-of-two sizes retain shared area filtering; CPU tests compare
+CPU mipmap generation. Non-power-of-two sizes retain shared area filtering; CPU tests compare
 its sparse reduction against exact source-pixel overlap.
 
 `make timeline-profile` measures production Keyframes panel CPU draw-data generation at 100,
@@ -248,15 +245,16 @@ before ending its throughput measurement. Run performance measurements separatel
 `make physics-render-benchmark` retains a fixed-workload experiment for isolating snapshot-copy
 cost. Its ordered publication mode preserves every displayed state and applies backpressure;
 it is distinct from the production latest-state policy. Pass `--production` to measure the real
-Session runtime, and `--renderer wgpu` or `--renderer bgfx` to select another backend. The native backend requires
+Session runtime, and `--renderer bgfx` to select another backend. The native backend requires
 `MOJIVE_NATIVE_BUILD` when it has not been installed as a platform wheel.
 
 Thread ownership, pause/step/history, command fences, model replacement, controls, replay, and
 failure recovery are covered by `tests/test_threaded_physics.py`. Default viewer startup and
 model-loading interaction additionally run through the GPU suites.
 
-The quick renderer benchmark compares `mujoco.Renderer`, Mojive OpenGL, and Mojive wgpu through
-their public `update_scene()` and `render()` APIs:
+The quick renderer benchmark compares `mujoco.Renderer`, Mojive OpenGL, and Mojive bgfx through
+their public `update_scene()` and `render()` APIs. The bgfx case requires the
+[native runtime and shaders](../how-to/native-viewer.md):
 
 ```bash
 make renderer-benchmark
@@ -275,7 +273,7 @@ synchronous readback in
 Run the larger resolution and RGB/depth/segmentation matrix explicitly:
 
 ```bash
-make renderer-benchmark ARGS="--renderers mujoco,mojive-opengl,mojive-wgpu,mojive-bgfx"
+make renderer-benchmark ARGS="--renderers mujoco,mojive-opengl,mojive-bgfx"
 make renderer-benchmark-full
 make renderer-benchmark ARGS="--workloads dynamic --modes rgb,depth --frames 200"
 make renderer-benchmark ARGS="--workloads dynamic_large --modes rgb --resolutions 1920x1080"
@@ -355,7 +353,7 @@ file-level result.
 
 ```bash
 make mujoco-model-suite
-make mujoco-model-suite ARGS="--backend wgpu"
+make mujoco-model-suite ARGS="--backend bgfx"
 make mujoco-model-suite \
   MUJOCO_MODEL_ROOTS="/path/to/model /path/to/another/model" \
   MUJOCO_MODEL_JOBS=8
@@ -446,12 +444,12 @@ and completed-image age. Run the two backend variants serially with identical me
 also captures the expanded 700-actuator component table and mouse mapping settings after
 completing its timed operations. `tests/gpu/test_input_mapping.py` exercises changed
 navigation, multi-button acquisition/release, unsupported perturbation, and panel/slider remaps
-through actual windows. Run these with `MOJIVE_RENDERER=opengl`, `wgpu`, and `bgfx` as applicable.
+through actual windows. Run these with `MOJIVE_RENDERER=opengl` and `bgfx` as applicable.
 
 ## Startup and documentation captures
 
 ```bash
-make startup-profile ARGS="--backend opengl wgpu bgfx --asset joint_gizmo --repeats 3"
+make startup-profile ARGS="--backend opengl bgfx --asset joint_gizmo --repeats 3"
 make startup-profile ARGS="--backend opengl --profile --compare-icons"
 make readme-media
 ```
@@ -469,7 +467,7 @@ local links, including the README image paths; the capture command checks identi
 ## Dense timeline and recording lifecycle
 
 `make editor-profile ARGS="--asset /path/to/model.xml --frames 90"` profiles idle frames,
-camera orbit, visibility and color edits in a production viewer. Use `BACKEND=wgpu` for WebGPU.
+camera orbit, visibility and color edits in a production viewer. Use `BACKEND=bgfx` for bgfx.
 Each case separates uninstrumented wall/thread CPU timings, inclusive stage timers and cProfile
 attribution. Nested stages must not be summed. OpenGL drain measures outstanding GPU work;
 other backends include color readback, so those values are not directly comparable GPU times.
@@ -493,7 +491,7 @@ finalization failures, full-buffer ownership and stalled encoder shutdown.
 
 `make material-workflow` captures box/floor material replacement, a skybox, and a retained
 floor grid whose spacing, width and color change under the same ID. On headless Linux,
-use `MOJIVE_GL=egl make material-workflow`; pass `ARGS='--renderer wgpu'` for WebGPU.
+use `MOJIVE_GL=egl make material-workflow`; pass `ARGS='--renderer bgfx'` for bgfx.
 The tool checks the box's color separately from the floor, so unrelated pixel changes cannot
 hide a broken material binding. Output is written under `output/material-workflow/`.
 

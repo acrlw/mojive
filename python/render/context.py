@@ -16,7 +16,7 @@ class _GLFWContext:
         if sys.platform == "darwin" and threading.current_thread() is not threading.main_thread():
             raise RuntimeError(
                 "macOS OpenGL context creation requires the main thread. "
-                "Use MOJIVE_RENDERER=wgpu for standalone RPC capture, "
+                "Use MOJIVE_RENDERER=bgfx with the native runtime for standalone RPC capture, "
                 "or capture through an attached viewer."
             )
         import glfw
@@ -144,18 +144,13 @@ def _select_backend(width: int, height: int, samples: int, renderer: str | None 
     """Create the explicitly selected or environment-configured render backend.
 
     Returns ``(context, backend)``; ``context`` is ``None`` for backends that
-    manage no GL state of their own (the webgpu backend needs no window, EGL,
-    or GLFW at all).
+    manage no GL state of their own, such as the native bgfx backend.
     """
     requested = render_backend_name(renderer)
     if requested == "bgfx":
         from .native.backend import NativeBackend
 
         return None, NativeBackend(max(1, width), max(1, height), samples)
-    if requested in {"wgpu", "webgpu"}:
-        from .webgpu.backend import WgpuBackend
-
-        return None, WgpuBackend(max(1, width), max(1, height), samples, gpu_timing=False)
     if requested not in {"", "opengl"}:
         raise ValueError(f"Unsupported MOJIVE_BACKEND: {requested}")
     from .opengl.backend import OpenGLBackend

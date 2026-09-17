@@ -3,7 +3,7 @@
 The bgfx backend is available through the Python Viewer, `Renderer`, and `SceneRenderer` APIs.
 It uses the same window controls, panels, Session, and adapter interfaces as the other renderers.
 C++ allocates GPU resources, submits drawing commands, and reads back images. bgfx selects the
-platform graphics API without depending on wgpu.
+platform graphics API.
 
 ## Build and launch
 

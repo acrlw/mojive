@@ -314,9 +314,8 @@ class Renderer:
     def render_async(self, *, out: np.ndarray | None = None) -> Future[np.ndarray]:
         """Submit a render and return a future for its CPU image.
 
-        WebGPU uses a bounded staging-buffer ring, allowing GPU rendering and
-        mapping/channel conversion to overlap subsequent submissions. OpenGL
-        currently preserves the same API with an already-completed future.
+        Native bgfx uses bounded asynchronous readback. OpenGL preserves the
+        same API with an already-completed future.
         When ``out`` is supplied, the caller owns it but must not read or mutate
         it until the returned future completes.
         """

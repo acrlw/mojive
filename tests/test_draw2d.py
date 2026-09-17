@@ -124,7 +124,7 @@ import sys
 
 class NoGraphics(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'imgui_bundle', 'moderngl', 'glfw', 'wgpu', 'mujoco'}:
+        if fullname.split('.')[0] in {'imgui_bundle', 'moderngl', 'glfw', 'mujoco'}:
             raise AssertionError('Unexpected graphics import: ' + fullname)
 
 sys.meta_path.insert(0, NoGraphics())

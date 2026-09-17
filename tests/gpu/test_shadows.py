@@ -61,10 +61,6 @@ def backend(backend_name, request):
         from mojive.render.native.backend import NativeBackend
 
         be = NativeBackend(W, H, samples=4)
-    elif backend_name == "wgpu":
-        from mojive.render.webgpu.backend import WgpuBackend
-
-        be = WgpuBackend(W, H, samples=4)
     else:
         _passes.load_all()
         if "shadow" not in registered():
@@ -302,7 +298,7 @@ def test_shadow_pass_actually_ran(backend):
 
     if backend.caps.name != "opengl":
         # Per-pass CPU timings and the pass registry are opengl implementation
-        # details; the wgpu backend reports frame_cpu_ms only.
+        # details; native timings have a different submission scope.
         pytest.skip("per-pass timing table is a opengl implementation detail")
     _render(backend, shadow=True)
     order = list(backend.stats.cpu_ms)
@@ -490,8 +486,7 @@ def test_every_cascade_addresses_its_own_tile_and_texel(backend):
 def test_render_leaves_no_gl_error(backend):
 
     if backend.caps.name != "opengl":
-        # GL error state and backend.ctx are opengl internals; WebGPU reports
-        # validation failures through device error scopes instead.
+        # GL error state and backend.ctx are OpenGL internals.
         pytest.skip("GL error state is a opengl implementation detail")
     G.native().drain_errors()
     _render(backend, shadow=True)

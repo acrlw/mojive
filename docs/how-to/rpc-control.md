@@ -16,13 +16,14 @@ uv run --no-sync mojive view assets/test_scene.xml --rpc-socket
 For a separate standalone simulation:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive rpc-serve assets/test_scene.xml
+MOJIVE_RENDERER=bgfx uv run --no-sync mojive rpc-serve assets/test_scene.xml
 ```
 
-wgpu is the portable choice for RPC capture on macOS because OpenGL contexts there must be created
-on the process main thread. A headless service uses one dedicated graphics worker for capture;
-socket workers serialize commands through the service. Linux can use the default OpenGL path.
-Non-rendering methods work with either selection.
+The bgfx command requires the [native runtime and shaders](native-viewer.md). Use it for standalone
+RPC capture on macOS, where OpenGL contexts must be created on the process main thread.
+A headless service uses one dedicated graphics worker for capture; socket workers serialize
+commands through the service. Linux can use the default OpenGL path. An attached OpenGL viewer
+captures on its UI thread. Non-rendering methods work with either renderer.
 
 To control the same interactive viewer that a user sees, attach the service to the viewer instead
 of starting a second headless session. Socket workers queue requests and the viewer executes them

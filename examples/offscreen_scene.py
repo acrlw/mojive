@@ -13,7 +13,7 @@ from mojive import CameraView, RenderProduct, Scene, SceneRenderer
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--renderer", choices=("opengl", "wgpu"), default=None)
+    parser.add_argument("--renderer", choices=("opengl", "bgfx"), default=None)
     parser.add_argument("--output", type=Path, default=Path("output/scene-renderer"))
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)

@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("model", type=Path)
     parser.add_argument("--output", type=Path, default=Path("output/examples"))
     parser.add_argument(
-        "--renderer", "--backend", dest="backend", choices=("opengl", "wgpu"), default="opengl"
+        "--renderer", "--backend", dest="backend", choices=("opengl", "bgfx"), default="opengl"
     )
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)

@@ -52,7 +52,7 @@ antialiasing. Geometry and native vertex arrays are cached by path, width and pl
 unchanged frame only submits the cached data. Check the actual raster output at UI scales 0.65,
 1.0, 1.25 and 1.5, including world/body spokes versus frames and the Keyframes toolbar.
 `make ui-icon-scales BACKEND=bgfx` captures these scales in `output/ui-icon-scales/`;
-`BACKEND=opengl` and `BACKEND=wgpu` use the same specimens.
+`BACKEND=opengl` uses the same specimens.
 
 ### Use explicit geometric centers
 

@@ -47,7 +47,7 @@ Both examples load the same scene and retain the existing default layout. In man
 Space uses Mojive's playback control. In the passive example, Space calls the supplied callback
 to pause the caller's stepping loop; camera navigation and synchronization continue while paused.
 Passive playback belongs to the caller, so the viewer's internal physics controls are disabled.
-Use `ARGS='--model /path/to/model.xml --renderer wgpu'` to select a model/backend in either example.
+Use `ARGS='--model /path/to/model.xml --renderer bgfx'` to select a model/backend in either example.
 
 ```python
 import mujoco

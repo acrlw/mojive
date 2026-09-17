@@ -126,7 +126,7 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
     def capture_logical_clips():
         render()
         # OpenGL's ImGui adapter scales clip rectangles in place on submission;
-        # WebGPU leaves them in points. Inspect the shared pre-submission domain.
+        # the native backend leaves them in points. Inspect the shared pre-submission domain.
         clip_rects.clear()
         window = imgui.internal.find_window_by_name("Playback###viewport_playback")
         if window is not None and window.active:

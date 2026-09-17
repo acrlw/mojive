@@ -97,7 +97,7 @@ import sys
 from mojive.geometry2d import PathBuilder2D, flatten_path
 path = PathBuilder2D().move_to(0, 0).quadratic_to(5, 10, 10, 0).finish()
 assert len(flatten_path(path)[0].points) > 2
-blocked = ('imgui_bundle', 'glfw', 'mujoco', 'moderngl', 'wgpu')
+blocked = ('imgui_bundle', 'glfw', 'mujoco', 'moderngl')
 assert not any(name in sys.modules for name in blocked)
 """
     env = dict(os.environ, MOJIVE_NATIVE_BUILD=str(Path(native.__file__).parents[2]))

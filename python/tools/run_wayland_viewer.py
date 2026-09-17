@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--runtime", type=Path, default=ROOT / "build/wayland")
     parser.add_argument("--output", type=Path, default=ROOT / "output/native-wayland-viewer")
-    parser.add_argument("--renderer", choices=("bgfx", "opengl", "wgpu"), default="bgfx")
+    parser.add_argument("--renderer", choices=("bgfx", "opengl"), default="bgfx")
     parser.add_argument("--scene", default="test_scene")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1200)

@@ -44,13 +44,15 @@ user guide and checked during `make docs-check`.
 
 ## MuJoCo rendering and control
 
+Commands selecting bgfx require the [native runtime and shaders](../docs/how-to/native-viewer.md).
+
 ```bash
 uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
   --output output/examples/render
 
 uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \
-  --renderer wgpu \
-  --output output/examples/render-wgpu
+  --renderer bgfx \
+  --output output/examples/render-bgfx
 
 uv run --no-sync python examples/mujoco_control.py assets/slider_crank.xml --steps 120
 
@@ -139,7 +141,7 @@ physics engine or separately running service.
 Start the service:
 
 ```bash
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive rpc-serve assets/test_scene.xml \
+MOJIVE_RENDERER=bgfx uv run --no-sync mojive rpc-serve assets/test_scene.xml \
   --socket output/mojive.sock
 ```
 
@@ -153,6 +155,6 @@ uv run --no-sync python examples/control_client.py \
 ```
 
 The AF_UNIX service is for trusted local automation. See the
-[RPC control guide](../docs/how-to/rpc-control.md) for the equivalent one-shot CLI. The wgpu
-renderer is used here because macOS does not permit the OpenGL capture context on an RPC worker
-thread; Linux can use the default OpenGL path.
+[RPC control guide](../docs/how-to/rpc-control.md) for the equivalent one-shot CLI. The bgfx command
+requires the [native runtime and shaders](../docs/how-to/native-viewer.md). macOS does not permit
+OpenGL context creation on an RPC worker thread; Linux can use the default OpenGL path.

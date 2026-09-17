@@ -53,25 +53,17 @@ def _make_backend(backend_name: str, request, samples: int = 4):
         from mojive.render.native.backend import NativeBackend
 
         return NativeBackend(WIDTH, HEIGHT, samples=samples)
-    if backend_name == "wgpu":
-        from mojive.render.webgpu.backend import WgpuBackend
-
-        return WgpuBackend(WIDTH, HEIGHT, samples=samples)
     _passes.load_all()
     return OpenGLBackend(request.getfixturevalue("gl"), WIDTH, HEIGHT, samples=samples)
 
 
 def _tendon_pass(backend):
-    if backend.caps.name in ("wgpu", "bgfx"):
+    if backend.caps.name == "bgfx":
         return backend._tendons
     return backend._passes["tendon"]
 
 
-def _vbo_bytes(backend, gpu_mesh) -> bytes:
-    # wgpu vertex buffers are created without COPY_SRC; the CPU-side copy in
-    # GpuMesh is the same bytes that were uploaded.
-    if backend.caps.name == "wgpu":
-        return gpu_mesh._vertices.tobytes()
+def _vbo_bytes(gpu_mesh) -> bytes:
     return gpu_mesh.vbo.read()
 
 
@@ -156,87 +148,31 @@ def _bounds(adapter, source):
 
 def _require(backend_name: str, *names: str) -> None:
     if backend_name != "opengl":
-        return  # wgpu wires its passes statically; there is no registry.
+        return  # Only OpenGL exposes the Python pass registry.
     _passes.load_all()
     missing = [n for n in names if n not in registered()]
     if missing:
         pytest.skip(f"required render passes unavailable: {missing}")
 
 
-def test_wgpu_reuses_stable_frame_bindings_and_target_views(rendered):
-    if rendered["backend_name"] != "wgpu":
-        pytest.skip("wgpu resource-lifetime contract")
-    backend = rendered["backend"]
-    target = backend.target
-    group0 = backend._group0
-    target.read_rgb()
-    rgb_buffer = target._rgb_packer._buffer
-    rgb_staging = target._sync_readback._buffer
-    rgb_group = target._rgb_packer._group
-    views = (
-        target.color_view,
-        target.color_ms_view,
-        target.zbuf_view,
-        target.export_depth_view,
-        target.export_id_view,
-        target.export_segmentation_view,
-        target.export_zbuf_view,
-    )
-
-    backend.render()
-    target.read_rgb()
-
-    assert backend._group0 is group0
-    assert target._rgb_packer._buffer is rgb_buffer
-    assert target._sync_readback._buffer is rgb_staging
-    assert target._rgb_packer._group is rgb_group
-    assert views == (
-        target.color_view,
-        target.color_ms_view,
-        target.zbuf_view,
-        target.export_depth_view,
-        target.export_id_view,
-        target.export_segmentation_view,
-        target.export_zbuf_view,
-    )
-
-
 def test_msaa_flag_updates_the_backend_sample_state(backend_name, request):
-    """OpenGL toggles rasterization state; wgpu rebuilds sample-count state."""
+    """MSAA toggles rendering without changing the configured sample count."""
     backend = _make_backend(backend_name, request)
     try:
         assert RenderFlag.MSAA in backend.caps.render_flags
         assert backend.get_flag(RenderFlag.MSAA)
         assert backend.target.samples == 4
         assert backend.caps.msaa_samples == 4
-        original_color_view = getattr(backend.target, "color_view", None)
-        original_rgb_buffer = None
-        original_rgb_staging = None
-        if backend_name == "wgpu":
-            backend.target.read_rgb()
-            original_rgb_buffer = backend.target._rgb_packer._buffer
-            original_rgb_staging = backend.target._sync_readback._buffer
 
         assert backend.set_flag(RenderFlag.MSAA, False)
         assert not backend.get_flag(RenderFlag.MSAA)
-        expected = 1 if backend_name == "wgpu" else 4
-        assert backend.target.samples == expected
-        assert backend.caps.msaa_samples == expected
-        if backend_name == "wgpu":
-            assert backend.target.color_view is not original_color_view
-            assert backend.target._rgb_packer._buffer is None
-            assert backend.target._sync_readback._buffer is original_rgb_staging
-            backend.target.read_rgb()
-            assert backend.target._rgb_packer._buffer is not original_rgb_buffer
-            assert backend.target._sync_readback._buffer is original_rgb_staging
+        assert backend.target.samples == 4
+        assert backend.caps.msaa_samples == 4
 
-        single_sample_view = getattr(backend.target, "color_view", None)
         assert backend.set_flag(RenderFlag.MSAA, True)
         assert backend.get_flag(RenderFlag.MSAA)
         assert backend.target.samples == 4
         assert backend.caps.msaa_samples == 4
-        if backend_name == "wgpu":
-            assert backend.target.color_view is not single_sample_view
     finally:
         backend.release()
 
@@ -550,7 +486,7 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, r
             before = backend.target.read_color().tobytes()
             revision = backend._revision
         else:
-            before = _vbo_bytes(backend, gpu_mesh)
+            before = _vbo_bytes(gpu_mesh)
         ranges = backend._scene.bucket_ranges
 
         joint = mujoco.mj_name2id(adapter.model, mujoco.mjtObj.mjOBJ_JOINT, "skin_tip_hinge")
@@ -563,7 +499,7 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, r
             assert backend._mesh_indices[key] == gpu_mesh
             assert backend._revision == revision
         else:
-            after = _vbo_bytes(backend, gpu_mesh)
+            after = _vbo_bytes(gpu_mesh)
             assert backend.meshes.get(key) is gpu_mesh
 
         assert before != after
@@ -578,11 +514,8 @@ def test_deformable_vertices_update_without_rebuilding_the_scene(backend_name, r
 def test_deformable_wireframe_view_follows_vertex_updates(backend_name, request):
     """The wireframe debug view must track in-place deformable vertex updates.
 
-    The wgpu mesh store expands indexed triangles into a barycentric wire
-    stream that GpuMesh.update refreshes in place; opengl injects barycentrics
-    in a geometry stage over the same VBO.  A stale wire stream would keep
-    drawing the rest pose, which the pixel assertions below catch on both
-    backends.
+    A stale wireframe vertex stream would keep drawing the rest pose,
+    which the pixel assertions below catch on both backends.
     """
 
     import mujoco
@@ -849,13 +782,10 @@ def test_batching_actually_happened(rendered):
     s = rendered["backend"].stats
     assert s.instances > 0
     assert s.triangles > 0
-    if rendered["backend_name"] == "wgpu":
-        # The wgpu shadow pass encodes one draw per CSM cascade tile per
-        # bucket (opengl batches its cascades), so with one directional light
-        # the bound grows by the three cascade tiles.
-        assert s.draw_calls <= s.buckets * 5 + 4
-    else:
-        assert s.draw_calls <= s.buckets * 2 + 4
+    # This scene has one directional light. bgfx submits its three shadow
+    # cascades separately, in addition to the color and identity passes.
+    passes_per_bucket = 5 if rendered["backend_name"] == "bgfx" else 2
+    assert s.draw_calls <= s.buckets * passes_per_bucket + 4
     if s.instances >= 8:
         assert s.draw_calls < s.instances
 

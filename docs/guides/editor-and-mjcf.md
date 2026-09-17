@@ -278,17 +278,17 @@ collapsed so the same subtree is never deleted twice.
 Use these visual acceptance entries for the supported structured paths:
 
 ```bash
-make primitive-authoring BACKEND=wgpu
-make material-authoring BACKEND=wgpu
-make contact-authoring BACKEND=wgpu
-make body-authoring BACKEND=wgpu
-make resource-authoring BACKEND=wgpu
-make asset-browser BACKEND=wgpu
-make joint-site-authoring BACKEND=wgpu
-make model-component-authoring BACKEND=wgpu
-make keyframe-authoring BACKEND=wgpu
-make batch-editing BACKEND=wgpu
-make joint-gizmo BACKEND=wgpu
+make primitive-authoring BACKEND=bgfx
+make material-authoring BACKEND=bgfx
+make contact-authoring BACKEND=bgfx
+make body-authoring BACKEND=bgfx
+make resource-authoring BACKEND=bgfx
+make asset-browser BACKEND=bgfx
+make joint-site-authoring BACKEND=bgfx
+make model-component-authoring BACKEND=bgfx
+make keyframe-authoring BACKEND=bgfx
+make batch-editing BACKEND=bgfx
+make joint-gizmo BACKEND=bgfx
 ```
 
 ## Current pose and key0

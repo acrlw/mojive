@@ -80,7 +80,7 @@ def main() -> int:
     )
     parser.add_argument("--weston-source", type=Path, help="Matching Weston 9 source headers")
     parser.add_argument("--output", type=Path, default=ROOT / "output/native-wayland")
-    parser.add_argument("--renderer", choices=("bgfx", "opengl", "wgpu", "all"), default="all")
+    parser.add_argument("--renderer", choices=("bgfx", "opengl", "all"), default="all")
     parser.add_argument("--timeout", type=int, default=240)
     args = parser.parse_args()
     output = args.output.resolve()
@@ -167,7 +167,7 @@ def main() -> int:
         MOJIVE_WAYLAND_OUTPUT=str(output),
     )
     env.setdefault("MOJIVE_NATIVE_BUILD", str(ROOT / "build/native"))
-    renderers = ("bgfx", "opengl", "wgpu") if args.renderer == "all" else (args.renderer,)
+    renderers = ("bgfx", "opengl") if args.renderer == "all" else (args.renderer,)
     for renderer in renderers:
         with tempfile.TemporaryDirectory(prefix="mojive-wayland-") as runtime:
             # The controller is inherited only by this test process; there is no

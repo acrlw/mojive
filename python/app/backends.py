@@ -44,14 +44,13 @@ _RENDER_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "opengl": ("moderngl", "glfw"),
     "mjr_": ("mujoco",),
     "newton-gl": ("newton",),
-    "wgpu": ("wgpu", "rendercanvas"),
 }
 
 
 def _active_renderer(renderer: str) -> str:
     """The renderer the viewer would actually use for a matrix row.
 
-    Renderer environment settings can swap OpenGL for the wgpu backend; other
+    Renderer environment settings can swap OpenGL for the native bgfx backend; other
     renderers (the MuJoCo reference, planned adapters) are unaffected.
     """
     if renderer != "opengl":

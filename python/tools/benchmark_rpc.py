@@ -148,7 +148,7 @@ def _trial(args, policy, repeat):
 def main(argv=None):
     """Run alternating policies serially and retain raw timing and capture evidence."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("opengl", "wgpu", "bgfx"), default="opengl")
+    parser.add_argument("--backend", choices=("opengl", "bgfx"), default="opengl")
     parser.add_argument("--clients", type=int, default=16)
     parser.add_argument("--requests", type=int, default=30, help="Requests per client per trial")
     parser.add_argument("--repeats", type=int, default=3)

@@ -146,9 +146,7 @@ def _trial(args, backend: str, dynamic: bool, repeat: int) -> dict:
 def main(argv: list[str] | None = None) -> int:
     """Run serial startup trials and save timings, logs, and window captures."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--backend", nargs="+", choices=("opengl", "wgpu", "bgfx"), default=["opengl"]
-    )
+    parser.add_argument("--backend", nargs="+", choices=("opengl", "bgfx"), default=["opengl"])
     parser.add_argument("--asset", default="joint_gizmo")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--output", type=Path, default=Path("output/startup-profile"))

@@ -2,7 +2,7 @@
 
 `viewer.canvas2d` and `SceneRenderer.canvas2d` expose the same retained drawing API.
 Canvas coordinates map to a world plane (XY by default). Canvas2D submits to the existing
-DebugDraw GPU pass on OpenGL, WebGPU, and bgfx. It does not use ImGui or allocate a second
+DebugDraw GPU pass on OpenGL and bgfx. It does not use ImGui or allocate a second
 renderer. UI controls continue to use ImGui draw lists.
 
 ## Author shapes
@@ -83,7 +83,7 @@ font runs are outside this API. Use ImGui for UI panels and image widgets.
 ```bash
 make canvas-2d-gallery BACKEND=opengl
 make canvas-2d-test BACKEND=opengl
-# Repeat with BACKEND=wgpu and BACKEND=bgfx.
+# Repeat with BACKEND=bgfx after building the native runtime.
 make canvas-2d
 ```
 

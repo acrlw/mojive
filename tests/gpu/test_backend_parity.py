@@ -14,7 +14,7 @@ from mojive import CameraView, Material, RenderProduct, Scene, SceneRenderer, Sh
 from mojive.types import TextureData, TextureType
 
 pytestmark = pytest.mark.gpu
-BACKENDS = ["opengl", "wgpu"] + (["bgfx"] if os.environ.get("MOJIVE_NATIVE_BUILD") else [])
+BACKENDS = ["opengl"] + (["bgfx"] if os.environ.get("MOJIVE_NATIVE_BUILD") else [])
 
 
 @pytest.mark.skipif("bgfx" not in BACKENDS, reason="Native build required")

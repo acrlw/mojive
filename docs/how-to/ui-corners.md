@@ -107,7 +107,7 @@ coincident samples are removed before fill and AA submission.
 Back endpoints and their labels fade with zero slope at both ends of the transition.
 Transform and perturbation drag links blend the hollow origin, connector, and solid target
 with an implicit union whose blend polynomial matches three derivatives at each limit.
-Regular level contours therefore retain G3 contact. OpenGL and WebGPU evaluate the same field
+Regular level contours therefore retain G3 contact. OpenGL and bgfx evaluate the same field
 on one existing quad. Endpoint overlap can change the hole topology; a collapsed hole is not
 a regular curve and has no G3 guarantee at its instant of disappearance.
 The connector blends into the outside of the origin while its inner circle remains intact.

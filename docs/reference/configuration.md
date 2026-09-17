@@ -8,8 +8,8 @@ it does not block viewport interaction.
 
 | Variable | Values | Purpose |
 |---|---|---|
-| `MOJIVE_RENDERER` | `opengl`, `wgpu`, `bgfx` | Select the renderer for interactive and offscreen rendering; an explicit `renderer=` argument takes precedence. |
-| `MOJIVE_BACKEND` | `opengl`, `wgpu`, `bgfx` | Legacy renderer setting, used when `MOJIVE_RENDERER` is unset. |
+| `MOJIVE_RENDERER` | `opengl`, `bgfx` | Select the renderer for interactive and offscreen rendering; an explicit `renderer=` argument takes precedence. |
+| `MOJIVE_BACKEND` | `opengl`, `bgfx` | Legacy renderer setting, used when `MOJIVE_RENDERER` is unset. |
 | `MOJIVE_GL` | `auto`, `native`, `glfw`, `egl` | Select OpenGL context creation. Offscreen `auto` tries EGL on Linux, then hidden GLFW only when a desktop display and the main thread are available. |
 | `MOJIVE_UI_SCALE` | positive number | Override the logical UI scale when desktop scale detection is wrong. |
 | `MOJIVE_LANGUAGE` | `en`, `zh_CN` | Override the UI language for the process. |
@@ -40,7 +40,7 @@ Application preferences default to these locations:
 path. `MOJIVE_CONFIG_DIR` affects the layout file only.
 
 The Settings panel writes user choices to the JSON settings file and restores them at the next
-launch. The file is intentionally backend-neutral, so switching between OpenGL, WebGPU and bgfx keeps
+launch. The file is intentionally backend-neutral, so switching between OpenGL and bgfx keeps
 the same preference.
 
 | Preference | Values | Settings panel |
@@ -426,7 +426,7 @@ without skipping motion or shortening the resulting video. Finished videos show 
 save path in a short viewport notice using the configured 3–5 second duration. The complete
 message remains in Output: right-click it and choose **Copy path**. Select ordinary Output
 records and use Ctrl/Cmd+C to copy their message bodies.
-Use `make take-video` (or `BACKEND=wgpu`) for native controls and decoded-video acceptance.
+Use `make take-video` (or `BACKEND=bgfx`) for native controls and decoded-video acceptance.
 
 Open **View > Layers...** or **Window > Layers** to control viewport content during everyday
 viewing and recording. The panel docks outside the viewport. Its switches control viewport
@@ -443,7 +443,7 @@ GPU drawing layers but excludes ImGui overlays. Camera preview is part of viewpo
 Small limited hinge joints show a faint complementary arc completing the rotation ring. Hover
 or drag anywhere on that ring to manipulate the joint within its authored limits.
 
-Use `make recording-layers` (or `BACKEND=wgpu`) for scripted live controls and encoded-video
+Use `make recording-layers` (or `BACKEND=bgfx`) for scripted live controls and encoded-video
 acceptance, including representative images under `output/recording-layers/`.
 
 `viewer.record(...)` remains the deterministic fixed-frame, UI-free rollout API. The
@@ -503,14 +503,6 @@ MOJIVE_GL=egl uv run --no-sync python examples/mujoco_video.py assets/test_scene
 Context errors retain the original initialization failure and every attempted backend. A
 successful GLFW fallback may select a different GPU from EGL, so the runtime emits a warning.
 The presence of a display variable permits an attempt; it does not guarantee a working display.
-
-The wgpu backend requires the `wgpu` optional dependency and a compatible Metal, Vulkan, or DX12
-adapter:
-
-```bash
-uv pip install "wgpu>=0.32"
-MOJIVE_RENDERER=wgpu uv run --no-sync mojive doctor test_scene
-```
 
 The bgfx backend requires the native extension and compiled shaders. Build with
 `make native-python-build`; use `MOJIVE_NATIVE_BUILD` to select that development build.

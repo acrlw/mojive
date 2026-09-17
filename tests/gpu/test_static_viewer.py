@@ -81,7 +81,7 @@ def viewport_snap(viewer) -> np.ndarray:
 
     The docked stats panel redraws its frame-time plot every sync, so a
     whole-window diff measures UI churn instead of the scene edit — and the
-    churn differs between the opengl and wgpu frame loops.
+    churn differs between the OpenGL and native frame loops.
     """
     image = snap(viewer)
     x, y, w, h = viewer.window.points_to_pixels(viewer.app._viewport_rect)

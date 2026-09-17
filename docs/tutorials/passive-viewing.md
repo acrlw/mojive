@@ -284,7 +284,7 @@ wall-clock scheduling behavior. Adapter integrations can use
 make passive-viewer
 make passive-viewer ARGS='--physics-hz 500 --hidden'
 MOJIVE_LANGUAGE=zh_CN MOJIVE_UI_SCALE=2.5 make passive-viewer ARGS='--record --hidden --width 3200 --height 1800'
-make passive-viewer ARGS='--renderer wgpu --output output/passive-viewer-wgpu --hidden'
+make passive-viewer ARGS='--renderer bgfx --output output/passive-viewer-bgfx --hidden'
 ```
 
 The example reports physics/display rates, checks the exact physics clock and display progress

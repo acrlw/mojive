@@ -903,7 +903,7 @@ def test_status_exposes_localized_recording_controls(
         sim_time=0.2,
         step=10,
         metric_mode="time",
-        backend="wgpu",
+        backend="bgfx",
         dt=0.002,
         fps=60.0,
         recording_phase=phase,
@@ -945,12 +945,12 @@ def test_right_aligned_telemetry_has_no_separator_against_empty_space():
         sim_time=0.2,
         step=0,
         metric_mode="steps",
-        backend="wgpu",
+        backend="bgfx",
         dt=0.002,
         fps=57.5,
     )
 
-    backend_x = next(position[0] for position, text in draw.text_positions if text == "wgpu")
+    backend_x = next(position[0] for position, text in draw.text_positions if text == "bgfx")
     vertical = [
         args[0][0] for args, _kwargs in draw.lines if args[0][0] == pytest.approx(args[1][0])
     ]
@@ -1043,7 +1043,7 @@ def test_status_progressively_collapses_without_text_overlap(width, show_physics
         sim_time=0.2,
         step=674,
         metric_mode="steps",
-        backend="wgpu",
+        backend="bgfx",
         dt=0.002,
         fps=59.8,
         show_physics=show_physics,

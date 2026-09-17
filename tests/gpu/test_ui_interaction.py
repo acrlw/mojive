@@ -812,11 +812,7 @@ def test_double_clicking_joint_and_hierarchy_rows_focuses_the_camera(viewer) -> 
         if v.backend.caps.name == "bgfx":
             assert v.backend._style.selection_xray
         else:
-            outline = (
-                v.backend._outline
-                if v.backend.caps.name == "wgpu"
-                else v.backend._passes["outline"]
-            )
+            outline = v.backend._passes["outline"]
             assert outline.xray
         assert v.app.camera.animating
         v.app.camera.advance(1.0, v.app.camera_out)

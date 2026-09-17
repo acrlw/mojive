@@ -10,8 +10,7 @@ mujoco = pytest.importorskip("mujoco")
 pytestmark = pytest.mark.gpu
 
 
-@pytest.mark.parametrize("backend", ["opengl", "wgpu"])
-def test_mujoco_user_scene_spheres_render_and_clear(backend):
+def test_mujoco_user_scene_spheres_render_and_clear(backend_name):
     model = mujoco.MjModel.from_xml_string("<mujoco/>")
     scene = mujoco.MjvScene(model, maxgeom=2)
     mujoco.mjv_initGeom(
@@ -23,7 +22,7 @@ def test_mujoco_user_scene_spheres_render_and_clear(backend):
         [1, 0, 0, 1],
     )
     scene.ngeom = 1
-    with SceneRenderer(width=96, height=72, samples=0, renderer=backend) as renderer:
+    with SceneRenderer(width=96, height=72, samples=0, renderer=backend_name) as renderer:
         empty = renderer.render().copy()
         draw_user_geometries(renderer.debug, snapshot_geometries(scene))
         red = renderer.render().copy()
