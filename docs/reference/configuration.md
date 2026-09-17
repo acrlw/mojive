@@ -274,11 +274,18 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
 **Settings > Camera** controls double-click focus and editor zoom. Changes apply immediately
 and persist across launches. Field labels follow the UI language; curve and mode names remain English.
 
+Object focus approaches from the camera's current side of the object and looks toward its bounds
+center. Views below a 30-degree elevation rise to that angle; steeper views from above retain their
+elevation. The eye follows a straight path; heading and elevation ease toward their endpoints
+without reversing, and level endpoint views stay level throughout the transition. Joint focus
+also accounts for the joint axis and nearby occlusion when choosing an observation direction.
+
 - **Focus distance** is framing padding: `1x` tightly fits the object's bounds; larger values
   leave more space. Joint focus retains its additional space for the joint axis and controls.
 - **Transition duration** is in seconds; `0` focuses immediately. **Transition curve** selects
   `Linear`, `Smoothstep` (default), `Smootherstep`, or `Ease out cubic`. Object focus applies the
-  curve to screen motion while retaining its straight camera path.
+  curve to both turning and visible approach, so they begin and end together. Travel along
+  the straight camera path accounts for perspective scaling to avoid a late rush toward the object.
 - **Proportional** zoom changes distance by a ratio, making each step smaller near the pivot.
   **Linear** moves a fixed fraction of the last framed scene's extent per step. **Zoom speed**
   scales both wheel and drag input.

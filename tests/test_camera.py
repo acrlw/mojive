@@ -879,7 +879,8 @@ def test_scene_camera_transition_handles_opposite_views_roll_and_intrinsics(orth
 
 @pytest.mark.parametrize("aspect", [0.5, 1.5, 3.0])
 @pytest.mark.parametrize("projection", ["perspective", "orthographic", "calibrated"])
-def test_focus_bounds_fits_viewport_and_retains_roll_and_lens(aspect, projection):
+@pytest.mark.parametrize("directed", [False, True])
+def test_focus_bounds_fits_viewport_and_retains_lens(aspect, projection, directed):
     from dataclasses import replace
     from itertools import product
 
@@ -906,12 +907,16 @@ def test_focus_bounds_fits_viewport_and_retains_roll_and_lens(aspect, projection
     center, half = np.array((0.5, -0.3, 0.7)), np.array((0.6, 0.2, 0.35))
     corners = center + np.array(list(product((-1, 1), repeat=3))) * half
     rect = (0, 0, 800 * aspect, 800)
-    camera.focus_bounds(center, half, sink)
+    direction = elevated_focus_view_direction(view.eye - center, camera.direction())
+    camera.focus_bounds(center, half, sink, eye_direction=direction if directed else None)
     assert camera.view().view_matrix() == pytest.approx(view.view_matrix())
     for _ in range(36):
         camera.advance(FOCUS_DURATION / 36, sink)
         current = camera.view()
-        assert current.view_matrix()[:3, :3] == pytest.approx(view.view_matrix()[:3, :3], abs=1e-6)
+        if not directed:
+            assert current.view_matrix()[:3, :3] == pytest.approx(
+                view.view_matrix()[:3, :3], abs=1e-6
+            )
         if projection == "calibrated":
             assert current.focal_length == pytest.approx(view.focal_length)
             assert current.principal_offset == pytest.approx(view.principal_offset)
@@ -919,6 +924,9 @@ def test_focus_bounds_fits_viewport_and_retains_roll_and_lens(aspect, projection
         assert np.all(pixels >= -1e-3)
         assert np.all(pixels <= np.array(rect[2:]) + 1e-3)
     final = camera.view()
+    if directed:
+        offset = final.eye - center
+        assert offset / np.linalg.norm(offset) == pytest.approx(direction, abs=1e-6)
     assert project(final, [center], rect)[0, :2] == pytest.approx((400 * aspect, 400), abs=1e-3)
     pixels = project(final, corners, rect)[:, :2]
     extent = np.max(np.abs(pixels / np.array(rect[2:]) * 2 - 1))
@@ -929,15 +937,74 @@ def test_focus_bounds_fits_viewport_and_retains_roll_and_lens(aspect, projection
     assert np.all(np.abs(clip[:, :3]) <= clip[:, 3, None] + 1e-5)
 
 
-def test_focus_bounds_retargeting_is_continuous_and_manual_pan_cancels_it():
+@pytest.mark.parametrize("forward", [(1, 0, 2), (-1, 0, 0), (0, 0, 1)])
+@pytest.mark.parametrize("offset", [(4, 0, 0), (3, -4, 5), (0, 0, 4), (0, 0, -4), (4, 0, -8)])
+@pytest.mark.parametrize("orthographic", [False, True])
+def test_focus_bounds_looks_down_from_the_current_side_even_when_facing_away(
+    forward, offset, orthographic
+):
+    center = np.array((1.0, -2.0, 1.0))
+    eye = center + np.array(offset)
+    view = CameraView(
+        eye=eye, target=eye + np.array(forward), up=np.array((0, 1, 1)), orthographic=orthographic
+    )
+    camera = OrbitCamera()
+    camera.adopt(view, exact=True)
+    sink = RecordingSink()
+
+    camera.focus_bounds(
+        center,
+        (0.2, 0.3, 0.4),
+        sink,
+        eye_direction=elevated_focus_view_direction(eye - center, camera.direction()),
+    )
+    assert camera.view().view_matrix() == pytest.approx(view.view_matrix())
+    previous_rotation = view.view_matrix()[:3, :3]
+    eyes = [eye.copy()]
+    pitches = [float(np.degrees(np.arcsin(-view.forward()[2])))]
+    for _ in range(36):
+        camera.advance(FOCUS_DURATION / 36, sink)
+        current = camera.view()
+        rotation = current.view_matrix()[:3, :3]
+        assert rotation @ rotation.T == pytest.approx(np.eye(3), abs=1e-6)
+        assert np.linalg.det(rotation) == pytest.approx(1, abs=1e-6)
+        turn = np.arccos(np.clip((np.trace(previous_rotation.T @ rotation) - 1) * 0.5, -1, 1))
+        assert np.degrees(turn) < 20
+        previous_rotation = rotation
+        assert current.distance() > 0
+        eyes.append(current.eye.copy())
+        pitches.append(camera.pitch)
+
+    final = camera.view()
+    final_offset = final.eye - center
+    if np.linalg.norm(offset[:2]) > 0:
+        assert final_offset[:2] / np.linalg.norm(final_offset[:2]) == pytest.approx(
+            np.array(offset[:2]) / np.linalg.norm(offset[:2]), abs=1e-6
+        )
+    elevation = np.degrees(np.arctan2(final_offset[2], np.linalg.norm(final_offset[:2])))
+    assert elevation == pytest.approx(
+        max(30, np.degrees(np.arctan2(offset[2], np.linalg.norm(offset[:2])))), abs=1e-5
+    )
+    assert final.forward() == pytest.approx(-final_offset / np.linalg.norm(final_offset), abs=1e-6)
+    assert final.target == pytest.approx(center)
+    travel = final.eye - eye
+    assert np.cross(np.asarray(eyes) - eye, travel) == pytest.approx(0, abs=1e-5)
+    for axis in range(3):
+        assert np.all(np.diff(np.asarray(eyes)[:, axis]) * travel[axis] >= -1e-7)
+    assert np.all(np.diff(pitches) * (pitches[-1] - pitches[0]) >= -1e-5)
+
+
+@pytest.mark.parametrize("direction", [None, (1, 1, 1)])
+def test_focus_bounds_retargeting_is_continuous_and_manual_pan_cancels_it(direction):
     camera = OrbitCamera(distance=6, aspect=1.5)
     sink = RecordingSink()
-    camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink)
+    camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink, eye_direction=direction)
     camera.advance(0.12, sink)
     before = camera.view()
-    camera.focus_bounds((1, 1, 0), (0.4, 0.2, 0.2), sink)
+    camera.focus_bounds((1, 1, 0), (0.4, 0.2, 0.2), sink, eye_direction=direction)
     assert camera.view().eye == pytest.approx(before.eye)
     assert camera.view().target == pytest.approx(before.target)
+    assert camera.view().view_matrix() == pytest.approx(before.view_matrix())
     camera.pan(10, 5, 800)
     assert not camera.animating
     after = camera.view()
@@ -945,11 +1012,45 @@ def test_focus_bounds_retargeting_is_continuous_and_manual_pan_cancels_it():
     assert camera.view().eye == pytest.approx(after.eye)
 
 
-def test_focus_bounds_starts_and_finishes_with_zero_velocity():
+def test_directed_focus_turn_and_visible_approach_progress_together():
+    from itertools import product
+
+    from mojive.interaction.gizmo import project
+
+    camera = OrbitCamera(distance=6, aspect=1.5)
+    sink = RecordingSink()
+    center, half = np.array((2, -1.5, 1)), np.full(3, 0.3 / np.sqrt(3))
+    points = center + np.array(list(product((-1, 1), repeat=3))) * half
+    start = camera.view()
+    camera.focus_bounds(
+        center,
+        half,
+        sink,
+        eye_direction=elevated_focus_view_direction(start.eye - center, camera.direction()),
+    )
+    views = [start]
+    angles = [(camera.yaw, camera.pitch)]
+    for _ in range(4):
+        camera.advance(FOCUS_DURATION / 4, sink)
+        views.append(camera.view())
+        angles.append((camera.yaw, camera.pitch))
+    angles = np.asarray(angles)
+    turn_progress = (angles - angles[0]) / (angles[-1] - angles[0])
+    assert turn_progress[:, 0] == pytest.approx((0, 0.15625, 0.5, 0.84375, 1))
+    assert turn_progress[:, 1] == pytest.approx(turn_progress[:, 0])
+    spans = np.array(
+        [np.ptp(project(view, points, (0, 0, 1200, 800))[:, :2], axis=0) for view in views]
+    )
+    visible_progress = (spans - spans[0]) / (spans[-1] - spans[0])
+    assert visible_progress == pytest.approx(turn_progress, abs=0.12)
+
+
+@pytest.mark.parametrize("direction", [None, (1, 1, 1)])
+def test_focus_bounds_starts_and_finishes_with_zero_velocity(direction):
     camera = OrbitCamera(distance=6, aspect=1.5)
     sink = RecordingSink()
     start = camera.view().eye
-    camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink)
+    camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink, eye_direction=direction)
     epsilon = FOCUS_DURATION * 1e-5
     camera.advance(epsilon, sink)
     first = camera.view().eye.copy()
@@ -962,12 +1063,13 @@ def test_focus_bounds_starts_and_finishes_with_zero_velocity():
     assert np.linalg.norm(end - penultimate) / travel < 1e-7
 
 
-def test_focus_bounds_translate_retains_the_animation_path():
+@pytest.mark.parametrize("direction", [None, (1, 1, 1)])
+def test_focus_bounds_translate_retains_the_animation_path(direction):
     sink = RecordingSink()
     cameras = [OrbitCamera(distance=6, aspect=1.5) for _ in range(2)]
     delta = np.array((0.5, 0.7, 1.0))
     for camera in cameras:
-        camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink)
+        camera.focus_bounds((2, -1.5, 1), (0.2, 0.2, 0.2), sink, eye_direction=direction)
         camera.advance(0.1, sink)
     cameras[1].translate(delta)
     for _ in range(30):
@@ -1027,7 +1129,8 @@ def test_repeated_zoom_out_never_overflows_and_reverses_at_the_limit(orthographi
         ("ease_out_cubic", 0.578125),
     ],
 )
-def test_focus_preferences_control_screen_progress_duration_and_fit(curve, progress):
+@pytest.mark.parametrize("directed", [False, True])
+def test_focus_preferences_control_progress_duration_and_fit(curve, progress, directed):
     from mojive import CameraNavigationConfig
     from mojive.interaction.gizmo import project
 
@@ -1036,14 +1139,22 @@ def test_focus_preferences_control_screen_progress_duration_and_fit(curve, progr
     sink = RecordingSink()
     center, half = np.array((2, -1.5, 1)), np.full(3, 0.2)
     rect = (0, 0, 1200, 800)
+    initial_angles = np.array((camera.yaw, camera.pitch))
     initial = project(camera.view(), [center], rect)[0, :2]
-    camera.focus_bounds(center, half, sink)
+    camera.focus_bounds(center, half, sink, eye_direction=(1, 1, 1) if directed else None)
     camera.advance(0.2, sink)
     assert camera.animating
-    expected = initial * (1 - progress) + np.array((600, 400)) * progress
-    assert project(camera.view(), [center], rect)[0, :2] == pytest.approx(expected, abs=1e-3)
+    middle_angles = np.array((camera.yaw, camera.pitch))
+    if not directed:
+        expected = initial * (1 - progress) + np.array((600, 400)) * progress
+        assert project(camera.view(), [center], rect)[0, :2] == pytest.approx(expected, abs=1e-3)
     camera.advance(0.6, sink)
     assert not camera.animating
+    if directed:
+        assert middle_angles == pytest.approx(
+            initial_angles * (1 - progress) + np.array((camera.yaw, camera.pitch)) * progress,
+            abs=1e-6,
+        )
     pixels = project(camera.view(), corners(center - half, center + half), rect)[:, :2]
     assert np.abs(pixels / (1200, 800) * 2 - 1).max() == pytest.approx(0.5, abs=1e-5)
 

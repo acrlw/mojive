@@ -272,9 +272,7 @@ def test_vertical_slide_focus_uses_iso_elevation_instead_of_a_level_view() -> No
 
 @pytest.mark.parametrize("node_type", (NodeType.GEOM, NodeType.WORLD, NodeType.ENVIRONMENT))
 @pytest.mark.parametrize("model_camera", (False, True))
-def test_node_focus_keeps_visible_bounds_in_frame_and_preserves_orientation(
-    node_type, model_camera
-) -> None:
+def test_node_focus_keeps_visible_bounds_in_frame_and_looks_down(node_type, model_camera) -> None:
     node = SceneNode(
         node_id=12,
         name="forearm",
@@ -309,26 +307,32 @@ def test_node_focus_keeps_visible_bounds_in_frame_and_preserves_orientation(
 
     corners = center + np.array(list(product((-1, 1), repeat=3))) * half
     initial_eye = app.camera.view().eye.copy()
-    initial_direction = app.camera.view().forward()
     app._apply_pending_node_focus()
-    previous_error = float("inf")
     eyes = []
+    previous_pixel = None
     for _ in range(37):
         view = app.camera.view()
         pixels = project(view, corners, app._viewport_rect)[:, :2]
         assert np.all(pixels >= 0)
         assert np.all(pixels <= (1200, 800))
-        error = np.linalg.norm(project(view, [center], app._viewport_rect)[0, :2] - (600, 400))
-        assert error <= previous_error + 1e-3
-        previous_error = error
-        assert view.forward() == pytest.approx(initial_direction, abs=1e-6)
+        pixel = project(view, [center], app._viewport_rect)[0, :2]
+        if previous_pixel is not None:
+            assert np.all(pixel >= previous_pixel - 1e-3)
+        previous_pixel = pixel
+        error = np.linalg.norm(pixel - (600, 400))
+        assert view.view_matrix()[0, 2] == pytest.approx(0, abs=1e-6)
         eyes.append(view.eye)
         app.camera.advance(FOCUS_DURATION / 36, app.camera_out)
     assert app.camera.pivot == pytest.approx(center)
-    assert previous_error < 1e-3
-    # Fixed orientation and coordinated zoom produce a straight eye path.
+    assert app.camera.pitch == pytest.approx(30, abs=1e-5)
+    offset = app.camera.view().eye - center
+    assert offset[:2] / np.linalg.norm(offset[:2]) == pytest.approx(
+        (initial_eye - center)[:2] / np.linalg.norm((initial_eye - center)[:2])
+    )
+    assert error < 1e-3
     travel = app.camera.view().eye - initial_eye
-    assert np.cross(np.asarray(eyes) - initial_eye, travel) == pytest.approx(0, abs=2e-5)
+    assert np.cross(np.asarray(eyes) - initial_eye, travel) == pytest.approx(0, abs=1e-5)
+    assert np.all(np.diff(np.asarray(eyes)[:, 2]) * travel[2] >= -1e-7)
 
 
 def test_hierarchy_camera_focus_uses_the_camera_world_position() -> None:
