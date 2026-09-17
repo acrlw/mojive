@@ -73,7 +73,7 @@ if(MOJIVE_BUILD_BGFX)
                 -o "${output}" --type ${shader_type} --platform ${shader_platform}
                 -p ${shader_profile} --varyingdef "${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying.def.sc"
                 -i "${BGFX_DIR}/src" -O 3
-            DEPENDS mojive_shaderc "shaders/${shader}.sc" shaders/varying.def.sc shaders/lighting.sh shaders/shadows.sh shaders/color.sh shaders/reflections.sh shaders/litVertex.sh shaders/litFragment.sh shaders/dataEncoding.sh VERBATIM)
+            DEPENDS mojive_shaderc "shaders/${shader}.sc" shaders/varying.def.sc shaders/lighting.sh shaders/shadows.sh shaders/color.sh shaders/reflections.sh shaders/litVertex.sh shaders/litFragment.sh shaders/dataEncoding.sh shaders/coverage.sh VERBATIM)
         list(APPEND shader_outputs "${output}")
     endforeach()
     add_custom_target(mojive_probe_shaders ALL DEPENDS ${shader_outputs})

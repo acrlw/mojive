@@ -7,7 +7,8 @@ float coverageAlpha(float alpha, vec2 pixel) {
     float low = 2.0 * mod(lo.x + lo.y, 2.0) + lo.y;
     float high = 2.0 * mod(hi.x + hi.y, 2.0) + hi.y;
     float threshold = (4.0 * low + high + 0.5) / 16.0;
-    bool collision = alpha <= -3.0;
+    // Classify inside the unused encoding gap so interpolation cannot change the role at -3.
+    bool collision = alpha < -2.5;
     float opacity = -alpha - (collision ? 3.0 : 1.0);
     // Complementary patterns keep an inner collision surface visible through a visual shell.
     if (opacity <= (collision ? 1.0 - threshold : threshold)) discard;
