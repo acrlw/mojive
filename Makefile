@@ -985,7 +985,7 @@ NATIVE_OUTPUT ?= output/native-probe/$(NATIVE_BACKEND)
 NATIVE_BINDINGS_BUILD ?= build/bindings
 NATIVE_JOBS ?= 4
 NATIVE_SCENE ?= output/native-probe/humanoids100.mjvp
-NATIVE_FONT_CACHE = $(shell $(PY) -c 'from mojive.ui.fonts import cache_dir; print(cache_dir())')
+NATIVE_FONT_CACHE = $(shell $(PY) -c 'from mojive.text.sources import cache_dir; print(cache_dir())')
 NATIVE_FONT_LATIN ?= $(NATIVE_FONT_CACHE)/JetBrainsMono-Regular.ttf
 NATIVE_FONT_CJK ?= $(or $(firstword $(wildcard $(NATIVE_FONT_CACHE)/NotoSansSC-Regular.otf /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc)),$(NATIVE_FONT_CACHE)/NotoSansSC-Regular.otf)
 
