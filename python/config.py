@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from mojive.capture import CaptureSurface
 
-from .types import GeometryStyle
+from .types import ContactStyle, GeometryStyle
 
 if TYPE_CHECKING:
     from .render.backend import ShadowQuality
@@ -404,6 +404,7 @@ class ViewerConfig:
     debug_server: bool = True
     geometry_style: GeometryStyle | None = None
     navigation: CameraNavigationConfig = field(default_factory=CameraNavigationConfig)
+    contact_style: ContactStyle | None = None
 
     @classmethod
     def minimal(cls, *panels: str) -> ViewerConfig:

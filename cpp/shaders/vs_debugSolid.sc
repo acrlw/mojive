@@ -20,7 +20,10 @@ void main() {
     mat4 model = mtxFromCols(in_model0, in_model1, in_model2, in_model3);
     vec4 world = mul(model, vec4(a_position, 1.0));
     v_color0 = vec4(in_color.rgb, in_color.a * u_alpha);
-    v_normal = mul(model, vec4(a_normal,0)).xyz;
+    vec3 normal = cross(in_model1.xyz, in_model2.xyz) * a_normal.x
+                + cross(in_model2.xyz, in_model0.xyz) * a_normal.y
+                + cross(in_model0.xyz, in_model1.xyz) * a_normal.z;
+    v_normal = mul(u_view, vec4(normal, 0.0)).xyz;
     v_view_pos = (mul(u_view, world)).xyz;
     gl_Position = nativeClip(mul(u_debugViewProj, world));
 }

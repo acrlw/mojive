@@ -47,6 +47,7 @@ the same preference.
 |---|---|---|
 | `shadow_quality` | `performance`, `balanced`, `high` | Rendering > Shadows > Shadow quality |
 | `geometry_style` | `collision_color`, `visual_opacity`, `collision_opacity` | MuJoCo Visuals > Both appearance |
+| `contact_style` | `shape`, `color`, `scale`, `use_model_color` | MuJoCo Visuals > Contact points |
 
 `balanced` is the default. `performance` reduces receiver filtering work, while `high` increases
 near-cascade density and filtering quality for close inspection. Changing the preset invalidates
@@ -268,6 +269,25 @@ with Renderer(model, shadow_quality=ShadowQuality.HIGH) as renderer:
     image = renderer.render()
     renderer.set_shadow_quality(ShadowQuality.PERFORMANCE)
 ```
+
+## Contact point appearance
+
+**Settings > MuJoCo Visuals > Contact points** controls contact marker visibility and appearance.
+The default is a red `Cylinder`, oriented along the contact normal to distinguish it from yellow
+collision geometry. `Sphere` draws a solid ball; `Point` retains the screen-space circular marker.
+**Color** includes opacity; **Size** multiplies the marker dimensions. **Use model color** restores
+the adapter's contact color. Island visualization takes precedence over either color choice.
+
+MuJoCo supplies the base radius and half height from `visual/scale/contactwidth` and
+`contactheight`, multiplied by `stat.meansize`. Cylinder uses these nominal dimensions;
+it does not stretch with penetration depth. Sphere uses the radius. Point uses a four-pixel
+radius at size `1x`. These display preferences do not change contacts or simulation parameters.
+
+Shape, color, and size persist across desktop launches and are shared by viewport, scene captures,
+video, and camera previews. Public Python callers can import `ContactStyle` from `mojive`, pass
+`ViewerConfig(contact_style=ContactStyle(...))`, call
+`viewer.configure_contact_style(ContactStyle(...), persist=True)`, or use
+`scene_renderer.set_contact_style(ContactStyle(...))` before updating its frame.
 
 ## Camera navigation
 

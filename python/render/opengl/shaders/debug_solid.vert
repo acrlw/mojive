@@ -20,7 +20,10 @@ void main() {
     mat4 model = mat4(in_model0, in_model1, in_model2, in_model3);
     vec4 world = model * vec4(in_position, 1.0);
     v_color = vec4(in_color.rgb, in_color.a * u_alpha);
-    v_normal = mat3(model) * in_normal;
+    mat3 normal_matrix = mat3(cross(model[1].xyz, model[2].xyz),
+                              cross(model[2].xyz, model[0].xyz),
+                              cross(model[0].xyz, model[1].xyz));
+    v_normal = mat3(u_view) * normal_matrix * in_normal;
     v_view_pos = (u_view * world).xyz;
     gl_Position = u_view_proj * world;
 }

@@ -711,6 +711,9 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def set_geometry_style(self, value):
             self.geometry_style = value
 
+        def set_contact_style(self, value):
+            self.contact_style = value
+
         def set_shadow_quality(self, value) -> None:
             self.shadow_quality = value
 
@@ -757,6 +760,11 @@ def test_camera_preview_copies_the_main_render_state() -> None:
         def get_geometry_style(self):
             return GeometryStyle((0.2, 0.4, 0.6), 0.9, 0.2)
 
+        def get_contact_style(self):
+            from mojive import ContactStyle
+
+            return ContactStyle("sphere", (0.1, 0.8, 0.9, 1), 2)
+
         def get_shadow_quality(self):
             return "high"
 
@@ -780,6 +788,7 @@ def test_camera_preview_copies_the_main_render_state() -> None:
     assert peer.shadow_quality == "high"
     assert peer.background == (0.1, 0.2, 0.3, 1.0)
     assert peer.geometry_style == Main().get_geometry_style()
+    assert peer.contact_style == Main().get_contact_style()
     assert peer.debug_view is DebugView.NORMAL
     assert peer.label_mode is LabelMode.BODY
     assert peer.frame_mode is FrameMode.WORLD
