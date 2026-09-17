@@ -26,6 +26,7 @@ from ..builder import SceneSourceBuilder
 from ..debugdraw import PRIMITIVE_MESH, DebugDraw, DrawPath, Occlusion
 from ..dependencies import lights_key
 from ..gizmo_plan import _MESHES, GizmoPlanner
+from ..lighting import schedule_lights
 from ..mesh import builtin_mesh, gizmo_mesh
 from ..overlay import OverlayPublisher, OverlayState
 from ..tendon import TendonPublisher, TendonScene
@@ -494,6 +495,13 @@ class NativeBackend:
         native.lights = items[:100]
         native.skybox_texture = self._textures.get(self._source.skybox, -1) if self._source else -1
         self.runtime.set_lighting(self._scene_handle, native)
+        schedule = schedule_lights(lights)
+        self.stats.notes["scene lights"] = (
+            f"{len(schedule.lights)} active, {schedule.deferred_lights} deferred"
+        )
+        self.stats.notes["shadow casters"] = (
+            f"{schedule.selected_shadow_count} active, {schedule.deferred_shadows} deferred"
+        )
         self._lighting_source = lights
         self._lighting_key = key
 
