@@ -107,6 +107,19 @@ def _wrap_deg(a: float) -> float:
     return float((a + 180.0) % 360.0 - 180.0)
 
 
+def _orbit_basis(yaw: float, pitch: float) -> np.ndarray:
+    """Build a level camera rotation, retaining its heading at the Z poles."""
+    yaw, pitch = np.radians((yaw, pitch))
+    cy, sy, cp, sp = np.cos(yaw), np.sin(yaw), np.cos(pitch), np.sin(pitch)
+    return np.array(((-sy, -sp * cy, cp * cy), (cy, -sp * sy, cp * sy), (0, cp, sp)))
+
+
+def _view_roll(view: CameraView, yaw: float, pitch: float) -> float:
+    right = view.view_matrix()[0, :3]
+    level = _orbit_basis(yaw, pitch)
+    return float(np.degrees(np.arctan2(right @ level[:, 1], right @ level[:, 0])))
+
+
 def _adopted_yaw(direction: np.ndarray, up) -> float:
     """Recover a stable orbit yaw, including at the world-Z poles."""
 
@@ -269,6 +282,8 @@ class _Anim:
     duration: float = FRAME_DURATION
     view: CameraView | None = None
     focus_start_span: float = 0.0
+    focus_end_span: float = 0.0
+    roll: float | None = None
 
 
 @dataclass
@@ -807,17 +822,34 @@ class OrbitCamera:
         *,
         margin: float | None = None,
         animate: bool = True,
+        eye_direction=None,
     ) -> CameraView:
-        """Center world bounds along a straight eye path, retaining the displayed orientation."""
+        """Frame bounds, optionally turning toward them from a requested world direction."""
         center = np.asarray(center, np.float64).reshape(3)
         half = np.abs(np.asarray(half_extents, np.float64).reshape(3))
         if not np.isfinite(center).all() or not np.isfinite(half).all():
             return self.publish(sink)
         start = self.view()
-        right, up, forward = camera_basis(start)
+        perspective = replace(start, orthographic=False, orthographic_blend=None).proj_matrix()
+        aimed = start
+        if eye_direction is not None:
+            direction = _normalized_direction(eye_direction, self.direction())
+            rotation = math3d.look_at(direction, np.zeros(3), (0, 0, 1))[:3, :3].T
+            if not start.orthographic:
+                # Aim the viewport's center ray along the requested direction even
+                # for a calibrated lens with an off-center principal point.
+                center_ray = np.array(
+                    (
+                        -perspective[0, 2] / perspective[0, 0],
+                        -perspective[1, 2] / perspective[1, 1],
+                        1,
+                    )
+                )
+                rotation = rotation @ math3d.look_at(center_ray, np.zeros(3), (0, 1, 0))[:3, :3]
+            aimed = replace(start, eye=center + rotation[:, 2], target=center, up=rotation[:, 1])
+        right, up, forward = camera_basis(aimed)
         backward = -forward
         padding = self.navigation.focus_margin if margin is None else max(1.0, float(margin))
-        perspective = replace(start, orthographic=False, orthographic_blend=None).proj_matrix()
         horizontal = perspective[0, 0] * right + perspective[0, 2] * backward
         vertical = perspective[1, 1] * up + perspective[1, 2] * backward
         # The support of an AABB in direction v is abs(v) @ half. These four
@@ -852,7 +884,7 @@ class OrbitCamera:
         self.near = min(start.near, max(MIN_NEAR, (distance - depth) * 0.25))
         self.far = max(start.far, (distance + depth) * 2)
         view = replace(
-            start,
+            aimed,
             eye=target + backward * distance,
             target=target,
             near=self.near,
@@ -860,20 +892,26 @@ class OrbitCamera:
             ortho_height=height,
             orthographic_blend=None,
         )
+        if start.orthographic:
+            start_span, end_span = start.ortho_height, height
+        elif eye_direction is None:
+            start_span, end_span = float(np.dot(center - start.eye, forward)), distance
+        else:
+            start_span = float(np.linalg.norm(center - start.eye))
+            end_span = float(np.linalg.norm(center - view.eye))
         goal = _Anim(
             pivot=target,
             distance=distance,
-            yaw=self.yaw,
-            pitch=self.pitch,
+            yaw=_adopted_yaw(backward, up),
+            pitch=float(np.degrees(np.arcsin(np.clip(backward[2], -1.0, 1.0)))),
             ortho_height=height,
             duration=self.navigation.focus_duration,
             view=view,
-            focus_start_span=(
-                start.ortho_height
-                if start.orthographic
-                else float(np.dot(center - start.eye, forward))
-            ),
+            focus_start_span=start_span,
+            focus_end_span=end_span,
         )
+        if eye_direction is not None:
+            goal.roll = _view_roll(view, goal.yaw, goal.pitch)
         self._apply_goal(
             goal,
             animate=animate and goal.duration > 0,
@@ -959,13 +997,20 @@ class OrbitCamera:
             self._stop_anim()
         if animate:
             goal.yaw = self.yaw + _wrap_deg(goal.yaw - self.yaw)
+            start_pitch = self._pitch
+            start_roll = None
+            if goal.roll is not None:
+                start_pitch = float(np.degrees(np.arcsin(np.clip(-start_view.forward()[2], -1, 1))))
+                start_roll = _view_roll(start_view, self.yaw, start_pitch)
+                goal.roll = start_roll + _wrap_deg(goal.roll - start_roll)
             self._anim_start = _Anim(
                 pivot=self.pivot.copy(),
                 distance=float(self._distance),
                 yaw=float(self._yaw),
-                pitch=float(self._pitch),
+                pitch=float(start_pitch),
                 ortho_height=float(self.ortho_height),
                 view=start_view,
+                roll=start_roll,
             )
             self._anim = goal
             self._anim_easing = easing
@@ -991,12 +1036,17 @@ class OrbitCamera:
         start = self._anim_start
         if anim is not None and start is not None:
             anim.elapsed += max(0.0, float(dt))
-            t = self._anim_easing(anim.elapsed / max(anim.duration, 1e-6))
+            progress = self._anim_easing(anim.elapsed / max(anim.duration, 1e-6))
+            t = progress
             if anim.view is not None and anim.focus_start_span > MIN_DISTANCE:
-                # Reparameterize the same straight path in screen space so a large
-                # dolly does not save most visible motion for the final few frames.
-                end_span = anim.ortho_height if anim.view.orthographic else anim.distance
-                t = t * anim.focus_start_span / (end_span * (1 - t) + anim.focus_start_span * t)
+                # Magnification is reciprocal to distance (or orthographic height).
+                # Remap travel along the straight path so visible approach and
+                # turning share one eased phase instead of finishing in a late rush.
+                t = (
+                    t
+                    * anim.focus_start_span
+                    / (anim.focus_end_span * (1 - t) + anim.focus_start_span * t)
+                )
             self.pivot = start.pivot + (anim.pivot - start.pivot) * t
 
             if anim.view is not None:
@@ -1011,21 +1061,37 @@ class OrbitCamera:
                         + np.log(max(anim.distance, MIN_DISTANCE)) * t
                     )
                 )
-            self._yaw = start.yaw + (anim.yaw - start.yaw) * t
-            self._pitch = start.pitch + (anim.pitch - start.pitch) * t
+            self._yaw = start.yaw + (anim.yaw - start.yaw) * progress
+            self._pitch = start.pitch + (anim.pitch - start.pitch) * progress
             self.ortho_height = start.ortho_height + (anim.ortho_height - start.ortho_height) * t
             self._touch()
             if anim.view is not None and start.view is not None:
+                eye = start.view.eye * (1 - t) + anim.view.eye * t
+                up = anim.view.up
+                if anim.roll is not None:
+                    # Ease each angle once toward its endpoint. Following the target
+                    # during travel can reverse pitch; quaternion arcs can add roll
+                    # even when both endpoint views have a level horizon.
+                    roll = np.radians(start.roll + (anim.roll - start.roll) * progress)
+                    basis = _orbit_basis(self._yaw, self._pitch) @ math3d.rotvec_to_mat3(
+                        (0, 0, roll)
+                    )
+                    self._pivot = eye - basis[:, 2] * self._distance
+                    up = basis[:, 1]
                 self._exact_view = replace(
                     anim.view,
-                    eye=start.view.eye * (1 - t) + anim.view.eye * t,
+                    eye=eye,
                     target=self.pivot.copy(),
+                    up=up,
                     ortho_height=self.ortho_height,
                     orthographic_blend=(
                         start.view.projection_blend() * (1 - t) + anim.view.projection_blend() * t
                     ),
                 )
             if anim.elapsed >= anim.duration:
+                if anim.view is not None:
+                    self._pivot = anim.pivot.copy()
+                    self._exact_view = anim.view
                 self._anim = None
                 self._anim_start = None
                 self._anim_easing = _ease_out_quad

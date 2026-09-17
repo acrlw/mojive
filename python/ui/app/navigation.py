@@ -613,11 +613,15 @@ class _Navigation:
         self._leave_model_camera()
         self.camera.adopt(current_view, exact=True)
         self.camera.set_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
+        direction = elevated_focus_view_direction(
+            np.asarray(current_view.eye, np.float64) - center, self.camera.direction()
+        )
         self.camera.focus_bounds(
             center,
             half,
             self.camera_out,
             animate=True,
+            eye_direction=direction,
         )
 
     def _joint_focus_radius(self, node: SceneNode) -> float:

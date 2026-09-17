@@ -34,7 +34,7 @@ camera-navigation: camera-focus
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_camera_navigation.py
 
 .PHONY: camera-focus
-## Capture ordinary object focus and verify dedicated joint/camera/light focus.
+## Capture object focus from offset/away/below views and verify joint/camera/light focus.
 camera-focus:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_camera_tracking.py -k double_click
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_interaction.py -k double_clicking_joint_and_hierarchy

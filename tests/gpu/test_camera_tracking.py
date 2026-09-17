@@ -117,9 +117,17 @@ def test_tracking_controls_and_navigation_follow_current_scene_pose(
         assert viewer.tracking_node_id is None
 
 
-@pytest.mark.parametrize("entrypoint", ("hierarchy", "viewport"))
-def test_double_click_keeps_offset_object_visible_throughout_focus(
-    tmp_path, monkeypatch, backend_name, entrypoint
+@pytest.mark.parametrize(
+    "entrypoint,pose",
+    [
+        ("hierarchy", "offset"),
+        ("viewport", "offset"),
+        ("hierarchy", "away"),
+        ("hierarchy", "below"),
+    ],
+)
+def test_double_click_focuses_from_the_current_side_and_above(
+    tmp_path, monkeypatch, backend_name, entrypoint, pose
 ):
     from itertools import product
 
@@ -143,7 +151,11 @@ def test_double_click_keeps_offset_object_visible_throughout_focus(
     with build_scene(scene, vsync=False, width=1440, height=1000, show_window=False) as viewer:
         for _ in range(5):
             viewer.sync()
-        viewer.set_camera(CameraView(eye=np.array((6, 0, 0)), target=np.zeros(3)))
+        initial_eye = center + np.array((0, 0, -4)) if pose == "below" else np.array((6, 0, 0))
+        initial_target = (
+            initial_eye + np.array((2, 0, 3)) if pose in ("away", "below") else np.zeros(3)
+        )
+        viewer.set_camera(CameraView(eye=initial_eye, target=initial_target))
         viewer.sync()
         # Drive only the animation clock deterministically; picking, layout and
         # presentation still run through the production native input/frame path.
@@ -164,26 +176,71 @@ def test_double_click_keeps_offset_object_visible_throughout_focus(
         output = Path("output/camera-focus")
         output.mkdir(parents=True, exist_ok=True)
         captures = []
+        animation = []
+        eyes = []
+        pitches = []
+        previous_rotation = viewer.session.camera.view_matrix()[:3, :3]
         for frame in range(25):
             view = viewer.session.camera
             rect = viewer.app._viewport_rect
             pixels = project(view, corners, rect)[:, :2]
-            assert np.all(pixels >= np.array(rect[:2]) - 1e-3)
-            assert np.all(pixels <= np.array(rect[:2]) + np.array(rect[2:]) + 1e-3)
-            assert view.forward() == pytest.approx((-1, 0, 0), abs=1e-6)
-            if frame in (0, 6, 12, 18, 24):
-                for _ in range(3):
-                    viewer.sync()
-                path = output / f"{backend_name}-{entrypoint}-{frame:02d}.png"
-                viewer.capture(path, surface="viewport")
-                with Image.open(path) as image:
+            if pose == "offset" or frame == 24:
+                assert np.all(pixels >= np.array(rect[:2]) - 1e-3)
+                assert np.all(pixels <= np.array(rect[:2]) + np.array(rect[2:]) + 1e-3)
+            rotation = view.view_matrix()[:3, :3]
+            assert np.isfinite(rotation).all()
+            assert rotation[0, 2] == pytest.approx(0, abs=1e-6)
+            eyes.append(view.eye.copy())
+            pitches.append(np.arcsin(np.clip(-view.forward()[2], -1, 1)))
+            turn = np.arccos(np.clip((np.trace(previous_rotation.T @ rotation) - 1) * 0.5, -1, 1))
+            assert np.degrees(turn) < 30
+            previous_rotation = rotation
+            if pose != "below":
+                assert np.dot((view.eye - center)[:2], (initial_eye - center)[:2]) > 0
+            for _ in range(3):
+                viewer.sync()
+            path = output / f"{backend_name}-{entrypoint}-{pose}-{frame:02d}.png"
+            viewer.capture(path, surface="viewport")
+            with Image.open(path) as image:
+                image.thumbnail((720, 540))
+                animation.append(image.copy())
+                if frame in (0, 6, 12, 18, 24):
                     image.thumbnail((480, 360))
                     captures.append(image.copy())
             viewer.app.camera.advance(FOCUS_DURATION / 24, viewer.app.camera_out)
             viewer.sync()
         assert viewer.app.camera.pivot == pytest.approx(center, abs=1e-5)
+        assert viewer.app.camera.pitch == pytest.approx(30, abs=1e-5)
+        eyes = np.asarray(eyes)
+        travel = eyes[-1] - eyes[0]
+        assert np.cross(eyes - eyes[0], travel) == pytest.approx(0, abs=1e-5)
+        assert np.all(np.diff(eyes, axis=0) * travel >= -1e-7)
+        assert np.all(np.diff(pitches) * (pitches[-1] - pitches[0]) >= -1e-7)
+        offset = viewer.session.camera.eye - center
+        if pose != "below":
+            assert offset[:2] / np.linalg.norm(offset[:2]) == pytest.approx(
+                (initial_eye - center)[:2] / np.linalg.norm((initial_eye - center)[:2]), abs=1e-5
+            )
         width, height = captures[0].size
         strip = Image.new("RGB", (width * len(captures), height))
         for index, image in enumerate(captures):
             strip.paste(image, (width * index, 0))
-        strip.save(output / f"{backend_name}-{entrypoint}-sequence.png")
+        strip.save(output / f"{backend_name}-{entrypoint}-{pose}-sequence.png")
+        animation[0].save(
+            output / f"{backend_name}-{entrypoint}-{pose}-slow.gif",
+            save_all=True,
+            append_images=animation[1:],
+            duration=[600] + [40] * 23 + [1000],
+            loop=0,
+        )
+        # GIF timestamps use centiseconds; preserve the configured transition
+        # duration so review does not rely only on slow-motion captures.
+        durations = np.diff(np.rint(np.linspace(0, FOCUS_DURATION * 100, len(animation)))) * 10
+        durations[0] += 600
+        animation[0].save(
+            output / f"{backend_name}-{entrypoint}-{pose}-realtime.gif",
+            save_all=True,
+            append_images=animation[1:],
+            duration=[*durations.astype(int), 1000],
+            loop=0,
+        )
