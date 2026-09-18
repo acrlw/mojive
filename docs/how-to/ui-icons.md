@@ -71,9 +71,64 @@ Transport First, Previous, Next, and More also use 4.00; Transport Play uses 3.0
 to a 1.00-stroke crossing gap with round caps and remains frame-aligned: its outer screen-ring
 centerline coincides with the orange placement circle, while its row can adjust frame padding and
 the inner-ring gap/stroke ratio. Half of the outer stroke sits on each side of its centerline.
-Output's mature Info, Warning, and Error painters are also locked; the review control does not
-change their geometry, size, or placement. Detail rows report `pad`, the declared anchor at
-`0.00, 0.00`, and either the axis-aligned box or minimum enclosing circle as a secondary diagnostic.
+Output's mature Info, Warning, and Error painters are also locked; padding and stroke controls do
+not change their geometry or size. Detail rows report `pad`, the declared anchor before optical
+adjustment, and the currently applied manual or automatic offset.
+
+Every family row also has independent **X/Y** drag fields, including the locked geometry families.
+Drag to fine-tune, or double-click / Ctrl+click to enter a value directly.
+These offsets use the 24-unit grid (+X right, +Y down), range from -4 to +4 with 0.01 precision,
+and translate only the glyph; the orange circle, gray square, button, and label stay in place.
+The same values apply at 14/24/56/112 points, in the overview and context specimens, and in
+candidate icon callbacks used by **Preview Icon Library**. **Default** restores the reviewed
+production offset along with that row's shape defaults.
+
+The Library and runtime share the reviewed optical offsets in `ICON_GLYPH_OFFSET_DEFAULTS`.
+Offsets scale with the 24-unit grid and are applied once, after fitting, by the production
+painter. They do not change hit regions, text positions, or cached geometry.
+`production_icon_metrics` describes the fitted shape before optical translation so composite
+layouts stay stable; diagnostic bounds add `production_icon_offset` when drawing guides.
+The Library starts with manual alignment and mirrored links enabled. Its automatic estimator
+continues to measure the unshifted candidate, so it replaces rather than stacks with manual offsets.
+
+In **Probe**, enable **Preview Icon Library**, then toggle **Apply icon X/Y offsets** to compare
+Redesign and other candidate UI contexts before and after translation. Candidate shapes, hit
+targets, and saved offsets stay the same. This switch also controls the Library's context
+specimens; its editable family sheets and overview keep showing the stored offsets.
+
+**Link mirrored offsets** in the Library (also **Probe > Link mirrored icon offsets**) links
+manual edits for Playback Previous/Next, Transport Previous/Next and First/Last, Previous/Next
+key, and Mouse Left/Right. Editing either member negates X and copies Y to its partner. A reset
+restores both production offsets while linked, but only the clicked glyph's shape defaults. Enabling the
+link preserves existing values until the next edit or reset. Auto align still measures each
+glyph independently so it remains useful as a comparison.
+
+Use **Auto align** to temporarily compare the alpha-weighted ink centroid with your manual
+placement. **Strength** ranges from 0% to 250%, with 100% placing the centroid on the slot center.
+The manual fields retain their values while disabled; switching Auto align off restores those
+values. **Centroid guides** adds an amber centroid dot and a neutral cross at the slot center.
+Hide these guides to judge actual-size appearance. The automatic estimate uses the current
+candidate shape, including padding, stroke, geometric anchor, and authored shape controls.
+The separate Components optical study continues to measure production shapes.
+
+**Copy icon parameters** and the component parameter export both include every
+`icon_manual_offset_<glyph>=(x, y)`, `icon_offset_grid_units`, the geometric anchor choices,
+`icon_auto_align`, `apply_icon_offsets`, `link_mirrored_icon_offsets`, and
+`icon_alignment_strength` (a multiplier, so 2.5 means 250%). Exporting
+while Auto align is enabled still preserves all manual values. New edits remain session-local
+until explicitly adopted into the shared production defaults.
+
+Centroid measurements use a bounded cache keyed by glyph and candidate shape. Only the two
+centroid coordinates are retained for each candidate; manual offsets, strength, preview size,
+and position do not invalidate the measurements. X/Y drags translate the existing glyph commands
+without rebuilding their contours. Offscreen family rows skip drawing and measurement, and
+parameter export does not rasterize the library. `tests/gpu/test_ui_icon_alignment.py` verifies
+real dragging and numeric input, switching, export, and cache reuse on both renderers.
+
+```bash
+make ui-feasibility BACKEND=bgfx ARGS='--page geometry --geometry-tab icons --icon-group scene-helpers --ui-scale 2.25'
+make ui-icon-scales BACKEND=bgfx ICON_SCALE_GROUPS='scene-helpers keyframe-follow' ARGS='--auto-align-centroid'
+```
 
 Viewport Playback Play is an equilateral G3 triangle. Previous and Next retain their original
 90-degree chevrons, while Pause retains its original twin bars. Both More names call one contour:

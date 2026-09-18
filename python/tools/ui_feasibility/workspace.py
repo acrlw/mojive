@@ -9,6 +9,7 @@ from mojive.ui.window import Window
 
 from ..ui_capsule_geometry import end_padding
 from ..ui_redesign import draw_redesign
+from .components import draw_components
 from .fixtures import CONCEPT_THEME, VIEW_A, VIEW_B, WORKSPACE_CANVAS_SIZE
 from .geometry import _draw_geometry_page
 from .gizmos import _draw_joint_gizmo
@@ -152,7 +153,7 @@ def _draw_workspace_canvas(available, scale: float, state: ProbeState):
     _draw_output(imgui.ImVec2(center_width, bottom_height), state, scale)
 
     imgui.set_cursor_screen_pos(imgui.ImVec2(right_x, top_y))
-    _draw_workspace_right_dock(imgui.ImVec2(right_width, right_top_height), state)
+    _draw_workspace_right_dock(imgui.ImVec2(right_width, right_top_height), state, scale)
     imgui.set_cursor_screen_pos(imgui.ImVec2(right_x, top_y + right_top_height + spacing.y))
     _draw_inspector_gallery(imgui.ImVec2(right_width, right_bottom_height), scale)
 
@@ -201,7 +202,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 imgui.menu_item("Design probe", "", False, False)
                 imgui.end_menu()
         if imgui.begin_menu("Probe"):
-            for page in ("Workspace", "Panels", "Geometry", "Redesign"):
+            for page in ("Workspace", "Panels", "Geometry", "Components", "Redesign"):
                 clicked, _ = imgui.menu_item(page, "", state.page == page)
                 if clicked:
                     state.page = page
@@ -214,6 +215,24 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
             if clicked:
                 state.preview_icon_library = not state.preview_icon_library
             imgui.set_item_tooltip("Use Icon Library candidates in the actual feasibility layouts")
+            clicked, _ = imgui.menu_item(
+                "Apply icon X/Y offsets", "", state.apply_icon_offsets, state.preview_icon_library
+            )
+            if clicked:
+                state.apply_icon_offsets = not state.apply_icon_offsets
+            imgui.set_item_tooltip(
+                "Compare candidate UI previews with and without their manual or automatic offsets. "
+                "Enable Preview Icon Library first. Stored offsets and library editing stay unchanged."
+            )
+            clicked, _ = imgui.menu_item(
+                "Link mirrored icon offsets", "", state.link_mirrored_icon_offsets
+            )
+            if clicked:
+                state.link_mirrored_icon_offsets = not state.link_mirrored_icon_offsets
+            imgui.set_item_tooltip(
+                "Subsequent manual edits reflect X and copy Y to the paired glyph. "
+                "Existing values are preserved until an edit or reset."
+            )
             imgui.separator()
             _, state.imgui_rounding = imgui.slider_float(
                 "ImGui corner radius",
@@ -261,6 +280,7 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
                 if clicked:
                     setattr(state, attribute, not value)
             imgui.end_menu()
+        imgui.begin_disabled(state.page == "Components")
         clicked, _ = imgui.menu_item(
             (
                 "Icons preview ON###icon-library-preview"
@@ -272,10 +292,19 @@ def _draw_workspace(window: Window, state: ProbeState) -> None:
         )
         if clicked:
             state.preview_icon_library = not state.preview_icon_library
-        imgui.set_item_tooltip("Substitute candidates throughout the current page")
+        imgui.end_disabled()
+        imgui.set_item_tooltip(
+            "Components compares production glyphs with local offsets"
+            if state.page == "Components"
+            else "Substitute candidates throughout the current page"
+        )
         imgui.end_menu_bar()
 
     available = imgui.get_content_region_avail()
+    if state.page == "Components":
+        draw_components(state, scale)
+        imgui.end()
+        return
     if state.page == "Redesign":
         draw_redesign(
             state.redesign,

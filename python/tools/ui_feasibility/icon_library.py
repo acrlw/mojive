@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from functools import partial
+from functools import lru_cache, partial
 
 import numpy as np
 from imgui_bundle import imgui
@@ -79,6 +79,8 @@ def _draw_concept_icon_specimen(
     rotate_ring_cap: str = ICON_ROTATE_RING_CAP,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
     alignment: str | None = None,
+    offset: tuple[float, float] = (0.0, 0.0),
+    centroid: tuple[float, float] | None = None,
 ) -> None:
     """Draw one candidate inside the shared circular placement boundary."""
 
@@ -100,6 +102,15 @@ def _draw_concept_icon_specimen(
         max(0.75, 0.9 * scale),
         segments=max(32, round(guide_radius * 4.0)),
     )
+    if centroid is not None:
+        for dx, dy in ((4 * scale, 0), (0, 4 * scale)):
+            draw.line(
+                (center[0] - dx, center[1] - dy),
+                (center[0] + dx, center[1] + dy),
+                CONCEPT_THEME.text_disabled,
+                scale,
+            )
+    center = (center[0] + offset[0] * size / ICON_GRID, center[1] + offset[1] * size / ICON_GRID)
     if name.startswith("status-") and name.removeprefix("status-") in {
         "info",
         "warning",
@@ -130,8 +141,18 @@ def _draw_concept_icon_specimen(
             tuning=tuning,
             alignment=alignment,
         )
+    if centroid is not None:
+        draw.circle_filled(
+            (
+                center[0] + centroid[0] * size / ICON_GRID,
+                center[1] + centroid[1] * size / ICON_GRID,
+            ),
+            2.0 * scale,
+            CONCEPT_THEME.warning,
+        )
 
 
+@lru_cache(maxsize=256)
 def _icon_review_metrics(
     name: str,
     padding: float = ICON_DEFAULT_PADDING,
@@ -242,6 +263,8 @@ def _draw_icon_library_overview(
                 state.rotate_ring_cap,
                 state.icon_tuning(),
                 state.icon_alignment_for_glyph(name),
+                offset=state.icon_offset(name),
+                centroid=state.icon_centroid(name) if state.show_icon_centroids else None,
             )
             draw.centered_label(
                 label,
@@ -267,6 +290,7 @@ def _draw_context_row(
     production_kind: str | None = None,
     tuning: IconTuning = ICON_TUNING_DEFAULTS,
     alignment: str | None = None,
+    offset: tuple[float, float] = (0.0, 0.0),
 ) -> None:
     """Place one candidate in current Mojive row metrics with text guides."""
 
@@ -309,7 +333,10 @@ def _draw_context_row(
     if production_kind is None:
         draw_concept_icon(
             draw,
-            icon_center,
+            (
+                icon_center[0] + offset[0] * icon_size / ICON_GRID,
+                icon_center[1] + offset[1] * icon_size / ICON_GRID,
+            ),
             icon_size,
             icon_name,
             CONCEPT_THEME.text,
@@ -384,7 +411,7 @@ def _draw_icon_context_page(
         center = (x0 + (390.0 + index * 520.0) * scale, first_y + 132.0 * scale)
         draw_concept_icon(
             draw,
-            center,
+            state.icon_center(name, center, 112.0 * scale),
             112.0 * scale,
             name,
             CONCEPT_THEME.text,
@@ -446,6 +473,7 @@ def _draw_icon_context_page(
         state.icon_stroke_for_glyph("key-snapshot"),
         tuning=state.icon_tuning(),
         alignment=state.icon_alignment_for_glyph("key-snapshot"),
+        offset=state.icon_offset("key-snapshot"),
     )
     _draw_context_row(
         draw,
@@ -461,6 +489,7 @@ def _draw_icon_context_page(
         state.icon_stroke_for_glyph("helper-camera"),
         tuning=state.icon_tuning(),
         alignment=state.icon_alignment_for_glyph("helper-camera"),
+        offset=state.icon_offset("helper-camera"),
     )
     _draw_context_row(
         draw,
@@ -476,6 +505,7 @@ def _draw_icon_context_page(
         state.icon_stroke_for_glyph("helper-light"),
         tuning=state.icon_tuning(),
         alignment=state.icon_alignment_for_glyph("helper-light"),
+        offset=state.icon_offset("helper-light"),
     )
 
     note_y = second_y + 270.0 * scale
@@ -725,6 +755,7 @@ def _draw_icon_family_detail(
             state.icon_padding_by_glyph.pop(name, None)
             state.icon_stroke_by_glyph.pop(name, None)
             state.icon_alignment_by_glyph.pop(name, None)
+            state.set_icon_manual_offset(name, None)
             if name == "tool-rotate":
                 state.rotate_ring_gap_ratio = ICON_ROTATE_RING_GAP_RATIO
             elif name == "tool-move":
@@ -740,7 +771,35 @@ def _draw_icon_family_detail(
             padding = state.icon_padding_for_glyph(name)
             stroke_width = state.icon_stroke_for_glyph(name)
             alignment = state.icon_alignment_for_glyph(name)
+        meta_x = origin[0] + 1160.0 * scale
+        offset = list(state.icon_manual_offset(name))
+        for axis in range(2):
+            control_y = center_y + (8.0 + 28.0 * axis) * scale
+            draw.text((meta_x, control_y + 6.0 * scale), CONCEPT_THEME.text_disabled, "XY"[axis])
+            imgui.set_cursor_screen_pos((meta_x + 22.0 * scale, control_y))
+            imgui.set_next_item_width(178.0 * scale)
+            imgui.begin_disabled(state.icon_auto_align)
+            changed, offset[axis] = imgui.drag_float(
+                f"##glyph-offset-{'xy'[axis]}",
+                offset[axis],
+                v_speed=0.01,
+                v_min=-4.0,
+                v_max=4.0,
+                format="%+.2f U",
+                flags=imgui.SliderFlags_.always_clamp,
+            )
+            imgui.end_disabled()
+            if changed:
+                state.set_icon_manual_offset(name, tuple(offset))
+            imgui.set_item_tooltip(
+                "Manual offset on the 24-unit grid. +X is right; +Y is down. "
+                "Drag to fine-tune; double-click or Ctrl+click to type a value. "
+                "Auto align temporarily previews the algorithm without changing this value."
+            )
         imgui.pop_id()
+
+        offset = state.icon_offset(name)
+        centroid = state.icon_centroid(name) if state.show_icon_centroids else None
 
         for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
             _draw_concept_icon_specimen(
@@ -756,10 +815,11 @@ def _draw_icon_family_detail(
                 state.rotate_ring_cap,
                 state.icon_tuning(),
                 alignment,
+                offset=offset,
+                centroid=centroid,
             )
 
-        meta_x = origin[0] + 1160.0 * scale
-        clearance, circle_x, circle_y, box_x, box_y = _icon_review_metrics(
+        clearance = _icon_review_metrics(
             name,
             padding,
             mouse_width,
@@ -768,7 +828,7 @@ def _draw_icon_family_detail(
             state.rotate_ring_cap,
             state.icon_tuning(),
             alignment,
-        )
+        )[0]
         anchor = icon_alignment_anchor(name, alignment)
         anchor_x, anchor_y = icon_alignment_center(
             name,
@@ -780,16 +840,16 @@ def _draw_icon_family_detail(
             state.icon_tuning(),
             alignment,
         )
-        diagnostic_label, diagnostic_x, diagnostic_y = (
-            ("box", box_x, box_y) if anchor == "circle" else ("circle", circle_x, circle_y)
-        )
         placement_label, placement_value = (
             ("frame", padding) if name == "tool-rotate" else ("pad", clearance)
         )
         for line, line_y in (
-            (f"{name} · {placement_label} {placement_value:.2f}u", -20.0),
-            (f"{anchor}  {anchor_x:+.2f},{anchor_y:+.2f}u", 0.0),
-            (f"{diagnostic_label}  {diagnostic_x:+.2f},{diagnostic_y:+.2f}u", 20.0),
+            (f"{name} · {placement_label} {placement_value:.2f}u", -54.0),
+            (f"{anchor}  {anchor_x:+.2f},{anchor_y:+.2f}u", -34.0),
+            (
+                f"{'Auto' if state.icon_auto_align else 'Manual'}  {offset[0]:+.2f},{offset[1]:+.2f} U",
+                -14.0,
+            ),
         ):
             draw.text(
                 (meta_x, center_y + line_y * scale),
@@ -854,7 +914,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, playback_y - 4.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Declared anchor center after placement; every value must be 0.00, 0.00",
+        "Declared anchor after the current manual or automatic offset",
     )
     for index, name in enumerate(
         (
@@ -876,6 +936,8 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
             rotate_ring_gap_ratio=state.rotate_ring_gap_ratio,
             rotate_ring_cap=state.rotate_ring_cap,
         )
+        offset = state.icon_offset(name)
+        anchor_center = tuple(a + b for a, b in zip(anchor_center, offset, strict=True))
         draw.text(
             (metrics_x, playback_y + (30.0 + index * 25.0) * scale),
             CONCEPT_THEME.text_disabled,
@@ -907,7 +969,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
         ):
             draw_concept_icon(
                 target,
-                center,
+                state.icon_center(name, center, 20.0 * icon_scale),
                 20.0 * icon_scale,
                 name,
                 THEME.viewport.record if danger else color,
@@ -975,7 +1037,7 @@ def _draw_capsule_context_page(draw, origin, scale: float, state: ProbeState) ->
     draw.text(
         (metrics_x, tools_y + 80.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Capsule cell, state circle, and each glyph's declared anchor coincide.",
+        "Offsets move glyphs inside fixed capsule cells and state circles.",
     )
 
 
@@ -1029,7 +1091,7 @@ def _draw_icon_library_page(
     if imgui.button("Copy icon parameters", imgui.ImVec2(178.0 * scale, 0.0)):
         imgui.set_clipboard_text(_icon_values_text(state))
     imgui.set_item_tooltip(
-        "Copy group defaults, per-glyph overrides, and authored shape controls for review."
+        "Copy geometry, every manual X/Y offset, and automatic comparison settings for review."
     )
     controls_x = x0 + max(450.0 * scale, available_width - 940.0 * scale)
     draw.text(
@@ -1114,6 +1176,42 @@ def _draw_icon_library_page(
         state.icon_adjustment_group = state.icon_library_tab
     elif state.icon_library_tab == "Keyframe follow":
         state.icon_adjustment_group = "Keyframes"
+    imgui.set_cursor_screen_pos((x0 + 42.0 * scale, imgui.get_cursor_screen_pos().y))
+    _, state.icon_auto_align = imgui.checkbox("Auto align", state.icon_auto_align)
+    imgui.set_item_tooltip(
+        "Temporarily preview alpha-weighted centroid alignment. Manual X/Y values are preserved."
+    )
+    imgui.same_line()
+    _, state.show_icon_centroids = imgui.checkbox("Centroid guides", state.show_icon_centroids)
+    imgui.same_line()
+    _, state.link_mirrored_icon_offsets = imgui.checkbox(
+        "Link mirrored offsets", state.link_mirrored_icon_offsets
+    )
+    imgui.set_item_tooltip(
+        "Editing either partner mirrors X and copies Y: Playback Previous/Next, Transport "
+        "Previous/Next and First/Last, Previous/Next key, Mouse Left/Right. "
+        "Existing values stay unchanged until an edit or reset. Auto align remains independent."
+    )
+    imgui.same_line()
+    imgui.begin_disabled(not state.icon_auto_align)
+    imgui.align_text_to_frame_padding()
+    imgui.text("Strength")
+    imgui.same_line()
+    imgui.set_next_item_width(200.0 * scale)
+    _, strength = _stepped_slider(
+        "##library-alignment-strength",
+        state.icon_alignment_strength * 100,
+        0,
+        250,
+        "%.0f %%",
+        step=1,
+    )
+    state.icon_alignment_strength = strength / 100
+    imgui.end_disabled()
+    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 42.0 * scale)
+    imgui.text_disabled(
+        "X/Y: manual offsets in 24-unit grid. Auto align previews the algorithm; amber dots mark ink centroids."
+    )
     content_y = float(imgui.get_cursor_screen_pos().y) + 14.0 * scale
     content_origin = (x0 + 42.0 * scale, content_y)
     if state.icon_library_tab == "Overview":

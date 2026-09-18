@@ -27,6 +27,7 @@ from mojive.ui.icons import (
 )
 from mojive.ui.window import WindowConfig
 
+from .components import CORNER_SCENE_KEYS
 from .fixtures import CORNER_CONTROLS, DEFAULT_OUTPUT, PROBE_BASE_SIZE, _apply_concept_theme
 from .layout import _probe_window_size
 from .state import ProbeState
@@ -60,6 +61,10 @@ def render(
     preview_icon_library: bool = False,
     renderer: str | None = None,
     icon_glyph: str | None = None,
+    component_tab: str = "corners",
+    corner_scene: str = "basic",
+    blur_sigma: float = 3.0,
+    auto_align_centroid: bool = False,
 ) -> None:
     renderer = render_backend_name(renderer)
     if icon_glyph is not None:
@@ -95,6 +100,11 @@ def render(
             preview_icon_library=preview_icon_library,
         )
         state.redesign.language = redesign_language
+        state.components.tab = int(component_tab == "optical")
+        state.components.scene = CORNER_SCENE_KEYS.index(corner_scene)
+        state.components.optical.sigma = blur_sigma
+        state.components.optical.auto_align = auto_align_centroid
+        state.icon_auto_align = auto_align_centroid
         state.redesign.section = redesign_section
         if initial_smoothing is not None:
             for _, name in CORNER_CONTROLS:
@@ -187,11 +197,24 @@ def main() -> None:
     )
     parser.add_argument(
         "--page",
-        choices=("workspace", "panels", "geometry", "redesign"),
+        choices=("workspace", "panels", "geometry", "components", "redesign"),
         default="workspace",
         help="Initial probe page; interactive mode can switch from the Probe menu",
     )
     parser.add_argument("--redesign-language", choices=("en", "zh"), default="en")
+    parser.add_argument("--component-tab", choices=("corners", "optical"), default="corners")
+    parser.add_argument("--corner-scene", choices=CORNER_SCENE_KEYS, default="basic")
+    parser.add_argument(
+        "--auto-align-centroid",
+        action="store_true",
+        help="Enable centroid alignment in the Icon Library and Components optical study",
+    )
+    parser.add_argument(
+        "--blur-sigma",
+        type=float,
+        default=3.0,
+        help="Gaussian standard deviation on the optical study's 24-unit grid",
+    )
     parser.add_argument(
         "--capsule-outline", choices=("neutral-gray", "soft-white"), default="soft-white"
     )
@@ -336,6 +359,8 @@ def main() -> None:
         parser.error(f"--icon-stroke must be between {ICON_MIN_STROKE:g} and {ICON_MAX_STROKE:g}")
     if not 0.5 <= args.ui_scale <= 4.0:
         parser.error("--ui-scale must be between 0.5 and 4.0")
+    if not 0.0 <= args.blur_sigma <= 6.0:
+        parser.error("--blur-sigma must be between 0 and 6")
     if not 15.0 <= args.fps <= 240.0:
         parser.error("--fps must be between 15 and 240")
     output = args.output.resolve()
@@ -361,6 +386,10 @@ def main() -> None:
         }[args.geometry_tab],
         initial_icon_group=ICON_GROUP_BY_SLUG[args.icon_group],
         icon_glyph=args.icon_glyph,
+        component_tab=args.component_tab,
+        corner_scene=args.corner_scene,
+        blur_sigma=args.blur_sigma,
+        auto_align_centroid=args.auto_align_centroid,
         initial_rotate_cap=args.rotate_cap,
         ui_scale=args.ui_scale,
         interactive_fps=args.fps,

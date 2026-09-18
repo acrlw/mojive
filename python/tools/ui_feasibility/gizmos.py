@@ -352,7 +352,7 @@ def _draw_scene_helper(
         name = "helper-camera" if kind == "camera" else "helper-light"
         draw_concept_icon(
             draw,
-            center,
+            state.icon_center(name, center, 20.0 * scale),
             20.0 * scale,
             name,
             color,

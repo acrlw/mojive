@@ -36,6 +36,10 @@ from mojive.ui.viewport_widgets import (
     OVERLAY_GEOMETRY,
     draw_status,
     draw_tool_glyph,
+    playback_control_centers,
+    playback_size,
+    tool_column_size,
+    tool_control_centers,
 )
 
 PROBE_PATH = Path(__file__).resolve().parents[1] / "python/tools/ui_feasibility"
@@ -132,7 +136,8 @@ def test_geometry_canvas_reserves_zoomed_playback_and_tool_extents():
 def test_geometry_export_names_production_overlay_fields():
     values = probe_tuning._geometry_values_text(probe_state.ProbeState())
 
-    assert "icon_radius=10," in values
+    assert "icon_radius=8," in values
+    assert f"end_padding_ratio={OVERLAY_GEOMETRY.end_padding_ratio}," in values
     assert f"icon_stroke_viewport_tools={ICON_STROKE}," in values
     assert f"icon_stroke_viewport_playback={ICON_STROKE}," in values
     assert "icon_padding_viewport_tools=0.5," in values
@@ -144,6 +149,19 @@ def test_geometry_export_names_production_overlay_fields():
     assert "icon_key_fit_arm_length=4.5," in values
     assert "icon_reset_head_scale=1.5," in values
     assert "hint_mouse_wheel_gap_ratio=" in values
+
+
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.25, 1.5, 2.25))
+def test_production_capsules_match_the_accepted_probe_layout(scale):
+    state = probe_state.ProbeState()
+    playback_centers, playback_length = capsule_layout(6, (3, 4), state)
+    tool_centers, tool_length = capsule_layout(5, (3,), state)
+    thickness = 2 * (state.overlay_icon_radius + 2 * state.overlay_radial_step) * scale
+
+    assert playback_control_centers() == pytest.approx(playback_centers)
+    assert tool_control_centers() == pytest.approx(tool_centers)
+    assert playback_size(scale) == pytest.approx((playback_length * scale, thickness))
+    assert tool_column_size(scale) == pytest.approx((thickness, tool_length * scale))
 
 
 def test_icon_library_export_contains_group_glyph_and_shape_controls():
@@ -166,7 +184,9 @@ def test_icon_library_export_contains_group_glyph_and_shape_controls():
 
 
 @pytest.mark.parametrize("alignment", ("circle", "box"))
-def test_labelled_snapshot_preview_places_the_selected_anchor_on_text_ink(monkeypatch, alignment):
+def test_labelled_snapshot_preview_offsets_the_selected_anchor_from_text_ink(
+    monkeypatch, alignment
+):
     state = probe_state.ProbeState(preview_icon_library=True)
     state.set_icon_alignment_for_glyph("key-snapshot", alignment)
     calls = []
@@ -187,7 +207,7 @@ def test_labelled_snapshot_preview_places_the_selected_anchor_on_text_ink(monkey
     )
 
     args, kwargs = calls[0]
-    assert args[1] == pytest.approx((100.0, 50.0))
+    assert args[1] == pytest.approx((100.0, 50.0 - 0.84 * 16 / 24))
     assert kwargs["alignment"] == alignment
 
 

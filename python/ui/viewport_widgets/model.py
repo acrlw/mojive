@@ -9,20 +9,24 @@ from functools import lru_cache
 from typing import Literal
 
 CAPSULE_SMOOTHING = 0.382
+# Source glyphs keep their authored coordinates before fitting into a control slot.
+GLYPH_REFERENCE_RADIUS = 10.0
 
 
 @dataclass(frozen=True)
 class OverlayGeometry:
     """Shared logical-pixel geometry for viewport chrome and its design probe."""
 
-    icon_radius: float = 10.0
-    radial_step: float = 8.0
-    center_step: float = 42.0
-    tool_center_step: float = 42.0
+    icon_radius: float = 8.0
+    radial_step: float = 6.0
+    center_step: float = 34.0
+    tool_center_step: float = 34.0
+    # Measured by the capsule probe at CAPSULE_SMOOTHING; scales with the shell.
+    end_padding_ratio: float = 1.0176593363285065
     tool_group_gap: float = 10.0
     divider_width: float = 20.0
     tool_stroke: float = 1.46
-    rotate_ring_gap_ratio: float = 0.5
+    rotate_ring_gap_ratio: float = 1.0
     rotate_ring_cap: str = "round"
     hint_control_height: float = 18.0
     hint_padding_x: float = 16.0
@@ -51,6 +55,10 @@ class OverlayGeometry:
     @property
     def shell_radius(self) -> float:
         return self.state_radius + self.radial_step
+
+    @property
+    def end_padding(self) -> float:
+        return self.shell_radius * self.end_padding_ratio
 
     @property
     def rotate_ring_gap(self) -> float:
@@ -315,7 +323,7 @@ def tool_control_centers(
     groups: Sequence[Sequence[ViewportControl]] = TOOL_GROUPS,
 ) -> tuple[float, ...]:
     centers: list[float] = []
-    cursor = SHELL_RADIUS
+    cursor = OVERLAY_GEOMETRY.end_padding
     for group_index, group in enumerate(groups):
         if group_index:
             cursor += TOOL_GROUP_GAP

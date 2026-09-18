@@ -192,6 +192,7 @@ ICON_GLYPH_PADDING_DEFAULTS = {
     "transport-previous": 4.0,
     "transport-play": 3.0,
     "transport-next": 4.0,
+    "transport-last": 4.0,
     "transport-more": 4.0,
     "key-keyframe": 4.0,
     "key-add": 4.0,
@@ -252,9 +253,31 @@ ICON_GLYPH_STROKE_DEFAULTS = {
     "panel-hidden": 1.0,
     "panel-perspective": 1.5,
     "panel-orthographic": 1.5,
-    "helper-camera": 1.5,
-    "helper-light": 1.5,
+    "helper-camera": 1.25,
+    "helper-light": 1.25,
 }
+
+# Reviewed optical translations on the 24-unit grid, after geometric fitting.
+# Keep these separate from shape metrics so labels and hit targets stay fixed.
+ICON_GLYPH_OFFSET_DEFAULTS = {
+    "tool-snap": (0.0, 0.70),
+    "playback-previous": (-1.0, 0.0),
+    "playback-next": (1.0, 0.0),
+    "transport-previous": (-1.0, 0.0),
+    "transport-next": (1.0, 0.0),
+    "transport-more": (0.0, 1.0),
+    "key-snapshot": (0.0, -0.84),
+    "panel-search": (0.98, 0.98),
+    "panel-sort": (-0.43, 0.50),
+    "panel-perspective": (0.27, 0.0),
+    "helper-camera": (0.0, -0.84),
+    "helper-light": (0.0, -0.65),
+}
+
+
+def production_icon_offset(name: str) -> tuple[float, float]:
+    """Return the reviewed optical translation, independent of geometry and size."""
+    return ICON_GLYPH_OFFSET_DEFAULTS.get(name, (0.0, 0.0))
 
 
 @dataclass(frozen=True)
@@ -2098,12 +2121,21 @@ def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None)
 
 
 def draw_icon_label(
-    draw, lo, hi, color, scale: float, name: str, label: str, *, style: IconStyle | None = None
+    draw,
+    lo,
+    hi,
+    color,
+    scale: float,
+    name: str,
+    label: str,
+    *,
+    style: IconStyle | None = None,
+    icon_offset: tuple[float, float] = (0.0, 0.0),
 ) -> None:
-    """Center an icon alone, or a measured pair on the Latin or CJK body line."""
+    """Center a measured pair; optional pixel offsets move only the icon, not its label."""
     size = 16.0 * scale
     if not label:
-        center = ((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5)
+        center = ((lo[0] + hi[0]) * 0.5 + icon_offset[0], (lo[1] + hi[1]) * 0.5 + icon_offset[1])
         _draw_cached_icon(draw, center, size, name, color, None, style)
         return
     if style is None:
@@ -2131,7 +2163,7 @@ def draw_icon_label(
     text_y = center_y - ((body[1] + body[3]) * 0.5 if body else line_height * 0.5)
     _draw_cached_icon(
         draw,
-        (left - bounds[0] * unit, center_y),
+        (left - bounds[0] * unit + icon_offset[0], center_y + icon_offset[1]),
         size,
         name,
         color,
@@ -2145,6 +2177,10 @@ def _draw_cached_icon(draw, center, size, name, color, accent_color, style):
     from .icon_draw import ImguiIconDraw
     from .imgui_draw import ImguiDraw2D
 
+    if style is None:
+        dx, dy = production_icon_offset(name)
+        unit = size / ICON_GRID
+        center = (center[0] + dx * unit, center[1] + dy * unit)
     if isinstance(draw, ImguiDraw2D) and name not in STROKE_SCALE_LOCKED_ICONS:
         resolved = production_icon_style(name) if style is None else style
         fringe = min(1.0, size / ICON_GRID * resolved.stroke_width * 0.5)
@@ -2309,7 +2345,7 @@ def icon_metrics(
 
 @cache
 def production_icon_metrics(name: str) -> IconMetrics:
-    """Return cached visible metrics for one frozen production icon."""
+    """Return fitted shape metrics before optical translation, for stable layout."""
 
     preset = _production_icon_preset(name)
     if preset is not None:

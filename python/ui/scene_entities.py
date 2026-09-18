@@ -56,7 +56,7 @@ def _production_helper_geometry(
     viewport_height: float,
     ui_scale: float,
 ) -> tuple[tuple[np.ndarray, float, bool], ...]:
-    """Project cached, box-centered UI helper paths into the scene."""
+    """Project cached, optically placed UI helper paths into the scene."""
 
     positions = np.asarray(positions, np.float64).reshape(-1, 3)
     if not len(positions):

@@ -27,6 +27,7 @@ from .model import (
     CENTER_STEP,
     DEFAULT_VIEWPORT_LABELS,
     DIVIDER_WIDTH,
+    GLYPH_REFERENCE_RADIUS,
     OVERLAY_GEOMETRY,
     PLAYBACK_CONTROLS,
     PLAYBACK_HALF_HEIGHT_PT,
@@ -146,7 +147,7 @@ def overlay_divider_length(width: float = DIVIDER_WIDTH, *, playback: bool) -> f
     symbols use their visible height, independently of hit targets and shell size.
     """
     if playback:
-        return width * PLAYBACK_HALF_HEIGHT_PT / (OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE)
+        return width * PLAYBACK_HALF_HEIGHT_PT / (GLYPH_REFERENCE_RADIUS * TOOL_GLYPH_SCALE)
     return width
 
 
@@ -168,7 +169,7 @@ def draw_overlay_divider(
 
 def playback_control_centers(controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS):
     """Keep group boundaries declarative when callers extend the toolbar."""
-    cursor = SHELL_RADIUS
+    cursor = OVERLAY_GEOMETRY.end_padding
     centers = []
     for index, control in enumerate(controls):
         if index and control.name in ("reset", "record"):
@@ -181,7 +182,9 @@ def playback_control_centers(controls: Sequence[ViewportControl] = PLAYBACK_CONT
 def playback_size(scale: float, controls: Sequence[ViewportControl] = PLAYBACK_CONTROLS):
     centers = playback_control_centers(controls)
     return (
-        ((centers[-1] + SHELL_RADIUS) * scale, SHELL_RADIUS * 2 * scale) if centers else (0.0, 0.0)
+        ((centers[-1] + OVERLAY_GEOMETRY.end_padding) * scale, SHELL_RADIUS * 2 * scale)
+        if centers
+        else (0.0, 0.0)
     )
 
 
@@ -193,7 +196,7 @@ def tool_column_size(
     if not centers:
         return (0.0, 0.0)
     last_center = centers[-1]
-    return (SHELL_RADIUS * 2.0 * scale, (last_center + SHELL_RADIUS) * scale)
+    return (SHELL_RADIUS * 2.0 * scale, (last_center + OVERLAY_GEOMETRY.end_padding) * scale)
 
 
 def _circle_button(

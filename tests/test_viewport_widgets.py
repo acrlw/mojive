@@ -19,6 +19,7 @@ from mojive.ui.viewport_widgets import (
     _MOVE_SHAFT_VISUAL_RATIO,
     DEFAULT_VIEWPORT_LABELS,
     DEFAULT_VIEWPORT_OVERLAY_SCALE,
+    GLYPH_REFERENCE_RADIUS,
     HINT_CHROME_SCALE,
     OVERLAY_CLIP_PADDING,
     OVERLAY_GEOMETRY,
@@ -94,8 +95,8 @@ def test_viewport_callbacks_route_reviewed_icons_with_component_sizes(monkeypatc
         "playback-record",
         "playback-more",
     ]
-    assert calls[0][2] == pytest.approx(30.0)
-    assert calls[2][2] == pytest.approx(30.0 * TOOL_GLYPH_SCALE)
+    assert calls[0][2] == pytest.approx(24.0)
+    assert calls[2][2] == pytest.approx(24.0 * TOOL_GLYPH_SCALE)
     assert calls[3][4] == accent
 
 
@@ -159,12 +160,16 @@ def test_default_overlay_scale_preserves_shared_radial_steps():
         geometry.divider_width,
         geometry.tool_stroke,
         geometry.rotate_ring_gap,
-    ) == pytest.approx((10.0, 8.0, 42.0, 42.0, 10.0, 20.0, 1.46, 0.73))
+    ) == pytest.approx((8.0, 6.0, 34.0, 34.0, 10.0, 20.0, 1.46, 1.46))
     assert geometry.rotate_ring_cap == "round"
     assert geometry.state_radius - geometry.icon_radius == pytest.approx(geometry.radial_step)
     assert geometry.shell_radius - geometry.state_radius == pytest.approx(geometry.radial_step)
-    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((352.5, 65.0))
-    assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx((65.0, 287.5))
+    assert playback_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx(
+        (288.383, 50.0), abs=0.001
+    )
+    assert tool_column_size(DEFAULT_VIEWPORT_OVERLAY_SCALE) == pytest.approx(
+        (50.0, 233.383), abs=0.001
+    )
     assert OVERLAY_GEOMETRY.tool_center_step > OVERLAY_GEOMETRY.state_radius * 2.0
 
 
@@ -318,7 +323,7 @@ def test_frame_step_glyph_is_centered_and_fills_the_icon_bound(kind: str):
     points = (*draw.paths[0], *draw.rectangles[0][0][:2])
     xs = tuple(point[0] for point in points)
     assert abs(min(xs) + max(xs)) < 0.75
-    assert max(math.hypot(*point) for point in points) < OVERLAY_GEOMETRY.icon_radius
+    assert max(math.hypot(*point) for point in points) < GLYPH_REFERENCE_RADIUS
 
     play = _RecordedGlyph()
     draw_playback_glyph(play, (0.0, 0.0), (1.0, 1.0, 1.0, 1.0), 1.0, "play")
@@ -353,9 +358,7 @@ def test_playback_visible_extents_align_across_states_and_smoothing(smoothing, s
         )
         assert min(ys) == pytest.approx(center[1] - PLAYBACK_HALF_HEIGHT_PT * scale * ratio)
         assert max(ys) == pytest.approx(center[1] + PLAYBACK_HALF_HEIGHT_PT * scale * ratio)
-        assert (
-            max(math.dist(point, center) for point in points) < OVERLAY_GEOMETRY.icon_radius * scale
-        )
+        assert max(math.dist(point, center) for point in points) < GLYPH_REFERENCE_RADIUS * scale
 
 
 def test_projection_glyph_distinguishes_converging_and_parallel_edges():
@@ -382,7 +385,7 @@ def test_projection_glyph_distinguishes_converging_and_parallel_edges():
     ("kind", "label"),
     (("persp", "persp"), ("ortho", "ortho"), ("persp", "透视"), ("ortho", "正交")),
 )
-def test_projection_labels_center_the_visible_pair_and_share_a_body_line(scale, kind, label):
+def test_projection_labels_keep_the_body_line_and_apply_only_the_icon_offset(scale, kind, label):
     ink = (2.0 * scale, 2.0 * scale, (len(label) * 7.0 - 3.0) * scale, 18.0 * scale)
 
     class LabelDraw(_RecordedGlyph):
@@ -415,8 +418,9 @@ def test_projection_labels_center_the_visible_pair_and_share_a_body_line(scale, 
     icon_right = max(p[0] for p in points) + stroke * 0.5
     label_left = draw.label[1][0] + ink[0]
     label_right = draw.label[1][0] + ink[2]
-    assert label_left - icon_right == pytest.approx(7.0 * scale)
-    assert icon_left + label_right == pytest.approx(lo[0] + hi[0])
+    optical_x = 0.27 * 16.0 * scale / 24.0 if kind == "persp" else 0.0
+    assert label_left - icon_right == pytest.approx(7.0 * scale - optical_x)
+    assert icon_left + label_right == pytest.approx(lo[0] + hi[0] + optical_x)
 
 
 def test_move_glyph_is_one_connected_rounded_antialiased_outline():
@@ -533,8 +537,8 @@ def test_rotate_glyph_uses_cyclic_axis_occlusion():
 
     assert tuple(len(ring) for ring in rings) == (2, 2, 2)
     assert all(_polygon_area(polygon) > 0.0 for ring in rings for polygon in ring)
-    assert OVERLAY_GEOMETRY.rotate_ring_gap_ratio == pytest.approx(0.5)
-    assert OVERLAY_GEOMETRY.rotate_ring_gap == pytest.approx(OVERLAY_GEOMETRY.tool_stroke * 0.5)
+    assert OVERLAY_GEOMETRY.rotate_ring_gap_ratio == pytest.approx(1.0)
+    assert OVERLAY_GEOMETRY.rotate_ring_gap == pytest.approx(OVERLAY_GEOMETRY.tool_stroke)
     custom = replace(OVERLAY_GEOMETRY, tool_stroke=2.0, rotate_ring_gap_ratio=0.25)
     assert custom.rotate_ring_gap == pytest.approx(0.5)
 
@@ -1564,7 +1568,7 @@ def test_tool_arrow_and_square_ink_leaves_space_inside_the_construction_circle(k
     draw = _RecordedGlyph()
     draw_tool_glyph(draw, (0, 0), (1, 1, 1, 1), scale, kind, "world")
     points = np.asarray([point for path in draw.paths for point in path])
-    radius = OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE * scale
+    radius = GLYPH_REFERENCE_RADIUS * TOOL_GLYPH_SCALE * scale
     assert np.linalg.norm(points, axis=1).max() < radius * 0.92
 
 
@@ -1580,7 +1584,7 @@ def test_capsule_dividers_share_glyph_proportion_and_stroke_style(scale):
     playback_span = playback[1][1] - playback[0][1]
     tool_span = tools[1][0] - tools[0][0]
     assert playback_span / (2 * PLAYBACK_HALF_HEIGHT_PT * scale) == pytest.approx(
-        tool_span / (2 * OVERLAY_GEOMETRY.icon_radius * TOOL_GLYPH_SCALE * scale)
+        tool_span / (2 * GLYPH_REFERENCE_RADIUS * TOOL_GLYPH_SCALE * scale)
     )
     assert playback_span < 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_STEP_SCALE * scale
     assert tool_span == pytest.approx(20 * scale)
