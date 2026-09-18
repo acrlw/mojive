@@ -391,7 +391,7 @@ def test_existing_capsule_ink_matches_geometry_and_reset_stays_in_bound(rig, mon
         for smoothing in (0.0, rig.probe.playback_smoothing, CORNER_SMOOTHING, 1.0):
             path = np.asarray(reset_glyph_path(stroke, smoothing))
             assert np.isfinite(path).all()
-            clearance = OVERLAY_GEOMETRY.icon_radius - np.linalg.norm(path, axis=1).max()
+            clearance = probe_fixtures.OVERLAY_ICON_RADIUS - np.linalg.norm(path, axis=1).max()
             assert clearance == pytest.approx(1.2)
 
 
@@ -471,7 +471,9 @@ def test_capsules_and_narrow_fields_fit_at_fractional_scales(monkeypatch, scale,
             rig.probe.overlay_radial_step = radial_step
             rig.frame()
             a, b = rig.state.rects["playback"], rig.state.rects["tools"]
-            assert a[3] - a[1] == pytest.approx((20 + 4 * radial_step) * scale, abs=0.1)
+            assert a[3] - a[1] == pytest.approx(
+                (2 * rig.probe.overlay_icon_radius + 4 * radial_step) * scale, abs=0.1
+            )
             assert a[3] - a[1] == pytest.approx(b[2] - b[0], abs=0.1)
             assert a[2] - a[0] != pytest.approx(b[3] - b[1])
             for key in ("playback", "tools"):

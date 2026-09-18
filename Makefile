@@ -102,6 +102,8 @@ help:
 		'  make outline           selection and antialiased outline' \
 		'  make inspector         compact Inspector transform reference image' \
 		'  make ui-feasibility    interactive M1-M18 UI feasibility probe' \
+		'  make ui-components     compare production widgets and local corner experiments' \
+		'  make ui-optical        compare optical offsets across icon sizes and contexts' \
 		'  make ui-icon-concepts  production icon family review captures' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
@@ -425,6 +427,26 @@ ui-reset-heads:
 
 ui-feasibility:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive $(ARGS)
+
+.PHONY: ui-components ui-components-gallery ui-optical ui-optical-gallery
+ui-components:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page components --width 1100 --height 760 $(ARGS)
+
+ui-components-gallery:
+	@set -e; for scale in 1 2.25; do \
+		for scene in basic inspector filters actions; do \
+			MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
+				--page components --corner-scene $$scene --width 1100 --height 800 \
+				--ui-scale $$scale -o output/ui-components/$(BACKEND)-$$scene-$$scale.png $(ARGS); \
+		done; \
+	done
+
+ui-optical:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page components --component-tab optical --width 1100 --height 1100 $(ARGS)
+
+ui-optical-gallery:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 1100 --ui-scale 1 -o output/ui-optical/$(BACKEND)-1.png $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 1100 --ui-scale 2.25 -o output/ui-optical/$(BACKEND)-2.25.png $(ARGS)
 
 ui-runtime:
 	$(PY) -m mojive.tools.ui_runtime $(ARGS)

@@ -14,6 +14,7 @@ from mojive.ui import gizmo as gizmo_ui
 from mojive.ui import theme as theme_mod
 from mojive.ui import viewcube as view_ui
 from mojive.ui.theme import THEME, rgb8
+from mojive.ui.viewport_widgets import GLYPH_REFERENCE_RADIUS
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -89,7 +90,7 @@ PROBE_PLOT_SAMPLES = np.asarray(
 # Overlay glyphs start from one 20×20 logical coordinate system. Tool Column
 # paths receive the shared optical scale so they read at runtime size; playback
 # remains on the base envelope.
-OVERLAY_ICON_RADIUS = 10.0
+OVERLAY_ICON_RADIUS = GLYPH_REFERENCE_RADIUS
 
 OVERLAY_STATE_RADIUS = 16.0
 

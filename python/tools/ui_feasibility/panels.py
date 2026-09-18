@@ -16,6 +16,7 @@ from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import PanelContext, button_row_layout, button_width, search_input
 from mojive.ui.panels import output as output_panel_module
 from mojive.ui.panels.hierarchy import disclosure_triangle
+from mojive.ui.panels.value_cards import value_rail
 from mojive.ui.text_layout import text_line_y
 from mojive.ui.viewport_widgets import ToolHint, default_tool_hints, draw_status
 
@@ -193,7 +194,30 @@ def _draw_copy_buttons(item_id: str, labels: tuple[str, str]) -> None:
     imgui.end_table()
 
 
-def _draw_control_content(state: ProbeState) -> None:
+def _scalar_sample(state: ProbeState, scale: float, label, value, bounds, *, unit=""):
+    ctx = PanelContext(
+        None,
+        None,
+        theme=CONCEPT_THEME,
+        style_scale=scale,
+        input_bindings=DEFAULT_INPUT_BINDINGS,
+        painter=state.painter,
+    )
+    return value_rail(
+        ctx,
+        label,
+        value,
+        bounds,
+        initial=0.0,
+        fmt="%+.3f",
+        unit=unit,
+        show_reset=False,
+        angular_degrees=state.angular_degrees,
+        toggle_unit=lambda: setattr(state, "angular_degrees", not state.angular_degrees),
+    ).value
+
+
+def _draw_control_content(state: ProbeState, scale: float) -> None:
     if imgui.collapsing_header("actuators", imgui.TreeNodeFlags_.default_open.value):
         state.control_filter, state.control_sort_by_name = _draw_search_header(
             state,
@@ -206,12 +230,12 @@ def _draw_control_content(state: ProbeState) -> None:
         _draw_copy_buttons("probe-actuator-state", ("Copy ctrl", "Copy act"))
         if _begin_gallery_properties("##probe-control-actuators"):
             _property_label("hinge_pos")
-            _, state.hinge_ctrl = imgui.slider_float(
-                "##probe-hinge-ctrl", state.hinge_ctrl, -1.0, 1.0, "%+.3f"
+            state.hinge_ctrl = _scalar_sample(
+                state, scale, "##probe-hinge-ctrl", state.hinge_ctrl, (-1.0, 1.0)
             )
             _property_label("slide_pos")
-            _, state.slide_ctrl = imgui.slider_float(
-                "##probe-slide-ctrl", state.slide_ctrl, -1.0, 1.0, "%+.3f"
+            state.slide_ctrl = _scalar_sample(
+                state, scale, "##probe-slide-ctrl", state.slide_ctrl, (-1.0, 1.0)
             )
             imgui.end_table()
 
@@ -231,14 +255,14 @@ def _draw_control_content(state: ProbeState) -> None:
         imgui.end_table()
 
 
-def _draw_control_gallery(size, state: ProbeState) -> None:
+def _draw_control_gallery(size, state: ProbeState, scale: float) -> None:
     opened = _begin_gallery_panel("Control", "ProbeControl", size)
     if opened:
-        _draw_control_content(state)
+        _draw_control_content(state, scale)
     imgui.end_child()
 
 
-def _draw_joints_content(state: ProbeState) -> None:
+def _draw_joints_content(state: ProbeState, scale: float) -> None:
     state.joint_filter, state.joint_sort_by_name = _draw_search_header(
         state,
         "probe-joint",
@@ -254,20 +278,20 @@ def _draw_joints_content(state: ProbeState) -> None:
         _property_label("shoulder_ball")
         _table_text("ball · 3 dof", disabled=True)
         _property_label("slide")
-        _, state.slide_position = imgui.slider_float(
-            "##probe-slide-position", state.slide_position, -0.34, 0.34, "%+.4f"
+        state.slide_position = _scalar_sample(
+            state, scale, "##probe-slide-position", state.slide_position, (-0.34, 0.34), unit="m"
         )
         _property_label("hinge_limited")
-        _, state.hinge_position = imgui.slider_float(
-            "##probe-hinge-position", state.hinge_position, -1.2, 1.2, "%+.4f"
+        state.hinge_position = _scalar_sample(
+            state, scale, "##probe-hinge-position", state.hinge_position, (-1.2, 1.2), unit="rad"
         )
         imgui.end_table()
 
 
-def _draw_joints_gallery(size, state: ProbeState) -> None:
+def _draw_joints_gallery(size, state: ProbeState, scale: float) -> None:
     opened = _begin_gallery_panel("Joints", "ProbeJoints", size)
     if opened:
-        _draw_joints_content(state)
+        _draw_joints_content(state, scale)
     imgui.end_child()
 
 
@@ -587,7 +611,9 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                         concept_name = "panel-down" if disclosure == "▾" else "panel-right"
                         draw_concept_icon(
                             row_draw,
-                            (node_x + 5 * scale, center_y),
+                            state.icon_center(
+                                concept_name, (node_x + 5 * scale, center_y), 10.0 * scale
+                            ),
                             10.0 * scale,
                             concept_name,
                             CONCEPT_THEME.text,
@@ -656,7 +682,7 @@ def _draw_hierarchy_gallery(size, state: ProbeState, scale: float) -> None:
                     )
                     draw_concept_icon(
                         row_draw,
-                        center,
+                        state.icon_center(concept_name, center, 16.0 * scale),
                         16.0 * scale,
                         concept_name,
                         color,
@@ -881,8 +907,8 @@ def _draw_panel_gallery(available, state: ProbeState, scale: float) -> None:
     top_size = imgui.ImVec2(top_width, row_height)
     for index, draw_panel in enumerate(
         (
-            lambda: _draw_control_gallery(top_size, state),
-            lambda: _draw_joints_gallery(top_size, state),
+            lambda: _draw_control_gallery(top_size, state, scale),
+            lambda: _draw_joints_gallery(top_size, state, scale),
             lambda: _draw_camera_gallery(top_size, state),
             lambda: _draw_inspector_gallery(top_size, scale),
         )
@@ -913,7 +939,7 @@ def _draw_panel_gallery(available, state: ProbeState, scale: float) -> None:
             imgui.same_line()
 
 
-def _draw_workspace_right_dock(size, state: ProbeState) -> None:
+def _draw_workspace_right_dock(size, state: ProbeState, scale: float) -> None:
     if not imgui.begin_child(
         "Right dock###ProbeWorkspaceRightDock",
         size,
@@ -932,9 +958,9 @@ def _draw_workspace_right_dock(size, state: ProbeState) -> None:
     )
     state.workspace_right_tab = active
     if active == "Control":
-        _draw_control_content(state)
+        _draw_control_content(state, scale)
     elif active == "Joints":
-        _draw_joints_content(state)
+        _draw_joints_content(state, scale)
     else:
         _draw_camera_content(state)
     imgui.end_child()

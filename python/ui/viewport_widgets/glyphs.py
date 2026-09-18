@@ -32,6 +32,7 @@ from .model import (
     CAPSULE_SMOOTHING,
     DEFAULT_RESET_HEAD_SCALE,
     FRAME_LABEL_MAX_WIDTH,
+    GLYPH_REFERENCE_RADIUS,
     OVERLAY_GEOMETRY,
     PLAYBACK_HALF_HEIGHT_PT,
     PLAYBACK_RESET_SCALE,
@@ -59,7 +60,7 @@ def reset_glyph_path(
     """Construct a counterclockwise arrow within Geometry's normalized icon circle."""
     if not math.isfinite(head_scale) or head_scale <= 0:
         raise ValueError("reset head scale must be finite and positive")
-    radius = OVERLAY_GEOMETRY.icon_radius - stroke / 2
+    radius = GLYPH_REFERENCE_RADIUS - stroke / 2
     angles = np.radians(np.linspace(140, -140, 65))
     radial = np.column_stack((np.cos(angles), np.sin(angles)))
     tangent = np.array((radial[-1, 1], -radial[-1, 0]))
@@ -82,9 +83,7 @@ def reset_glyph_path(
         tuple(range(len(outer), len(outer) + 3)),
         smoothing=smoothing,
     )
-    outline *= (
-        OVERLAY_GEOMETRY.icon_radius * RESET_GLYPH_SCALE / np.linalg.norm(outline, axis=1).max()
-    )
+    outline *= GLYPH_REFERENCE_RADIUS * RESET_GLYPH_SCALE / np.linalg.norm(outline, axis=1).max()
     return tuple(map(tuple, outline.tolist()))
 
 

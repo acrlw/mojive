@@ -297,6 +297,20 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
 
 def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> None:
     assert ICON_ROTATE_RING_GAP_RATIO == 1.0
+    assert icon_concepts.ICON_GLYPH_OFFSET_DEFAULTS == {
+        "tool-snap": (0.0, 0.70),
+        "playback-previous": (-1.0, 0.0),
+        "playback-next": (1.0, 0.0),
+        "transport-previous": (-1.0, 0.0),
+        "transport-next": (1.0, 0.0),
+        "transport-more": (0.0, 1.0),
+        "key-snapshot": (0.0, -0.84),
+        "panel-search": (0.98, 0.98),
+        "panel-sort": (-0.43, 0.50),
+        "panel-perspective": (0.27, 0.0),
+        "helper-camera": (0.0, -0.84),
+        "helper-light": (0.0, -0.65),
+    }
     assert ICON_GLYPH_PADDING_DEFAULTS == {
         "tool-rotate": 0.0,
         "playback-previous": 4.0,
@@ -306,6 +320,7 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "transport-previous": 4.0,
         "transport-play": 3.0,
         "transport-next": 4.0,
+        "transport-last": 4.0,
         "transport-more": 4.0,
         "key-keyframe": 4.0,
         "key-add": 4.0,
@@ -365,8 +380,8 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "panel-hidden": 1.0,
         "panel-perspective": 1.5,
         "panel-orthographic": 1.5,
-        "helper-camera": 1.5,
-        "helper-light": 1.5,
+        "helper-camera": 1.25,
+        "helper-light": 1.25,
     }
 
 
@@ -386,7 +401,7 @@ def test_icon_only_follow_segments_center_without_measuring_text(mode, scale) ->
 
 def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> None:
     style = production_icon_style("helper-camera")
-    assert (style.padding, style.stroke_width, style.alignment) == (0.5, 1.5, "box")
+    assert (style.padding, style.stroke_width, style.alignment) == (0.5, 1.25, "box")
     assert style.rotate_ring_gap_ratio == 1.0
     assert style.rotate_ring_cap == "round"
 
@@ -1224,7 +1239,8 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
             return record
 
     style, (fitted, offset, compensation) = icon_concepts._production_icon_layout(name)
-    for size in (14.0, 31.5):
+    optical = icon_concepts.production_icon_offset(name)
+    for size in (14.0, 24.0, 56.0, 112.0):
         center = (13.25, 17.5)
         for foreground, accent in (
             ((1, 0.4, 0.2, 0.3), (0.2, 0.4, 1, 0.5)),
@@ -1234,7 +1250,10 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
             unit = size / ICON_GRID
             icon_concepts._draw_concept_icon_raw(
                 expected,
-                (center[0] + offset[0] * unit, center[1] + offset[1] * unit),
+                (
+                    center[0] + (offset[0] + optical[0]) * unit,
+                    center[1] + (offset[1] + optical[1]) * unit,
+                ),
                 size * fitted,
                 name,
                 foreground,
@@ -1289,7 +1308,7 @@ def test_cold_production_icons_skip_dynamic_fitting(monkeypatch):
 
 @pytest.mark.parametrize("head_scale", (0.65, 1.6, 2.0))
 def test_value_restore_head_control_preserves_its_envelope_and_cache(head_scale):
-    from mojive.ui.viewport_widgets import OVERLAY_GEOMETRY, reset_glyph_path
+    from mojive.ui.viewport_widgets import GLYPH_REFERENCE_RADIUS, reset_glyph_path
     from mojive.ui.viewport_widgets.model import RESET_GLYPH_SCALE
 
     original = reset_glyph_path(1.5)
@@ -1297,7 +1316,7 @@ def test_value_restore_head_control_preserves_its_envelope_and_cache(head_scale)
     assert changed != original
     assert changed is reset_glyph_path(1.5, head_scale=head_scale)
     assert max(math.hypot(x, y) for x, y in changed) == pytest.approx(
-        OVERLAY_GEOMETRY.icon_radius * RESET_GLYPH_SCALE
+        GLYPH_REFERENCE_RADIUS * RESET_GLYPH_SCALE
     )
 
 

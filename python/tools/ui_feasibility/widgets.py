@@ -53,7 +53,7 @@ def _draw_concept_control_icon(
         stroke_width = state.icon_stroke_for_glyph(name)
     draw_concept_icon(
         draw,
-        center,
+        state.icon_center(name, center, size) if state is not None else center,
         size,
         name,
         color,
@@ -81,7 +81,7 @@ def _draw_concept_projection_icon(
         stroke_width = state.icon_stroke_for_glyph(name)
     draw_concept_icon(
         draw,
-        center,
+        state.icon_center(name, center, size) if state is not None else center,
         size,
         name,
         color,
@@ -141,7 +141,7 @@ def _draw_icon_library_command_icon(
     icon_size = 16.0 * float(scale)
     draw_concept_icon(
         draw,
-        center,
+        state.icon_center(name, center, icon_size) if state is not None else center,
         icon_size,
         name,
         color,
@@ -160,7 +160,17 @@ def _draw_icon_library_label(draw, lo, hi, color, scale, name, label, *, state: 
         alignment=state.icon_alignment_for_glyph(name),
         tuning=state.icon_tuning(),
     )
-    draw_icon_label(draw, lo, hi, color, scale, name, label, style=style)
+    draw_icon_label(
+        draw,
+        lo,
+        hi,
+        color,
+        scale,
+        name,
+        label,
+        style=style,
+        icon_offset=state.icon_center(name, (0.0, 0.0), 16.0 * scale),
+    )
 
 
 def _draw_reset_icon(

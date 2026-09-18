@@ -405,7 +405,7 @@ def _icon_library_canvas_size(family: str) -> tuple[float, float]:
     if family == "Capsules":
         return GEOMETRY_CANVAS_SIZE[0], 1260.0
     rows = len(icon_family(family))
-    required_height = 260.0 + (max(_ICON_REVIEW_SIZES) + 20.0) * rows
+    required_height = 324.0 + (max(_ICON_REVIEW_SIZES) + 20.0) * rows
     if family == "Keyframe follow":
         required_height += 110.0
     return GEOMETRY_CANVAS_SIZE[0], max(GEOMETRY_CANVAS_SIZE[1], required_height)

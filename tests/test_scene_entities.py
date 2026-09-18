@@ -18,7 +18,12 @@ from mojive.scene.queries import node_world_pose
 from mojive.session import Session
 from mojive.types import CameraView, Light, LightSet, LightType
 from mojive.ui.gizmo import ObjectGizmo, _set_camera_from_world, _set_light_from_world
-from mojive.ui.icons import ICON_GRID, production_helper_strokes, production_icon_metrics
+from mojive.ui.icons import (
+    ICON_GRID,
+    production_helper_strokes,
+    production_icon_metrics,
+    production_icon_offset,
+)
 from mojive.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,
     HELPER_ICON_LAYER,
@@ -497,7 +502,7 @@ def test_camera_and_light_helper_sizes_are_visually_balanced() -> None:
 
 
 @pytest.mark.parametrize("name", ("helper-camera", "helper-light"))
-def test_production_scene_helper_visible_box_is_centered_on_entity(name: str) -> None:
+def test_production_scene_helper_uses_reviewed_optical_placement(name: str) -> None:
     camera = CameraView(
         eye=np.array((0.0, -5.0, 2.0), np.float32),
         target=np.array((0.0, 0.0, 1.0), np.float32),
@@ -513,7 +518,7 @@ def test_production_scene_helper_visible_box_is_centered_on_entity(name: str) ->
     anchor = project(camera, position, (0.0, 0.0, 1200.0, 800.0))[0]
     box_center = (screen[:, :2].min(axis=0) + screen[:, :2].max(axis=0)) * 0.5
 
-    assert box_center == pytest.approx(anchor[:2], abs=0.05)
+    assert box_center == pytest.approx(anchor[:2] + production_icon_offset(name), abs=0.05)
 
 
 def test_scene_entity_helpers_index_large_hierarchies_once_per_structure() -> None:

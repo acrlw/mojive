@@ -7,8 +7,10 @@ from imgui_bundle import imgui
 from mojive.ui import theme as theme_mod
 from mojive.ui.icons import (
     ICON_ALIGNMENT_EDITABLE_ICONS,
+    ICON_FAMILIES,
     ICON_GLYPH_PADDING_DEFAULTS,
     ICON_GLYPH_STROKE_DEFAULTS,
+    ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_GROUP_STROKE_DEFAULTS,
     ICON_ROTATE_RING_CAP,
@@ -23,6 +25,27 @@ from .layout import _deferred_icon_group_slider, _even_slider, _flags, _property
 from .state import ProbeState
 
 
+def _icon_alignment_values(state: ProbeState):
+    return (
+        ("icon_offset_grid_units", ICON_GRID),
+        ("apply_icon_offsets", state.apply_icon_offsets),
+        ("link_mirrored_icon_offsets", state.link_mirrored_icon_offsets),
+        ("icon_auto_align", state.icon_auto_align),
+        ("icon_auto_align_method", repr("alpha-weighted-centroid")),
+        ("icon_alignment_strength", state.icon_alignment_strength),
+        ("show_icon_centroids", state.show_icon_centroids),
+        *(
+            (f"icon_alignment_{name.replace('-', '_')}", repr(state.icon_alignment_for_glyph(name)))
+            for name in sorted(ICON_ALIGNMENT_EDITABLE_ICONS)
+        ),
+        *(
+            (f"icon_manual_offset_{name.replace('-', '_')}", state.icon_manual_offset(name))
+            for _, icons in ICON_FAMILIES
+            for _, name in icons
+        ),
+    )
+
+
 def _geometry_values_text(state: ProbeState) -> str:
     """Return the live component experiment as reviewable production fields."""
 
@@ -31,7 +54,12 @@ def _geometry_values_text(state: ProbeState) -> str:
         ("capsule_outline", repr(state.capsule_outline)),
         ("icon_radius", state.overlay_icon_radius),
         ("radial_step", state.overlay_radial_step),
+        (
+            "end_padding_ratio",
+            end_padding(state) / (state.overlay_icon_radius + 2 * state.overlay_radial_step),
+        ),
         ("center_step", state.overlay_center_step),
+        ("tool_center_step", state.overlay_center_step),
         ("tool_group_gap", state.tool_group_gap),
         ("divider_width", state.divider_width),
         ("tool_stroke", state.tool_stroke_width),
@@ -81,6 +109,7 @@ def _geometry_values_text(state: ProbeState) -> str:
         for name, value in sorted(state.icon_stroke_by_glyph.items())
     )
     values += tuple((name, getattr(state, name)) for _, name in CORNER_CONTROLS)
+    values += _icon_alignment_values(state)
     return "\n".join(f"{name}={value}," for name, value in values)
 
 
@@ -125,13 +154,7 @@ def _icon_values_text(state: ProbeState) -> str:
         )
         for name in sorted(ICON_GLYPH_STROKE_DEFAULTS.keys() | state.icon_stroke_by_glyph.keys())
     )
-    values.extend(
-        (
-            f"icon_alignment_{name.replace('-', '_')}",
-            repr(state.icon_alignment_for_glyph(name)),
-        )
-        for name in sorted(ICON_ALIGNMENT_EDITABLE_ICONS)
-    )
+    values.extend(_icon_alignment_values(state))
     return "\n".join(f"{name}={value}," for name, value in values)
 
 

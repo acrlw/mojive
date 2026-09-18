@@ -14,14 +14,17 @@ from mojive.ui.icons import (
     ICON_GLYPH_ALIGNMENT_DEFAULTS,
     ICON_GLYPH_PADDING_DEFAULTS,
     ICON_GLYPH_STROKE_DEFAULTS,
+    ICON_GRID,
     ICON_GROUP_LAYOUT_DEFAULTS,
     ICON_GROUP_STROKE_DEFAULTS,
     ICON_ROTATE_RING_CAP,
     ICON_ROTATE_RING_GAP_RATIO,
     ICON_TUNING_DEFAULTS,
     STATUS_MOUSE_DEFAULT_WIDTH,
+    IconStyle,
     IconTuning,
     icon_component_group,
+    production_icon_offset,
 )
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.messages import OutputBuffer
@@ -34,6 +37,8 @@ from mojive.ui.viewport_widgets import DEFAULT_VIEWPORT_OVERLAY_SCALE, OVERLAY_G
 
 from ..ui_capsule_geometry import CAPSULE_SMOOTHING
 from ..ui_redesign import RedesignState
+from .components import ComponentStudy
+from .icon_alignment import candidate_centroid, update_manual_offset
 
 
 @dataclass
@@ -42,6 +47,7 @@ class ProbeState:
     renderer: str = "opengl"
     page: str = "Workspace"
     redesign: RedesignState = field(default_factory=RedesignState)
+    components: ComponentStudy = field(default_factory=ComponentStudy)
     imgui_rounding: float = theme_mod.DEFAULT_CORNER_RADIUS
     imgui_example_value: float = 0.0
     imgui_example_enabled: bool = True
@@ -144,6 +150,12 @@ class ProbeState:
     icon_padding_by_glyph: dict[str, float] = field(default_factory=dict)
     icon_padding_draft_by_group: dict[str, float] = field(default_factory=dict)
     icon_alignment_by_glyph: dict[str, str] = field(default_factory=dict)
+    icon_offsets_by_glyph: dict[str, tuple[float, float]] = field(default_factory=dict)
+    apply_icon_offsets: bool = True
+    link_mirrored_icon_offsets: bool = True
+    icon_auto_align: bool = False
+    icon_alignment_strength: float = 1.0
+    show_icon_centroids: bool = False
     icon_stroke_by_group: dict[str, float] = field(
         default_factory=lambda: dict(ICON_GROUP_STROKE_DEFAULTS)
     )
@@ -207,6 +219,38 @@ class ProbeState:
 
     def icon_stroke_for(self, group: str) -> float:
         return self.icon_stroke_by_group.get(group, ICON_GROUP_STROKE_DEFAULTS[group])
+
+    def icon_manual_offset(self, name: str) -> tuple[float, float]:
+        return self.icon_offsets_by_glyph.get(name, production_icon_offset(name))
+
+    def set_icon_manual_offset(self, name: str, value: tuple[float, float] | None) -> None:
+        update_manual_offset(
+            self.icon_offsets_by_glyph, name, value, link_mirrored=self.link_mirrored_icon_offsets
+        )
+
+    def icon_centroid(self, name: str) -> tuple[float, float]:
+        style = IconStyle(
+            padding=self.icon_padding_for_glyph(name),
+            stroke_width=self.icon_stroke_for_glyph(name),
+            alignment=self.icon_alignment_for_glyph(name),
+            mouse_width=self.concept_mouse_width(),
+            rotate_ring_gap_ratio=self.rotate_ring_gap_ratio,
+            rotate_ring_cap=self.rotate_ring_cap,
+            tuning=self.icon_tuning(),
+        )
+        return candidate_centroid(name, style)
+
+    def icon_offset(self, name: str) -> tuple[float, float]:
+        if self.icon_auto_align:
+            x, y = self.icon_centroid(name)
+            return -x * self.icon_alignment_strength, -y * self.icon_alignment_strength
+        return self.icon_manual_offset(name)
+
+    def icon_center(self, name: str, center, size: float) -> tuple[float, float]:
+        if not self.apply_icon_offsets:
+            return center
+        x, y = self.icon_offset(name)
+        return center[0] + x * size / ICON_GRID, center[1] + y * size / ICON_GRID
 
     def set_icon_stroke_for(self, group: str, stroke_width: float) -> None:
         self.icon_stroke_by_group[group] = float(stroke_width)

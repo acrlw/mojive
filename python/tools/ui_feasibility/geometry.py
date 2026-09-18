@@ -128,7 +128,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                     concept_name = f"playback-{kind}"
                     draw_concept_icon(
                         item_draw,
-                        center,
+                        state.icon_center(concept_name, center, 42.0 * scale),
                         42.0 * scale,
                         concept_name,
                         CONCEPT_THEME.text,
@@ -153,7 +153,7 @@ def _draw_corner_page(draw: ImguiDraw2D, origin, scale: float, state: ProbeState
                     concept_name = "tool-scale" if kind == "dimensions" else f"tool-{kind}"
                     draw_concept_icon(
                         item_draw,
-                        center,
+                        state.icon_center(concept_name, center, 47.2 * scale),
                         47.2 * scale,
                         concept_name,
                         CONCEPT_THEME.text,
@@ -988,7 +988,7 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
             if state.preview_icon_library:
                 draw_concept_icon(
                     draw,
-                    center,
+                    state.icon_center("helper-camera", center, 20.0 * scale * icon_scale),
                     20.0 * scale * icon_scale,
                     "helper-camera",
                     CONCEPT_THEME.text,
@@ -999,7 +999,11 @@ def _draw_geometry_page(available, scale: float, state: ProbeState) -> None:
                 )
                 draw_concept_icon(
                     draw,
-                    (center[0] + 40.0 * scale, center[1]),
+                    state.icon_center(
+                        "helper-light",
+                        (center[0] + 40.0 * scale, center[1]),
+                        20.0 * scale * icon_scale,
+                    ),
                     20.0 * scale * icon_scale,
                     "helper-light",
                     CONCEPT_THEME.text,

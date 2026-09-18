@@ -66,6 +66,14 @@ The production defaults use smoothing **0.382** for capsules, playback glyphs an
 icons, and **0.618** for the other custom corner geometry. Capsule outlines use Soft white (the theme's text color at 25% opacity). Playback and tool capsules share their thickness; their lengths follow
 the number of controls. Native ImGui frame rounding remains **4.8 logical pixels**.
 
+Viewport capsules use icon/state/shell radii of **8 / 14 / 20** logical pixels, a **34**-pixel
+center step, a **10**-pixel group gap, and a **20**-pixel tool divider. Optical end spacing puts
+the first and last control centers **20.3532** pixels from the capsule ends, matching their mean
+clearance to the straight sides. `OverlayGeometry.end_padding_ratio` stores the measured ratio
+to the shell radius, so production layout scales without fitting the curve during startup.
+The Geometry probe's **Copy current values** export includes this ratio for future tuning.
+Its Playback zoom and Tool zoom controls only magnify the inspection specimens.
+
 ## Geometry contract
 
 The reference curve is parameterized by arc length. Each corner consists of a cubic smoothstep
@@ -176,6 +184,92 @@ dependency build. Whole-frame timing also includes scene rendering and schedulin
 subtracting two frame medians cannot establish that corner drawing costs zero.
 
 ## Live corner controls
+
+For a small side-by-side study using current production controls, run:
+
+```bash
+make ui-components
+make ui-components BACKEND=bgfx ARGS='--ui-scale 2.25'
+make ui-components-gallery BACKEND=bgfx
+make ui-components BACKEND=bgfx ARGS='--corner-scene inspector'
+```
+
+The same page is available under **Probe > Components**. The scene selector offers basic controls,
+an Inspector card, a search/filter toolbar, and an action group. All scenes retain current/candidate
+columns with shared sample values. The gallery captures every scene at 1x and 2.25x.
+Inspector fields, filter reset, and action buttons are interactive without changing the viewer.
+Both columns call the production
+search input, value rail, joined numeric/unit field, segmented control, and icon painters with
+shared sample values. The current column keeps the production frame radius; the candidate uses
+a local override. Its nested child surface is a test fixture: **Link outer radius to inset**
+sets its radius to the inner control radius plus the shared inset. The search pill retains its
+own half-height radius. **Camera extra Y** moves only the candidate camera glyph relative to its
+reviewed production offset on the 24-unit grid. Hide the guides
+to compare visual balance. **Reset experiment** restores the trial parameters. Nothing is saved
+to viewer settings or production defaults.
+
+The corner candidate starts at inner radius **4**, inset **2**, outer radius **6** logical
+pixels. This is a probe preset, independent of production defaults.
+
+The **Optical alignment** tab covers all 50 Icon Library production glyphs except
+Info/Warning/Error. Open it directly with:
+
+```bash
+make ui-optical
+make ui-optical BACKEND=bgfx ARGS='--ui-scale 2.25'
+make ui-optical-gallery BACKEND=bgfx
+```
+
+Use **Family** and **Choose icon**, or step through all glyphs with **Previous icon / Next icon**.
+This includes viewport tools and playback, keyframe transport and actions, panel controls,
+scene helpers, and mouse hints. Tune X/Y from -4 to +4 on the 24-unit grid (+X right, +Y down). Each glyph
+retains its own additional offsets while switching tabs. Zero uses the reviewed production
+placement; Auto align measures and corrects that current production silhouette. These experimental
+deltas are separate from the Icon Library's absolute offsets. The camera Y adjustment is shared with the corner
+study. Compare 16/20/24-pixel glyphs in circular and rounded buttons, English/CJK icon labels,
+and a toolbar of the selected family. The labels retain their production text placement while only the glyph
+moves. These are context fixtures using production painters, not interactive editor controls.
+
+**Auto-align weighted centroid** corrects each candidate glyph's alpha-weighted ink centroid
+(amber dot). **Alignment strength** scales that correction from 0% to 250% (default 100%):
+0% uses the production position, 50% moves halfway, 100% puts the centroid at its control
+center, and values above 100% overshoot. This scales the displacement without changing the
+centroid's weights or the correction direction. It cannot reproduce arbitrary manual X/Y
+adjustments; switch auto-align off to tune those independently. The same correction applies
+at every preview size, to icon labels, and to the selected family's toolbar glyphs.
+The production reference stays unchanged. Auto mode
+shows calculated X/Y values and disables manual sliders and reset; switching it off restores
+the saved manual offsets. Blur sigma and contour threshold do not affect this alignment.
+`--auto-align-centroid` enables the switch at startup. The centroid is also marked on the
+sharp enlarged glyph, so guides remain useful with the blur diagnostic hidden.
+
+The enlarged diagnostic shows production geometry and a cached Gaussian-blurred alpha mask.
+**Gaussian blur / sigma** adjusts the standard deviation from 0 to 6 grid units (default 3;
+0 shows the unblurred mask). `--blur-sigma 4` also selects the initial strength. The probe
+convolves a normalized Gaussian kernel along X/Y, truncated at four sigma, on a padded
+256-pixel canvas. Display interpolates full 8-bit coverage across a 128-sample grid instead
+of drawing enlarged, flat blocks with quantized opacity. Stronger blur spreads and fades ink.
+
+**Circle contour / fraction of peak** selects the enclosing-circle support from 5% to 80% of
+peak opacity (default 25%); it affects the measured circle without changing the blurred image.
+Optional guides mark control centers, visible bounds, the ink centroid (amber dot), and the
+threshold circle with its center (small square). The circle-center trial offset is the negative
+of that measured center on the icon grid; it is displayed for comparison and never applied
+automatically. A symmetric Gaussian preserves the whole-image centroid without clipping,
+while thresholding can change the shape and its enclosing circle. These measurements are not
+unique perceptual centers. Judge the actual-size controls with guides hidden before accepting
+a correction.
+**Link mirrored offsets** applies the same X-reflection/Y-copy rule as the Icon Library to this
+study's manual offsets. Edits work from either member of a supported pair; enabling the switch
+preserves existing values until edited. **Reset selected** clears that glyph's manual offset,
+and its partner's offset while linked. **Copy offsets** copies the active alignment mode,
+link setting, and offsets as JSON for review (strength as a multiplier and all 50 effective
+offsets in auto mode);
+values remain local to the probe session and do not modify the viewer.
+
+Control and Joints scalar samples in the older Panels/Workspace studies also call the production
+value rail and numeric/unit controls. Their surrounding sample layouts, other panels, and settings
+remain design studies rather than full replicas of the live editor.
 
 Open the UI Feasibility corner page with:
 

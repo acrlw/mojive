@@ -654,8 +654,8 @@ def test_settings_is_a_dockable_panel(panels: PanelSet):
 
 
 def test_viewport_chrome_uses_exact_capsule_geometry_and_spacing():
-    assert playback_size(1.0) == pytest.approx((282.0, 52.0))
-    assert tool_column_size(1.0) == pytest.approx((52.0, 230.0))
+    assert playback_size(1.0) == pytest.approx((230.7064, 40.0), abs=0.0001)
+    assert tool_column_size(1.0) == pytest.approx((40.0, 186.7064), abs=0.0001)
 
     horizontal = np.asarray(capsule_points(10.0, 20.0, 136.0, 52.0))
     vertical = np.asarray(capsule_points(10.0, 20.0, 52.0, 188.0))

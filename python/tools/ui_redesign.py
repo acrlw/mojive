@@ -335,7 +335,9 @@ def _capsule(state, origin, scale, geometry, circular_button, vertical=False):
                     stroke_width = ICON_STROKE
                 draw_concept_icon(
                     target,
-                    center,
+                    geometry.icon_center(concept_name, center, nominal_diameter)
+                    if hasattr(geometry, "icon_center")
+                    else center,
                     nominal_diameter,
                     concept_name,
                     color,
@@ -538,10 +540,11 @@ def _viewport(state, scale, geometry, circular_button):
                 "rotate": "tool-rotate",
                 "dimensions": "tool-scale",
             }[state.tool]
+            icon_size = 2.0 * OVERLAY_GEOMETRY.icon_radius * 3.0 * scale * TOOL_GLYPH_SCALE
             draw_concept_icon(
                 draw,
-                (cx, cy),
-                2.0 * OVERLAY_GEOMETRY.icon_radius * 3.0 * scale * TOOL_GLYPH_SCALE,
+                geometry.icon_center(concept_name, (cx, cy), icon_size),
+                icon_size,
                 concept_name,
                 THEME.primary,
                 padding=geometry.icon_padding_for_glyph(concept_name),
