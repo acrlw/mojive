@@ -263,11 +263,100 @@ def test_origin_projection_from_scene_camera_keeps_the_displayed_view(origin_vie
     app.select_model_camera(camera_id)
     viewer.sync()
     original = viewer.session.camera
+    io.add_mouse_pos_event(*center)
+    viewer.sync()
+    assert not app.view_cube.origin_hovered
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    assert app._model_camera_id == camera_id
+    assert viewer.session.camera.eye == pytest.approx(original.eye)
+    assert viewer.session.camera.target == pytest.approx(original.target)
+    assert not viewer.session.camera_view(camera_id).orthographic
+    app.select_model_camera(-1)
     _press_origin(viewer, io, center)
     io.add_mouse_button_event(0, False)
     viewer.sync()
-    assert app._model_camera_id == -1
     assert app.camera.orthographic
-    assert app.camera.view().eye == pytest.approx(original.eye, abs=1e-5)
-    assert app.camera.pivot == pytest.approx(original.target)
-    assert not viewer.session.camera_view(camera_id).orthographic
+
+
+@pytest.mark.parametrize("gesture", ("orbit", "pan", "dolly", "wheel", "fly", "frame"))
+def test_scene_camera_retains_selection_during_viewport_navigation(origin_viewer, gesture):
+    from pathlib import Path
+
+    from imgui_bundle import imgui
+
+    from mojive import commands as cmd
+    from mojive.tools.ui_runtime import _activate_panel
+
+    viewer, io, _center = origin_viewer
+    app = viewer.app
+    camera_id = viewer.session.cameras[0].camera_id
+    editor = app.camera.view()
+    app.select_model_camera(camera_id)
+    _activate_panel(viewer, "Camera")
+    viewer.sync()
+    original = viewer.session.camera
+    x, y, width, height = app._viewport_rect
+    point = (x + width * 0.65, y + height * 0.55)
+    io.add_mouse_pos_event(*point)
+    viewer.sync()
+    buttons = {"orbit": (0,), "pan": (2,), "dolly": (0, 1)}.get(gesture, ())
+    key = {"fly": imgui.Key.w, "frame": imgui.Key.f}.get(gesture)
+    for button in buttons:
+        io.add_mouse_button_event(button, True)
+    if key is not None:
+        io.add_key_event(key, True)
+    viewer.sync()
+    for index in range(1, 5):
+        io.add_mouse_pos_event(point[0] + index * 10, point[1] + index * 6)
+        if gesture == "wheel":
+            io.add_mouse_wheel_event(0, 1)
+        viewer.sync()
+        assert app._model_camera_id == camera_id
+        assert viewer.session.camera.eye == pytest.approx(original.eye)
+        assert viewer.session.camera.target == pytest.approx(original.target)
+        assert app.camera.view().eye == pytest.approx(editor.eye)
+    for button in buttons:
+        io.add_mouse_button_event(button, False)
+    if key is not None:
+        io.add_key_event(key, False)
+    viewer.sync()
+    node = next(node for node in viewer.session.nodes if node.name == "box")
+    assert not app.request_node_focus(node.node_id)
+    assert app._pending_node_focus_id is None
+
+    # Scene motion and explicit camera edits still drive the selected view.
+    moved = replace(original, eye=np.add(original.eye, (0, 0, 0.3)))
+    assert viewer.session.submit(cmd.SetSceneCamera(camera_id, moved)).ok
+    viewer.sync()
+    assert viewer.session.camera.eye == pytest.approx(moved.eye)
+    if gesture == "orbit":
+        folder = Path("output/camera-selection") / viewer.backend.caps.name
+        folder.mkdir(parents=True, exist_ok=True)
+        viewer.capture(folder / "locked-camera.png", surface="window")
+    app.select_model_camera(-1)
+    viewer.sync()
+    assert viewer.session.camera.eye == pytest.approx(editor.eye)
+    io.add_mouse_wheel_event(0, 1)
+    viewer.sync()
+    assert not np.allclose(viewer.session.camera.eye, editor.eye)
+
+
+def test_removing_selected_scene_camera_restores_editor_view(origin_viewer):
+    from mojive import commands as cmd
+
+    viewer, _io, _center = origin_viewer
+    app = viewer.app
+    editor = app.camera.view()
+    camera_id = viewer.session.cameras[0].camera_id
+    node = next(node for node in viewer.session.nodes if node.name == "box")
+    assert app.request_node_focus(node.node_id)
+    app.select_model_camera(camera_id)
+    assert app._pending_node_focus_id is None
+    viewer.sync()
+    assert viewer.session.submit(cmd.RemoveSceneCamera(camera_id)).ok
+    viewer.sync()
+    assert app._model_camera_id == -1
+    assert viewer.session.camera.eye == pytest.approx(editor.eye)

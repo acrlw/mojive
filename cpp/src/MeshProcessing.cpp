@@ -42,4 +42,55 @@ SimplifiedIndices simplifyMesh(std::span<const std::array<float, 3>> positions,
     result.indices.resize(count);
     return result;
 }
+std::vector<MeshLod> prepareMeshLods(const Mesh &mesh, std::stop_token stop) {
+    std::vector<MeshLod> result;
+    if (mesh.indices.size() < 192 || stop.stop_requested())
+        return result;
+    std::vector<std::array<float, 5>> attributes(mesh.vertices.size());
+    for (size_t i = 0; i < attributes.size(); ++i) {
+        const auto &n = mesh.vertices[i].normal;
+        auto uv = mesh.texcoords.empty() ? std::array<float, 2>{} : mesh.texcoords[i];
+        attributes[i] = {n[0], n[1], n[2], uv[0], uv[1]};
+    }
+    const auto *positions = mesh.vertices[0].position.data();
+    const float scale = meshopt_simplifyScale(positions, mesh.vertices.size(), sizeof(Vertex));
+    constexpr float weights[] = {.5f, .5f, .5f, 1, 1};
+    size_t previous = mesh.indices.size();
+    float previousError = 0;
+    for (size_t target = mesh.indices.size() / 4; target >= 3; target /= 4) {
+        if (stop.stop_requested())
+            return {};
+        std::vector<uint32_t> indices(mesh.indices.size());
+        float error = 0;
+        size_t count = meshopt_simplifyWithAttributes(
+            indices.data(), mesh.indices.data(), mesh.indices.size(), positions,
+            mesh.vertices.size(), sizeof(Vertex), attributes[0].data(), sizeof(attributes[0]),
+            weights, 5, nullptr, target / 3 * 3, 1.f,
+            meshopt_SimplifyPermissive | meshopt_SimplifyPrune, &error);
+        // meshoptimizer calls are indivisible; abandon canceled results before
+        // compaction and before starting another simplification level.
+        if (stop.stop_requested())
+            return {};
+        if (count < 3 || count >= previous * .8)
+            continue;
+        auto level = std::make_shared<Mesh>();
+        level->indices.reserve(count);
+        std::vector<uint32_t> remap(mesh.vertices.size(), UINT32_MAX);
+        for (size_t i = 0; i < count; ++i) {
+            const auto index = indices[i];
+            if (remap[index] == UINT32_MAX) {
+                remap[index] = level->vertices.size();
+                level->vertices.push_back(mesh.vertices[index]);
+                if (!mesh.texcoords.empty())
+                    level->texcoords.push_back(mesh.texcoords[index]);
+            }
+            level->indices.push_back(remap[index]);
+        }
+        // Independent simplifications need not have monotonically increasing error.
+        previousError = std::max(previousError, error * scale);
+        result.push_back({std::move(level), previousError});
+        previous = count;
+    }
+    return result;
+}
 } // namespace mojive

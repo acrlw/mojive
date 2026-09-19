@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from mojive import CameraNavigationConfig, Scene, ViewerConfig, build, build_scene
+from mojive import CameraNavigationConfig, CameraView, Scene, ViewerConfig, build, build_scene
 from mojive.tools.keyframe_timeline import show_settings
 from mojive.tools.ui_runtime import (
     _click,
@@ -19,6 +19,21 @@ from mojive.tools.ui_runtime import (
 )
 
 pytestmark = pytest.mark.gpu
+
+
+def test_explicit_camera_before_startup_survives_first_sync(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    scene = Scene()
+    scene.box(position=(80, 0, 0))
+    view = CameraView(eye=np.array([2, -3, 1.5]), target=np.array([0, 0, 0.2]), far=120)
+    with build_scene(scene, width=640, height=480, vsync=False, show_window=False) as viewer:
+        assert not viewer.app._started
+        viewer.set_camera(view)
+        for _ in range(3):
+            viewer.sync()
+            np.testing.assert_allclose(viewer.session.camera.eye, view.eye, atol=1e-5)
+            np.testing.assert_allclose(viewer.session.camera.target, view.target, atol=1e-5)
+        assert viewer.session.camera.far == view.far
 
 
 def _enter_number(viewer, name, value):

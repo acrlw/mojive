@@ -28,6 +28,17 @@ def invoke(service, method, **params):
     return result
 
 
+def test_capture_flags_do_not_advertise_or_accept_viewport_mesh_lod(service):
+    settings = invoke(service, "get_capture_settings")
+    assert "mesh_lod" not in settings["supported_render_flags"]
+    assert "mesh_lod" not in settings["supported_visualization_flags"]
+    for method in ("set_render_flag", "set_visualization_flag"):
+        with pytest.raises(RpcError) as error:
+            invoke(service, method, name="mesh_lod", enabled=True)
+        assert error.value.code == "invalid_params"
+    assert invoke(service, "get_capture_settings") == settings
+
+
 @pytest.mark.parametrize(
     "extra",
     [
@@ -209,6 +220,52 @@ def test_queries_observe_updates_from_the_scene_owner(service, method):
         if method == "get_scene":
             assert any(node["name"] == "new object" for node in result["objects"])
             assert result["cameras"][0]["name"] == "new camera"
+
+
+def test_object_queries_filter_before_paging_and_only_build_returned_payloads(service, monkeypatch):
+    from mojive.control import application
+
+    scene = service.session.adapter.scene
+    for index in range(40):
+        scene.box(name=f"Robot {index}")
+    scene.add_camera("Robot camera", CameraView())
+    all_nodes = invoke(service, "list_objects")
+    matching = [node for node in all_nodes if node["type"] == "geom" and "1" in node["name"]]
+    calls = []
+    original = application._node_payload
+
+    def payload(node):
+        calls.append(node.node_id)
+        return original(node)
+
+    monkeypatch.setattr(application, "_node_payload", payload)
+    page = invoke(service, "list_objects", name="1", type="geom", offset=1, limit=3)
+    assert page == matching[1:4]
+    assert calls == [node["node_id"] for node in page]
+    assert invoke(service, "list_objects", name="ROBOT", type="camera")[0]["name"] == "Robot camera"
+    parent = page[0]["parent"]
+    assert invoke(service, "list_objects", parent=parent) == [
+        node for node in all_nodes if node["parent"] == parent
+    ]
+    assert invoke(service, "list_objects", offset=len(all_nodes)) == []
+    assert invoke(service, "list_objects", name="absent") == []
+    calls.clear()
+    summary = invoke(service, "get_scene", include_objects=False)
+    assert not calls and summary["objects"] == []
+    assert summary["object_count"] == len(all_nodes)
+    assert summary["cameras"][0]["name"] == "Robot camera"
+    assert invoke(service, "get_scene")["objects"] == all_nodes
+    scene.box(name="Robot later")
+    assert invoke(service, "list_objects", name="later")
+
+
+@pytest.mark.parametrize(
+    "params", ({"offset": -1}, {"limit": 0}, {"limit": 1.5}, {"type": "invalid"})
+)
+def test_object_query_rejects_invalid_paging(service, params):
+    with pytest.raises(RpcError) as error:
+        service.dispatch("list_objects", params)
+    assert error.value.code == "invalid_params"
 
 
 @pytest.mark.parametrize("workspace", [False, True])

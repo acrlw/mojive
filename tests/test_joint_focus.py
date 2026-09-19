@@ -301,6 +301,10 @@ def test_node_focus_keeps_visible_bounds_in_frame_and_looks_down(node_type, mode
     app._pending_joint_focus_id = None
     app._pending_node_focus_id = None
 
+    if model_camera:
+        assert not app.request_node_focus(node.node_id)
+        assert app._pending_node_focus_id is None
+        return
     assert app.request_node_focus(node.node_id)
     app.session.camera = app.camera.view()
     from mojive.interaction.gizmo import project
@@ -402,6 +406,7 @@ def test_joint_selection_highlights_its_renderable_parent_without_changing_targe
 def test_joint_focus_from_a_link_does_not_replace_its_selection() -> None:
     app = object.__new__(ViewerApp)
     app._camera_transition = None
+    app._model_camera_id = -1
     joint = JointInfo(0, "elbow", "hinge", True, (-1.0, 1.0), 0, 0, 1)
     link = SceneNode(3, "forearm", NodeType.LINK, object_id=9, body_index=1)
     joint_node = SceneNode(4, "elbow", NodeType.JOINT, body_index=1, joint_index=0)

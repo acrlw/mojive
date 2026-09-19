@@ -14,6 +14,7 @@ from mojive.ui.keyframe_editor.controls import unique_keyframe_name as unique_ke
 from mojive.ui.keyframe_editor.properties import draw_error, draw_selected
 from mojive.ui.keyframe_editor.toolbar import TimelineToolbar
 from mojive.ui.keyframe_editor.track import draw_dope_sheet
+from mojive.ui.replay_controls import ReplayControls
 from mojive.ui.timeline import (
     decimated_marker_ids as decimated_marker_ids,
 )
@@ -64,6 +65,7 @@ class KeyframesPanel(Panel):
         super().__init__()
         self.editor = TimelineEditor()
         self.toolbar = TimelineToolbar(follow_mode_icon_drawer)
+        self._replay = ReplayControls()
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -75,6 +77,9 @@ class KeyframesPanel(Panel):
         return self.editor.status_detail(translate)
 
     def draw(self, ctx: PanelContext) -> None:
+        if ctx.session.replay_info is not None:
+            self._replay.draw(ctx)
+            return
         editor = self.editor
         models = tuple(ctx.session.scene_models)
         model_ids = tuple(model.model_id for model in models)

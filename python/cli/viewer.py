@@ -121,16 +121,68 @@ def cmd_attach(args: argparse.Namespace) -> int:
     from mojive.app.composition import build_from_adapter
     from mojive.remote import RemoteSceneAdapter
 
+    rpc_options = _viewer_rpc_options(args)
     viewer = build_from_adapter(
         RemoteSceneAdapter(args.host, args.port),
         vsync=not args.no_vsync,
         title=args.title,
     )
     try:
+        if rpc_options is not None:
+            viewer.start_rpc(**rpc_options)
+        for name in args.enable_render:
+            if not viewer.backend.set_flag(RenderFlag(name), True):
+                raise ValueError(f"Render flag {name!r} is unavailable on this renderer")
         viewer.backend.set_debug_view(DebugView(args.debug_view))
         viewer.run()
     finally:
         viewer.release()
+    return 0
+
+
+def cmd_replay_joints(args: argparse.Namespace) -> int:
+    """Decode selected compact joint samples locally, without a pose-stream bridge."""
+    from mojive.adapters.joint_replay import JointReplayAdapter
+    from mojive.app.composition import build_from_adapter
+
+    rpc_options = _viewer_rpc_options(args)
+    options = {
+        "worlds": args.worlds,
+        "world_ids": None if args.world_ids is None else tuple(args.world_ids),
+        "max_worlds": args.world_limit,
+        "paused": not args.play,
+    }
+    if args.archive.startswith(("http://", "https://")):
+        from mojive.adapters.rollout_replay import RolloutReplayAdapter
+
+        adapter = RolloutReplayAdapter(args.archive, window_frames=args.window_frames, **options)
+    else:
+        adapter = JointReplayAdapter(Path(args.archive), **options)
+    viewer = build_from_adapter(adapter, vsync=not args.no_vsync, title="Mojive joint replay")
+    try:
+        if rpc_options is not None:
+            viewer.start_rpc(**rpc_options)
+        for name in args.enable_render:
+            if not viewer.backend.set_flag(RenderFlag(name), True):
+                raise ValueError(f"Render flag {name!r} is unavailable on this renderer")
+        viewer.run()
+    finally:
+        viewer.release()
+    return 0
+
+
+def cmd_serve_rollout(args: argparse.Namespace) -> int:
+    """Publish an existing rollout window without a viewer or per-frame streaming."""
+    import threading
+
+    from mojive.remote.rollout import RolloutServer, RolloutStore
+
+    store = RolloutStore.from_archive(
+        Path(args.archive), max_worlds=args.world_limit, max_frames=args.frame_limit
+    )
+    with RolloutServer(store, args.host, args.port) as server:
+        log.info("Rollout previews at http://{}:{}; requests are manual", *server.address)
+        threading.Event().wait()
     return 0
 
 

@@ -29,6 +29,8 @@ from .viewer import cmd_attach as cmd_attach
 from .viewer import cmd_canvas as cmd_canvas
 from .viewer import cmd_editor as cmd_editor
 from .viewer import cmd_replay as cmd_replay
+from .viewer import cmd_replay_joints as cmd_replay_joints
 from .viewer import cmd_serve as cmd_serve
+from .viewer import cmd_serve_rollout as cmd_serve_rollout
 from .viewer import cmd_toy as cmd_toy
 from .viewer import cmd_view as cmd_view

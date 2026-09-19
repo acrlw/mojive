@@ -7,7 +7,15 @@ from dataclasses import replace
 import numpy as np
 
 from ..types import CameraView, InstancePoseSource
-from .base import AdapterCaps, FrameNeeds, NodeType, SceneAdapterBase, SceneFrame, SceneNode
+from .base import (
+    GEOMETRY_OBJECT_BASE,
+    AdapterCaps,
+    FrameNeeds,
+    NodeType,
+    SceneAdapterBase,
+    SceneFrame,
+    SceneNode,
+)
 
 
 class WorldInstances(SceneAdapterBase):
@@ -27,12 +35,22 @@ class WorldInstances(SceneAdapterBase):
 
     caps = AdapterCaps(name="worlds", external_clock=True, clock_control=False)
 
-    def __init__(self, source, frame: SceneFrame, offsets: np.ndarray) -> None:
+    def __init__(self, source, frame: SceneFrame, offsets: np.ndarray, *, world_ids=None) -> None:
         offsets = np.array(offsets, dtype=np.float32, copy=True)
         if offsets.ndim != 2 or offsets.shape[1] != 3 or not len(offsets):
             raise ValueError("offsets must have shape (worlds, 3), with at least one world")
         if not np.isfinite(offsets).all():
             raise ValueError("world offsets must be finite")
+        world_ids = np.asarray(range(len(offsets)) if world_ids is None else world_ids)
+        if (
+            world_ids.shape != (len(offsets),)
+            or world_ids.dtype.kind not in "iu"
+            or np.any(world_ids < 0)
+            or np.any(world_ids >= GEOMETRY_OBJECT_BASE - 1)
+            or len(np.unique(world_ids)) != len(world_ids)
+        ):
+            raise ValueError("world_ids must be unique non-negative world identities")
+        self.world_ids = tuple(int(i) for i in world_ids)
         count = source.instance_count
         pose = source.geom_pose_source
         if (
@@ -55,15 +73,15 @@ class WorldInstances(SceneAdapterBase):
         self._moving_count = n * self.world_count
         rows = np.concatenate((np.tile(self.moving_instances, self.world_count), fixed))
         size = len(rows)
-        world = np.repeat(np.arange(self.world_count, dtype=np.int32), n)
+        world = np.repeat(np.asarray(self.world_ids, dtype=np.int32), n)
         ids = np.concatenate((world + 1, np.zeros(len(fixed), np.int32)))
         template_slots = source.geom_source if len(source.geom_source) else np.arange(count)
         self.pose_indices = np.array(template_slots[self.moving_instances], copy=True)
         self.pose_indices.flags.writeable = False
-        nodes = [SceneNode(0, "world", NodeType.WORLD, children=list(range(1, len(offsets) + 1)))]
+        nodes = [SceneNode(0, "world", NodeType.WORLD, children=[i + 1 for i in self.world_ids])]
         nodes.extend(
             SceneNode(i + 1, f"World {i}", NodeType.MODEL, parent=0, object_id=i + 1)
-            for i in range(len(offsets))
+            for i in self.world_ids
         )
 
         def expand_optional(values):

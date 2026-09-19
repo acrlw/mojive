@@ -662,6 +662,10 @@ class _Capture:
         self.panels.load("keyframes").toggle_recording(self._panel_context())
 
     def _toggle_playback(self, *, source: str | None = None) -> None:
+        replay = self.session.replay_info
+        if replay is not None and getattr(self, "_take_video", None) is None:
+            self.session.submit(cmd.SetReplayPlayback(paused=not replay.paused))
+            return
         if getattr(self, "_take_video", None) is not None:
             if self.recording.phase is RecordingPhase.PAUSED:
                 self.resume_recording()
@@ -677,6 +681,9 @@ class _Capture:
             self.session.submit(cmd.Play())
 
     def _reset_playback(self) -> None:
+        if self.session.replay_info is not None:
+            self.session.submit(cmd.SeekReplay(0))
+            return
         if getattr(self, "_take_video", None) is not None:
             self.stop_recording()
         if self.session.state_take_recording:

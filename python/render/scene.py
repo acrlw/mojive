@@ -216,98 +216,85 @@ class SceneBuilder:
         shading_model: ShadingModel = ShadingModel.LINEAR,
     ) -> RenderScene:
         n = len(self._rows)
+        scene = RenderScene(
+            count=n,
+            camera=camera,
+            lights=lights,
+            scene_extent=float(scene_extent),
+            scene_center=np.asarray(scene_center, np.float32),
+            shadow_clip=float(shadow_clip),
+            shading_model=shading_model,
+            infinite_planes=tuple(i for i, row in enumerate(self._rows) if row["infinite_plane"]),
+        )
+        for column, field_name, dtype, shape in (
+            ("transforms", "transform", np.float32, (n, 4, 4)),
+            ("colors", "color", np.float32, (n, 4)),
+            ("material", "material", np.float32, (n, 4)),
+            ("tex_coef", "tex_coef", np.float32, (n, 4)),
+            ("cube_coef", "cube_coef", np.float32, (n, 4)),
+            ("object_id", "object_id", np.uint32, (n,)),
+            ("segmentation", "segmentation", np.int32, (n, 2)),
+        ):
+            setattr(
+                scene, column, np.asarray([r[field_name] for r in self._rows], dtype).reshape(shape)
+            )
+        return self.build_columns(
+            [r["key"][0] for r in self._rows],
+            np.asarray([r["key"][1] for r in self._rows], np.intp),
+            scene,
+        )
 
-        # A draw bucket represents GPU binding state, not a logical material.
-        # Per-instance color, shading, reflection, and texture-coordinate values
-        # already live in the instance streams, so opaque materials that bind the
-        # same texture can share one instanced draw.  The retained material id is
-        # a representative used only to resolve that texture in the backends.
-        ident: list[tuple[MeshKey, int, bool, int]] = []
-        seen: dict[tuple[MeshKey, str | tuple[str, int] | None, bool, int], int] = {}
+    def build_columns(
+        self, meshes: list[MeshKey], material_ids: np.ndarray, scene: RenderScene
+    ) -> RenderScene:
+        """Bucket instance columns without constructing a Python object for every row."""
+        n = scene.count
+        # Buckets represent GPU bindings, not logical materials. Keep first-use
+        # order and one bucket per transparent row for stable depth sorting.
+        mesh_ids: dict[MeshKey, int] = {}
+        mesh_slots = np.fromiter(
+            (mesh_ids.setdefault(mesh, len(mesh_ids)) for mesh in meshes), np.int64, count=n
+        )
+        bindings: dict[str | None, int] = {}
+        material_bindings = np.asarray(
+            [bindings.setdefault(mat.texture, len(bindings)) for mat in self._materials], np.int64
+        )
+        valid = (material_ids >= 0) & (material_ids < len(self._materials))
+        if not np.all(valid):
+            invalid = int(material_ids[np.flatnonzero(~valid)[0]])
+            raise ValueError(f"material id {invalid} exceeds table size {len(self._materials)}")
+        keys = mesh_slots * max(1, len(bindings)) + material_bindings[material_ids]
+        transparent = (scene.colors[:, 3] >= 0) & (scene.colors[:, 3] < 1)
+        opaque_rows = np.flatnonzero(~transparent)
+        transparent_rows = np.flatnonzero(transparent)
+        _, first, inverse = np.unique(keys[opaque_rows], return_index=True, return_inverse=True)
+        first_order = np.argsort(first)
+        remap = np.empty(len(first), np.int32)
+        remap[first_order] = np.arange(len(first), dtype=np.int32)
         row_bucket = np.empty(n, np.int32)
-        for i, row in enumerate(self._rows):
-            transparent = 0.0 <= float(row["color"][3]) < 1.0
-            mesh, matid = row["key"]
-            binding: str | tuple[str, int] | None
-            if 0 <= matid < len(self._materials):
-                binding = self._materials[matid].texture
-            else:
-                # Preserve invalid ids as distinct keys so validation reports the
-                # original material-table error instead of silently merging them.
-                binding = ("invalid-material", matid)
-            batch_key = (mesh, binding, transparent, i if transparent else -1)
-            if batch_key not in seen:
-                seen[batch_key] = len(ident)
-                ident.append((mesh, matid, transparent, i if transparent else -1))
-            row_bucket[i] = seen[batch_key]
-
-        order_of_bucket = sorted(range(len(ident)), key=lambda b: (ident[b][2], b))
-        remap = np.empty(len(ident), np.int32)
-        for new_b, old_b in enumerate(order_of_bucket):
-            remap[old_b] = new_b
-        row_bucket = remap[row_bucket]
-        ordered = [ident[b] for b in order_of_bucket]
-
+        row_bucket[opaque_rows] = remap[inverse]
+        row_bucket[transparent_rows] = np.arange(len(first), len(first) + len(transparent_rows))
+        representatives = np.concatenate((opaque_rows[first[first_order]], transparent_rows))
         order = np.argsort(row_bucket, kind="stable")
-
-        write_index = np.empty(n, np.int32)
-        write_index[order] = np.arange(n, dtype=np.int32)
-        self.write_index = write_index
-
-        scene = RenderScene(count=n)
-        scene.bucket = row_bucket[order].astype(np.int32)
-        scene.transforms = (
-            np.asarray([r["transform"] for r in self._rows])[order]
-            if n
-            else np.zeros((0, 4, 4), np.float32)
-        )
-        scene.colors = (
-            np.asarray([r["color"] for r in self._rows])[order]
-            if n
-            else np.zeros((0, 4), np.float32)
-        )
-        scene.material = (
-            np.asarray([r["material"] for r in self._rows])[order]
-            if n
-            else np.zeros((0, 4), np.float32)
-        )
-        scene.tex_coef = (
-            np.asarray([r["tex_coef"] for r in self._rows])[order]
-            if n
-            else np.zeros((0, 4), np.float32)
-        )
-        scene.cube_coef = (
-            np.asarray([r["cube_coef"] for r in self._rows])[order]
-            if n
-            else np.zeros((0, 4), np.float32)
-        )
-        scene.object_id = (
-            np.array([r["object_id"] for r in self._rows], np.uint32)[order]
-            if n
-            else np.zeros(0, np.uint32)
-        )
-        scene.segmentation = (
-            np.asarray([r["segmentation"] for r in self._rows])[order]
-            if n
-            else np.full((0, 2), -1, np.int32)
-        )
-        scene.infinite_planes = tuple(
-            int(write_index[i]) for i, r in enumerate(self._rows) if r["infinite_plane"]
-        )
-
-        bounds = np.searchsorted(scene.bucket, np.arange(len(ordered) + 1))
-        scene.bucket_ranges = tuple(
-            (int(bounds[b]), int(bounds[b + 1])) for b in range(len(ordered))
-        )
-        scene.bucket_keys = tuple((mesh, matid) for mesh, matid, _, _ in ordered)
-        scene.opaque_buckets = tuple(b for b, k in enumerate(ordered) if not k[2])
-        scene.transparent_buckets = tuple(b for b, k in enumerate(ordered) if k[2])
+        self.write_index = np.empty(n, np.int32)
+        self.write_index[order] = np.arange(n, dtype=np.int32)
+        for name in (
+            "transforms",
+            "colors",
+            "material",
+            "tex_coef",
+            "cube_coef",
+            "object_id",
+            "segmentation",
+        ):
+            setattr(scene, name, getattr(scene, name)[order])
+        scene.bucket = row_bucket[order]
+        scene.infinite_planes = tuple(int(self.write_index[i]) for i in scene.infinite_planes)
+        bounds = np.searchsorted(scene.bucket, np.arange(len(representatives) + 1))
+        scene.bucket_ranges = tuple(zip(bounds[:-1].tolist(), bounds[1:].tolist(), strict=True))
+        scene.bucket_keys = tuple((meshes[i], int(material_ids[i])) for i in representatives)
+        scene.opaque_buckets = tuple(range(len(first)))
+        scene.transparent_buckets = tuple(range(len(first), len(representatives)))
         scene.materials = tuple(self._materials)
-        scene.shading_model = shading_model
-        scene.camera = camera
-        scene.lights = lights
-        scene.scene_extent = float(scene_extent)
-        scene.shadow_clip = float(shadow_clip)
-        scene.scene_center = np.asarray(scene_center, np.float32)
         scene.validate()
         return scene

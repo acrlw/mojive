@@ -2,6 +2,7 @@
 #include "Environment.hpp"
 #include "InstanceStream.hpp"
 #include "Lighting.hpp"
+#include "Lod.hpp"
 #include "Reflections.hpp"
 #include "Shadows.hpp"
 #include "Timing.hpp"
@@ -12,6 +13,7 @@
 #include <bgfx/bgfx.h>
 #include <bgfx/defines.h>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -24,6 +26,7 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace mojive {
 namespace {
@@ -56,7 +59,20 @@ struct GpuMesh {
     MeshBounds bounds;
     std::shared_ptr<const Mesh> source;
     std::vector<Vertex> deformed;
+    std::vector<std::shared_ptr<GpuMesh>> lods;
+    std::vector<float> lodErrors;
+    std::shared_ptr<LodJob> lodJob;
+    bool lodPrepared = false;
+    void discardLods() {
+        if (lodJob)
+            lodJob->stop.request_stop();
+        lodJob.reset();
+        decltype(lods){}.swap(lods);
+        decltype(lodErrors){}.swap(lodErrors);
+        lodPrepared = false;
+    }
     ~GpuMesh() {
+        discardLods();
         for (auto handle : {vertices, wireVertices})
             if (bgfx::isValid(handle))
                 bgfx::destroy(handle);
@@ -84,12 +100,24 @@ struct GpuBatch {
     std::vector<uint32_t> instances;
 };
 using ShadowKey = std::tuple<uint64_t, uint64_t, int, bool, std::array<float, 3>>;
+struct ShadowViews {
+    Matrix projection{};
+    std::array<Matrix, 5> views{};
+    size_t count = 0;
+    bool bounded = true;
+    bool operator==(const ShadowViews &) const = default;
+};
 using DataKey = std::tuple<uint64_t, uint64_t, Matrix, Matrix, float, float>;
 using ReflectionKey =
     std::tuple<uint64_t, uint64_t, uint64_t, Matrix, Matrix, float, float, std::array<float, 3>>;
 struct GpuScene {
+    uint64_t lodIdentity = allocateId();
+    std::vector<std::vector<uint8_t>> shadowLodLevels;
     uint64_t geometryRevision = 1, lightingRevision = 1, styleRevision = 1;
     std::optional<ShadowKey> shadowKey;
+    ShadowViews shadowViews;
+    // Empty means that the cached maps include every directional caster.
+    std::vector<uint8_t> shadowCasters;
     SceneStyle style;
     Lighting lighting;
     OverlayFrame overlays;
@@ -102,6 +130,7 @@ struct GpuScene {
     std::vector<bgfx::TextureHandle> textures;
     std::vector<std::shared_ptr<GpuTexture>> textureOwners;
     std::vector<GpuBatch> batches;
+    std::vector<uint32_t> lodMeshIndices;
     SceneSource source;
     uint64_t sequence = 0;
     std::vector<std::shared_ptr<GpuMesh>> meshes;
@@ -109,6 +138,8 @@ struct GpuScene {
     std::vector<MeshBounds> worldBounds;
 };
 struct GpuTarget {
+    uint64_t lodIdentity = 0;
+    std::vector<std::vector<uint8_t>> lodLevels;
     Scene scene;
     bgfx::FrameBufferHandle selectionFrame = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle selectionMask = BGFX_INVALID_HANDLE;
@@ -161,6 +192,8 @@ class BgfxRenderer final : public Renderer {
     };
     std::map<TextureKey, TextureEntry> mTextureCache;
     ResourceStats mResources;
+    std::unique_ptr<LodWorker> mLodWorker;
+    std::vector<std::vector<uint32_t>> mLodIndices;
     std::unique_ptr<UiPass> mUiPass;
     uint32_t mUiUploadFrame = UINT32_MAX;
     uint64_t mSubmission = 0;
@@ -228,6 +261,8 @@ class BgfxRenderer final : public Renderer {
     FrameStats mStats;
     bgfx::VertexLayout mVertices, mWireVertices;
     std::vector<uint32_t> mDrawIndices;
+    std::vector<uint8_t> mShadowCasters;
+    std::vector<ShadowReceiverVolume> mShadowReceivers;
     std::array<bgfx::VertexLayout, debugRecordFloats.size()> mDebugLayouts;
     std::array<bgfx::ProgramHandle, debugRecordFloats.size()> mDebugPrograms = [] {
         std::array<bgfx::ProgramHandle, debugRecordFloats.size()> handles;
@@ -301,7 +336,8 @@ class BgfxRenderer final : public Renderer {
         scene.textureOwners.clear();
         scene.meshes.clear();
     }
-    bool renderShadows(GpuScene &scene, const CameraView &camera) {
+    bool renderShadows(GpuScene &scene, const CameraView &camera,
+                       const ReflectionMaps &reflections) {
         ShadowKey key{scene.geometryRevision, scene.lightingRevision, scene.style.shadowQuality,
                       scene.style.shadows,
                       std::ranges::any_of(
@@ -309,16 +345,86 @@ class BgfxRenderer final : public Renderer {
                           [](const Light &light) { return light.type == 0 && light.castShadow; })
                           ? camera.focus
                           : std::array<float, 3>{}};
-        if (scene.shadowKey == key)
+        const bool cached = scene.shadowKey == key;
+        if (cached && scene.shadowCasters.empty())
             return false;
+        ShadowViews views;
+        views.projection = camera.projection;
+        views.views[views.count++] = camera.view;
+        for (size_t i = 0; i < reflections.groups.size(); ++i)
+            views.views[views.count++] = reflections.camera(camera, i).view;
+        // Color-only overlay surfaces may receive shadows outside scene bounds.
+        views.bounded = scene.overlays.surfaceBatches.empty();
+        if (cached && scene.shadowViews == views)
+            return false;
+        // Preparation can replace resources; a failed allocation must not leave
+        // a reusable key pointing at a partially prepared shadow map.
         scene.shadowKey.reset();
         auto &shadow = scene.shadows;
         shadow.prepare(scene.source, scene.lighting, scene.style, camera);
+        mShadowCasters.clear();
+        bool filtered = false;
+        if (shadow.directionalLight >= 0) {
+            glm::vec3 lo(std::numeric_limits<float>::infinity()), hi = -lo;
+            for (size_t i = 0; i < scene.instances.size(); ++i) {
+                if (scene.instances[i][19] == 0)
+                    continue;
+                const auto &bounds = scene.worldBounds[i];
+                lo = glm::min(lo, bounds.center - bounds.extent);
+                hi = glm::max(hi, bounds.center + bounds.extent);
+            }
+            const MeshBounds receivers =
+                lo.x <= hi.x ? MeshBounds{(lo + hi) * .5f, (hi - lo) * .5f} : MeshBounds{};
+            auto direction =
+                glm::make_vec3(scene.lighting.lights[shadow.directionalLight].direction.data());
+            direction =
+                glm::length(direction) > 1e-6f ? glm::normalize(direction) : glm::vec3(0, 0, -1);
+            mShadowReceivers.clear();
+            for (size_t i = 0; i < views.count; ++i) {
+                auto receiverCamera = camera;
+                receiverCamera.view = views.views[i];
+                mShadowReceivers.emplace_back(receiverCamera, direction,
+                                              views.bounded ? &receivers : nullptr);
+            }
+            // Cover the widest PCF footprint, including bilinear sampling, in
+            // all three cascades. Original bounds also enclose display LODs.
+            const float padding =
+                3 * *std::max_element(shadow.texels.begin(), shadow.texels.begin() + 3);
+            mShadowCasters.resize(scene.instances.size(), 0);
+            bool subset = cached;
+            for (size_t i = 0; i < scene.instances.size(); ++i) {
+                if (scene.instances[i][19] >= 0 && scene.instances[i][19] < 1)
+                    continue;
+                auto bounds = scene.worldBounds[i];
+                bounds.extent += glm::vec3(padding);
+                const bool keep = std::ranges::any_of(mShadowReceivers, [&](const auto &volume) {
+                    return volume.intersects(bounds);
+                });
+                mShadowCasters[i] = keep;
+                filtered |= !keep;
+                if (cached && keep && !scene.shadowCasters[i])
+                    subset = false;
+            }
+            if (subset) {
+                // Orbit/zoom may reuse a wider cached caster set. Keep that set
+                // until an actual redraw so later views can reuse it as well.
+                scene.shadowViews = views;
+                scene.shadowKey = key;
+                return false;
+            }
+        }
+        size_t shadowMap = 0;
         auto draw = [&](bgfx::ViewId view, const glm::mat4 &matrix, bgfx::FrameBufferHandle frame,
                         int x, int y, int pixels, const float *light) {
             orderPass(view);
             timePass(view, RenderPass::Shadow);
             const ClipFrustum frustum(matrix);
+            std::optional<LodProjection> lodProjection;
+            if (scene.style.meshLod) {
+                lodProjection.emplace(matrix, Extent{uint32_t(pixels), uint32_t(pixels)});
+                if (scene.shadowLodLevels.size() <= shadowMap)
+                    scene.shadowLodLevels.resize(shadowMap + 1);
+            }
             auto projection = matrix;
             if (!bgfx::getCaps()->homogeneousDepth)
                 for (int c = 0; c < 4; ++c)
@@ -340,36 +446,50 @@ class BgfxRenderer final : public Renderer {
                 for (auto index : batch.instances) {
                     if (scene.instances[index][19] >= 0 && scene.instances[index][19] < 1)
                         continue;
-                    if (frustum.intersects(scene.worldBounds[index])) {
+                    if ((light || !filtered || mShadowCasters[index]) &&
+                        frustum.intersects(scene.worldBounds[index])) {
                         mDrawIndices.push_back(index);
                         ++mStats.shadowInstances;
                     } else
                         ++mStats.culledShadowInstances;
                 }
-                uint32_t count = mDrawIndices.size();
-                if (!count)
-                    continue;
-                constexpr uint16_t stride = 12 * sizeof(float);
-                auto *buffer = mInstances.allocate(count, stride).data();
-                for (size_t i = 0; i < count; ++i)
-                    std::memcpy(buffer + i * stride, scene.instances[mDrawIndices[i]].data(),
-                                stride);
-                const auto &mesh = *scene.meshes[batch.mesh];
-                bgfx::setVertexBuffer(0, mesh.vertices);
-                bgfx::setIndexBuffer(mesh.indices);
-                uint64_t state = BGFX_STATE_CULL_CW;
-                if (light) {
-                    bgfx::setUniform(mShadowLightPosition, light);
-                    state |= BGFX_STATE_WRITE_RGB |
-                             BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_ONE) |
-                             BGFX_STATE_BLEND_EQUATION(BGFX_STATE_BLEND_EQUATION_MIN);
-                } else
-                    state |= BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_WRITE_Z;
-                bgfx::setState(state);
-                bgfx::submit(view, light ? mDistanceProgram : mShadowProgram);
-                ++mStats.drawCalls;
-                mStats.uploadBytes += count * stride;
+                auto drawLevel = [&](std::span<const uint32_t> indices, size_t level) {
+                    uint32_t count = indices.size();
+                    if (!count)
+                        return;
+                    constexpr uint16_t stride = 12 * sizeof(float);
+                    auto *buffer = mInstances.allocate(count, stride).data();
+                    for (size_t i = 0; i < count; ++i)
+                        std::memcpy(buffer + i * stride, scene.instances[indices[i]].data(),
+                                    stride);
+                    const auto &base = *scene.meshes[batch.mesh];
+                    const auto &mesh = level ? *base.lods[level - 1] : base;
+                    mStats.shadowTriangles += count * (mesh.source->indices.size() / 3);
+                    bgfx::setVertexBuffer(0, mesh.vertices);
+                    bgfx::setIndexBuffer(mesh.indices);
+                    uint64_t state = BGFX_STATE_CULL_CW;
+                    if (light) {
+                        bgfx::setUniform(mShadowLightPosition, light);
+                        state |= BGFX_STATE_WRITE_RGB |
+                                 BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_ONE) |
+                                 BGFX_STATE_BLEND_EQUATION(BGFX_STATE_BLEND_EQUATION_MIN);
+                    } else
+                        state |= BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_WRITE_Z;
+                    bgfx::setState(state);
+                    bgfx::submit(view, light ? mDistanceProgram : mShadowProgram);
+                    ++mStats.drawCalls;
+                    mStats.uploadBytes += count * stride;
+                };
+                if (!scene.style.meshLod) {
+                    drawLevel(mDrawIndices, 0);
+                } else {
+                    groupLods(scene, batch.mesh, mDrawIndices, *lodProjection,
+                              scene.shadowLodLevels[shadowMap]);
+                    for (size_t level = 0; level < mLodIndices.size(); ++level)
+                        drawLevel(mLodIndices[level], level);
+                }
             }
+            ++shadowMap;
         };
         if (shadow.directionalLight >= 0)
             for (int i = 0; i < 3; ++i)
@@ -385,6 +505,11 @@ class BgfxRenderer final : public Renderer {
                      shadow.positions[slot].data());
         }
         scene.shadowKey = key;
+        scene.shadowViews = views;
+        if (filtered)
+            scene.shadowCasters.swap(mShadowCasters);
+        else
+            scene.shadowCasters.clear();
         return true;
     }
     void renderEnvironment(const GpuScene &scene, const GpuTarget &target,
@@ -759,8 +884,9 @@ class BgfxRenderer final : public Renderer {
             replacements.emplace_back(&destination, program(mShaderDirectory, vs, fs));
         };
         try {
-            const char *debugNames[] = {"Line", "Arrow", "Point", "Stroke", "Solid", "Sector",
-                                       "DragLink", "Screen", "Text", "Triangle", "LitTriangle"};
+            const char *debugNames[] = {"Line",  "Arrow",    "Point",      "Stroke",
+                                        "Solid", "Sector",   "DragLink",   "Screen",
+                                        "Text",  "Triangle", "LitTriangle"};
             for (size_t i = 0; i < mDebugPrograms.size(); ++i) {
                 const auto name = std::string("debug") + debugNames[i];
                 stage(mDebugPrograms[i], ("vs_" + name).c_str(), ("fs_" + name).c_str());
@@ -1248,9 +1374,44 @@ class BgfxRenderer final : public Renderer {
 
         auto &current = scene(id);
         if (current.style != style) {
+            const bool disableLod = current.style.meshLod && !style.meshLod;
+            if (current.style.meshLod != style.meshLod ||
+                (style.meshLod && (current.style.selectedId != style.selectedId ||
+                                   current.style.wireframe != style.wireframe ||
+                                   current.style.debugView != style.debugView)))
+                current.shadowKey.reset();
             current.style = style;
             ++current.styleRevision;
+            if (disableLod) {
+                decltype(current.lodMeshIndices){}.swap(current.lodMeshIndices);
+                decltype(current.shadowLodLevels){}.swap(current.shadowLodLevels);
+                for (auto &[targetId, target] : mTargets)
+                    if (target.scene == id)
+                        decltype(target.lodLevels){}.swap(target.lodLevels);
+                discardUnusedLods();
+            }
         }
+    }
+    void discardUnusedLods() {
+        // Mesh uploads are shared even by opted-out scenes. Keep optional
+        // geometry while an enabled scene draws or explicitly retains that mesh.
+        // Auxiliary gizmo/debug meshes must not keep dormant LOD chains alive.
+        std::unordered_set<const GpuMesh *> needed;
+        bool enabled = false;
+        for (const auto &[id, value] : mScenes)
+            if (value.style.meshLod) {
+                enabled = true;
+                for (const auto &batch : value.batches)
+                    needed.insert(value.meshes[batch.mesh].get());
+                for (auto index : value.source.retainedLodMeshes)
+                    needed.insert(value.meshes[index].get());
+            }
+        for (auto &[id, value] : mScenes)
+            for (auto &mesh : value.meshes)
+                if (!needed.contains(mesh.get()))
+                    mesh->discardLods();
+        if (!enabled)
+            decltype(mLodIndices){}.swap(mLodIndices);
     }
     ResourceStats resourceStats() const override {
         owner();
@@ -1285,6 +1446,74 @@ class BgfxRenderer final : public Renderer {
         if (cache)
             mMeshCache[mesh->source.get()] = mesh;
         return mesh;
+    }
+    void prepareLods(GpuScene &current) {
+        if (current.lodMeshIndices.empty()) {
+            std::vector<bool> used(current.meshes.size());
+            for (const auto &batch : current.batches)
+                if (!used[batch.mesh]) {
+                    used[batch.mesh] = true;
+                    current.lodMeshIndices.push_back(batch.mesh);
+                }
+        }
+        const auto started = std::chrono::steady_clock::now();
+        for (auto index : current.lodMeshIndices) {
+            auto &mesh = current.meshes[index];
+            if (!mesh->deformed.empty() || mesh->source->indices.size() < 192 || mesh->lodPrepared)
+                continue;
+            if (!mesh->lodJob) {
+                if (!mLodWorker)
+                    mLodWorker = std::make_unique<LodWorker>();
+                mesh->lodJob = mLodWorker->submit(mesh->source);
+                continue;
+            }
+            if (!mesh->lodJob->ready.load(std::memory_order_acquire) ||
+                std::chrono::steady_clock::now() - started > std::chrono::milliseconds(4))
+                continue;
+            if (mesh->lodJob->failure)
+                std::rethrow_exception(mesh->lodJob->failure);
+            std::vector<std::shared_ptr<GpuMesh>> levels;
+            std::vector<float> errors;
+            for (const auto &level : mesh->lodJob->levels) {
+                levels.push_back(uploadMesh(level.mesh, false));
+                errors.push_back(level.error);
+            }
+            mesh->lods = std::move(levels);
+            mesh->lodErrors = std::move(errors);
+            mesh->lodPrepared = true;
+            mesh->lodJob.reset();
+            // Commit cache invalidation with each installed chain, even if a
+            // later mesh upload fails. Opted-out peers still use the unchanged
+            // original mesh, so their cached passes remain valid.
+            for (auto &[id, value] : mScenes)
+                if (value.style.meshLod)
+                    ++value.geometryRevision;
+        }
+    }
+    void groupLods(const GpuScene &scene, uint32_t meshIndex, std::span<const uint32_t> indices,
+                   const LodProjection &projection, std::vector<uint8_t> &history) {
+        const auto &mesh = *scene.meshes[meshIndex];
+        if (mLodIndices.size() < mesh.lods.size() + 1)
+            mLodIndices.resize(mesh.lods.size() + 1);
+        for (auto &group : mLodIndices)
+            group.clear();
+        if (!scene.style.meshLod || mesh.lods.empty() || !mesh.deformed.empty() ||
+            scene.style.wireframe || scene.style.debugView == 5) {
+            mLodIndices[0].assign(indices.begin(), indices.end());
+            return;
+        }
+        history.resize(scene.instances.size());
+        for (auto index : indices) {
+            uint8_t level = 0;
+            if (!scene.style.selectedId ||
+                scene.source.instances[index].objectId != scene.style.selectedId)
+                level = chooseLod(mesh.lodErrors,
+                                  projection.pixelsPerUnit(scene.worldBounds[index],
+                                                           scene.instances[index].data()),
+                                  history[index]);
+            history[index] = level;
+            mLodIndices[level].push_back(index);
+        }
     }
     std::shared_ptr<GpuTexture> uploadSceneTexture(const TextureSource &texture) {
         const TextureKey key{texture.rgba.get(), texture.size.width, texture.size.height,
@@ -1337,7 +1566,8 @@ class BgfxRenderer final : public Renderer {
                          .cubeCoords = source.cubeCoords,
                          .extent = source.extent,
                          .shadowClip = source.shadowClip,
-                         .center = source.center};
+                         .center = source.center,
+                         .retainedLodMeshes = source.retainedLodMeshes};
         for (const auto &texture : source.textures)
             result.source.textures.push_back(
                 {texture.size, texture.mipmaps, texture.srgb, texture.cube, {}});
@@ -1431,6 +1661,8 @@ class BgfxRenderer final : public Renderer {
         }
         releaseScene(current);
         current = std::move(replacement);
+        if (current.style.meshLod)
+            discardUnusedLods();
     }
     void destroy(Scene id) override {
         owner();
@@ -1445,8 +1677,11 @@ class BgfxRenderer final : public Renderer {
             destroy(target);
         if (mPendingCommands)
             flush();
+        const bool hadLod = current.style.meshLod;
         releaseScene(current);
         mScenes.erase(id.id);
+        if (hadLod)
+            discardUnusedLods();
     }
     void update(const SceneFrame &frame) override {
         update(Scene{}, frame);
@@ -1503,11 +1738,15 @@ class BgfxRenderer final : public Renderer {
         // used by a peer scene, so detach before its first deformation.
         auto &mesh = current.meshes[index];
         if (mesh->deformed.empty()) {
-            if (mesh.use_count() > 1)
+            if (mesh.use_count() > 1) {
+                const bool hadLods = mesh->lodPrepared || mesh->lodJob;
                 mesh = uploadMesh(current.source.meshes[index], false);
-            else
+                if (hadLods)
+                    discardUnusedLods();
+            } else
                 mMeshCache.erase(mesh->source.get());
         }
+        mesh->discardLods();
         mesh->deformed.assign(vertices.begin(), vertices.end());
         current.meshes[index]->bounds = meshBounds(vertices);
         for (size_t i = 0; i < current.instances.size(); ++i)
@@ -1666,6 +1905,17 @@ class BgfxRenderer final : public Renderer {
         validateCamera(camera);
         auto &t = target(id);
         auto &current = scene(t.scene);
+        // Reap completed CPU work without waiting for an active simplifier on
+        // the UI thread. No worker exists until LOD is explicitly requested.
+        if (mLodWorker && mLodWorker->idle())
+            mLodWorker.reset();
+        if (current.style.meshLod) {
+            prepareLods(current);
+            if (t.lodIdentity != current.lodIdentity) {
+                decltype(t.lodLevels){}.swap(t.lodLevels);
+                t.lodIdentity = current.lodIdentity;
+            }
+        }
         const bool identityColor = request.color && current.style.debugView >= 6;
         if (identityColor) {
             request.sceneData = true;
@@ -1713,10 +1963,10 @@ class BgfxRenderer final : public Renderer {
         bool shadowRendered = false;
         if (renderColor && !identityColor) {
             mLighting.prepare(current.lighting);
-            shadowRendered = renderShadows(current, camera);
             if (reflectionDirty)
                 t.reflections.prepare(current.source, current.instances, current.style, camera,
                                       t.size);
+            shadowRendered = renderShadows(current, camera, t.reflections);
         }
         t.colorOnly = !request.sceneData;
         t.dataOnly = !request.color;
@@ -1767,8 +2017,9 @@ class BgfxRenderer final : public Renderer {
         };
         int reflectionLayer = -1;
         auto colorView = t.view;
-        auto draw = [&](uint32_t meshIndex, uint32_t materialIndex,
-                        std::span<const uint32_t> indices, uint16_t pass, bool transparent) {
+        auto drawLevel = [&](uint32_t meshIndex, uint32_t materialIndex,
+                             std::span<const uint32_t> indices, uint16_t pass, bool transparent,
+                             size_t level) {
             uint32_t count = indices.size();
             if (!count)
                 return;
@@ -1810,7 +2061,12 @@ class BgfxRenderer final : public Renderer {
                 }
             }
             mStats.uploadBytes += count * stride;
-            auto &mesh = *current.meshes[meshIndex];
+            auto &base = *current.meshes[meshIndex];
+            auto &mesh = level ? *base.lods[level - 1] : base;
+            const auto triangles = count * (mesh.source->indices.size() / 3);
+            (pass ? mStats.dataTriangles : mStats.colorTriangles) += triangles;
+            if (level)
+                mStats.lodInstances += count;
             if (wire) {
                 if (!bgfx::isValid(mesh.wireVertices))
                     updateWireMesh(current, meshIndex);
@@ -1875,6 +2131,20 @@ class BgfxRenderer final : public Renderer {
                                                                          : mColorProgram));
             ++mStats.drawCalls;
             mStats.instances += count;
+        };
+        auto draw = [&](uint32_t meshIndex, uint32_t materialIndex,
+                        std::span<const uint32_t> indices, uint16_t pass, bool transparent) {
+            if (!current.style.meshLod) {
+                drawLevel(meshIndex, materialIndex, indices, pass, transparent, 0);
+                return;
+            }
+            size_t viewIndex = reflectionLayer + 1;
+            if (t.lodLevels.size() <= viewIndex)
+                t.lodLevels.resize(viewIndex + 1);
+            groupLods(current, meshIndex, indices, LodProjection(drawCamera, t.size),
+                      t.lodLevels[viewIndex]);
+            for (size_t level = 0; level < mLodIndices.size(); ++level)
+                drawLevel(meshIndex, materialIndex, mLodIndices[level], pass, transparent, level);
         };
         auto drawTransparent = [&]() {
             if (current.style.transparent) {
@@ -1986,6 +2256,15 @@ class BgfxRenderer final : public Renderer {
                                mStats.uploadBytes - before.uploadBytes, -1};
         auto &stats = t.latest.statistics;
         stats.passes = mTiming.get(id);
+        stats.colorTriangles = mStats.colorTriangles - before.colorTriangles;
+        stats.shadowTriangles = mStats.shadowTriangles - before.shadowTriangles;
+        stats.dataTriangles = mStats.dataTriangles - before.dataTriangles;
+        stats.lodInstances = mStats.lodInstances - before.lodInstances;
+        for (auto index : current.lodMeshIndices) {
+            const auto &mesh = current.meshes[index];
+            stats.lodMeshesReady += mesh->lodPrepared;
+            stats.lodMeshesPending += bool(mesh->lodJob);
+        }
         stats.shadowInstances = mStats.shadowInstances - before.shadowInstances;
         stats.culledShadowInstances = mStats.culledShadowInstances - before.culledShadowInstances;
         stats.culledInstances = mStats.culledInstances - before.culledInstances;

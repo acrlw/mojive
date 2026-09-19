@@ -144,9 +144,10 @@ def test_library_offsets_toggle_export_and_drag_without_recomputing(
 
         def enter_value(label, value):
             io = imgui.get_io()
-            io.add_key_event(imgui.Key.mod_ctrl, True)
+            modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+            io.add_key_event(modifier, True)
             click(label)
-            io.add_key_event(imgui.Key.mod_ctrl, False)
+            io.add_key_event(modifier, False)
             frame(False)
             io.add_input_characters_utf8(str(value))
             frame(False)

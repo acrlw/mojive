@@ -12,6 +12,7 @@ import numpy as np
 
 from mojive import commands as cmd
 from mojive import math3d
+from mojive.adapters.base import NodeType
 from mojive.config import InteractionConfig, SelectionStyle
 from mojive.control.errors import ControlError
 from mojive.control.schema import (
@@ -55,7 +56,7 @@ from mojive.control.schema import (
     value_schema,
 )
 from mojive.render.backend import RenderFlag, RenderProduct, ShadowQuality
-from mojive.types import CameraView, Light, LightType, Material, MeshKey, MeshShape
+from mojive.types import CameraView, GeometryView, Light, LightType, Material, MeshKey, MeshShape
 
 CAPTURE_PRODUCTS = {
     "rgb": RenderProduct.COLOR,
@@ -82,6 +83,7 @@ CAPTURE_VISUAL_FLAGS = (
         RenderFlag.OUTLINE,
         RenderFlag.TONEMAP,
         RenderFlag.MSAA,
+        RenderFlag.MESH_LOD,
     }
 )
 
@@ -301,6 +303,78 @@ _SCALAR_OR_VECTOR = obj(
 )
 _CATALOG = [
     _op(
+        "get_replay_info",
+        "Read the local clip clock without advancing playback.",
+        result=obj(
+            {
+                "frame_index": ID,
+                "frame_count": COUNT,
+                "hz": NUMBER,
+                "paused": BOOLEAN,
+                "speed": NUMBER,
+                "loop": BOOLEAN,
+                "error": STRING,
+            }
+        ),
+        handler="_replay_info",
+        capabilities=("replay.control",),
+    ),
+    _cmd(
+        "set_replay_playback",
+        cmd.SetReplayPlayback,
+        {
+            "paused": {"anyOf": [BOOLEAN, {"type": "null"}]},
+            "speed": {"anyOf": [{**NUMBER, "minimum": 0.05, "maximum": 8}, {"type": "null"}]},
+            "loop": {"anyOf": [BOOLEAN, {"type": "null"}]},
+        },
+        capabilities=("replay.control",),
+    ),
+    _cmd(
+        "seek_replay", cmd.SeekReplay, {"frame": ID}, ("frame",), capabilities=("replay.control",)
+    ),
+    _op(
+        "get_rollout_sync",
+        "Read one manual rollout download's status, without network requests.",
+        result=obj(
+            {
+                "pending": BOOLEAN,
+                "revision": STRING,
+                "start_step": ID,
+                "window_frames": COUNT,
+                "max_frames": COUNT,
+                "received_bytes": ID,
+                "error": STRING,
+            }
+        ),
+        handler="_rollout_sync_info",
+        capabilities=("replay.sync",),
+    ),
+    _cmd(
+        "sync_rollout",
+        cmd.SyncRollout,
+        {
+            "world_ids": {
+                "anyOf": [{**array(ID), "minItems": 1, "uniqueItems": True}, {"type": "null"}]
+            },
+            "frame_count": {"anyOf": [{**INTEGER, "minimum": 2, "maximum": 512}, {"type": "null"}]},
+        },
+        capabilities=("replay.sync",),
+    ),
+    _op(
+        "get_world_selection",
+        "Read the total world count, original IDs being evaluated, and preview limit.",
+        result=obj({"total_worlds": COUNT, "world_ids": array(ID), "max_worlds": COUNT}),
+        handler="_world_selection",
+        capabilities=("world.selection",),
+    ),
+    _cmd(
+        "set_world_selection",
+        cmd.SetWorldSelection,
+        {"world_ids": {**array(ID), "minItems": 1, "uniqueItems": True}},
+        ("world_ids",),
+        capabilities=("world.selection",),
+    ),
+    _op(
         "get_rpc_stats",
         "Read RPC budgets, counters and bounded timing summaries without changing scene state.",
         result=RPC_STATS_RESULT,
@@ -337,6 +411,7 @@ _CATALOG = [
     _op(
         "get_scene",
         "Read current hierarchy, camera IDs, bounds, and document identity.",
+        {"include_objects": {**BOOLEAN, "default": True}},
         result=SCENE_RESULT,
         handler="_scene",
     ),
@@ -355,7 +430,14 @@ _CATALOG = [
     ),
     _op(
         "list_objects",
-        "List current hierarchy nodes and selection identities.",
+        "List hierarchy nodes; filter before paging in scene order. Name is a case-insensitive substring.",
+        {
+            "name": STRING,
+            "type": {"enum": [kind.value for kind in NodeType]},
+            "parent": {"type": "integer", "minimum": -1},
+            "offset": {**ID, "default": 0},
+            "limit": COUNT,
+        },
         result=array(NODE),
         handler="_list_objects",
     ),
@@ -734,6 +816,32 @@ _CATALOG = [
         result=CAPTURE_RESULT,
         handler="_capture",
         scope="capture",
+    ),
+    _op(
+        "set_viewport_geometry_view",
+        "Set the visible window's geometry preset without changing physics or capture settings.",
+        {"view": {"enum": [view.value for view in GeometryView]}},
+        ("view",),
+        result=obj({"view": {"enum": [view.value for view in GeometryView]}}),
+        handler="_set_viewport_geometry_view",
+        mutates=True,
+        **_VIEW,
+    ),
+    _op(
+        "get_viewer_stats",
+        "Read completed window frames and current scene time without advancing the scene. Compare counters across samples to measure window cadence independently of replay rate.",
+        result=obj(
+            {
+                "sample_time": NUMBER,
+                "presented_frames": ID,
+                "scene_step": INTEGER,
+                "scene_time": NUMBER,
+                "status_fps": NUMBER,
+                "viewport": array(INTEGER, 2),
+            }
+        ),
+        handler="_viewer_stats",
+        **_VIEW,
     ),
     _op(
         "capture_viewport",

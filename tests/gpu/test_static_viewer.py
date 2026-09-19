@@ -9,6 +9,27 @@ import pytest
 
 pytestmark = pytest.mark.gpu
 
+
+def test_external_replay_status_does_not_claim_the_scene_is_static(canvas, monkeypatch):
+    from dataclasses import replace
+
+    from mojive.ui.app import status
+
+    viewer, _ = canvas
+    adapter = viewer.session.adapter
+    adapter.caps = replace(adapter.caps, external_clock=True, clock_control=False)
+    observed = []
+    original = status.draw_status
+
+    def draw_status(*args, **kwargs):
+        observed.append(kwargs["state"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(status, "draw_status", draw_status)
+    viewer.sync()
+    assert observed[-1] == "external"
+
+
 glfw = pytest.importorskip("glfw")
 
 from mojive import commands as cmd  # noqa: E402

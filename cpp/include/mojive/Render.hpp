@@ -79,6 +79,7 @@ struct SceneStyle {
     bool cullFace = false, transparent = true, additive = false, tonemap = true;
     bool fog = false, haze = true, msaa = true;
     bool shadows = true, skybox = true, reflections = true;
+    bool meshLod = false;
     int shadowQuality = 1;
     int debugView = 0;
     uint32_t selectedId = 0;
@@ -99,6 +100,9 @@ struct SceneSource {
     std::vector<std::array<float, 4>> visualMaterials, cubeCoords;
     float extent = 1, shadowClip = 1;
     std::array<float, 3> center = {0, 0, 0};
+    // Preserve prepared levels across visibility changes without preparing
+    // unused meshes. Auxiliary overlay meshes do not imply LOD ownership.
+    std::vector<uint32_t> retainedLodMeshes;
 };
 struct SceneFrame {
     uint64_t sourceRevision = 1, sequence = 0;
@@ -231,6 +235,8 @@ struct FrameStats {
     uint64_t shadowInstances = 0, culledShadowInstances = 0;
     uint64_t culledInstances = 0;
     PassTimings passes;
+    uint64_t colorTriangles = 0, shadowTriangles = 0, dataTriangles = 0, lodInstances = 0;
+    uint64_t lodMeshesReady = 0, lodMeshesPending = 0;
 };
 struct FrameToken {
     Target target;

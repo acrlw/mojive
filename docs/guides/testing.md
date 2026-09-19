@@ -50,6 +50,14 @@ reuse, the MuJoCo-compatible renderer's segmentation, and scene screenshot/video
 each view. The repeated-instance regression ensures Both keeps diagnostic overlays batched.
 With `MOJIVE_RENDERER=bgfx`, the geometry-view tests also count native mesh/texture uploads
 across repeated view switches and verify that replacing the source clears retained mesh slots.
+For dense switching and replay measurements, run
+`make g1-geometry-views BACKEND=bgfx G1_WORLDS=4 MENAGERIE_ROOT=/path/to/mujoco_menagerie`.
+Add `ARGS='--mesh-lod'` to check optional LOD reuse. The report separates the synchronous
+switch, first completed image, resource uploads, and steady replay/readback timing for each
+view. Captures and the report are saved under `output/g1-geometry-views/`. The first cycle can
+prepare previously unused geometry; subsequent cycles must not regenerate prepared LODs.
+LOD resources remain bounded by the current source and enabled owners; replacement, deformation,
+and disabling the last owner are covered by `tests/native/test_native_lod.py`.
 `make geometry-ui` clicks the production Hierarchy and Inspector controls in English and
 Chinese at narrow, standard and HiDPI sizes, checks that Help remains visible in the real menu
 bar, and captures the resulting panels. Inspect the captures under `output/geometry-ui`.
@@ -499,3 +507,18 @@ hide a broken material binding. Output is written under `output/material-workflo
 later activation, disabled-panel policy, minimal Viewer construction and socket suppression.
 `tests/test_timeline_gestures.py` exercises the production panel with real ImGui input without
 a native window. `make timeline-profile ARGS='--capture'` captures the same panel with EGL.
+
+## World selection acceptance
+
+`make world-selection-check G1_REPLAY_ARCHIVE=path/to/archive` limits the real CLI viewer to
+four worlds, verifies subset selection via persistent RPC and a separate CLI process, and
+captures Visual/Collision/Both under `output/world-selection/`. The archive itself can be larger;
+unselected worlds must not enter FK or instance construction. The process always closes after
+acceptance. Run `tests/gpu/test_world_selection.py -m 'gpu and physics'` for production count/ID
+input, deferred Apply, invalid drafts and externally refreshed selection in English and Chinese.
+
+`make rollout-preview-check G1_REPLAY_ARCHIVE=path/to/archive BACKEND=opengl` (or `bgfx`) uses
+two selected worlds to verify HTTP windows, real CLI/RPC control, local playback without network
+traffic, repeated sync and geometry switches. Results go under `output/rollout-preview/`.
+`tests/test_rollout.py` covers bounded transfers and direct MuJoCo-model publication; the GPU
+world-selection tests cover local playback and asynchronous sync failures as well.

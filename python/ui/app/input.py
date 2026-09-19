@@ -300,6 +300,7 @@ class _Input:
             cursor,
             self.window.style_scale,
             enabled=over_viewport
+            and self._model_camera_id < 0
             and self.interactions.camera.view_cube
             and self.viewport_layers.viewport_ui
             and not self._input_claim.pointer,
@@ -399,7 +400,9 @@ class _Input:
         if keys.toggle_pause:
             self._toggle_playback()
         for _ in range(keys.step_back_count):
-            if not self.session.submit(cmd.StepBack()):
+            replay = self.session.replay_info
+            command = cmd.SeekReplay(max(0, replay.frame_index - 1)) if replay else cmd.StepBack()
+            if not self.session.submit(command):
                 break
         if keys.clear_selection:
             self.session.submit(cmd.Select(0))

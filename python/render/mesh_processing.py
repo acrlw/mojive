@@ -11,11 +11,12 @@ from ..types import MeshData
 
 @dataclass(frozen=True)
 class MeshLod:
-    """A mesh with original vertex attributes and fewer triangle indices.
+    """A mesh with preserved vertex attributes and fewer triangles.
 
     ``relative_error`` is meshoptimizer's combined geometric/attribute error,
     normalized by mesh extent. The actual ratio can exceed the requested target
-    to preserve topology, seams, and the error bound.
+    to preserve topology, seams, and the error bound. Unreferenced vertices are
+    removed; indices address the returned mesh rather than the input mesh.
     """
 
     mesh: MeshData
@@ -43,4 +44,17 @@ def simplify_mesh(mesh: MeshData, *, ratio: float, max_error: float = 0.005) -> 
         ratio,
         max_error,
     )
-    return MeshLod(MeshData(mesh.positions, mesh.normals, mesh.uvs, indices), float(error))
+    # Simplification removes triangles but retains the source vertex numbering.
+    # Compact all attributes together so an LOD does not upload/store the full
+    # resolution vertex buffer. Triangle order and surviving seams stay intact.
+    used, remapped = np.unique(indices, return_inverse=True)
+    if len(used) == len(mesh.positions):
+        result = MeshData(mesh.positions, mesh.normals, mesh.uvs, indices)
+    else:
+        result = MeshData(
+            mesh.positions[used],
+            mesh.normals[used],
+            mesh.uvs[used],
+            remapped.astype(np.uint32),
+        )
+    return MeshLod(result, float(error))

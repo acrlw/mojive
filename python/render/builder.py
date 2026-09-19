@@ -71,10 +71,13 @@ class _InfinitePlane:
 class SceneSourceBuilder:
     """Build a RenderScene from stable source data and the current frame."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, compose_poses=None) -> None:
+        self._compose_poses = compose_poses
+        self._composed_poses = False
         self._source: SceneSource | None = None
         self._scene = RenderScene()
         self._write_index = np.zeros(0, np.intp)
+        self._read_index = np.zeros(0, np.intp)
         self._src_geom = np.zeros(0, np.intp)
         self._source_instances = np.zeros(0, np.intp)
         self._base_colors = np.zeros((0, 4), np.float32)
@@ -223,165 +226,163 @@ class SceneSourceBuilder:
         self._hidden_count = int(np.count_nonzero(~keep))
         materials = src.materials or [DEFAULT_MATERIAL]
         untextured = tuple(replace(material, texture=None) for material in materials)
-        colors = self._linear_color(src.geom_rgba)
-        style = self._geometry_style
-        collision_rgba = (*style.collision_color, 1.0)
-        collision_color = self._linear_color(collision_rgba)
+        source_instances, collision = self._geometry_instances(keep)
+        n = len(source_instances)
         count = src.instance_count
-        if len(src.geom_local) >= count:
-            local_transforms = np.asarray(src.geom_local[:count], np.float32)
-        else:
-            local_transforms = np.broadcast_to(np.eye(4, dtype=np.float32), (count, 4, 4)).copy()
-            local_transforms[: len(src.geom_local)] = src.geom_local
-        scaled_transforms = local_transforms.copy()
-        scaled_transforms[:, :3, :3] *= np.asarray(src.geom_size, np.float32)[:, None, :]
-        material_values: dict[tuple[int, bool], np.ndarray] = {}
-        default_tex = np.array([1.0, 1.0, 0.0, 0.0], np.float32)
-        reflected_tex = np.array([1.0, -1.0, 0.0, 1.0], np.float32)
-        no_cube = np.zeros(4, np.float32)
-
-        sb = SceneBuilder()
-        slots: list[int] = []
-        source_instances: list[int] = []
-        pose_sources: list[int] = []
-        ls: list[np.ndarray] = []
-        planes: list[_InfinitePlane] = []
-
-        for i, collision in self._geometry_instances(keep):
-            view = int(self._instance_views[i])
-            mat_index = src.geom_material[i] if i < len(src.geom_material) else 0
-            mat = materials[mat_index] if 0 <= mat_index < len(materials) else DEFAULT_MATERIAL
-            rgba = src.geom_rgba[i]
-            color = colors[i]
-            if collision:
-                mat = DEFAULT_MATERIAL
-                rgba = np.array(collision_rgba, np.float32)
-                color = collision_color
-                if view == int(GeometryRole.BOTH):
-                    rgba[3] = style.collision_opacity
-            elif view == int(GeometryRole.BOTH) and (
-                len(src.geom_role) == src.instance_count
-                and (
-                    int(src.geom_role[i]) == int(GeometryRole.VISUAL)
-                    or (
-                        len(src.geom_collision_mesh) == src.instance_count
-                        and src.geom_collision_mesh[i] != src.geom_mesh[i]
-                    )
-                )
-            ):
-                rgba = rgba.copy()
-                rgba[3] *= style.visual_opacity
-            if (
-                self._show_island
-                and not view
-                and i < len(src.instance_island_body)
-                and int(src.instance_island_body[i]) >= 0
-            ):
-                mat = untextured[mat_index] if 0 <= mat_index < len(untextured) else untextured[0]
-                rgba = rgba.copy()
-                rgba[3] = 1.0
-            matid = sb.material_id(mat)
-            size = np.asarray(src.geom_size[i], np.float32)
-            key: MeshKey = src.geom_mesh[i]
-            if collision and len(src.geom_collision_mesh) == src.instance_count:
-                key = src.geom_collision_mesh[i]
-            elif (
-                not view
-                and self._show_convex_hull
-                and len(src.geom_convex_mesh) == src.instance_count
-            ):
-                key = src.geom_convex_mesh[i]
-            infinite = bool(src.geom_infinite_plane[i]) if len(src.geom_infinite_plane) else False
-
-            local = local_transforms[i]
-            ls_i = scaled_transforms[i]
-            if (
-                collision
-                and view == int(GeometryRole.BOTH)
-                and (int(src.geom_role[i]) & int(GeometryRole.VISUAL))
-            ):
-                # Shared mesh/hull faces are often coplanar. Separate only the
-                # translucent comparison overlay; collision-only stays exact.
-                ls_i = ls_i.copy()
-                ls_i[:3, :3] *= 1.005
-
-            if mat.texture is None:
-                tex = (
-                    reflected_tex
-                    if key.shape is MeshShape.CAPSULE_CAP and float(local[2, 2]) < 0.0
-                    else default_tex
-                )
-                cube = no_cube
-            else:
-                tex = self._tex_coef(mat, size, infinite, key, local)
-                cube = self._cube_coef(src, mat, size, key, local)
-            planar = key.shape in (MeshShape.PLANE, MeshShape.BOX)
-            material_key = (matid, planar)
-            if material_key not in material_values:
-                material_values[material_key] = np.array(
-                    [mat.emission, mat.specular, mat.shininess, mat.reflectance if planar else 0.0],
-                    np.float32,
-                )
-            if color[3] != rgba[3]:
-                color = color.copy()
-                color[3] = rgba[3]
-            slot = sb.add(
-                mesh=key,
-                matid=matid,
-                transform=ls_i,
-                color=color,
-                material=material_values[material_key],
-                object_id=int(src.geom_object_id[i]),
-                segmentation=(
-                    src.geom_segmentation[i]
-                    if len(src.geom_segmentation) == src.instance_count
-                    else (-1, -1)
+        views = self._instance_views[source_instances]
+        both = views == int(GeometryRole.BOTH)
+        roles = (
+            src.geom_role[source_instances]
+            if len(src.geom_role) == count
+            else np.full(n, int(GeometryRole.VISUAL), np.uint8)
+        )
+        distinct = np.zeros(n, bool)
+        keys = [src.geom_mesh[i] for i in source_instances]
+        if len(src.geom_collision_mesh) == count:
+            distinct = np.fromiter(
+                (
+                    src.geom_collision_mesh[i] != key
+                    for i, key in zip(source_instances, keys, strict=True)
                 ),
+                bool,
+                count=n,
+            )
+            for row in np.flatnonzero(collision):
+                keys[row] = src.geom_collision_mesh[source_instances[row]]
+        if self._show_convex_hull and len(src.geom_convex_mesh) == count:
+            for row in np.flatnonzero(views == 0):
+                keys[row] = src.geom_convex_mesh[source_instances[row]]
+
+        style = self._geometry_style
+        colors = self._linear_color(src.geom_rgba[source_instances])
+        colors[collision] = self._linear_color((*style.collision_color, 1.0))
+        colors[collision & both, 3] = style.collision_opacity
+        visual_overlay = (
+            ~collision
+            & both
+            & ((roles == int(GeometryRole.VISUAL)) | distinct)
+            & (len(src.geom_role) == count)
+        )
+        colors[visual_overlay, 3] *= style.visual_opacity
+        island = np.zeros(n, bool)
+        if self._show_island and len(src.instance_island_body):
+            rows = np.flatnonzero(source_instances < len(src.instance_island_body))
+            island[rows] = (views[rows] == 0) & (
+                src.instance_island_body[source_instances[rows]] >= 0
+            )
+            colors[island, 3] = 1.0
+        coverage = both & (colors[:, 3] < 1)
+        colors[coverage, 3] = -(
+            np.where(collision[coverage], 3.0, 1.0) + np.clip(colors[coverage, 3], 0.0, 1.0)
+        )
+
+        # Material and geometry recipes are columns. Large replicated scenes
+        # must not allocate a dict and several tiny arrays per visible instance.
+        material_indices = np.zeros(count, np.intp)
+        material_indices[: len(src.geom_material)] = src.geom_material[:count]
+        material_indices = material_indices[source_instances]
+        valid_material = (material_indices >= 0) & (material_indices < len(materials))
+        codes = np.where(valid_material, material_indices, len(materials))
+        codes[collision] = len(materials)
+        codes[island] = (
+            len(materials) + 1 + np.where(valid_material[island], material_indices[island], 0)
+        )
+        table = (*materials, DEFAULT_MATERIAL, *untextured)
+        sb = SceneBuilder()
+        unique_codes, first = np.unique(codes, return_index=True)
+        material_map = np.zeros(len(table), np.intp)
+        for code in unique_codes[np.argsort(first)]:
+            material_map[code] = sb.material_id(table[code])
+        matids = material_map[codes]
+        values = np.asarray(
+            [[mat.emission, mat.specular, mat.shininess, mat.reflectance] for mat in table],
+            np.float32,
+        )[codes]
+        planar = np.fromiter(
+            (key.shape in (MeshShape.PLANE, MeshShape.BOX) for key in keys), bool, count=n
+        )
+        values[~planar, 3] = 0
+
+        if len(src.geom_local) >= count:
+            local = np.asarray(src.geom_local, np.float32)[source_instances]
+        else:
+            local = np.broadcast_to(np.eye(4, dtype=np.float32), (n, 4, 4)).copy()
+            rows = np.flatnonzero(source_instances < len(src.geom_local))
+            local[rows] = src.geom_local[source_instances[rows]]
+        size = np.asarray(src.geom_size, np.float32)[source_instances]
+        ls = local.copy()
+        ls[:, :3, :3] *= size[:, None, :]
+        # Separate only the translucent coplanar overlay; collision-only is exact.
+        overlay = collision & both & ((roles & int(GeometryRole.VISUAL)) != 0)
+        ls[overlay, :3, :3] *= 1.005
+        infinite = (
+            src.geom_infinite_plane[source_instances]
+            if len(src.geom_infinite_plane)
+            else np.zeros(n, bool)
+        )
+        tex = np.zeros((n, 4), np.float32)
+        tex[:, :2] = 1
+        reflected = np.fromiter((key.shape is MeshShape.CAPSULE_CAP for key in keys), bool, count=n)
+        reflected &= local[:, 2, 2] < 0
+        tex[reflected] = (1, -1, 0, 1)
+        cube = np.zeros((n, 4), np.float32)
+        textured = np.asarray([mat.texture is not None for mat in table])[codes]
+        for row in np.flatnonzero(textured):
+            mat = table[codes[row]]
+            tex[row] = self._tex_coef(mat, size[row], infinite[row], keys[row], local[row])
+            cube[row] = self._cube_coef(src, mat, size[row], keys[row], local[row])
+        planes: list[_InfinitePlane] = []
+        for row in np.flatnonzero(infinite):
+            if not np.allclose(local[row], np.eye(4)):
+                raise ValueError("infinite planes must use identity local transforms")
+            repeat = table[codes[row]].tex_repeat
+            planes.append(
+                _InfinitePlane(
+                    row=0,
+                    slot=int(row),
+                    axis_x=float(size[row, 0]) == 0.0,
+                    axis_y=float(size[row, 1]) == 0.0,
+                    period_u=2.0 / max(float(repeat[0]), 1e-6),
+                    period_v=2.0 / max(float(repeat[1]), 1e-6),
+                    repeat_u=float(repeat[0]),
+                    repeat_v=float(repeat[1]),
+                )
+            )
+        slots = np.arange(count, dtype=np.intp)
+        slots[: len(src.geom_source)] = src.geom_source[:count]
+        slots = slots[source_instances]
+        pose_sources = np.full(count, int(InstancePoseSource.GEOM), np.uint8)
+        pose_sources[: len(src.geom_pose_source)] = src.geom_pose_source[:count]
+        pose_sources = pose_sources[source_instances]
+        cam = camera if camera is not None else self._scene.camera
+        self._scene = sb.build_columns(
+            keys,
+            matids,
+            RenderScene(
+                count=n,
+                transforms=ls,
+                colors=colors,
+                material=values,
                 tex_coef=tex,
                 cube_coef=cube,
-                infinite_plane=infinite,
-                coverage=view == int(GeometryRole.BOTH) and float(rgba[3]) < 1,
-                collision_coverage=collision,
-            )
-            slots.append(int(src.geom_source[i]) if len(src.geom_source) > i else i)
-            source_instances.append(i)
-            pose_sources.append(
-                int(src.geom_pose_source[i])
-                if len(src.geom_pose_source) > i
-                else int(InstancePoseSource.GEOM)
-            )
-            ls.append(ls_i)
-            if infinite:
-                if not np.allclose(local, np.eye(4)):
-                    raise ValueError("infinite planes must use identity local transforms")
-                repeat = np.asarray(mat.tex_repeat, np.float32)
-
-                pu = 2.0 / max(float(repeat[0]), 1e-6)
-                pv = 2.0 / max(float(repeat[1]), 1e-6)
-                planes.append(
-                    _InfinitePlane(
-                        row=0,
-                        slot=slot,
-                        axis_x=float(size[0]) == 0.0,
-                        axis_y=float(size[1]) == 0.0,
-                        period_u=pu,
-                        period_v=pv,
-                        repeat_u=float(repeat[0]),
-                        repeat_v=float(repeat[1]),
-                    )
-                )
-
-        cam = camera if camera is not None else self._scene.camera
-        lights = src.lights
-        self._scene = sb.build(
-            cam,
-            lights,
-            src.scene_extent,
-            src.scene_center,
-            src.shadow_clip,
-            getattr(src, "shading_model", ShadingModel.LINEAR),
+                object_id=np.asarray(src.geom_object_id, np.uint32)[source_instances],
+                segmentation=(
+                    src.geom_segmentation[source_instances]
+                    if len(src.geom_segmentation) == count
+                    else np.full((n, 2), -1, np.int32)
+                ),
+                infinite_planes=tuple(np.flatnonzero(infinite)),
+                camera=cam,
+                lights=src.lights,
+                scene_extent=src.scene_extent,
+                scene_center=src.scene_center,
+                shadow_clip=src.shadow_clip,
+                shading_model=getattr(src, "shading_model", ShadingModel.LINEAR),
+            ),
         )
         self._write_index = sb.write_index.astype(np.intp)
+        self._read_index = np.empty_like(self._write_index)
+        self._read_index[self._write_index] = np.arange(self._scene.count, dtype=np.intp)
         self._source_instances = np.asarray(source_instances, np.intp)
         self._base_colors = self._scene.colors.copy()
         self._preserved_color_rows = np.flatnonzero(self._instance_views[self._source_instances])
@@ -475,30 +476,42 @@ class SceneSourceBuilder:
                     views[i] = modes.index(GeometryView(view))
         return views
 
-    def _geometry_instances(self, keep):
+    def _geometry_instances(self, keep: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         src = self._source
-        for i in np.flatnonzero(keep):
-            view = int(self._instance_views[i])
-            if view == int(GeometryRole.COLLISION):
-                yield i, True
-            elif view != int(GeometryRole.BOTH):
-                yield i, False
-            else:
-                role = int(src.geom_role[i]) if len(src.geom_role) else int(GeometryRole.VISUAL)
-                distinct_mesh = (
-                    len(src.geom_collision_mesh) == src.instance_count
-                    and src.geom_collision_mesh[i] != src.geom_mesh[i]
-                )
-                # An invisible/shared primitive still needs an opaque collision shape.
-                shared_transparent = (
-                    role == int(GeometryRole.BOTH) and not distinct_mesh and src.geom_rgba[i, 3] < 1
-                )
-                if role & int(GeometryRole.VISUAL) and not shared_transparent:
-                    yield i, False
-                if role & int(GeometryRole.COLLISION) and (
-                    not role & int(GeometryRole.VISUAL) or distinct_mesh or shared_transparent
-                ):
-                    yield i, True
+        count = src.instance_count
+        roles = (
+            src.geom_role
+            if len(src.geom_role) == count
+            else np.full(count, int(GeometryRole.VISUAL), np.uint8)
+        )
+        distinct = np.zeros(count, bool)
+        if len(src.geom_collision_mesh) == count:
+            distinct = np.fromiter(
+                (
+                    visual != collision
+                    for visual, collision in zip(
+                        src.geom_mesh, src.geom_collision_mesh, strict=True
+                    )
+                ),
+                bool,
+                count=count,
+            )
+        shared_transparent = (
+            (roles == int(GeometryRole.BOTH)) & ~distinct & (src.geom_rgba[:, 3] < 1)
+        )
+        both = self._instance_views == int(GeometryRole.BOTH)
+        collision_only = self._instance_views == int(GeometryRole.COLLISION)
+        has_visual = (roles & int(GeometryRole.VISUAL)) != 0
+        has_collision = (roles & int(GeometryRole.COLLISION)) != 0
+        visual = keep & ((~both & ~collision_only) | (both & has_visual & ~shared_transparent))
+        collision = keep & (
+            collision_only | (both & has_collision & (~has_visual | distinct | shared_transparent))
+        )
+        counts = visual.astype(np.intp) + collision
+        source_instances = np.repeat(np.arange(count), counts)
+        collision_rows = np.zeros(len(source_instances), bool)
+        collision_rows[np.cumsum(counts)[collision] - 1] = True
+        return source_instances, collision_rows
 
     def _visible_instances(self) -> np.ndarray:
         src = self._source
@@ -544,6 +557,12 @@ class SceneSourceBuilder:
             for current in path:
                 cache[current] = visible
             return visible
+
+        if len(src.geom_node) == n and np.all(src.geom_node >= 0):
+            nodes, inverse = np.unique(src.geom_node, return_inverse=True)
+            visible = np.fromiter((effective(int(node)) for node in nodes), bool, count=len(nodes))
+            keep &= visible[inverse]
+            return keep
 
         geom_nodes: dict[int, list[int]] = {}
         body_nodes: dict[int, int] = {}
@@ -691,6 +710,43 @@ class SceneSourceBuilder:
                     f"{int(self._geom_sources.max())}"
                 )
 
+        if (
+            self._compose_poses is not None
+            and self._local_rotation_diagonal
+            and self._local_position_zero
+            and not self._site_rows.size
+            and not self._world_rows.size
+            and xpos.dtype == xmat.dtype
+            and xpos.dtype in (np.dtype("float32"), np.dtype("float64"))
+        ):
+            # Fuse gathering, scaling, bucket ordering and change detection. Only
+            # infinite planes need their world poses in the intermediate buffers.
+            for plane in self._planes:
+                slot = plane.slot
+                geom = self._src_geom[slot]
+                self._w_rot[slot] = xmat[geom]
+                self._w_pos[slot] = xpos[geom]
+            if self._planes:
+                visual_changed = self._update_infinite_planes(scene) or visual_changed
+            changed = self._compose_poses(
+                xpos, xmat, self._ls_scale, self._src_geom, self._read_index, scene.transforms
+            )
+            if changed or not self._pose_valid:
+                self._pose_revision += 1
+                scene.pose_revision = self._pose_revision
+            self._pose_valid = True
+            self._composed_poses = True
+            if visual_changed:
+                self._visual_revision += 1
+                scene.visual_revision = self._visual_revision
+            return scene
+
+        if self._composed_poses:
+            # The fused path writes the final buffer, not the NumPy stage cache.
+            self._pose_valid = False
+            self._world_pose_valid = False
+            self._composed_poses = False
+
         if len(xpos):
             np.take(xmat, self._src_geom, axis=0, out=self._w_rot, mode="clip")
             np.take(xpos, self._src_geom, axis=0, out=self._w_pos, mode="clip")
@@ -742,7 +798,9 @@ class SceneSourceBuilder:
 
         pose_changed = not self._pose_valid or not np.array_equal(self._last_stage, self._stage)
         if pose_changed:
-            scene.transforms[self._write_index] = self._stage
+            # Gather into contiguous draw buckets instead of scattering matrix
+            # writes across the large instance buffer on every animation frame.
+            np.take(self._stage, self._read_index, axis=0, out=scene.transforms, mode="clip")
             np.copyto(self._last_stage, self._stage)
             self._pose_valid = True
             self._pose_revision += 1

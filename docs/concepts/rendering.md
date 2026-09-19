@@ -104,6 +104,80 @@ World coordinates are Z-up. Python matrices are row-major with translation at `m
 Upload-boundary conversion and render-target orientation belong to the backend. Callers do not
 transpose scene matrices or infer image orientation from the graphics API.
 
+## Adaptive mesh detail
+
+Native bgfx supports opt-in `RenderFlag.MESH_LOD` (`mesh_lod`). Enable it with
+`renderer.set_flag("mesh_lod", True)`, the Settings render flags, or CLI `--enable-render mesh_lod`.
+Agents can use these public Python/CLI paths. The existing RPC `set_render_flag` controls capture
+flags, not viewport flags, and does not expose LOD. OpenGL does not advertise this capability.
+It remains off by default. Opted-out scenes do not create LOD jobs, build level lists, or
+run detail selection in color or shadow passes. Small scenes usually need no LOD; keep
+original geometry unless repeated detailed meshes are a measured rendering bottleneck.
+
+The renderer generates compact shared levels with the pinned meshoptimizer library on one CPU
+worker. GPU uploads happen on the render owner, with a preparation time budget checked between
+meshes. The initial frames use available geometry while preparation completes; cold startup can
+still be expensive. This budget is not a hard frame deadline: one mesh upload or one
+meshoptimizer call cannot be interrupted. Preparation also consumes CPU alongside the app.
+Rigid instances share their levels. Vertex-deformed meshes, selected objects and wireframe
+views retain original geometry.
+
+Disabling the flag restores original geometry immediately, without waiting for a running CPU
+job. When the last enabled scene stops using a mesh, its queued work is canceled and prepared
+CPU/GPU levels are released. An active simplification stops between meshoptimizer calls;
+completed worker threads are reaped on subsequent rendering. Enabled peer scenes retain their
+shared levels. Re-enabling after the last user opts out prepares levels again instead of
+retaining a hidden cache. No disk cache or asset rewriting is involved.
+
+`make mesh-lod-example` runs the [self-contained example](../guides/examples.md) with LOD off;
+add `ARGS='--mesh-lod'` to opt in. This is a display option, not mandatory preprocessing.
+
+Each camera chooses detail from projected simplification error and target resolution, with
+hysteresis to reduce changes around a threshold. Perspective, orthographic and asymmetric
+projections are supported. Shadows use their own light projection and map resolution. Existing
+camera and light frustum culling still use original bounds; an offscreen shadow caster is not
+discarded merely because the main camera cannot see it. Color, picking, segmentation and depth
+use the displayed geometry, so disable this flag when exact mesh-based sensor data is required.
+The error estimate guides detail selection; it is not a strict image-difference guarantee.
+
+Native frame statistics expose submitted `color_triangles` (including reflections),
+`shadow_triangles`, `data_triangles`, `lod_instances`, `lod_meshes_ready`, and
+`lod_meshes_pending`. LOD instances count non-shadow draw submissions, not unique objects.
+Cached passes submit zero triangles. These differ from the full source
+triangle count. Use `make mesh-lod` for lifecycle/product acceptance and a comparison capture.
+For the shared G1 kinematic replay workload:
+
+```bash
+make g1-worlds G1_MODEL=/path/to/unitree_g1/scene.xml G1_WORLDS=4096 ARGS='--mesh-lod --camera detail'
+make g1-worlds-benchmark G1_MODEL=/path/to/unitree_g1/scene.xml ARGS='--worker bgfx --count 4096 --mesh-lod --camera detail --output output/g1-lod'
+```
+
+The benchmark waits for pending LOD preparation before warmup and records startup separately.
+This workload replays independent poses; it does not simulate 4096 physics worlds.
+The viewer supports normal orbit, pan and zoom; **Camera > Presets > frame all** shows the whole
+grid. Add `--rpc-socket /tmp/mojive-g1.sock` to the interactive command to let an agent inspect,
+move the viewport camera and capture that same window through the public RPC API.
+
+## Visibility and shadow work
+
+Native bgfx culls each color, reflection and data view using transformed original mesh bounds.
+Directional shadows also reject casters whose light-ray extrusion cannot reach the visible
+receiver volume. That volume includes reflected cameras and is bounded by scene geometry;
+color-only overlay surfaces conservatively disable the geometry bound. Screen-edge filtering
+retains a margin for the shadow sampling footprint. Point and spot lights retain light-frustum
+culling. This runs independently of the optional mesh LOD feature.
+
+The shadow cache records its caster coverage. Narrowing the view can reuse a wider map, while
+revealing previously excluded casters redraws it. Offscreen objects that cast visible shadows
+remain included. `make shadow-visibility` checks this against complete shadow maps and saves a
+comparison under `output/shadow-visibility/` (culled, complete, shadows disabled).
+
+Culling reduces draw submission and uploads; it does not unload shared meshes or suspend
+simulation and pose updates. The G1 replay still updates every world. Its 4096 instances share
+one mesh resource set, so loading separate robot assets on camera movement would not address
+that CPU cost. Headless benchmark timings include synchronous image readback; the interactive
+`--duration 12 --capture` mode separately records animation plus viewer synchronization.
+
 ## UI and diagnostic drawing
 
 ImGui draw lists render panel controls and their custom glyphs. `geometry2d` supplies reusable

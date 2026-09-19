@@ -67,6 +67,7 @@ class RenderFlag(enum.StrEnum):
     OUTLINE = "outline"
     TONEMAP = "tonemap"
     MSAA = "msaa"
+    MESH_LOD = "mesh_lod"
 
 
 class ShadowQuality(enum.StrEnum):

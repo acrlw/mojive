@@ -209,7 +209,7 @@ class NativeBackend:
         self._gizmo_planner = GizmoPlanner()
         self._gizmo_meshes = {}
         self._geometry_style = GeometryStyle()
-        self._builder = SceneSourceBuilder()
+        self._builder = SceneSourceBuilder(compose_poses=self.api.compose_instance_poses)
         self._scene = self._builder.scene
         self._external_scene = False
         self._triangle_count = 0
@@ -345,10 +345,14 @@ class NativeBackend:
             self._revision += 1
             source.revision = self._revision
             source.infinite_planes = scene.infinite_planes
-            source.planar_kinds = [
-                {MeshShape.PLANE: 1, MeshShape.BOX: 2}.get(scene.bucket_keys[int(b)][0].shape, 0)
-                for b in scene.bucket
-            ]
+            planar_kinds = np.asarray(
+                [
+                    {MeshShape.PLANE: 1, MeshShape.BOX: 2}.get(key.shape, 0)
+                    for key, _ in scene.bucket_keys
+                ],
+                np.uint8,
+            )
+            source.planar_kinds = planar_kinds[scene.bucket].tolist()
             source.linear_colors = scene.shading_model.value == "linear"
             source.extent, source.shadow_clip, source.center = (
                 scene.scene_extent,
@@ -362,6 +366,7 @@ class NativeBackend:
                 # every Visual/Collision/Both round trip upload them again.
                 keys = list(dict.fromkeys((*self._mesh_indices, *keys)))
             self._mesh_indices = {key: index for index, key in enumerate(keys)}
+            source.retained_lod_meshes = list(range(len(keys)))
             triangle_counts = {}
             leases = []
 
@@ -397,9 +402,9 @@ class NativeBackend:
             for key in PRIMITIVE_MESH.values():
                 mesh = builtin_mesh(key)
                 self._debug_meshes[key] = add_mesh(mesh)
-            slots = np.array(
-                [self._mesh_indices[scene.bucket_keys[int(b)][0]] for b in scene.bucket], np.uint32
-            )
+            slots = np.asarray(
+                [self._mesh_indices[key] for key, _ in scene.bucket_keys], np.uint32
+            )[scene.bucket]
             texture_items = list((self._source.textures if self._source else {}).items())
 
             def prepare(item):
@@ -434,7 +439,9 @@ class NativeBackend:
             source.materials = materials
             source.set_instances(slots, scene.object_id, scene.segmentation, scene.colors)
             source.set_material_indices(
-                np.array([scene.bucket_keys[int(b)][1] for b in scene.bucket], np.uint32)
+                np.asarray([material_id for _, material_id in scene.bucket_keys], np.uint32)[
+                    scene.bucket
+                ]
             )
             source.set_visuals(scene.material, scene.cube_coef)
             self.runtime.set_scene(source, self._scene_handle)
@@ -692,6 +699,15 @@ class NativeBackend:
         self.stats.notes["culled instances"] = statistics.culled_instances
         self.stats.notes["shadow instances"] = statistics.shadow_instances
         self.stats.notes["culled shadow instances"] = statistics.culled_shadow_instances
+        for name in (
+            "color_triangles",
+            "shadow_triangles",
+            "data_triangles",
+            "lod_instances",
+            "lod_meshes_ready",
+            "lod_meshes_pending",
+        ):
+            self.stats.notes[name.replace("_", " ")] = getattr(statistics, name)
         self.stats.buckets = self._scene.bucket_count()
         self.stats.frame_cpu_ms = (time.perf_counter() - started) * 1000
         texture = self.target.texture
@@ -742,6 +758,7 @@ class NativeBackend:
         self._render_state_dirty = True
         style_names = {
             RenderFlag.WIREFRAME: "wireframe",
+            RenderFlag.MESH_LOD: "mesh_lod",
             RenderFlag.TEXTURE: "textures",
             RenderFlag.CULL_FACE: "cull_face",
             RenderFlag.TRANSPARENT: "transparent",

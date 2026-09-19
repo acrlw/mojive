@@ -58,6 +58,9 @@ void validateScene(const SceneSource &scene, bool validateGeometry) {
     for (auto index : scene.infinitePlanes)
         if (index >= scene.instances.size())
             throw std::invalid_argument("Invalid infinite plane index");
+    for (auto index : scene.retainedLodMeshes)
+        if (index >= scene.meshes.size())
+            throw std::invalid_argument("Invalid retained LOD mesh index");
     for (const auto &texture : scene.textures) {
         uint64_t expected = 0;
         uint32_t w = texture.size.width, h = texture.size.height;

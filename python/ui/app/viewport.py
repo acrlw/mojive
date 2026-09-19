@@ -404,7 +404,7 @@ class _Viewport:
         caps = self.session.adapter.caps
         if (
             not self.viewport_layers.viewport_ui
-            or not caps.simulation
+            or not (caps.simulation or caps.supports("replay.control"))
             or not self._has_scene_content()
         ):
             self._playback_widget_rect = None
@@ -468,6 +468,7 @@ class _Viewport:
         )
         if visible:
             take_playing = self.session.state_take_playing
+            replay = self.session.replay_info
             paused = self.session.paused and not take_playing
             with _clipped_overlay_draw(self._viewport_rect, window=self.window) as draw:
                 action = draw_playback(
@@ -479,13 +480,20 @@ class _Viewport:
                         self.external_paused is False
                         if self.session.adapter.caps.external_clock
                         and not self.session.adapter.caps.clock_control
+                        and replay is None
                         else not paused
                     ),
-                    step_enabled=paused and not take_playing,
-                    toggle_tooltip=self.localizer.text("Run simulation")
+                    step_enabled=paused
+                    and not take_playing
+                    and (replay is None or replay.frame_index < replay.frame_count - 1),
+                    toggle_tooltip=self.localizer.text(
+                        "Local replay" if replay else "Run simulation"
+                    )
                     if paused and self._take_video is None
                     else "",
-                    previous_enabled=self.session.can_step_back,
+                    previous_enabled=replay.frame_index > 0
+                    if replay
+                    else self.session.can_step_back,
                     recording=self.session.state_take_recording or self.recording.active,
                     record_action=(
                         "pause"
@@ -521,7 +529,7 @@ class _Viewport:
                         )
                     ),
                     enabled=not self._scene_input_blocked(),
-                    clock_enabled=self.session.adapter.caps.clock_control,
+                    clock_enabled=replay is not None or self.session.adapter.caps.clock_control,
                     clock_disabled_reason=self.localizer.text(
                         "Simulation is controlled by the external application."
                     ),
@@ -535,9 +543,15 @@ class _Viewport:
             elif action == "toggle":
                 self._toggle_playback(source="simulation")
             elif action == "step":
-                self.session.submit(cmd.Step(1))
+                self.session.submit(
+                    cmd.SeekReplay(min(replay.frame_count - 1, replay.frame_index + 1))
+                    if replay
+                    else cmd.Step(1)
+                )
             elif action == "previous":
-                self.session.submit(cmd.StepBack())
+                self.session.submit(
+                    cmd.SeekReplay(max(0, replay.frame_index - 1)) if replay else cmd.StepBack()
+                )
             elif action in ("reset", "stop"):
                 self._reset_playback()
             elif action == "record":
@@ -933,6 +947,8 @@ class _Viewport:
             )
         if not (self.interactions.perturb and self.session.adapter.caps.perturb):
             defaults = tuple(hint for hint in defaults if not hint.hint_id.startswith("perturb"))
+        if self._status_panel == "Viewport" and self._model_camera_id >= 0:
+            defaults = tuple(hint for hint in defaults if not hint.hint_id.startswith("camera."))
         return self.tool_hints.resolve(defaults, surface="status")
 
     def _selection_clear_enabled(self) -> bool:

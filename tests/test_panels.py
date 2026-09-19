@@ -1233,7 +1233,9 @@ def test_timeline_status_hints_describe_selection_in_the_hovered_track():
 
 def test_panel_status_hints_compose_without_duplicate_row_entries():
     localizer = Localizer(Language.SIMPLIFIED_CHINESE)
-    ctx = SimpleNamespace(status_hints=(), tr=localizer.text, input_bindings=None)
+    ctx = SimpleNamespace(
+        status_hints=(), tr=localizer.text, input_bindings=None, model_camera_id=-1
+    )
 
     publish_focus_item_hint(ctx)
     publish_focus_item_hint(ctx)

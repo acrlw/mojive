@@ -9,12 +9,15 @@ from typing import TYPE_CHECKING
 from mojive import commands as cmd
 from mojive.commands import Command, CommandResult
 
-from . import assets, documents, keyframes, physics, playback, properties, scene, transforms
+from . import assets, documents, keyframes, physics, playback, properties, replay, scene, transforms
 
 if TYPE_CHECKING:
     from ..core import Session
 
 _HANDLERS = {
+    cmd.SetReplayPlayback: replay.set_replay_playback,
+    cmd.SeekReplay: replay.seek_replay,
+    cmd.SyncRollout: replay.sync_rollout,
     cmd.CaptureSceneSnapshot: playback.scene_snapshot,
     cmd.RestoreSceneSnapshot: playback.scene_snapshot,
     cmd.RemoveSceneSnapshot: playback.scene_snapshot,
@@ -65,6 +68,7 @@ _HANDLERS = {
     cmd.Select: transforms.select,
     cmd.SelectNode: transforms.select_node,
     cmd.SetVisible: transforms.set_visible,
+    cmd.SetWorldSelection: transforms.set_world_selection,
     cmd.SetGeometryView: transforms.set_geometry_view,
     cmd.SetVisualGroup: transforms.set_visual_group,
     cmd.SetPose: transforms.set_pose,
