@@ -100,6 +100,10 @@ int main() {
         scene.meshes = {mesh};
         scene.instances = {{0, 0xfedcba98, {INT32_MIN, INT32_MAX}, {1, 1, 1, 1}}};
         validateScene(scene);
+        scene.retainedLodMeshes = {1};
+        rejects([&] { validateScene(scene); });
+        scene.retainedLodMeshes = {0};
+        validateScene(scene);
         auto matrix = identity();
         std::array<Matrix, 1> transforms = {matrix};
         validateFrame(scene, {1, 8, transforms});

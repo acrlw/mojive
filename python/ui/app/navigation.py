@@ -86,6 +86,10 @@ class _Navigation:
             self.camera.publish(self.camera_out)
 
     def _poll_camera(self, state: gs.InputState, keys: Keys, dt: float) -> None:
+        # Viewing a scene camera is a persistent choice. Navigation must not
+        # silently replace it with the independently stored editor camera.
+        if self._model_camera_id >= 0:
+            return
         fwd, right, up = keys.fly
         if fwd or right or up:
             self._leave_model_camera()
@@ -109,8 +113,6 @@ class _Navigation:
             elif self.router.released and travel < CLICK_SLOP_PT:
                 if self._view_cube_origin_pressed:
                     if self.view_cube.origin_hovered and self.backend.caps.orthographic:
-                        if self._model_camera_id >= 0:
-                            self.camera.adopt(self._camera_view(), exact=True)
                         self._leave_model_camera()
                         self.camera.set_orthographic(not self.camera.orthographic, animate=True)
                 elif ball is not None:
@@ -171,6 +173,8 @@ class _Navigation:
         view = view.with_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
         self.backend.set_camera(view)
         self.session.submit(cmd.SetCamera(view))
+        if not self._started:
+            self._initial_camera_set = True
 
     def _select_model_camera_animated(self, camera_id: int) -> None:
         self.select_model_camera(camera_id, animate=True)
@@ -193,6 +197,8 @@ class _Navigation:
         if i != self._model_camera_id:
             self._model_camera_projection_target = None
         self._model_camera_id = i
+        self._pending_node_focus_id = None
+        self._pending_joint_focus_id = None
         self._camera_transition = CameraViewTransition(start) if animate else None
 
     def _viewing_selected_camera(self) -> bool:
@@ -327,6 +333,8 @@ class _Navigation:
     def request_joint_focus(self, joint_id: int) -> bool:
         """Request one diagnostics-backed camera focus on a stable joint ID."""
 
+        if self._model_camera_id >= 0:
+            return False
         requested = int(joint_id)
         if not any(joint.joint_id == requested for joint in self.session.joints):
             return False
@@ -337,6 +345,8 @@ class _Navigation:
     def request_node_focus(self, node_id: int) -> bool:
         """Request a camera focus on one stable hierarchy node."""
 
+        if self._model_camera_id >= 0:
+            return False
         node = self.session.node(int(node_id))
         if node is None:
             return False

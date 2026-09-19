@@ -249,8 +249,15 @@ def test_viewport_capture_completes_after_present_and_keeps_capture_camera_separ
                     return result
 
                 call("get_viewer_settings")
+                stats_before = call("get_viewer_stats")
                 call("get_panels")
-                capture_before = call("get_capture_settings")["camera"]
+                capture_settings_before = call("get_capture_settings")
+                capture_before = capture_settings_before["camera"]
+                for geometry_view in ("collision", "both", "visual", "default"):
+                    assert call("set_viewport_geometry_view", {"view": geometry_view}) == {
+                        "view": geometry_view
+                    }
+                assert call("get_capture_settings") == capture_settings_before
                 view = {
                     "eye": [4, -3, 2],
                     "target": [0, 0, 0],
@@ -284,6 +291,11 @@ def test_viewport_capture_completes_after_present_and_keeps_capture_camera_separ
                         if surface == "viewport":
                             np.testing.assert_array_equal(target.array, decoded)
                 actual = call("get_viewport_camera")
+                stats_after = call("get_viewer_stats")
+                assert stats_after["presented_frames"] > stats_before["presented_frames"]
+                assert stats_after["sample_time"] > stats_before["sample_time"]
+                assert stats_after["scene_step"] == stats_before["scene_step"]
+                assert min(stats_after["viewport"]) > 0
                 assert actual["up"] == view["up"]
                 assert actual["focal_length"] == view["focal_length"]
                 assert call("get_capture_settings")["camera"] == capture_before

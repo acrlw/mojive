@@ -6,6 +6,7 @@ Run these programs from the repository root after `make setup`. Commands use
 | Example | Window | Result |
 |---|---:|---|
 | `offscreen_scene.py` | no | authored RGB, depth, and object-ID output without MuJoCo |
+| `mesh_lod.py` | no | shared native meshes; LOD preparation only with `--mesh-lod` |
 | `programmatic_scene.py` | yes | authored scene without a physics backend |
 | `debug_draw.py` | yes | retained diagnostics and world-space labels |
 | `canvas2d.py` | yes | layered 2D physics and geometry diagnostics |
@@ -21,6 +22,7 @@ Run these programs from the repository root after `make setup`. Commands use
 | `compose_scene.py` | no | combined `.mojive.json` workspace or portable MJCF |
 | `remote_publish.py` | no | live latest-state publisher for attached viewers |
 | `record_replay.py` | no | versioned `.fvs` snapshot recording |
+| `rollout_preview.py` | no | bounded rollout windows, selected worlds, and manual viewer synchronization |
 | `control_client.py` | no | persistent local RPC automation |
 | `agent_inspection.py` | no | RPC discovery, transactional editing, document lifecycle, and image verification |
 
@@ -42,9 +44,24 @@ uv run --no-sync python examples/canvas2d.py
 Close the application window to end each program. These sources are cross-referenced from the
 user guide and checked during `make docs-check`.
 
-## MuJoCo rendering and control
+## Optional mesh detail
 
 Commands selecting bgfx require the [native runtime and shaders](../docs/how-to/native-viewer.md).
+
+Compare original geometry and opt-in display LOD without external models:
+
+```bash
+make mesh-lod-example ARGS='--output output/examples/mesh-exact'
+make mesh-lod-example ARGS='--mesh-lod --output output/examples/mesh-lod'
+```
+
+Both runs save `rgb.png`. The default run never starts LOD preparation. The enabled run
+renders 120 frames, allowing background preparation to progress; this is not a readiness
+deadline. Small scenes usually do not need LOD. For interactive use, toggle **Mesh LOD** in
+Settings > Rendering when using bgfx. See [adaptive mesh detail](../docs/concepts/rendering.md#adaptive-mesh-detail)
+for preparation costs, sharing, and exact sensor output.
+
+## MuJoCo rendering and control
 
 ```bash
 uv run --no-sync python examples/mujoco_render.py assets/test_scene.xml \

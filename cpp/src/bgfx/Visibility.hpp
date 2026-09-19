@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace mojive {
 struct MeshBounds {
@@ -36,6 +37,7 @@ inline MeshBounds transformBounds(const MeshBounds &bounds, const float *matrix)
     return result;
 }
 class ClipFrustum {
+    friend class ShadowReceiverVolume;
     std::array<glm::vec4, 6> mPlanes;
 
   public:
@@ -57,6 +59,57 @@ class ClipFrustum {
             const float radius = glm::dot(glm::abs(normal), bounds.extent);
             const float tolerance = 1e-5f * (1 + std::abs(center) + std::abs(plane.w) + radius);
             if (center + plane.w + radius < -tolerance)
+                return false;
+        }
+        return true;
+    }
+};
+
+// A directional caster matters only if its extrusion along the light ray can
+// reach a receiver. Plane-wise AABB support is conservative: it may retain extra
+// casters, but never drops an offscreen caster whose shadow reaches the view.
+class ShadowReceiverVolume {
+    std::array<glm::vec4, 12> mPlanes{};
+    std::array<float, 12> mSlopes{};
+    size_t mCount = 6;
+
+  public:
+    ShadowReceiverVolume(const CameraView &camera, glm::vec3 direction,
+                         const MeshBounds *receivers) {
+        const ClipFrustum frustum(camera);
+        std::copy(frustum.mPlanes.begin(), frustum.mPlanes.end(), mPlanes.begin());
+        if (receivers) {
+            // Clip away empty space below/above the scene. Extruding the entire
+            // camera frustum would otherwise retain shadows on imaginary ground.
+            for (int axis = 0; axis < 3; ++axis) {
+                glm::vec4 lower(0), upper(0);
+                lower[axis] = 1;
+                upper[axis] = -1;
+                lower.w = receivers->extent[axis] - receivers->center[axis];
+                upper.w = receivers->extent[axis] + receivers->center[axis];
+                mPlanes[mCount++] = lower;
+                mPlanes[mCount++] = upper;
+            }
+        }
+        for (size_t i = 0; i < mCount; ++i)
+            mSlopes[i] = glm::dot(glm::vec3(mPlanes[i]), direction);
+    }
+    bool intersects(const MeshBounds &caster) const {
+        float enter = 0, leave = std::numeric_limits<float>::infinity();
+        for (size_t i = 0; i < mCount; ++i) {
+            const auto &plane = mPlanes[i];
+            const glm::vec3 normal(plane);
+            const float center = glm::dot(normal, caster.center);
+            const float radius = glm::dot(glm::abs(normal), caster.extent);
+            const float tolerance = 1e-5f * (1 + std::abs(center) + std::abs(plane.w) + radius);
+            const float support = center + plane.w + radius + tolerance;
+            if (mSlopes[i] > 0)
+                enter = std::max(enter, -support / mSlopes[i]);
+            else if (mSlopes[i] < 0)
+                leave = std::min(leave, -support / mSlopes[i]);
+            else if (support < 0)
+                return false;
+            if (enter > leave)
                 return false;
         }
         return true;

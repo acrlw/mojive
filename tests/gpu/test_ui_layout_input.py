@@ -71,9 +71,7 @@ def test_saved_file_receipt_keeps_pending_edit_buttons_accessible(
         _settle(viewer, 2)
         path = tmp_path / "saved-recording-with-a-long-filename.mp4"
         path.touch()
-        viewer.app.output.publish(
-            f"Saved video to {path} · File copied to clipboard", duration=None, copy_text=str(path)
-        )
+        viewer.app.output.publish(f"Saved video to {path}", duration=None, copy_text=str(path))
         _settle(viewer, 3)
         pending = imgui.internal.find_window_by_name("###pending_model_edits")
         receipt = viewer.app._status_notice_bounds
@@ -82,6 +80,25 @@ def test_saved_file_receipt_keeps_pending_edit_buttons_accessible(
         discard = _item_center(
             viewer, "button", viewer.app.localizer.text("Discard") + "##discard_model_edits"
         )
+        from mojive.ui.app import status as status_module
+
+        revealed = []
+        monkeypatch.setattr(status_module, "reveal_path", revealed.append)
+        label = viewer.app.localizer.text("Open folder") + "##status-open-folder"
+        point = _item_center(viewer, "button", label)
+        io = imgui.get_io()
+        io.add_mouse_pos_event(*point)
+        viewer.sync()
+        io.add_mouse_button_event(0, True)
+        viewer.sync()
+        # Async clipboard completion must not move the button between press/release.
+        viewer.app.output.publish(
+            f"Saved video to {path} · File copied to clipboard", duration=None, copy_text=str(path)
+        )
+        assert _item_center(viewer, "button", label) == point
+        io.add_mouse_button_event(0, False)
+        viewer.sync()
+        assert revealed == [path]
         _click(
             viewer,
             _item_center(
@@ -93,6 +110,15 @@ def test_saved_file_receipt_keeps_pending_edit_buttons_accessible(
         assert imgui.get_clipboard_text() == str(path)
         _click(viewer, discard)
         assert not viewer.app.model_edits.active
+        from pathlib import Path
+
+        folder = Path("output/file-receipt")
+        folder.mkdir(parents=True, exist_ok=True)
+        io.add_mouse_pos_event(-100, -100)
+        viewer.sync()
+        viewer.capture(
+            folder / f"{viewer.backend.caps.name}-{language}-{scale}.png", surface="window"
+        )
 
 
 @pytest.mark.parametrize(

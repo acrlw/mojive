@@ -14,6 +14,86 @@ import pytest
 from mojive import math3d
 
 
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_compose_instance_poses_matches_numpy_without_intermediate_gathers(native, dtype):
+    rng = np.random.default_rng(2)
+    # Strided MuJoCo-like input and repeated sources must preserve bucket order.
+    positions = rng.normal(size=(12, 3)).astype(dtype)[::2]
+    rotations = rng.normal(size=(12, 3, 3)).astype(dtype)[::2]
+    sources = np.array([5, 2, 2, 0], np.int64)
+    order = np.array([2, 0, 3, 1], np.int64)
+    scales = rng.normal(size=(4, 3)).astype(np.float32)
+    output = np.zeros((4, 4, 4), np.float32)
+    expected = np.broadcast_to(np.eye(4, dtype=np.float32), output.shape).copy()
+    expected[:, :3, :3] = rotations[sources].astype(np.float32) * scales[:, None, :]
+    expected[:, :3, 3] = positions[sources]
+    assert native.compose_instance_poses(positions, rotations, scales, sources, order, output)
+    np.testing.assert_array_equal(output, expected[order])
+    assert not native.compose_instance_poses(positions, rotations, scales, sources, order, output)
+    positions[2, 0] += 1
+    assert native.compose_instance_poses(positions, rotations, scales, sources, order, output)
+    before = output.copy()
+    for invalid in (np.array([5, 2, -1, 0]), np.array([5, 2, 6, 0])):
+        with pytest.raises(ValueError, match="index"):
+            native.compose_instance_poses(positions, rotations, scales, invalid, order, output)
+        np.testing.assert_array_equal(output, before)
+    with pytest.raises(ValueError, match="lengths"):
+        native.compose_instance_poses(positions, rotations[:-1], scales, sources, order, output)
+    output.setflags(write=False)
+    with pytest.raises(TypeError):
+        native.compose_instance_poses(positions, rotations, scales, sources, order, output)
+
+
+def test_fused_builder_preserves_plane_changes_rebuilds_and_fallback(native):
+    from dataclasses import replace
+
+    from mojive import CameraView, Scene
+    from mojive.adapters.base import FrameNeeds
+    from mojive.adapters.static import StaticSceneAdapter
+    from mojive.render.builder import SceneSourceBuilder
+
+    authored = Scene()
+    authored.plane(size=(0, 0, 1))
+    authored.box(position=(0, 0, 1))
+    adapter = StaticSceneAdapter(authored)
+    source = adapter.scene_source()
+    frame = adapter.frame(FrameNeeds())
+    calls = []
+
+    def compose(*arrays):
+        calls.append(True)
+        return native.compose_instance_poses(*arrays)
+
+    reference = SceneSourceBuilder()
+    fused = SceneSourceBuilder(compose_poses=compose)
+    for builder in (reference, fused):
+        builder.set_source(source)
+    for dtype, rotation_dtype, offset in [
+        (np.float32, np.float32, 1),
+        (np.float64, np.float64, 2),
+        (np.float64, np.float32, 1),
+        (np.float32, np.float32, 3),
+    ]:
+        current = replace(
+            frame,
+            geom_xpos=(frame.geom_xpos + offset).astype(dtype),
+            geom_xmat=frame.geom_xmat.astype(rotation_dtype),
+        )
+        camera = CameraView(eye=np.array([offset * 100, 2, 3]), far=offset * 200)
+        expected = reference.update(current, camera)
+        actual = fused.update(current, camera)
+        np.testing.assert_array_equal(actual.transforms, expected.transforms)
+        np.testing.assert_array_equal(actual.tex_coef, expected.tex_coef)
+        revision = actual.pose_revision
+        fused.update(current, camera)
+        assert actual.pose_revision == revision
+    assert calls
+    for builder in (reference, fused):
+        builder.set_source(source)
+        builder.update(frame)
+    np.testing.assert_array_equal(fused.scene.transforms, reference.scene.transforms)
+
+
 def test_camera_matrices_match_existing_python_conventions(native):
     rng = np.random.default_rng(42)
     for _ in range(100):

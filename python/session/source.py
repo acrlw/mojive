@@ -16,7 +16,13 @@ from mojive.adapters.base import (
     NodeType,
     PhysicsOption,
     PhysicsOptions,
+    ReplayControl,
+    ReplayInfo,
+    RolloutSync,
+    RolloutSyncInfo,
     SceneNode,
+    WorldSelection,
+    WorldSelectionInfo,
 )
 from mojive.commands import Query
 from mojive.scene.bounds import SceneBounds
@@ -32,6 +38,27 @@ from .state import (
 
 class _Source:
     """Private source methods of Session; state belongs to its owner."""
+
+    @property
+    def replay_info(self) -> ReplayInfo | None:
+        """Read the local replay clock, independent of the physics clock."""
+        if not self._adapter.caps.supports("replay.control"):
+            return None
+        return cast(ReplayControl, self._adapter).replay_info()
+
+    @property
+    def rollout_sync_info(self) -> RolloutSyncInfo | None:
+        """Read manual synchronization status without network work."""
+        if not self._adapter.caps.supports("replay.sync"):
+            return None
+        return cast(RolloutSync, self._adapter).rollout_sync_info()
+
+    @property
+    def world_selection(self) -> WorldSelectionInfo | None:
+        """Return preview world identities when the adapter supports selection."""
+        if not self._adapter.caps.supports("world.selection"):
+            return None
+        return cast(WorldSelection, self._adapter).world_selection()
 
     @property
     def physics_options(self) -> tuple[PhysicsOption, ...]:
@@ -91,6 +118,12 @@ class _Source:
 
         if getattr(self, "_applying_model_edits", False) and not installed:
             return
+        world_visibility = {
+            (node.type, node.object_id): node.visible
+            for node in self._nodes
+            if self._adapter.caps.supports("world.selection")
+            and (node.object_id or node.type is NodeType.WORLD)
+        }
         selected_before = self._by_node_id.get(self._selected_node_id)
         self._mesh_bounds_cache.clear()
         self._scene_bounds = None
@@ -218,6 +251,10 @@ class _Source:
         ):
             self._clear_scene_snapshots()
         self._adapter_revision = self._adapter.structure_revision
+        for node in (*self._nodes, *self._source.nodes):
+            key = (node.type, node.object_id)
+            if key in world_visibility:
+                node.visible = world_visibility[key]
         self._structure_generation += 1
         self._frame = self._adapter.frame(FrameNeeds())
         self._sync_equality_state()

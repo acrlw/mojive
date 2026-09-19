@@ -11,6 +11,7 @@ Start an editor with an attached endpoint, or attach one to an existing viewer i
 ```bash
 uv run --no-sync mojive editor --rpc-socket
 uv run --no-sync mojive view assets/test_scene.xml --rpc-socket
+uv run --no-sync mojive attach --rpc-socket
 ```
 
 For a separate standalone simulation:
@@ -104,6 +105,34 @@ an already-running operation. An asynchronous operation retains its admission sl
 completion, including after its client has received `completion_unknown`.
 
 ## Work budgets and diagnostics
+
+Joint replay adapters advertise `replay.control`; manual remote windows additionally advertise
+`replay.sync`. Agents can discover these optional operations and use the same local controls:
+
+```bash
+uv run --no-sync mojive control get_replay_info --json
+uv run --no-sync mojive control set_replay_playback --params '{"paused":false,"speed":1}' --json
+uv run --no-sync mojive control seek_replay --params '{"frame":20}' --json
+uv run --no-sync mojive control sync_rollout --params '{"world_ids":[0,7],"frame_count":64}' --json
+uv run --no-sync mojive control get_rollout_sync --json
+```
+
+Seeking pauses at a zero-based sample. These commands do not step or pause server training.
+`sync_rollout` admits one background request and returns immediately; inspect `get_rollout_sync`
+for `pending`, `revision`, `start_step`, and `error` before using the new clip. Failure preserves
+the previous clip. Pending requests reject another sync or local world selection, so old replies
+cannot overwrite a newer choice. Successful replacement pauses at frame zero; an unchanged
+revision leaves local playback untouched. See the [rollout tutorial](../tutorials/remote-viewing.md#manual-rollout-windows).
+
+An attached service exposes `get_viewer_stats`: completed window frames, a monotonic sampling
+time, scene step/time, viewport dimensions, and the smoothed status-bar FPS. Sample twice and
+divide the change in `presented_frames` by the change in `sample_time` to measure window cadence.
+This method does not tick the scene or trigger a capture. Window FPS includes repeated poses;
+use publisher cadence and scene timestamps separately when evaluating remote playback.
+
+`set_viewport_geometry_view` accepts `{"view":"default|visual|collision|both"}` (choose one
+value). It uses the same geometry preset as the Hierarchy control and changes only this window;
+capture settings and simulation collision definitions remain independent.
 
 `mojive.control.rpc.RpcLimits` provides the same immutable configuration for attached and
 standalone servers. All byte limits include the newline delimiter.
@@ -210,7 +239,7 @@ construction, retaining their existing `CommandResult` error format.
 | Authoring | `add_scene_object`, `add_scene_camera`, `add_scene_light`, `set_pose`, `set_scale`, `set_scene_camera`, `set_geometry_color`, `set_geometry_size`, `rename_scene_entity`, `duplicate_scene_entity`, `remove_scene_entity` |
 | History | `edit_scene`, `undo`, `redo` |
 | Capture | `get_capture_settings`, `set_capture_camera`, `capture`, `set_render_flag`, `set_visualization_flag`, `load_camera_bookmark` |
-| Viewport | `get_viewport_camera`, `set_viewport_camera`, `capture_viewport`, `get_viewer_settings`, `get_panels`, `set_panel`, `set_interactions`, `set_selection_style`, `set_shadow_quality`, `reset_layout` |
+| Viewport | `get_viewport_camera`, `set_viewport_camera`, `capture_viewport`, `get_viewer_settings`, `get_viewer_stats`, `set_viewport_geometry_view`, `get_panels`, `set_panel`, `set_interactions`, `set_selection_style`, `set_shadow_quality`, `reset_layout` |
 
 `set_camera` remains a version-1 alias for `set_capture_camera`. Camera and light removal also
 have explicit `remove_scene_camera`/`remove_scene_light` operations. Consult discovery for their
@@ -232,6 +261,15 @@ replace document identity.
 Creation results retain legacy `entity_id` and add a named `object_id`, `camera_id`, or `light_id`.
 Scene, object-list, bounds, and inspection queries refresh the composed Session before reading,
 so they also observe updates made through a caller-owned scene provider.
+
+For large scenes, call `get_scene` with `include_objects: false` to read document identity,
+bounds, camera IDs, and `object_count` without serializing the hierarchy (`objects` is empty).
+Use `list_objects` with a case-insensitive `name` substring, a node `type`, or a direct `parent`
+node ID (`-1` selects roots). Filters combine with AND and run before `offset` and positive
+`limit`; results retain scene order. Omitting these parameters preserves the complete list.
+Only returned nodes are serialized. Paging is a live query, not a retained snapshot: compare
+`structure_generation` before and after collecting pages and restart if structure changed.
+
 `get_scene.cameras` maps camera IDs to selectable object IDs. `inspect_object` returns position
 and a 3×3 rotation in the world frame. Geometry color/size operations use the `node_id` returned
 by `inspect_object.geometries`; the selected parent can have a different ID. Camera angles are
@@ -444,6 +482,11 @@ application surface, call `capture_viewport` with `surface: "viewport"` or `surf
 It waits until the viewer has presented a frame and saved the image, then returns the artifact
 metadata. It requires a running viewer loop. The default surface is `viewport`.
 
+Selecting a viewport scene camera stays active through mouse navigation, fly/frame keys, View Cube
+input, and object focus gestures. Its pose still follows the scene. Choose **Return to Editor Camera**
+in Camera (or explicitly set a free viewport camera through RPC) before navigating freely. Removing
+the selected camera restores the editor view. Object selection and scene editing remain available.
+
 `set_capture_camera` changes only offscreen capture; `set_viewport_camera` changes the visible
 viewer. Both retain camera roll and physical intrinsics. A free viewport camera preserves its
 exact view across frames and resize until an orbit gesture or framing command takes control.
@@ -457,3 +500,18 @@ dimensions. These fields reject string coercions and return `invalid_params` bef
 
 The socket is local and the protocol is intended for trusted processes on the same machine. Use
 the remote snapshot transport when a renderer runs on another host.
+
+## Select replay worlds
+
+Adapters exposing `world.selection` revision 1 support `get_world_selection` and
+`set_world_selection`. The query returns `total_worlds`, the original `world_ids` currently
+being evaluated, and `max_worlds`. Set a nonempty list of unique original IDs within that limit:
+
+```bash
+mojive control set_world_selection --params '{"world_ids":[7,42]}' --json
+```
+
+Selection is a preview operation: it changes neither the recording nor document history.
+Unsupported adapters report the capability as unavailable. The local joint replay adapter
+filters before FK and render-instance construction. This does not subscribe a remote publisher
+to fewer worlds; see [selected-world replay](../tutorials/remote-viewing.md#selected-world-joint-replay).

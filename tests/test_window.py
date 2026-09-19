@@ -294,6 +294,7 @@ def test_scene_drag_retains_ownership_across_overlay_and_notice(monkeypatch, sur
 @pytest.mark.parametrize("panel", ("Viewport", "Joints", "Inspector"))
 def test_selection_status_is_composed_with_panel_hints_but_yields_to_input(panel):
     app = ViewerApp.__new__(ViewerApp)
+    app._model_camera_id = -1
     app._status_panel = panel
     app._panel_status_hints = (ToolHint("mouse", "right", "Copy name", hint_id="panel.copy"),)
     app._precise_gizmo_edit = None

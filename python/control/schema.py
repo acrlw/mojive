@@ -288,6 +288,7 @@ SCENE_RESULT = record(
         "structure_generation": ID,
         "bounds": BOUNDS_RESULT,
         "objects": array(NODE),
+        "object_count": ID,
         "cameras": array(record({"camera_id": ID, "object_id": ID, "name": STRING})),
     }
 )

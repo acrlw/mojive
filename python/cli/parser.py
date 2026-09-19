@@ -20,7 +20,17 @@ from .inspection import (
     cmd_doctor,
     cmd_inspect,
 )
-from .viewer import cmd_attach, cmd_canvas, cmd_editor, cmd_replay, cmd_serve, cmd_toy, cmd_view
+from .viewer import (
+    cmd_attach,
+    cmd_canvas,
+    cmd_editor,
+    cmd_replay,
+    cmd_replay_joints,
+    cmd_serve,
+    cmd_serve_rollout,
+    cmd_toy,
+    cmd_view,
+)
 
 
 def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -51,18 +61,23 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
         )
         return sp
 
-    sp = with_render_flags(with_asset(sub.add_parser("view", help="Open the viewer")))
+    def with_viewer_rpc(sp):
+        sp.add_argument(
+            "--rpc-socket",
+            nargs="?",
+            const=str(DEFAULT_SOCKET),
+            help="Expose this viewer through a local control socket (default: user runtime directory)",
+        )
+        sp.add_argument("--rpc-limits", help="Read RPC budgets from JSON; requires --rpc-socket")
+        return sp
+
+    sp = with_viewer_rpc(
+        with_render_flags(with_asset(sub.add_parser("view", help="Open the viewer")))
+    )
     startup = sp.add_mutually_exclusive_group()
     startup.add_argument("--paused", dest="paused", action="store_true")
     startup.add_argument("--play", dest="paused", action="store_false")
     sp.add_argument("--no-vsync", action="store_true")
-    sp.add_argument(
-        "--rpc-socket",
-        nargs="?",
-        const=str(DEFAULT_SOCKET),
-        help="Expose this viewer through a local control socket (default: user runtime directory)",
-    )
-    sp.add_argument("--rpc-limits", help="Read RPC budgets from JSON; requires --rpc-socket")
     sp.set_defaults(func=cmd_view, json=False, paused=True)
 
     sp = with_render_flags(sub.add_parser("canvas", help="Open a procedural 3D canvas"))
@@ -70,16 +85,9 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_canvas, json=False)
 
-    sp = sub.add_parser("editor", help="Open a model and scene workspace")
+    sp = with_viewer_rpc(sub.add_parser("editor", help="Open a model and scene workspace"))
     sp.add_argument("asset", nargs="?", help="Optional MJCF or URDF path or asset name")
     sp.add_argument("--no-vsync", action="store_true")
-    sp.add_argument(
-        "--rpc-socket",
-        nargs="?",
-        const=str(DEFAULT_SOCKET),
-        help="Expose this viewer through a local control socket (default: user runtime directory)",
-    )
-    sp.add_argument("--rpc-limits", help="Read RPC budgets from JSON; requires --rpc-socket")
     sp.set_defaults(func=cmd_editor, json=False)
 
     sp = sub.add_parser("toy", help="Open the toy physics backend")
@@ -100,7 +108,11 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     sp.add_argument("--record-snapshot", metavar="FILE", help="append the published stream")
     sp.set_defaults(func=cmd_serve, json=False)
 
-    sp = sub.add_parser("attach", help="Open a viewer connected to live snapshots")
+    sp = with_viewer_rpc(
+        with_render_flags(
+            sub.add_parser("attach", help="Open a viewer connected to live snapshots")
+        )
+    )
     sp.add_argument("--host", default="127.0.0.1")
     sp.add_argument("--port", type=int, default=47650)
     sp.add_argument("--title", default="Mojive remote")
@@ -111,6 +123,44 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     )
     sp.add_argument("--no-vsync", action="store_true")
     sp.set_defaults(func=cmd_attach, json=False)
+
+    sp = with_viewer_rpc(
+        with_render_flags(
+            sub.add_parser(
+                "replay-joints", help="Preview selected worlds from a compact qpos archive"
+            )
+        )
+    )
+    sp.add_argument("archive", help="Local archive directory or an HTTP(S) rollout server URL")
+    subset = sp.add_mutually_exclusive_group()
+    subset.add_argument(
+        "--worlds",
+        type=_positive_int,
+        help="initial world count (default: up to 4 within the preview limit)",
+    )
+    subset.add_argument("--world-ids", nargs="+", type=int, help="original world IDs to display")
+    sp.add_argument(
+        "--world-limit", type=_positive_int, default=64, help="maximum preview worlds (default: 64)"
+    )
+    sp.add_argument("--no-vsync", action="store_true")
+    sp.add_argument(
+        "--window-frames",
+        type=_positive_int,
+        default=128,
+        help="frames per manual rollout sync (default: 128)",
+    )
+    sp.add_argument(
+        "--play", action="store_true", help="start local playback immediately; default is paused"
+    )
+    sp.set_defaults(func=cmd_replay_joints, json=False)
+
+    sp = sub.add_parser("serve-rollout", help="Serve bounded rollout windows on demand")
+    sp.add_argument("archive")
+    sp.add_argument("--host", default="127.0.0.1")
+    sp.add_argument("--port", type=int, default=47651)
+    sp.add_argument("--world-limit", type=_positive_int, default=64)
+    sp.add_argument("--frame-limit", type=_positive_int, default=512)
+    sp.set_defaults(func=cmd_serve_rollout, json=False)
 
     sp = sub.add_parser("replay", help="Replay recorded snapshots")
     sp.add_argument("snapshot")

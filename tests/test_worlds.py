@@ -111,3 +111,10 @@ def test_worlds_preserve_empty_optional_source_arrays():
     source.geom_visual = np.zeros(2, np.uint8)
     with pytest.raises(ValueError, match="instance count"):
         WorldInstances(source, frame, np.zeros((2, 3)))
+
+
+@pytest.mark.parametrize("ids", [(1, 1), (-1, 2), (1.5, 2), (True, False), (1,), (0x50000000, 0)])
+def test_worlds_reject_ambiguous_original_identities(ids):
+    source, frame = template()
+    with pytest.raises(ValueError, match="world_ids"):
+        WorldInstances(source, frame, np.zeros((2, 3)), world_ids=ids)

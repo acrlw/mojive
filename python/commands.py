@@ -532,6 +532,37 @@ class SetEnvironment(Command):
 
 
 @dataclass(frozen=True)
+class SetReplayPlayback(Command):
+    """Change local clip playback without controlling the training server."""
+
+    paused: bool | None = None
+    speed: float | None = None
+    loop: bool | None = None
+
+
+@dataclass(frozen=True)
+class SeekReplay(Command):
+    """Pause and seek to one frame in the current local clip."""
+
+    frame: int
+
+
+@dataclass(frozen=True)
+class SyncRollout(Command):
+    """Request one rollout window in the background; never enqueue repeated requests."""
+
+    world_ids: tuple[int, ...] | None = None
+    frame_count: int | None = None
+
+
+@dataclass(frozen=True)
+class SetWorldSelection(Command):
+    """Choose original world IDs for bounded preview through ``world.selection``."""
+
+    world_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class SetPhysicsOptions(Command):
     """Patch world-wide simulation options through ``physics.options`` revision 1."""
 

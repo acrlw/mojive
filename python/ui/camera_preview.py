@@ -77,7 +77,7 @@ class CameraPreview:
         if image is None:
             self._bounds = None
             return
-        translate = translate or str
+        t = translate or str
         x, y, width, height = viewport
         scale = window.style_scale
         header_height = 25.0 * scale
@@ -107,8 +107,8 @@ class CameraPreview:
         ):
             imgui.end_child()
             return
-        pin_label = translate("Pinned" if self._pinned else "Pin")
-        lock_label = translate("Locked" if self._locked else "Lock")
+        pin_label = t("Pinned" if self._pinned else "Pin")
+        lock_label = t("Locked" if self._locked else "Lock")
         pin_width = imgui.calc_text_size(pin_label).x + 18.0 * scale
         lock_width = imgui.calc_text_size(lock_label).x + 18.0 * scale
         spacing = imgui.get_style().item_spacing.x
@@ -116,7 +116,7 @@ class CameraPreview:
             1.0,
             imgui.get_content_region_avail().x - pin_width - lock_width - 2.0 * spacing,
         )
-        title = f"{translate('Camera')} · {camera_name}"
+        title = f"{t('Camera')} · {camera_name}"
         imgui.button(title, imgui.ImVec2(title_width, header_height))
         if (
             not (self._pinned or self._locked)
@@ -128,9 +128,15 @@ class CameraPreview:
         imgui.same_line()
         if imgui.button(pin_label, imgui.ImVec2(pin_width, header_height)):
             self.set_pinned(not self._pinned)
+        imgui.set_item_tooltip(
+            t("Freeze the preview viewpoint and panel position. Scene motion continues.")
+        )
         imgui.same_line()
         if imgui.button(lock_label, imgui.ImVec2(lock_width, header_height)):
             self.set_locked(not self._locked)
+        imgui.set_item_tooltip(
+            t("Follow this camera even when selection changes. The camera can still move.")
+        )
         available = imgui.get_content_region_avail()
         uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
         uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)

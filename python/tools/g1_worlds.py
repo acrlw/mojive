@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import urllib.request
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -169,6 +170,54 @@ def prepare_lod(source, args):
     return lod_errors
 
 
+def geometry_switches(renderer, dance, args):
+    """Measure completed switch images separately from steady replay cadence."""
+    from PIL import Image
+
+    rows = []
+    for cycle in range(3):
+        for mode in ("collision", "both", "visual", "default"):
+            renderer.update(dance.update(0))
+            runtime = renderer._backend.runtime if args.worker == "bgfx" else None
+            before = runtime.resource_stats() if runtime else None
+            started = time.perf_counter()
+            renderer.set_geometry_view(mode)
+            switched = time.perf_counter()
+            image = renderer.render()
+            finished = time.perf_counter()
+            row = {
+                "cycle": cycle,
+                "view": mode,
+                "switch_ms": (switched - started) * 1000,
+                "first_image_ms": (finished - switched) * 1000,
+                "completed_ms": (finished - started) * 1000,
+                "instances": renderer._backend._builder.scene.count,
+            }
+            if args.mesh_lod:
+                deadline = time.perf_counter() + 120
+                while renderer._backend.target.frame.statistics.lod_meshes_pending:
+                    if time.perf_counter() > deadline:
+                        raise TimeoutError("Adaptive mesh preparation did not complete")
+                    image = renderer.render()
+            if runtime:
+                after = runtime.resource_stats()
+                row["mesh_uploads"] = after.mesh_uploads - before.mesh_uploads
+                row["texture_uploads"] = after.texture_uploads - before.texture_uploads
+            Image.fromarray(image).save(args.output / f"geometry-{mode}.png")
+            if cycle == 2:
+                samples = []
+                for index in range(args.warmup + args.frames):
+                    started = time.perf_counter()
+                    renderer.update(dance.update((index + 1) / 120))
+                    renderer.render()
+                    elapsed = (time.perf_counter() - started) * 1000
+                    if index >= args.warmup:
+                        samples.append(elapsed)
+                row["replay_update_readback_ms"] = distribution(samples)
+            rows.append(row)
+    return rows
+
+
 def worker(args):
     from PIL import Image
 
@@ -191,7 +240,7 @@ def worker(args):
         "samples": args.samples,
         "instances": source.instance_count,
         "shared_meshes": len(source.meshes),
-        "submitted_triangles_per_scene_pass": sum(
+        "source_triangles_per_scene_pass": sum(
             source.meshes[k].triangle_count if k in source.meshes else 2 for k in source.geom_mesh
         ),
         "unique_mesh_bytes": sum(
@@ -201,6 +250,7 @@ def worker(args):
         "prepare_s": prepared - started,
         "mode": "independent kinematic replay",
         "camera": args.camera,
+        "mesh_lod": args.mesh_lod,
         "mesh_ratio_requested": args.mesh_ratio,
         "mesh_error_limit": args.mesh_error,
         "mesh_error_max": max(lod_errors, default=0),
@@ -215,11 +265,23 @@ def worker(args):
     ) as renderer:
         uploaded = time.perf_counter()
         result["renderer_setup_s"] = uploaded - prepared
+        if args.mesh_lod and not renderer.set_flag("mesh_lod", True):
+            raise ValueError("Adaptive mesh LOD requires the bgfx renderer")
         renderer.update(dance.update(0))
         image = renderer.render()
         result["first_gpu_ready_s"] = time.perf_counter() - started
+        if args.mesh_lod:
+            lod_started = time.perf_counter()
+            while renderer._backend.target.frame.statistics.lod_meshes_pending:
+                if time.perf_counter() - lod_started > 120:
+                    raise TimeoutError("Adaptive mesh preparation did not complete")
+                image = renderer.render()
+            result["lod_settle_after_first_frame_s"] = time.perf_counter() - lod_started
+            result["lod_ready_since_setup_s"] = time.perf_counter() - uploaded
         Image.fromarray(image).save(args.output / "initial.png")
-        if args.capture:
+        if args.geometry_switches:
+            result["geometry_switches"] = geometry_switches(renderer, dance, args)
+        elif args.capture:
             for t in (0.0, 0.375, 2.25):
                 from mojive import CameraView
 
@@ -249,7 +311,17 @@ def worker(args):
                     args.output / f"frame-{t}.png"
                 )
         else:
-            values = {"replay_ms": [], "update_ms": [], "render_readback_ms": [], "total_ms": []}
+            values = {
+                key: []
+                for key in (
+                    "replay_ms",
+                    "update_ms",
+                    "render_readback_ms",
+                    "total_ms",
+                    "backend_submission_ms",
+                    "wait_readback_overhead_ms",
+                )
+            }
             out = np.empty_like(image)
             for i in range(args.warmup + args.frames):
                 a = time.perf_counter()
@@ -262,7 +334,14 @@ def worker(args):
                 if i >= args.warmup:
                     for key, value in zip(
                         values,
-                        ((b - a) * 1000, (c - b) * 1000, (d - c) * 1000, (d - a) * 1000),
+                        (
+                            (b - a) * 1000,
+                            (c - b) * 1000,
+                            (d - c) * 1000,
+                            (d - a) * 1000,
+                            renderer._backend.stats.frame_cpu_ms,
+                            (d - c) * 1000 - renderer._backend.stats.frame_cpu_ms,
+                        ),
                         strict=True,
                     ):
                         values[key].append(value)
@@ -276,10 +355,21 @@ def worker(args):
             if args.worker == "bgfx":
                 stats = renderer._backend.target.frame.statistics
                 result["gpu_ms_last"] = stats.gpu_ms if stats.gpu_ms >= 0 else None
+                result["cpu_pass_ms_last"] = stats.cpu_ms
+                result["gpu_pass_ms_last"] = stats.gpu_pass_ms
                 result["instance_upload_bytes_last"] = stats.upload_bytes
                 result["shadow_instances"] = stats.shadow_instances
                 result["culled_shadow_instances"] = stats.culled_shadow_instances
                 result["culled_instances"] = stats.culled_instances
+                for key in (
+                    "color_triangles",
+                    "shadow_triangles",
+                    "data_triangles",
+                    "lod_instances",
+                    "lod_meshes_ready",
+                    "lod_meshes_pending",
+                ):
+                    result[key] = getattr(stats, key)
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         result["peak_rss_bytes"] = rss if sys.platform == "darwin" else rss * 1024
     (args.output / "report.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -334,16 +424,43 @@ def show(args):
         samples=args.samples,
         title=f"G1 dance · {args.count} independent worlds",
     ) as viewer:
-        viewer.app.camera.adopt(scene_camera(dance, args.camera))
+        if args.mesh_lod:
+            viewer.app.backend.set_flag("mesh_lod", True)
+        viewer.set_camera(scene_camera(dance, args.camera))
+        if args.rpc_socket is not None:
+            print(f"Viewer RPC: {viewer.start_rpc(args.rpc_socket).socket_path}", flush=True)
         started = time.perf_counter()
+        samples = deque(maxlen=10000)
         while viewer.is_running():
-            dance.update(time.perf_counter() - started)
+            frame_started = time.perf_counter()
+            dance.update(frame_started - started)
             viewer.sync()
+            if args.capture:
+                stats = getattr(
+                    getattr(viewer.app.backend.target, "frame", None), "statistics", None
+                )
+                if not args.mesh_lod or (stats is not None and not stats.lod_meshes_pending):
+                    samples.append((time.perf_counter() - frame_started) * 1000)
             if args.duration and time.perf_counter() - started >= args.duration:
                 break
         if args.capture:
             args.output.mkdir(parents=True, exist_ok=True)
             viewer.capture(args.output / "viewer.png", surface="window")
+            warm = list(samples)[args.warmup :]
+            report = {
+                "worlds": args.count,
+                "mesh_lod": args.mesh_lod,
+                "camera": args.camera,
+                "camera_eye": np.asarray(viewer.session.camera.eye).tolist(),
+                "camera_target": np.asarray(viewer.session.camera.target).tolist(),
+                "viewport_resolution": [
+                    viewer.app.backend.target.width,
+                    viewer.app.backend.target.height,
+                ],
+                "measured_frames": len(warm),
+                "animation_and_viewer_sync_ms": distribution(warm) if warm else None,
+            }
+            (args.output / "viewer-report.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
 def publish(args):
@@ -555,6 +672,7 @@ def main():
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--samples", type=int, default=4)
+    parser.add_argument("--mesh-lod", action="store_true", help="Adaptive bgfx display detail")
     parser.add_argument("--mesh-ratio", type=float, default=1.0)
     parser.add_argument("--mesh-error", type=float, default=0.005)
     parser.add_argument("--frames", type=int, default=30)
@@ -562,8 +680,14 @@ def main():
     parser.add_argument("--worker", choices=("opengl", "bgfx"))
     parser.add_argument("--count", type=int, default=1)
     parser.add_argument("--capture", action="store_true")
+    parser.add_argument(
+        "--geometry-switches",
+        action="store_true",
+        help="Measure geometry-view switching in a worker",
+    )
     parser.add_argument("--parity-only", action="store_true")
     parser.add_argument("--view", action="store_true")
+    parser.add_argument("--rpc-socket", type=Path, help="Attach local agent control to --view")
     parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="bgfx")
     parser.add_argument("--duration", type=float, default=0)
     parser.add_argument("--transport-only", action="store_true")
@@ -574,6 +698,16 @@ def main():
     parser.add_argument("--publish", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, default=49100, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.geometry_switches and (not args.worker or args.capture):
+        parser.error("--geometry-switches requires --worker and cannot use --capture")
+    if args.rpc_socket is not None and not args.view:
+        parser.error("--rpc-socket requires --view")
+    if args.mesh_lod and (
+        args.worker != "bgfx" if args.worker else not args.view or args.renderer != "bgfx"
+    ):
+        parser.error("--mesh-lod requires --worker bgfx or --view --renderer bgfx")
+    if args.mesh_lod and args.mesh_ratio != 1:
+        parser.error("Choose adaptive LOD or explicit mesh simplification")
     if args.camera != "overview" and (args.monitor or args.publish or args.transport_only):
         parser.error("The detail camera applies to local rendering and viewer modes")
     if args.frames < 1 or args.warmup < 0 or args.duration < 0 or args.receive_hz <= 0:

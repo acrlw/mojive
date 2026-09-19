@@ -117,7 +117,7 @@ _CATEGORY_SEARCH_TERMS = {
     "Rendering": (
         "backend graphics device scene lights shadow casters quality performance balanced high",
         "debug view labels frames",
-        "opengl render flags outline tonemap msaa",
+        "renderer render flags outline tonemap msaa mesh lod detail",
     ),
     "MuJoCo Visuals": (
         "visual groups bvh depth geometry both collision color opacity",
@@ -152,8 +152,10 @@ def responsive_flag_groups(requested: int, available_width: float, style_scale: 
 
 
 def render_flag_label(flag: RenderFlag, translate, *, localized: bool) -> str:
-    """Keep official MuJoCo flag tokens intact while localizing OpenGL flags."""
+    """Keep official MuJoCo tokens intact and name renderer display controls."""
 
+    if flag == RenderFlag.MESH_LOD:
+        return translate("Mesh LOD")
     return translate(flag.value) if localized else flag.value
 
 
@@ -168,7 +170,7 @@ def flag_groups() -> tuple[tuple[str, tuple[RenderFlag, ...]], ...]:
     return (
         ("mjtRndFlag", _RND_FLAGS),
         ("mjtVisFlag", _VIS_FLAGS),
-        ("opengl", rest),
+        ("renderer", rest),
     )
 
 
@@ -600,10 +602,10 @@ class SettingsPanel(Panel):
                     ctx.set_shadow_quality(selected)
                 imgui.end_table()
 
-        opengl_flags = flag_groups()[-1][1]
-        if opengl_flags:
-            self._group_heading(t("OpenGL render flags"))
-            self._flag_table(ctx, "opengl_render_flags", opengl_flags, groups=3)
+        renderer_flags = flag_groups()[-1][1]
+        if renderer_flags:
+            self._group_heading(t("Renderer flags"))
+            self._flag_table(ctx, "renderer_flags", renderer_flags, groups=3)
 
         flags = imgui.TreeNodeFlags_.default_open if self._search else 0
         if imgui.collapsing_header(
@@ -1300,6 +1302,10 @@ class SettingsPanel(Panel):
         if not supported:
             imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{display_label}”")
             return
+        if flag == RenderFlag.MESH_LOD:
+            imgui.set_item_tooltip(
+                ctx.tr("Adaptive display detail; depth and picking use the displayed mesh")
+            )
         if changed and not ctx.backend.set_flag(flag, value):
             self._message = (
                 f"{display_label} · {ctx.tr('backend refused the change')} ({caps.name})"

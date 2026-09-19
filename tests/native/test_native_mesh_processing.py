@@ -52,3 +52,24 @@ def test_mesh_processing_rejects_invalid_input_before_native_algorithm(native):
     p[0, 0] = np.nan
     with pytest.raises(ValueError, match="finite"):
         native.simplify_mesh_indices(p, n, uv, indices, 0.5, 0.01)
+
+
+def test_public_lod_compacts_attributes_without_changing_triangles(native, monkeypatch):
+    from mojive.render.mesh_processing import simplify_mesh
+    from mojive.render.native import device
+    from mojive.types import MeshData
+
+    monkeypatch.setattr(device, "native_module", lambda: native)
+    p, n, uv, original = grid()
+    source = MeshData(p, n, uv, original)
+    indices, error = native.simplify_mesh_indices(p, n, uv, original, 0.1, 0.005)
+    lod = simplify_mesh(source, ratio=0.1)
+    assert len(lod.mesh.positions) < len(p) / 2
+    assert len(np.unique(lod.mesh.indices)) == len(lod.mesh.positions)
+    for before, after in ((p, lod.mesh.positions), (n, lod.mesh.normals), (uv, lod.mesh.uvs)):
+        np.testing.assert_array_equal(before[indices], after[lod.mesh.indices])
+    assert lod.relative_error == error
+    assert simplify_mesh(source, ratio=1).mesh is source
+    np.testing.assert_array_equal(source.indices, grid()[3])
+    assert not np.shares_memory(lod.mesh.positions, p)
+    assert lod.mesh.indices.dtype == np.uint32

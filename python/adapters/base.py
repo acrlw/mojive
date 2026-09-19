@@ -425,6 +425,70 @@ class PhysicsState:
 
 
 @dataclass(frozen=True)
+class WorldSelectionInfo:
+    """Recorded world identities and the bounded subset currently being evaluated."""
+
+    total_worlds: int
+    world_ids: tuple[int, ...]
+    max_worlds: int
+
+
+class WorldSelection(Protocol):
+    """Optional ``world.selection`` revision 1, independent of physics control.
+
+    IDs refer to original worlds, not positions in the displayed subset. A failed
+    change leaves the previous subset intact. Successful changes publish a new
+    structure revision; identical selections do no work.
+    """
+
+    def world_selection(self) -> WorldSelectionInfo: ...
+    def set_world_selection(self, world_ids: tuple[int, ...]) -> bool: ...
+
+
+@dataclass(frozen=True)
+class ReplayInfo:
+    """Local clip playback, independent of simulation and network publication."""
+
+    frame_index: int
+    frame_count: int
+    hz: float
+    paused: bool
+    speed: float
+    loop: bool
+    error: str = ""
+
+
+class ReplayControl(Protocol):
+    """Optional ``replay.control`` revision 1; seeking pauses on a complete frame."""
+
+    def replay_info(self) -> ReplayInfo: ...
+    def set_replay_playback(
+        self, *, paused: bool | None, speed: float | None, loop: bool | None
+    ) -> None: ...
+    def seek_replay(self, frame: int) -> None: ...
+
+
+@dataclass(frozen=True)
+class RolloutSyncInfo:
+    """One manual rollout fetch; the current clip survives a pending or failed fetch."""
+
+    pending: bool
+    revision: str
+    start_step: int
+    window_frames: int
+    max_frames: int
+    received_bytes: int = 0
+    error: str = ""
+
+
+class RolloutSync(Protocol):
+    """Optional ``replay.sync`` revision 1; at most one bounded background fetch."""
+
+    def rollout_sync_info(self) -> RolloutSyncInfo: ...
+    def sync_rollout(self, world_ids: tuple[int, ...] | None, frame_count: int | None) -> None: ...
+
+
+@dataclass(frozen=True)
 class PhysicsOption:
     """One world-wide physics setting exposed by an optional adapter extension.
 

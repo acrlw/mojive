@@ -82,7 +82,7 @@ contracts and do not replace production viewer acceptance.
 The G1 tools exercise independent pose streams with shared geometry:
 
 ```bash
-make g1-worlds MENAGERIE_ROOT=/path/to/mujoco_menagerie G1_WORLDS=1024
+make g1-worlds MENAGERIE_ROOT=/path/to/mujoco_menagerie G1_WORLDS=16
 make g1-worlds-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie
 make g1-worlds-transport MENAGERIE_ROOT=/path/to/mujoco_menagerie
 make g1-worlds-monitor-benchmark MENAGERIE_ROOT=/path/to/mujoco_menagerie

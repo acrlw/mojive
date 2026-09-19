@@ -1070,7 +1070,7 @@ cpp-python-test: cpp-python
 .PHONY: cpp-python-gpu
 cpp-python-gpu:
 	$(MAKE) cpp-python CPP_PYTHON_BGFX=ON CPP_PYTHON_BUILD=$(NATIVE_BUILD)
-	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q tests/native/test_native.py tests/native/test_native_render.py
+	MOJIVE_NATIVE_TEST_BUILD="$(abspath $(NATIVE_BUILD))" MOJIVE_NATIVE_SHADER_DIR="$(abspath $(NATIVE_BUILD)/shaders)" MOJIVE_NATIVE_SCENE="$(abspath $(NATIVE_SCENE))" $(PYTEST) -q tests/native/test_native.py tests/native/test_native_render.py tests/native/test_native_lod.py
 
 # Opt-in native development entry points use the existing Python Viewer and tools.
 .PHONY: native-python-build native-viewer native-editor native-viewer-test
@@ -1135,6 +1135,14 @@ native-ui-parity: native-python-build
 viewcube-transitions:
 	$(PY) -m mojive.tools.viewcube_transitions --renderer $(BACKEND) $(ARGS)
 
+.PHONY: camera-selection
+camera-selection:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_viewcube.py -k scene_camera
+
+.PHONY: file-receipt
+file-receipt:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_layout_input.py -k saved_file_receipt
+
 .PHONY: native-load-benchmark
 native-load-benchmark: native-python-build
 	MOJIVE_NATIVE_BUILD="$(NATIVE_BUILD)" $(PY) -m mojive.tools.native_load_benchmark --root "$(MENAGERIE_ROOT)" $(ARGS)
@@ -1145,13 +1153,49 @@ native-editor-benchmark: native-python-build
 
 # Reproducible monitoring stress: pinned motion, independent worlds, shared resources.
 G1_MODEL ?= $(MENAGERIE_ROOT)/unitree_g1/scene.xml
-G1_WORLDS ?= 1024
-.PHONY: g1-worlds g1-worlds-benchmark g1-worlds-transport
+G1_WORLDS ?= 16
+.PHONY: g1-worlds g1-worlds-benchmark g1-worlds-transport mesh-lod mesh-lod-example shadow-visibility
+shadow-visibility: native-python-build
+	cmake --build $(NATIVE_BUILD) --target mojive_native_visibility_test --parallel $(NATIVE_JOBS)
+	ctest --test-dir $(NATIVE_BUILD) -R '^native_visibility$$' --output-on-failure
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q tests/native/test_native_visibility.py
+
+mesh-lod: native-python-build
+	cmake --build $(NATIVE_BUILD) --target mojive_native_lod_test mojive_native_visibility_test --parallel $(NATIVE_JOBS)
+	ctest --test-dir $(NATIVE_BUILD) -R 'native_(lod|visibility)$$' --output-on-failure
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PYTEST) -q tests/native/test_native_lod.py
+mesh-lod-example: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) examples/mesh_lod.py $(ARGS)
 g1-worlds: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --view --count $(G1_WORLDS) $(ARGS)
 
 g1-worlds-benchmark: native-python-build
 	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download $(ARGS)
+
+.PHONY: g1-geometry-views
+g1-geometry-views: native-python-build
+	MOJIVE_NATIVE_BUILD="$(abspath $(NATIVE_BUILD))" $(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --worker $(BACKEND) --geometry-switches --camera detail --count $(G1_WORLDS) --output output/g1-geometry-views $(ARGS)
+
+.PHONY: g1-replay-generate g1-replay g1-replay-check
+G1_REPLAY_ARCHIVE ?= output/g1-replay/archive
+G1_REPLAY_WORLDS ?= 64
+G1_REPLAY_PREVIEW_WORLDS ?= 4
+g1-replay-generate:
+	$(PY) -m mojive.tools.g1_replay generate --model "$(G1_MODEL)" --worlds $(G1_REPLAY_WORLDS) --archive "$(G1_REPLAY_ARCHIVE)" $(ARGS)
+
+g1-replay:
+	$(PY) -m mojive.cli replay-joints "$(G1_REPLAY_ARCHIVE)" $(ARGS)
+
+g1-replay-check: native-python-build
+	$(PY) -m mojive.tools.g1_replay check --archive "$(G1_REPLAY_ARCHIVE)" --worlds $(G1_REPLAY_PREVIEW_WORLDS) $(ARGS)
+
+.PHONY: world-selection-check
+world-selection-check:
+	$(PY) -m mojive.tools.world_selection "$(G1_REPLAY_ARCHIVE)" $(ARGS)
+
+.PHONY: rollout-preview-check
+rollout-preview-check:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.rollout_preview "$(G1_REPLAY_ARCHIVE)" $(ARGS)
 
 g1-worlds-transport:
 	$(PY) -m mojive.tools.g1_worlds --model "$(G1_MODEL)" --download --transport-only $(ARGS)

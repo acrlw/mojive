@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
 from mojive import commands as cmd
 from mojive.adapters.base import (
     NodeType,
+    WorldSelection,
 )
 from mojive.commands import CommandResult
 from mojive.scene.geometry import scale_vector
@@ -16,6 +17,16 @@ from mojive.types import GeometryView
 
 if TYPE_CHECKING:
     from .. import Session
+
+
+def set_world_selection(self: Session, c: cmd.SetWorldSelection) -> CommandResult:
+    try:
+        changed = cast(WorldSelection, self._adapter).set_world_selection(c.world_ids)
+    except ValueError as error:
+        return CommandResult.bad(str(error))
+    if changed:
+        self._refresh_structure()
+    return CommandResult.good("World selection applied")
 
 
 def select(self: Session, c: cmd.Select) -> CommandResult:

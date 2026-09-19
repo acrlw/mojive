@@ -19,13 +19,31 @@ def test_control_socket_default_and_viewer_opt_in_are_consistent():
 
     parser = build_parser()
     assert parser.parse_args(["editor"]).rpc_socket is None
-    for command in (["editor"], ["view", "test_scene"]):
+    for command in (["editor"], ["view", "test_scene"], ["attach"], ["replay-joints", "archive"]):
         assert parser.parse_args([*command, "--rpc-socket"]).rpc_socket == str(DEFAULT_SOCKET)
         assert (
             parser.parse_args([*command, "--rpc-socket", "custom.sock"]).rpc_socket == "custom.sock"
         )
     assert parser.parse_args(["control", "hello"]).socket == str(DEFAULT_SOCKET)
     assert parser.parse_args(["rpc-serve", "test_scene"]).socket == str(DEFAULT_SOCKET)
+
+
+def test_joint_replay_cli_selection_is_bounded_and_explicit():
+    from mojive.cli.parser import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(["replay-joints", "archive"])
+    assert args.worlds is None and args.world_limit == 64
+    assert not args.play and args.window_frames == 128
+    remote = parser.parse_args(["replay-joints", "http://127.0.0.1:47651", "--play"])
+    assert remote.play
+    server = parser.parse_args(["serve-rollout", "archive"])
+    assert server.host == "127.0.0.1" and server.world_limit == 64
+    args = parser.parse_args(["replay-joints", "archive", "--world-ids", "4000", "7"])
+    assert args.world_ids == [4000, 7]
+    for flags in (["--worlds", "0"], ["--worlds", "2", "--world-ids", "7"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["replay-joints", "archive", *flags])
 
 
 def test_control_socket_uses_user_runtime_and_user_scoped_temp_fallback(tmp_path, monkeypatch):
@@ -36,6 +54,67 @@ def test_control_socket_uses_user_runtime_and_user_scoped_temp_fallback(tmp_path
     monkeypatch.delenv("XDG_RUNTIME_DIR")
     monkeypatch.setattr(protocol.tempfile, "gettempdir", lambda: str(tmp_path))
     assert protocol._default_socket() == tmp_path / f"mojive-{protocol.os.getuid()}/control.sock"
+
+
+@pytest.mark.parametrize("rpc_fails", [False, True])
+def test_attach_connects_control_to_the_same_viewer_and_releases_on_failure(monkeypatch, rpc_fails):
+    calls = []
+    adapter = object()
+
+    def connect(host, port):
+        calls.append(("connect", host, port))
+        return adapter
+
+    def start_rpc(**options):
+        calls.append(("rpc", str(options["socket_path"])))
+        if rpc_fails:
+            raise OSError("Socket unavailable")
+
+    viewer = SimpleNamespace(
+        start_rpc=start_rpc,
+        backend=SimpleNamespace(
+            set_flag=lambda name, value: calls.append(("flag", name.value, value)) or True,
+            set_debug_view=lambda value: calls.append(("debug", value.value)),
+        ),
+        run=lambda: calls.append(("run",)),
+        release=lambda: calls.append(("release",)),
+    )
+
+    def build(received, **options):
+        assert received is adapter
+        calls.append(("build", options["title"]))
+        return viewer
+
+    monkeypatch.setattr("mojive.remote.RemoteSceneAdapter", connect)
+    monkeypatch.setattr("mojive.app.composition.build_from_adapter", build)
+    result = cli.main(
+        [
+            "attach",
+            "--port",
+            "49120",
+            "--title",
+            "Training replay",
+            "--rpc-socket",
+            "replay.sock",
+            "--enable-render",
+            "mesh_lod",
+        ]
+    )
+    assert result == (2 if rpc_fails else 0)
+    assert calls[:3] == [
+        ("connect", "127.0.0.1", 49120),
+        ("build", "Training replay"),
+        ("rpc", "replay.sock"),
+    ]
+    assert calls[-1] == ("release",)
+    assert (("run",) in calls) is not rpc_fails
+
+
+def test_attach_rejects_invalid_rpc_options_before_connecting(monkeypatch):
+    monkeypatch.setattr(
+        "mojive.remote.RemoteSceneAdapter", lambda *_: pytest.fail("Invalid options connected")
+    )
+    assert cli.main(["attach", "--rpc-limits", "unused.json"]) == 2
 
 
 @pytest.mark.parametrize("argument", ["--params", "--params-file"])

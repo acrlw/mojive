@@ -260,6 +260,7 @@ class ViewerApp(
         if os.environ.get("MOJIVE_OPEN_SETTINGS") == "1":
             self.panels.open_panel("Settings")
         self._started = False
+        self._initial_camera_set = False
         self._released = False
         self._frame_index = 0
         self._last_time = time.perf_counter()
@@ -596,7 +597,8 @@ class ViewerApp(
             self.window = Window(WindowConfig(title=self.title))
             self.window.apply_theme(self.theme)
         self._sync_structure()
-        self._reset_source_camera()
+        if not self._initial_camera_set:
+            self._reset_source_camera()
         self.session.set_threaded_physics(self._threaded_physics)
         if self.window.config.show_on_start:
             self.window.show()

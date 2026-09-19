@@ -83,11 +83,16 @@ class _Status:
                 sim_step = 0
             else:
                 caps = self.session.adapter.caps
+                replay = self.session.replay_info
                 state = (
-                    "static"
-                    if not caps.simulation
+                    "paused"
+                    if replay and replay.paused
+                    else "replaying"
+                    if replay
                     else "external"
                     if caps.external_clock and not caps.clock_control
+                    else "static"
+                    if not caps.simulation
                     else "replaying"
                     if self.session.state_take_playing
                     else "paused"
@@ -287,15 +292,13 @@ class _Status:
         )
         actions_width = sum(button_widths) + gap
         available = max(1.0, width - 2 * (margin + padding))
-        text_width = imgui.calc_text_size(text).x
-        inline = text_width + gap + actions_width <= available
+        # Clipboard completion can extend the receipt while a button is held.
+        # Anchor actions to the viewport and choose rows from the stable filename,
+        # so asynchronous status text cannot move their hit targets mid-click.
+        inline = imgui.calc_text_size(path.name).x + gap + actions_width <= available
         stack_actions = actions_width > available
         text = fit_text(
             overlay, text, available - actions_width - gap if inline else available, middle=True
-        )
-        content_width = imgui.calc_text_size(text).x
-        content_width = (
-            content_width + gap + actions_width if inline else max(content_width, actions_width)
         )
         rows = 1 if inline else 3 if stack_actions else 2
         rows_height = imgui.get_frame_height() * rows + style.item_spacing.y * (rows - 1)
@@ -307,9 +310,7 @@ class _Status:
             | imgui.WindowFlags_.no_move
         )
         imgui.set_next_window_pos((x + margin, y + height - margin), pivot=(0, 1))
-        imgui.set_next_window_size(
-            (min(content_width, available) + 2 * padding, rows_height + 2 * padding)
-        )
+        imgui.set_next_window_size((available + 2 * padding, rows_height + 2 * padding))
         imgui.push_style_var(imgui.StyleVar_.window_padding, (padding, padding))
         imgui.push_style_color(imgui.Col_.window_bg, self.theme.bg_child)
         visible, _ = imgui.begin("##viewport-file-status", None, flags)
@@ -327,6 +328,8 @@ class _Status:
                     reveal_path(path)
             if inline:
                 imgui.same_line()
+            if not stack_actions:
+                imgui.set_cursor_pos_x(padding + available - actions_width)
             if imgui.button(f"{labels[0]}##status-open-folder"):
                 reveal_path(path)
             if not stack_actions:

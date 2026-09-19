@@ -154,6 +154,8 @@ def activate_edit_gizmo(ctx: PanelContext, node, joint=None) -> None:
 def publish_focus_item_hint(ctx: PanelContext) -> None:
     """Advertise the shared hierarchy/joint double-click focus gesture."""
 
+    if ctx.model_camera_id >= 0:
+        return
     publish_status_hint(
         ctx,
         pointer_tool_hint(

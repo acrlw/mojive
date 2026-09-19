@@ -26,13 +26,16 @@ MOJIVE_RENDERER=bgfx uv run --no-sync mojive view test_scene --adapter mujoco
 Asset arguments accept a filesystem path or a bundled asset name. The extension is optional for
 bundled assets. Use `mojive assets --quick` and `mojive backends` to inspect the current install.
 
-`--enable-render FLAG` is repeatable on `view`, `canvas`, `capture`, `record`, and `keyframes`.
+`--enable-render FLAG` is repeatable on `view`, `attach`, `replay-joints`, `canvas`, `capture`, `record`, and `keyframes`.
 Accepted values are `shadow`, `wireframe`, `reflection`, `additive`, `skybox`, `fog`, `haze`,
 `cull_face`, `convexhull`, `texture`, `joint`, `actuator`, `activation`, `camera`, `light`,
 `rangefinder`, `constraint`, `static`, `skin`, `flex_face`, `flex_skin`, `flex_vertex`,
 `flex_edge`, `contactpoint`, `contactforce`, `contactsplit`, `island`, `autoconnect`, `tendon`,
 `transparent`, `com`, `inertia`, `scaled_inertia`, `body_bvh`, `mesh_bvh`, `outline`, `tonemap`,
-`msaa`, `visual_geometry`, and `collision_geometry`.
+`msaa`, `mesh_lod`, `visual_geometry`, and `collision_geometry`.
+
+`mesh_lod` enables [adaptive display geometry](../concepts/rendering.md#adaptive-mesh-detail)
+on bgfx. It affects displayed color and data products and is off by default.
 
 Enable `visual_geometry` for appearance only, `collision_geometry` for collision shapes only,
 or both flags for a comparison overlay. Leaving both off preserves the default visual groups.
@@ -86,6 +89,27 @@ Open the dependency-free reference physics adapter.
 ```text
 mojive toy [--no-vsync]
 ```
+
+### `replay-joints`
+
+Preview selected worlds from a diagnostic compact joint archive or rollout URL using local FK.
+
+```text
+mojive replay-joints ARCHIVE_OR_URL [--worlds COUNT | --world-ids ID ...] [--world-limit COUNT]
+                            [--rpc-socket PATH] [--rpc-limits PATH] [--no-vsync]
+                            [--window-frames COUNT] [--play] [--enable-render FLAG ...]
+```
+
+The default count is up to 4, bounded by the recorded count and preview limit (64 by default).
+Playback starts paused; `--play` starts it immediately. HTTP(S) sources fetch 128 frames by
+default (`--window-frames`, range 2–512, also bounded by the server). File sources use the archive.
+Subsequent remote updates require **Sync latest rollout** or the `sync_rollout` RPC operation;
+ordinary playback never polls the server. The Keyframes panel offers pause, seek, step, loop,
+and speed controls. Space toggles local playback.
+IDs refer to the original recording. The Hierarchy panel and `set_world_selection` RPC can
+change the subset within that limit. Mesh LOD is off by default. See
+[selected-world replay](../tutorials/remote-viewing.md#selected-world-joint-replay) for archive
+requirements, selection semantics and current transport limitations.
 
 ## Rendering and output
 
@@ -193,6 +217,19 @@ mojive probe
 
 ## Remote viewing and replay
 
+### `serve-rollout`
+
+Expose an existing diagnostic archive as a bounded, manually fetched joint window.
+
+```text
+mojive serve-rollout ARCHIVE [--host HOST] [--port PORT]
+                             [--world-limit COUNT] [--frame-limit COUNT]
+```
+
+Defaults: `127.0.0.1:47651`, at most 64 worlds and 512 samples per request. The CLI serves a
+fixed archive; training code uses `RolloutStore.publish()` to replace the latest complete window.
+See [manual rollout windows](../tutorials/remote-viewing.md#manual-rollout-windows).
+
 ### `serve`
 
 Run simulation in a headless process and publish scene snapshots. `--record-snapshot` also appends
@@ -213,11 +250,16 @@ Open an independent viewer connected to `serve` or `replay`.
 
 ```text
 mojive attach [--host HOST] [--port PORT] [--title TITLE]
-              [--debug-view VIEW] [--no-vsync]
+              [--debug-view VIEW] [--no-vsync] [--enable-render FLAG ...]
+              [--rpc-socket [PATH]] [--rpc-limits PATH]
 ```
 
 Debug views: `shaded`, `albedo`, `normal`, `depth`, `segment`, `idcolor`, `overdraw`, and
 `wireframe`.
+
+`--rpc-socket` exposes this attached window to the normal local `mojive control` client.
+Local selection, viewport camera and captures affect the same window. Simulation writes still
+require capabilities advertised by the publisher. `--rpc-limits` requires `--rpc-socket`.
 
 ### `replay`
 

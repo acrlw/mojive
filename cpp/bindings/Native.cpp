@@ -10,6 +10,52 @@
 namespace nb = nanobind;
 using namespace mojive;
 namespace {
+template <typename T>
+bool composeInstancePoses(nb::ndarray<nb::numpy, const T, nb::shape<-1, 3>> positions,
+                          nb::ndarray<nb::numpy, const T, nb::shape<-1, 3, 3>> rotations,
+                          nb::ndarray<nb::numpy, const float, nb::shape<-1, 3>> scales,
+                          nb::ndarray<nb::numpy, const int64_t, nb::ndim<1>> sources,
+                          nb::ndarray<nb::numpy, const int64_t, nb::ndim<1>> order,
+                          nb::ndarray<nb::numpy, float, nb::shape<-1, 4, 4>, nb::c_contig> output) {
+    const auto count = sources.shape(0);
+    if (rotations.shape(0) != positions.shape(0) || scales.shape(0) != count ||
+        order.shape(0) != count || output.shape(0) != count)
+        throw std::invalid_argument("Inconsistent pose array lengths");
+    auto pos = positions.view();
+    auto rot = rotations.view();
+    auto scale = scales.view();
+    auto src = sources.view();
+    auto read = order.view();
+    auto out = output.view();
+    // Validate before writing: invalid input must not partially replace the last good frame.
+    for (size_t i = 0; i < count; ++i) {
+        if (src(i) < 0 || size_t(src(i)) >= positions.shape(0) || read(i) < 0 ||
+            size_t(read(i)) >= count)
+            throw std::invalid_argument("Pose index out of range");
+    }
+    bool changed = false;
+    for (size_t i = 0; i < count; ++i) {
+        const auto recipe = read(i);
+        const auto geom = src(recipe);
+        for (size_t r = 0; r < 3; ++r) {
+            for (size_t c = 0; c < 3; ++c) {
+                const float value = float(rot(geom, r, c)) * scale(recipe, c);
+                changed |= out(i, r, c) != value;
+                out(i, r, c) = value;
+            }
+            const float value = float(pos(geom, r));
+            changed |= out(i, r, 3) != value;
+            out(i, r, 3) = value;
+        }
+        for (size_t c = 0; c < 4; ++c) {
+            const float value = c == 3 ? 1.0f : 0.0f;
+            changed |= out(i, 3, c) != value;
+            out(i, 3, c) = value;
+        }
+    }
+    return changed;
+}
+
 auto matrixArray(Matrix value) {
     auto data = std::make_unique<Matrix>(value);
     nb::capsule owner(data.get(),
@@ -24,6 +70,16 @@ void bindRender(nb::module_ &);
 void bindMeshProcessing(nb::module_ &);
 void bindGeometry2D(nb::module_ &);
 NB_MODULE(_native, module) {
+    module.def("compose_instance_poses", &composeInstancePoses<float>,
+               nb::arg("positions").noconvert(), nb::arg("rotations").noconvert(),
+               nb::arg("scales").noconvert(), nb::arg("sources").noconvert(),
+               nb::arg("order").noconvert(), nb::arg("output").noconvert(),
+               nb::call_guard<nb::gil_scoped_release>());
+    module.def("compose_instance_poses", &composeInstancePoses<double>,
+               nb::arg("positions").noconvert(), nb::arg("rotations").noconvert(),
+               nb::arg("scales").noconvert(), nb::arg("sources").noconvert(),
+               nb::arg("order").noconvert(), nb::arg("output").noconvert(),
+               nb::call_guard<nb::gil_scoped_release>());
     bindMeshProcessing(module);
     bindGeometry2D(module);
     module.doc() = "Private Mojive runtime infrastructure; use the compatible Python facade.";

@@ -27,6 +27,7 @@ not required.
 | Example | Result |
 |---|---|
 | `offscreen_scene.py` | authored RGB, depth, and object-ID output without MuJoCo |
+| `mesh_lod.py` | shared native meshes with explicitly enabled background LOD preparation |
 | `agent_inspection.py` | RPC discovery, transactions, document lifecycle, and scene/viewport capture |
 | `programmatic_scene.py` | interactive scene without a physics backend |
 | `debug_draw.py` | retained lines, arrows, points, frames, and labels |
@@ -43,4 +44,5 @@ not required.
 | `compose_scene.py` | combined MJCF/URDF workspace or portable MJCF |
 | `remote_publish.py` | live latest-state publisher for independent viewers |
 | `record_replay.py` | `.fvs` snapshot recording |
+| `rollout_preview.py` | selected-world rollout publication and independent local playback |
 | `control_client.py` | persistent local RPC automation |

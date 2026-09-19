@@ -8,6 +8,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from contextlib import nullcontext
 from dataclasses import asdict
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -578,7 +579,7 @@ class ControlApplication:
             flag = next((item for item in RenderFlag if item.value == name.lower()), None)
         if flag is not None and (flag in CAPTURE_RENDER_FLAGS) != (family == "render"):
             flag = None
-        if flag in {RenderFlag.OUTLINE, RenderFlag.TONEMAP, RenderFlag.MSAA}:
+        if flag in {RenderFlag.OUTLINE, RenderFlag.TONEMAP, RenderFlag.MSAA, RenderFlag.MESH_LOD}:
             flag = None
         if flag is None:
             raise ControlError("invalid_params", f"Unknown {family} flag: {name}")
@@ -640,19 +641,39 @@ class ControlApplication:
     def _drop_renderer(self) -> None:
         self._capture_service.reset()
 
-    def _list_objects(self, _params=None) -> list[dict[str, Any]]:
+    def _list_objects(self, params=None) -> list[dict[str, Any]]:
         self.session.tick(FrameNeeds.none(), wall_dt=0.0)
-        return [_node_payload(node) for node in self.session.nodes]
+        params = params or {}
+        name = params.get("name", "").casefold()
+        kind, parent = params.get("type"), params.get("parent")
+        nodes = (
+            node
+            for node in self.session.nodes
+            if (not name or name in node.name.casefold())
+            and (kind is None or node.type == kind)
+            and (parent is None or node.parent == parent)
+        )
+        offset, limit = params.get("offset", 0), params.get("limit")
+        # Slice before constructing payloads: a small query must not serialize
+        # every entity in a large monitored scene on the viewer's UI thread.
+        return [
+            _node_payload(node)
+            for node in islice(nodes, offset, None if limit is None else offset + limit)
+        ]
 
-    def _scene(self, _params=None) -> dict[str, Any]:
-        objects = self._list_objects()
+    def _scene(self, params=None) -> dict[str, Any]:
+        self.session.tick(FrameNeeds.none(), wall_dt=0.0)
+        include_objects = (params or {}).get("include_objects", True)
         lo, hi = self.session.bounds()
         return {
             "document": document_state(self.session),
             "asset": str(self.session.asset_path or ""),
             "structure_generation": self.session.structure_generation,
             "bounds": {"minimum": np.asarray(lo).tolist(), "maximum": np.asarray(hi).tolist()},
-            "objects": objects,
+            "objects": [_node_payload(node) for node in self.session.nodes]
+            if include_objects
+            else [],
+            "object_count": len(self.session.nodes),
             "cameras": [
                 {
                     "camera_id": int(camera.camera_id),
@@ -702,6 +723,33 @@ class ControlApplication:
             },
             "panels": self._panels(),
         }
+
+    def _world_selection(self, _params=None) -> dict[str, Any]:
+        return asdict(self.session.world_selection)
+
+    def _replay_info(self, _params=None) -> dict[str, Any]:
+        return asdict(self.session.replay_info)
+
+    def _rollout_sync_info(self, _params=None) -> dict[str, Any]:
+        return asdict(self.session.rollout_sync_info)
+
+    def _viewer_stats(self, _params=None) -> dict[str, Any]:
+        app = self._require_viewer()
+        target = app.backend.target
+        return {
+            "sample_time": time.perf_counter(),
+            "presented_frames": app._frame_index,
+            "scene_step": self.session.frame.step,
+            "scene_time": self.session.frame.time,
+            "status_fps": app._frame_rate.value,
+            "viewport": [target.width, target.height],
+        }
+
+    def _set_viewport_geometry_view(self, params):
+        app = self._require_viewer()
+        if not app.backend.set_geometry_view(params["view"]):
+            raise ControlError("unsupported", "This renderer does not support geometry presets")
+        return {"view": params["view"]}
 
     def _reset_layout(self, _params=None) -> dict[str, bool]:
         app = self._require_viewer()

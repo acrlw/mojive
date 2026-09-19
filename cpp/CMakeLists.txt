@@ -46,6 +46,16 @@ if(MOJIVE_ENABLE_SANITIZERS)
     endforeach()
 endif()
 
+if(MOJIVE_BUILD_PYTHON OR MOJIVE_BUILD_BGFX)
+    # Reuse the MIT-licensed meshoptimizer sources pinned transitively by bgfx.
+    set(meshoptimizer_dir "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/bgfx/3rdparty/meshoptimizer/src")
+    add_library(mojive_mesh_processing STATIC src/MeshProcessing.cpp
+        "${meshoptimizer_dir}/allocator.cpp" "${meshoptimizer_dir}/simplifier.cpp")
+    set_target_properties(mojive_mesh_processing PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(mojive_mesh_processing PRIVATE "${meshoptimizer_dir}")
+    target_link_libraries(mojive_mesh_processing PUBLIC mojive_render_contract)
+endif()
+
 if(MOJIVE_BUILD_BGFX)
     if(APPLE)
         set(shader_platform osx)
@@ -80,7 +90,7 @@ if(MOJIVE_BUILD_BGFX)
     add_library(mojive_backend_bgfx STATIC src/bgfx/Renderer.cpp src/bgfx/UiPass.cpp src/Texture.cpp)
     set_target_properties(mojive_backend_bgfx PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(mojive_backend_bgfx PRIVATE "${bimg_SOURCE_DIR}/3rdparty/stb")
-    target_link_libraries(mojive_backend_bgfx PUBLIC mojive_render_core PRIVATE bgfx glm::glm)
+    target_link_libraries(mojive_backend_bgfx PUBLIC mojive_render_core PRIVATE bgfx glm::glm mojive_mesh_processing Threads::Threads)
     add_dependencies(mojive_backend_bgfx mojive_probe_shaders)
 endif()
 if(MOJIVE_BUILD_SDL)
@@ -156,6 +166,10 @@ if(BUILD_TESTING)
         target_link_libraries(mojive_native_visibility_test PRIVATE mojive_render_contract glm::glm)
         add_test(NAME native_visibility COMMAND mojive_native_visibility_test)
         set_tests_properties(native_visibility PROPERTIES LABELS cpu TIMEOUT 30)
+        add_executable(mojive_native_lod_test tests/MeshLod.cpp)
+        target_link_libraries(mojive_native_lod_test PRIVATE mojive_mesh_processing glm::glm Threads::Threads)
+        add_test(NAME native_lod COMMAND mojive_native_lod_test)
+        set_tests_properties(native_lod PROPERTIES LABELS cpu TIMEOUT 30)
     endif()
     add_executable(mojive_native_contract_test tests/Contract.cpp)
     target_link_libraries(mojive_native_contract_test PRIVATE mojive_render_core)
@@ -175,13 +189,6 @@ endif()
 
 if(MOJIVE_BUILD_PYTHON)
     include(cmake/Python.cmake)
-    # Reuse the MIT-licensed meshoptimizer sources pinned transitively by bgfx.
-    # Geometry processing has no renderer dependency and also builds without bgfx.
-    set(meshoptimizer_dir "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/bgfx/3rdparty/meshoptimizer/src")
-    add_library(mojive_mesh_processing STATIC src/MeshProcessing.cpp
-        "${meshoptimizer_dir}/allocator.cpp" "${meshoptimizer_dir}/simplifier.cpp")
-    target_include_directories(mojive_mesh_processing PRIVATE "${meshoptimizer_dir}")
-    target_link_libraries(mojive_mesh_processing PUBLIC mojive_render_contract)
     nanobind_add_module(_native NB_STATIC NOMINSIZE NOSTRIP
         bindings/Native.cpp bindings/MeshProcessing.cpp
         bindings/Geometry2D.cpp)

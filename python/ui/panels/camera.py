@@ -113,6 +113,9 @@ class CameraPanel(Panel):
             ):
                 ctx.select_model_camera(-1)
             imgui.text_disabled(ctx.tr("model camera follows scene kinematics"))
+            imgui.text_wrapped(
+                ctx.tr("Return to Editor Camera to orbit, pan, zoom, or frame objects.")
+            )
             return
 
         self._params(ctx, camera)
@@ -282,14 +285,14 @@ class CameraPanel(Panel):
             return
         by_id = {c.camera_id: c.name for c in cameras}
         current = (
-            ctx.tr("free")
+            ctx.tr("Editor Camera")
             if ctx.model_camera_id < 0
             else by_id.get(ctx.model_camera_id, ctx.tr("missing"))
         )
         imgui.set_next_item_width(-1)
         if not imgui.begin_combo("##camera_source", f"{ctx.tr('source')}: {current}"):
             return
-        selected, _ = imgui.selectable(ctx.tr("free"), ctx.model_camera_id < 0)
+        selected, _ = imgui.selectable(ctx.tr("Editor Camera"), ctx.model_camera_id < 0)
         if selected and ctx.select_model_camera is not None:
             ctx.select_model_camera(-1)
         for info in cameras:

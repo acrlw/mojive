@@ -161,7 +161,10 @@ class _Menus:
             self._draw_entity_menu(shortcut, can_edit)
             if self._begin_main_menu(t("View")):
                 frame_scene, _ = imgui.menu_item(
-                    t("Frame All"), self.input_bindings.label(InputAction.FRAME_SCENE), False
+                    t("Frame All"),
+                    self.input_bindings.label(InputAction.FRAME_SCENE),
+                    False,
+                    self._model_camera_id < 0,
                 )
                 if imgui.begin_menu(t("Capture")):
                     clicked, _ = imgui.menu_item(t("Scene Image"), f"{shortcut}+Shift+P", False)

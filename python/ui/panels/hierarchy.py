@@ -12,6 +12,7 @@ from mojive.geometry2d.curves import CORNER_SMOOTHING, smooth_polygon_corners
 from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.text_layout import text_line_y
+from mojive.ui.world_selection import WorldSelectionControl
 
 from ... import commands as cmd
 from ...adapters.base import FrameNeeds, NodeType, SceneNode
@@ -108,6 +109,7 @@ class HierarchyPanel(Panel):
         self._row_cache: list[tuple[SceneNode, int, bool]] = []
         self._show_type_column = True
         self._text_line_offset = 0.0
+        self._world_selection = WorldSelectionControl()
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -140,6 +142,7 @@ class HierarchyPanel(Panel):
 
     def draw(self, ctx: PanelContext) -> None:
         s = ctx.session
+        self._world_selection.draw(ctx)
         self._refresh(ctx)
         self._follow_selection(s)
 
