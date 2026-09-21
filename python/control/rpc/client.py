@@ -116,13 +116,19 @@ class RpcClient:
     def hello(self) -> dict[str, Any]:
         return self.call("hello")
 
-    def describe_operations(self, *, name=None, scope=None, available_only=False) -> dict[str, Any]:
+    def describe_operations(
+        self, *, name=None, scope=None, query=None, include_schemas=True, available_only=False
+    ) -> dict[str, Any]:
         """Read live operation schemas and availability, optionally filtering the catalog."""
         params = {"available_only": available_only}
         if name is not None:
             params["name"] = name
         if scope is not None:
             params["scope"] = scope
+        if query is not None:
+            params["query"] = query
+        if include_schemas is not True:
+            params["include_schemas"] = include_schemas
         return self.call("describe_operations", params)
 
     def get_state(self, *, observations: bool = True) -> dict[str, Any]:

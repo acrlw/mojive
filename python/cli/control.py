@@ -94,15 +94,11 @@ def cmd_control(args: argparse.Namespace) -> int:
 
 def cmd_operations(args: argparse.Namespace) -> int:
     """Describe installed operation contracts without starting a viewer or service."""
-    from mojive.control.errors import ControlError
-    from mojive.control.operations import OPERATIONS
+    from mojive.control.operations import find_operations
 
-    if args.name is not None and args.name not in OPERATIONS:
-        raise ControlError("unknown_method", f"Unknown control method: {args.name}")
-    selected = [OPERATIONS[args.name]] if args.name else OPERATIONS.values()
-    descriptions = [
-        item.specification() for item in selected if args.scope is None or item.scope == args.scope
-    ]
+    selected = find_operations(name=args.name, scope=args.scope, query=args.query)
+    include_schemas = not args.summary and (args.json or args.name is not None)
+    descriptions = [item.specification(include_schemas=include_schemas) for item in selected]
     if args.json:
         print(
             json.dumps(

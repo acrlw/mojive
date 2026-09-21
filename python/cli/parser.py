@@ -254,6 +254,8 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     sp = sub.add_parser("operations", help="Describe installed control schemas without a service")
     sp.add_argument("name", nargs="?", help="Optional operation name")
     sp.add_argument("--scope", choices=("scene", "capture", "viewport", "service"))
+    sp.add_argument("--query", help="Match all search terms against operation metadata")
+    sp.add_argument("--summary", action="store_true", help="Omit input and output schemas")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_operations)
     return p
