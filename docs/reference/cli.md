@@ -279,12 +279,20 @@ Read installed operation descriptions and JSON schemas without opening a window,
 or connecting to a service. An optional operation name returns its complete contract.
 
 ```text
-mojive operations [NAME] [--scope scene|capture|viewport|service] [--json]
+mojive operations [NAME] [--scope scene|capture|viewport|service]
+                  [--query TERMS] [--summary] [--json]
 ```
 
 This catalog comes from the same definitions as RPC validation. It does not report live
 availability or document identity. Use `control describe_operations` against the target viewer
 before applying edits; the running service can have a different version or adapter.
+
+`--query` matches all whitespace-separated terms, case-insensitively, against operation names,
+descriptions, scopes, and capability names. It combines with the exact name and scope filters.
+`--summary` omits input and output schemas; the JSON default retains complete schemas. For example,
+use `mojive operations --query camera --summary --json` to find camera operations, then
+`mojive operations set_capture_camera --json` to read the selected contract. The default text
+listing also avoids constructing schemas.
 
 ### `rpc-serve`
 

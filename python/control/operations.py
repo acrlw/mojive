@@ -214,8 +214,8 @@ class Operation:
             return "The scene contains no actuator controls"
         return None
 
-    def specification(self) -> dict:
-        """Return independent copies of the installed contract without runtime availability."""
+    def specification(self, *, include_schemas: bool = True) -> dict:
+        """Describe the installed contract, optionally without copying parameter/result schemas."""
         result = {
             "name": self.name,
             "version": self.version,
@@ -224,17 +224,22 @@ class Operation:
             "mutates": self.mutates,
             "transactional": self.transactional,
             "writes_document": self.writes_document,
-            "input_schema": deepcopy(self.input_schema),
-            "output_schema": deepcopy(self.output_schema),
             "requirements": {"capabilities": list(self.capabilities), "paused": self.paused},
         }
+        if include_schemas:
+            result.update(
+                input_schema=deepcopy(self.input_schema),
+                output_schema=deepcopy(self.output_schema),
+            )
         if self.alias_of:
             result["alias_of"] = self.alias_of
         return result
 
-    def describe(self, session, *, viewer_attached: bool = False) -> dict:
+    def describe(
+        self, session, *, viewer_attached: bool = False, include_schemas: bool = True
+    ) -> dict:
         """Return machine-readable schemas, scope, and current availability."""
-        result = self.specification()
+        result = self.specification(include_schemas=include_schemas)
         reason = self.unavailable_reason(session, viewer_attached=viewer_attached)
         result.update(available=reason is None, unavailable_reason=reason)
         return result
@@ -244,10 +249,22 @@ def _op(name, description, params=None, required=(), *, result=COMMAND_RESULT, *
     return Operation(name, description, obj(params, required), result, **options)
 
 
-def _cmd(name, kind, params=None, required=(), **options):
+def _cmd(name, kind, params=None, **options):
+    """Register an explicit wire schema with required fields and defaults from its command."""
     options.setdefault("writes_document", options.get("transactional", False))
     properties = deepcopy(params or {})
-    for item in fields(kind):
+    command_fields = {item.name: item for item in fields(kind) if item.init}
+    unknown = properties.keys() - command_fields.keys()
+    if unknown:
+        raise ValueError(f"{name}: unknown command parameters: {', '.join(sorted(unknown))}")
+    required = []
+    for item in command_fields.values():
+        if item.default is MISSING and item.default_factory is MISSING:
+            if item.name not in properties:
+                raise ValueError(
+                    f"{name}: missing schema for required command parameter {item.name}"
+                )
+            required.append(item.name)
         if item.name in properties:
             default = item.default
             if default is MISSING and item.default_factory is not MISSING:
@@ -329,9 +346,7 @@ _CATALOG = [
         },
         capabilities=("replay.control",),
     ),
-    _cmd(
-        "seek_replay", cmd.SeekReplay, {"frame": ID}, ("frame",), capabilities=("replay.control",)
-    ),
+    _cmd("seek_replay", cmd.SeekReplay, {"frame": ID}, capabilities=("replay.control",)),
     _op(
         "get_rollout_sync",
         "Read one manual rollout download's status, without network requests.",
@@ -371,7 +386,6 @@ _CATALOG = [
         "set_world_selection",
         cmd.SetWorldSelection,
         {"world_ids": {**array(ID), "minItems": 1, "uniqueItems": True}},
-        ("world_ids",),
         capabilities=("world.selection",),
     ),
     _op(
@@ -398,10 +412,15 @@ _CATALOG = [
     ),
     _op(
         "describe_operations",
-        "Describe operation schemas and current availability; filter by name or scope.",
+        "Discover operations by name, scope, or search terms; optionally omit schemas.",
         {
             "name": NAME,
             "scope": {"enum": ["scene", "capture", "viewport", "service"]},
+            "query": {
+                **STRING,
+                "description": "Case-insensitive terms matched against name, description, scope, and capabilities. All terms must match.",
+            },
+            "include_schemas": {**BOOLEAN, "default": True},
             "available_only": BOOLEAN,
         },
         result=DESCRIPTION_RESULT,
@@ -451,11 +470,9 @@ _CATALOG = [
         INSPECTED_NODE,
         handler="_inspect_object",
     ),
-    _cmd("select_object", cmd.Select, {"object_id": ID}, ("object_id",), handler="_select_object"),
-    _cmd("select_node", cmd.SelectNode, {"node_id": ID}, ("node_id",), handler="_select_node"),
-    _cmd(
-        "set_visible", cmd.SetVisible, {"node_id": ID, "visible": BOOLEAN}, ("node_id", "visible")
-    ),
+    _cmd("select_object", cmd.Select, {"object_id": ID}, handler="_select_object"),
+    _cmd("select_node", cmd.SelectNode, {"node_id": ID}, handler="_select_node"),
+    _cmd("set_visible", cmd.SetVisible, {"node_id": ID, "visible": BOOLEAN}),
     _cmd("pause", cmd.Pause, **_PHYSICS),
     _cmd("resume", cmd.Play, handler="_resume", **_PHYSICS),
     _op(
@@ -473,12 +490,11 @@ _CATALOG = [
         **_PHYSICS,
     ),
     _cmd("reset", cmd.Reset),
-    _cmd("set_speed", cmd.SetSpeed, {"factor": POSITIVE}, ("factor",), **_PHYSICS),
+    _cmd("set_speed", cmd.SetSpeed, {"factor": POSITIVE}, **_PHYSICS),
     _cmd(
         "set_keyframe",
         cmd.LoadKeyframe,
         {"keyframe_id": ID},
-        ("keyframe_id",),
         capabilities=("keyframes",),
         paused=True,
     ),
@@ -561,7 +577,6 @@ _CATALOG = [
         "mujoco.set_model_source",
         cmd.SetModelSource,
         {"model_id": ID, "mjcf": NAME},
-        ("model_id", "mjcf"),
         capabilities=("topology_editing", "mujoco.mjcf"),
         viewer_document_action="edit",
         paused=True,
@@ -580,7 +595,6 @@ _CATALOG = [
         "open_scene",
         cmd.OpenScene,
         {"path": NAME},
-        ("path",),
         capabilities=("scene_open",),
         viewer_document_action="open",
         writes_document=True,
@@ -589,7 +603,6 @@ _CATALOG = [
         "save_scene",
         cmd.SaveScene,
         {"path": NAME, "current_pose_keyframe": {"type": ["string", "null"]}},
-        ("path",),
         capabilities=("scene_save",),
         viewer_document_action="save",
         writes_document=True,
@@ -598,7 +611,6 @@ _CATALOG = [
         "set_pose",
         cmd.SetPose,
         {"node_id": ID, "position": VECTOR3, "rotation": ROTATION},
-        ("node_id", "position", "rotation"),
         capabilities=("write_pose",),
         paused=True,
         transactional=True,
@@ -607,7 +619,6 @@ _CATALOG = [
         "set_scale",
         cmd.SetScale,
         {"node_id": ID, "scale": array(POSITIVE, 3)},
-        ("node_id", "scale"),
         capabilities=("write_scale",),
         paused=True,
         transactional=True,
@@ -648,30 +659,26 @@ _CATALOG = [
             "color": RGBA,
             "material": MATERIAL,
         },
-        ("shape",),
         **_EDIT,
     ),
-    _cmd("remove_scene_object", cmd.RemoveSceneObject, {"object_id": ID}, ("object_id",), **_EDIT),
+    _cmd("remove_scene_object", cmd.RemoveSceneObject, {"object_id": ID}, **_EDIT),
     _cmd(
         "duplicate_scene_entity",
         cmd.DuplicateSceneEntity,
         {"object_id": ID},
-        ("object_id",),
         **_EDIT,
     ),
-    _cmd("remove_scene_entity", cmd.RemoveSceneEntity, {"object_id": ID}, ("object_id",), **_EDIT),
+    _cmd("remove_scene_entity", cmd.RemoveSceneEntity, {"object_id": ID}, **_EDIT),
     _cmd(
         "rename_scene_entity",
         cmd.RenameSceneEntity,
         {"object_id": ID, "name": NAME},
-        ("object_id", "name"),
         **_EDIT,
     ),
     _cmd(
         "set_geometry_color",
         cmd.SetGeometryColor,
         {"node_id": ID, "rgba": RGBA},
-        ("node_id", "rgba"),
         paused=True,
         transactional=True,
     ),
@@ -679,7 +686,6 @@ _CATALOG = [
         "set_geometry_size",
         cmd.SetGeometrySize,
         {"node_id": ID, "size": array(POSITIVE, 3)},
-        ("node_id", "size"),
         paused=True,
         transactional=True,
     ),
@@ -687,27 +693,24 @@ _CATALOG = [
         "add_scene_camera",
         cmd.AddSceneCamera,
         {"name": NAME, "camera": CAMERA},
-        ("name", "camera"),
         **_EDIT,
     ),
     _cmd(
         "set_scene_camera",
         cmd.SetSceneCamera,
         {"camera_id": ID, "camera": CAMERA},
-        ("camera_id", "camera"),
         capabilities=("model_cameras",),
         paused=True,
         transactional=True,
     ),
-    _cmd("remove_scene_camera", cmd.RemoveSceneCamera, {"camera_id": ID}, ("camera_id",), **_EDIT),
+    _cmd("remove_scene_camera", cmd.RemoveSceneCamera, {"camera_id": ID}, **_EDIT),
     _cmd(
         "add_scene_light",
         cmd.AddSceneLight,
         {"name": NAME, "light": LIGHT},
-        ("name", "light"),
         **_EDIT,
     ),
-    _cmd("remove_scene_light", cmd.RemoveSceneLight, {"light_id": ID}, ("light_id",), **_EDIT),
+    _cmd("remove_scene_light", cmd.RemoveSceneLight, {"light_id": ID}, **_EDIT),
     _cmd("undo", cmd.Undo, **_HISTORY),
     _cmd("redo", cmd.Redo, **_HISTORY),
     _op(
@@ -772,7 +775,6 @@ _CATALOG = [
         "set_visual_group",
         cmd.SetVisualGroup,
         {"category": NAME, "group": ID, "visible": BOOLEAN},
-        ("category", "group", "visible"),
         capabilities=("visual_groups",),
     ),
     _op(
@@ -933,6 +935,28 @@ _CATALOG = [
 ]
 
 OPERATIONS = {operation.name: operation for operation in _CATALOG}
+
+
+def find_operations(
+    *, name: str | None = None, scope: str | None = None, query: str | None = None
+) -> tuple[Operation, ...]:
+    """Select catalog entries before generating descriptions; preserve registration order."""
+    if name is not None and name not in OPERATIONS:
+        raise ControlError("unknown_method", f"Unknown control method: {name}")
+    selected = (OPERATIONS[name],) if name is not None else OPERATIONS.values()
+    terms = (query or "").casefold().split()
+    return tuple(
+        operation
+        for operation in selected
+        if (scope is None or operation.scope == scope)
+        and all(
+            term
+            in " ".join(
+                (operation.name, operation.description, operation.scope, *operation.capabilities)
+            ).casefold()
+            for term in terms
+        )
+    )
 
 
 def document_state(session) -> dict:

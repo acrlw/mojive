@@ -8,4 +8,5 @@ from mojive.control.operations import OPERATIONS as OPERATIONS
 from mojive.control.operations import Operation as Operation
 from mojive.control.operations import apply_session_operation as apply_session_operation
 from mojive.control.operations import document_state as document_state
+from mojive.control.operations import find_operations as find_operations
 from mojive.control.operations import prepare_operation as prepare_operation

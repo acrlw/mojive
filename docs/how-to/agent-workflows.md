@@ -24,13 +24,17 @@ Begin with capabilities and the current scene. CLI commands below use the defaul
 
 ```bash
 uv run --no-sync mojive control hello --json
-uv run --no-sync mojive control get_scene --json
+uv run --no-sync mojive control get_scene --params '{"include_objects":false}' --json
+uv run --no-sync mojive control describe_operations --params '{"query":"edit","include_schemas":false}' --json
 uv run --no-sync mojive control describe_operations --params '{"name":"edit_scene"}' --json
 ```
 
 For repeated operations, use one `RpcClient`; `examples/control_client.py` is a small starting
-point. Discover each needed operation by name, reuse its schema, and refresh availability after
-relevant state changes. Use returned entity IDs and current document tokens as described in
+point. Search summaries by `query` and optional `scope`, then read each needed operation's schema
+by name. Reuse its schema and refresh availability after relevant state changes. Locate entities
+with filtered, bounded `list_objects` queries; the scene summary does not serialize the hierarchy.
+Compute and filter intermediate results in Python before returning them to the agent.
+Use returned entity IDs and current document tokens as described in
 [document editing](rpc-control.md#edit-a-document). Inspect the resulting state and, for visual
 changes, the appropriate scene or presented-viewer capture. Capture metadata identifies the frame
 and structure generation; separate calls on a running or externally clocked simulation may observe
@@ -69,7 +73,8 @@ RPC capture on macOS, where the graphics worker cannot create an OpenGL context.
 OpenGL viewer renders on the UI thread. Select the relevant mode and renderer using the
 [verification matrix](../guides/testing.md#change-mapping).
 
-The example creates an isolated authored scene and service, discovers its object and camera IDs,
+The example creates an isolated authored scene and service, searches operation summaries, reads
+the selected schema, and discovers object and camera IDs through bounded queries. It
 hides a box, verifies that its selection pixels disappear, then restores it. The plane and sphere
 remain visible. It writes RGB images, object-ID arrays, and `report.json` under the output
 directory. It then edits position, size, color, and name in one transaction, reads back the edited

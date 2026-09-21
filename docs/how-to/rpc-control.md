@@ -211,19 +211,27 @@ input tail latency. This is a pump-policy comparison, not a comparison of whole 
 ## Discover operations
 
 `hello` lists recognized `methods`, currently `available_methods`, adapter capabilities, and
-whether a viewer is attached. Query the schema for the operation you need:
+whether a viewer is attached. Search metadata first, then query the schema for the operation you need:
 
 ```bash
+uv run --no-sync mojive control describe_operations --params '{"query":"camera","include_schemas":false}' --json
 uv run --no-sync mojive control describe_operations --params '{"name":"add_scene_object"}' --json
-uv run --no-sync mojive control describe_operations --params '{"scope":"viewport","available_only":true}' --json
+uv run --no-sync mojive control describe_operations --params '{"scope":"viewport","include_schemas":false,"available_only":true}' --json
 ```
 
-Each description includes JSON Schema Draft 2020-12 `input_schema` and `output_schema`, defaults,
+`query` splits on whitespace and matches every term, case-insensitively, against the operation's
+name, description, scope, and capability names. It combines with exact `name` and `scope` filters;
+results retain catalog order. Empty queries match all operations. An unknown exact `name` is an
+error; an unmatched search returns an empty list.
+
+Descriptions include JSON Schema Draft 2020-12 `input_schema` and `output_schema`, defaults,
 `scope`, `mutates`, `transactional`, `writes_document`, requirements, and current
-`available`/`unavailable_reason`.
+`available`/`unavailable_reason`. Set `include_schemas: false` to omit both schemas without copying
+them; all other metadata remains available. Schema inclusion defaults to true for compatibility.
 Availability reflects the adapter, pause state, history, and viewer attachment. Refresh it after
 state changes. Input validation rejects missing, unknown, incorrectly typed, and non-finite
 parameters before dispatch. Python clients can call `client.describe_operations(name="edit_scene")`.
+Use `client.describe_operations(query="camera", include_schemas=False)` to search summaries.
 The catalog in `control/operations.py` drives both discovery and dispatch. Result schemas describe
 scene inspection, physics array shapes/values, camera bookmarks, viewer settings, and discovery
 records. Native remote authoring commands consume and check `expected_document` before command

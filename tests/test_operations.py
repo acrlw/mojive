@@ -2,12 +2,13 @@
 
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 
 import numpy as np
 import pytest
 
 from mojive import Scene, SharedImage
+from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.control.operations import OPERATIONS, apply_session_operation, document_state
 from mojive.control.rpc import ControlService, RpcError
@@ -295,9 +296,9 @@ def test_discovery_has_valid_schemas_defaults_handlers_and_dynamic_availability(
         operation = OPERATIONS[item["name"]]
         if operation.handler:
             assert callable(getattr(service.application, operation.handler))
-        for field in item["input_schema"]["properties"].values():
-            if "default" in field:
-                Validator(field).validate(field["default"])
+        for parameter_schema in item["input_schema"]["properties"].values():
+            if "default" in parameter_schema:
+                Validator(parameter_schema).validate(parameter_schema["default"])
     by_name = {item["name"]: item for item in description["operations"]}
     assert by_name["add_scene_object"]["available"]
     assert not by_name["undo"]["available"]
@@ -317,6 +318,74 @@ def test_discovery_has_valid_schemas_defaults_handlers_and_dynamic_availability(
         "list_objects",
     ):
         invoke(service, method)
+
+
+def test_command_registration_derives_wire_requirements_and_defaults():
+    from mojive.control.operations import _cmd
+    from mojive.control.schema import ID, STRING, array
+
+    @dataclass(frozen=True)
+    class ExampleCommand(cmd.Command):
+        object_id: int
+        label: str = "untitled"
+        tags: list[str] = field(default_factory=lambda: ["draft"])
+        internal: bool = False
+
+    operation = _cmd(
+        "example", ExampleCommand, {"object_id": ID, "label": STRING, "tags": array(STRING)}
+    )
+    assert operation.input_schema["required"] == ["object_id"]
+    assert "internal" not in operation.input_schema["properties"]
+    with pytest.raises(RpcError, match="object_id"):
+        operation.validate({"label": "missing target"})
+    command = operation.command(operation.validate({"object_id": 7}))
+    assert command == ExampleCommand(7)
+    properties = operation.specification()["input_schema"]["properties"]
+    assert properties["label"]["default"] == command.label
+    assert properties["tags"]["default"] == command.tags
+    properties["tags"]["default"].append("changed")
+    assert operation.command({"object_id": 7}).tags == ["draft"]
+
+
+def test_command_registration_rejects_incomplete_or_misspelled_wire_parameters():
+    from mojive.control.operations import _cmd
+    from mojive.control.schema import ID, STRING
+
+    with pytest.raises(ValueError, match=r"missing schema.*name"):
+        _cmd("rename", cmd.RenameSceneEntity, {"object_id": ID})
+    with pytest.raises(ValueError, match="unknown command parameters: naem"):
+        _cmd("rename", cmd.RenameSceneEntity, {"object_id": ID, "naem": STRING})
+
+
+def test_summary_discovery_searches_metadata_and_keeps_live_availability(service, monkeypatch):
+    from mojive.control import operations
+
+    # Summary discovery must not build the full schemas just to discard them.
+    monkeypatch.setattr(operations, "deepcopy", lambda _: pytest.fail("Copied a schema"))
+    summary = invoke(
+        service,
+        "describe_operations",
+        query="  PRIMITIVE scene_authoring  ",
+        scope="scene",
+        include_schemas=False,
+    )
+    assert [item["name"] for item in summary["operations"]] == ["add_scene_object"]
+    item = summary["operations"][0]
+    assert "input_schema" not in item and "output_schema" not in item
+    assert item["available"] and item["transactional"] and item["writes_document"]
+    assert item["requirements"]["capabilities"] == ["scene_authoring"]
+    assert not invoke(service, "describe_operations", query="absent operation")["operations"]
+    assert not invoke(service, "describe_operations", name="capture", scope="scene")["operations"]
+    assert not invoke(
+        service, "describe_operations", name="undo", include_schemas=False, available_only=True
+    )["operations"]
+
+
+@pytest.mark.parametrize("params", [{"query": 1}, {"include_schemas": "false"}])
+def test_discovery_rejects_invalid_search_options(service, params):
+    with pytest.raises(RpcError) as error:
+        invoke(service, "describe_operations", **params)
+    assert error.value.code == "invalid_params"
 
 
 @pytest.mark.parametrize(

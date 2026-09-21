@@ -152,6 +152,46 @@ Retain a focused regression that fails on the previous implementation. Check the
 path and the affected failure/recovery path, including undo/redo for document transactions.
 Use the [verification matrix](testing.md#change-mapping) for the applicable completion gates.
 
+## Public control operations
+
+Keep pure calculations and reusable workflow helpers in ordinary Python modules. Register an
+operation when an external caller needs to query or change a running Session. A helper that
+composes existing `RpcClient` calls does not need another RPC method. Related entity properties
+can share one typed operation; each internal function or property does not need a separate tool.
+
+`control/operations.py` owns the public operation catalog. For an existing typed command, use
+`_cmd` with an explicit schema for each exposed parameter:
+
+```python
+_cmd(
+    "set_pose",
+    cmd.SetPose,
+    {"node_id": ID, "position": VECTOR3, "rotation": ROTATION},
+    capabilities=("write_pose",),
+    paused=True,
+    transactional=True,
+)
+```
+
+Required parameters and defaults come from the command dataclass; its docstring supplies the
+description. Registration rejects unknown parameter names and missing schemas for required
+constructor arguments. Optional internal command fields may remain unexposed. Keep wire types,
+units, reference frames, capability requirements, and transaction behavior explicit: Python type
+hints alone cannot express these contracts. Use `_op` or `Operation` for queries and operations
+whose wire parameters need custom application handling.
+
+RPC dispatch, native remote authoring, discovery, and the generic CLI reuse this catalog. New
+transports, including an MCP adapter, should derive descriptions from the same entries and route
+calls through the existing application boundary. A transport controlling an attached viewer must
+preserve its RPC queue and Session ownership. Domain modules should not import a tool protocol.
+
+`find_operations` filters metadata before constructing descriptions. Use
+`operation.specification(include_schemas=False)` for an installed summary and
+`operation.describe(session, include_schemas=False)` for live availability. Read full schemas
+only for selected operations; do not maintain a parallel command list in the Skill. Cover the
+new operation's observable behavior and recovery, then use the
+[scene-control verification gates](testing.md#change-mapping).
+
 ## Collaboration and commits
 
 `AGENTS.md` contains repository instructions; this guide describes implementation conventions,

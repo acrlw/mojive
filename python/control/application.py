@@ -30,6 +30,7 @@ from mojive.control.operations import (
     _check_document_precondition,
     _check_pending_edits,
     document_state,
+    find_operations,
     prepare_operation,
 )
 from mojive.control.schema import json_value
@@ -187,15 +188,16 @@ class ControlApplication:
         return self.rpc_stats()
 
     def _describe_operations(self, params):
-        selected = list(OPERATIONS.values())
-        if "name" in params:
-            if params["name"] not in OPERATIONS:
-                raise ControlError("unknown_method", f"Unknown control method: {params['name']}")
-            selected = [OPERATIONS[params["name"]]]
-        if "scope" in params:
-            selected = [item for item in selected if item.scope == params["scope"]]
+        selected = find_operations(
+            name=params.get("name"), scope=params.get("scope"), query=params.get("query")
+        )
         descriptions = [
-            item.describe(self.session, viewer_attached=self.app is not None) for item in selected
+            item.describe(
+                self.session,
+                viewer_attached=self.app is not None,
+                include_schemas=params.get("include_schemas", True),
+            )
+            for item in selected
         ]
         if params.get("available_only"):
             descriptions = [item for item in descriptions if item["available"]]

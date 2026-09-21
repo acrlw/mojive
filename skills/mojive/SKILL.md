@@ -24,10 +24,14 @@ and the [RPC guide](../../docs/how-to/rpc-control.md) for protocol details.
 
 ## RPC tasks
 
-Start a connection with `hello` and `get_scene`. Use `describe_operations` filtered by `name`
-for each needed operation's live schema and availability reason. Reuse schemas within the
-connection and refresh availability after relevant state changes. Keep one `RpcClient` for a
-multi-step task; individual shell calls use `mojive control METHOD --params 'JSON_OBJECT' --json`.
+Start with `hello` and `get_scene` using `include_objects: false`. Find targets through
+`list_objects` with name/type/parent filters and a bounded `limit`, then inspect their returned IDs.
+For an unfamiliar capability, search `describe_operations` with `query` and
+`include_schemas: false`, optionally narrowed by `scope`. Query each needed operation by `name`
+with schemas included before calling it. Summaries retain current availability and its reason.
+Reuse schemas within the connection and refresh availability after relevant state changes.
+Keep one `RpcClient` for a multi-step task; use Python to compute and filter intermediate results.
+Individual shell calls use `mojive control METHOD --params 'JSON_OBJECT' --json`.
 
 Locate entities by metadata, then use returned IDs. `object_id` selects an entity and identifies
 pixels; `node_id` addresses its hierarchy entry; `camera_id` addresses a camera. Read the named

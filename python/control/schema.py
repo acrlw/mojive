@@ -434,8 +434,26 @@ OPERATION_DESCRIPTION = record(
     }
 )
 OPERATION_DESCRIPTION["properties"]["alias_of"] = NAME
+OPERATION_SUMMARY = {
+    **OPERATION_DESCRIPTION,
+    "properties": {
+        name: value
+        for name, value in OPERATION_DESCRIPTION["properties"].items()
+        if name not in {"input_schema", "output_schema"}
+    },
+    "required": [
+        name
+        for name in OPERATION_DESCRIPTION["required"]
+        if name not in {"input_schema", "output_schema"}
+    ],
+    "not": {"anyOf": [{"required": ["input_schema"]}, {"required": ["output_schema"]}]},
+}
 DESCRIPTION_RESULT = record(
-    {"schema_dialect": NAME, "document": DOCUMENT, "operations": array(OPERATION_DESCRIPTION)}
+    {
+        "schema_dialect": NAME,
+        "document": DOCUMENT,
+        "operations": array({"oneOf": [OPERATION_DESCRIPTION, OPERATION_SUMMARY]}),
+    }
 )
 CAPTURE_SETTINGS_RESULT = record(
     {

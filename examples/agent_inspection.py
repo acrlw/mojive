@@ -32,10 +32,18 @@ def inspection_scene() -> Scene:
 def exercise(socket_path: Path, output: Path) -> None:
     with RpcClient(socket_path, timeout=20) as client:
         capabilities = client.hello()
+        discovery = client.describe_operations(query="atomic undo", include_schemas=False)
+        assert [item["name"] for item in discovery["operations"]] == ["edit_scene"]
+        assert "input_schema" not in discovery["operations"][0]
         schema = client.describe_operations(name="edit_scene")
         assert schema["operations"][0]["available"]
-        metadata = client.call("get_scene")
-        node = next(item for item in metadata["objects"] if item["name"] == "inspection-box")
+        metadata = client.call("get_scene", {"include_objects": False})
+        assert metadata["objects"] == [] and metadata["object_count"] > 0
+        matches = client.call(
+            "list_objects", {"name": "inspection-box", "type": "link", "limit": 2}
+        )
+        assert len(matches) == 1
+        node = matches[0]
         inspected = client.call("inspect_object", {"object_id": node["object_id"]})
         geometry = inspected["geometries"][0]
         camera = next(item for item in metadata["cameras"] if item["name"] == "inspection")
@@ -144,7 +152,7 @@ def exercise(socket_path: Path, output: Path) -> None:
         client.call("save_scene", {"path": str(saved)})
         client.call("new_scene")
         client.call("open_scene", {"path": str(saved)})
-        reopened = client.call("get_scene")
+        reopened = client.call("get_scene", {"include_objects": False})
         assert reopened["document"]["id"] != metadata["document"]["id"]
         try:
             client.call(
@@ -172,6 +180,7 @@ def exercise(socket_path: Path, output: Path) -> None:
                 captures.append(result)
         report = {
             "capabilities": capabilities,
+            "discovery": discovery,
             "transaction_schema": schema,
             "object": node,
             "visible_pixels": counts,

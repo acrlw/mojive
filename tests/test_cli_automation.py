@@ -227,6 +227,30 @@ def test_offline_catalog_filters_and_unknown_names(capsys):
     assert json.loads(capsys.readouterr().out)["error"]["code"] == "unknown_method"
 
 
+def test_offline_summary_search_matches_live_metadata(capsys):
+    from mojive.adapters.static import StaticSceneAdapter
+    from mojive.scene import Scene
+
+    query = "  CAMERA capture  "
+    assert cli.main(["operations", "--query", query, "--summary", "--json"]) == 0
+    offline = json.loads(capsys.readouterr().out)["operations"]
+    service = ControlService(StaticSceneAdapter(Scene()))
+    try:
+        live = service.dispatch("describe_operations", {"query": query, "include_schemas": False})[
+            "operations"
+        ]
+        for item in live:
+            item.pop("available")
+            item.pop("unavailable_reason")
+        assert offline == live
+        assert "set_capture_camera" in {item["name"] for item in offline}
+        assert all("input_schema" not in item and "output_schema" not in item for item in offline)
+        assert cli.main(["operations", "--query", "does_not_exist", "--summary", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["operations"] == []
+    finally:
+        service.close()
+
+
 def test_offline_catalog_does_not_start_application_or_graphics():
     subprocess.run(
         [
@@ -306,6 +330,12 @@ def test_cli_pipe_executes_and_reads_back_one_real_edit(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        with RpcClient(server.socket_path) as client:
+            summary = client.describe_operations(query="primitive", include_schemas=False)
+            assert [item["name"] for item in summary["operations"]] == ["add_scene_object"]
+            assert "input_schema" not in summary["operations"][0]
+            contract = client.describe_operations(name=summary["operations"][0]["name"])
+            assert contract["operations"][0]["input_schema"]["required"] == ["shape"]
         args = [sys.executable, "-m", "mojive.cli", "control"]
         common = ["--socket", str(server.socket_path), "--json"]
         result = subprocess.run(
