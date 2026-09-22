@@ -448,6 +448,15 @@ message remains in Output: right-click it and choose **Copy path**. Select ordin
 records and use Ctrl/Cmd+C to copy their message bodies.
 Use `make take-video` (or `BACKEND=bgfx`) for native controls and decoded-video acceptance.
 
+**Settings > Interaction > Perturb** provides independent **Drag force scale** and
+**Twist torque scale** multipliers from 0x to 20x (default 1x). They scale the physical
+perturbation wrench, including damping, without changing mouse sensitivity or policy
+controls. Translation also scales its moment-arm torque. Zero disables that gesture's
+force or torque; the value-reset mouse binding restores 1x. Changes persist as
+`perturb_force_scale` and `perturb_torque_scale` in the viewer settings file. They work
+in managed and passive MuJoCo viewers; adapters without strength support retain unit
+strength and show disabled controls.
+
 Open **View > Layers...** or **Window > Layers** to control viewport content during everyday
 viewing and recording. The panel docks outside the viewport. Its switches control viewport
 controls, transform and joint gizmos, selection feedback, camera/light helpers, perturbation

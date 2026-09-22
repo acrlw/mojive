@@ -108,6 +108,36 @@ def test_changing_mode_and_grab_point_replaces_the_previous_force(adapter):
     assert not adapter.data.xfrc_applied[:, :3].any()
 
 
+@pytest.mark.parametrize("mode", ["translate", "rotate"])
+@pytest.mark.parametrize("strength", [0.0, 0.5, 2.0, 5.0])
+def test_strength_scales_the_complete_wrench_without_accumulating(adapter, mode, strength):
+    from mojive.adapters.workspace import WorkspaceAdapter
+    from mojive.commands import Perturb
+    from mojive.session import Session
+
+    session = Session(WorkspaceAdapter(adapter))
+    try:
+        node = next(n for n in session.nodes if n.name == "offset")
+        adapter.data.qvel[:] = np.linspace(-0.3, 0.4, adapter.model.nv)
+        mujoco.mj_forward(adapter.model, adapter.data)
+        position = adapter.data.xpos[1] + [0.01, 0.02, 0.005]
+        rotation = math3d.rotvec_to_mat3([0.1, -0.2, 0.3]) @ adapter.data.xmat[1].reshape(3, 3)
+        local = np.array([0.019, 0.023, 0.004])
+        assert session.submit(Perturb(node.node_id, position, rotation, mode, local))
+        baseline = adapter.data.xfrc_applied.copy()
+        assert np.linalg.norm(baseline) > 0
+        for _ in range(3):
+            assert session.submit(Perturb(node.node_id, position, rotation, mode, local, strength))
+            np.testing.assert_allclose(adapter.data.xfrc_applied, baseline * strength)
+        for invalid in (-1, np.inf, np.nan):
+            assert not session.submit(
+                Perturb(node.node_id, position, rotation, mode, local, invalid)
+            )
+            np.testing.assert_allclose(adapter.data.xfrc_applied, baseline * strength)
+    finally:
+        session.release()
+
+
 @pytest.mark.parametrize("workspace", [False, True])
 def test_controller_drag_routes_through_session_and_physics_worker(adapter, workspace):
     import time

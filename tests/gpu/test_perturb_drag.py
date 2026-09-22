@@ -1,7 +1,9 @@
 """Exercise held Control drags through the real viewport and physics command path."""
 
+import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -15,6 +17,81 @@ from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.perturb import project
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
+
+
+def _edit_strength(viewer, label, value):
+    from mojive.tools.ui_runtime import _click, _item_center
+
+    native = imgui.drag_float
+
+    def scroll_to_field(item_label, *args, **kwargs):
+        result = native(item_label, *args, **kwargs)
+        if item_label == label:
+            imgui.set_scroll_here_y(0.45)
+        return result
+
+    with patch.object(imgui, "drag_float", scroll_to_field):
+        for _ in range(4):
+            viewer.sync()
+    center = _item_center(viewer, "drag_float", label)
+    io = imgui.get_io()
+    modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    io.add_key_event(modifier, True)
+    viewer.sync()
+    _click(viewer, center)
+    io.add_key_event(imgui.Key.a, True)
+    viewer.sync()
+    io.add_key_event(imgui.Key.a, False)
+    io.add_key_event(modifier, False)
+    io.add_input_characters_utf8(str(value))
+    viewer.sync()
+    io.add_key_event(imgui.Key.enter, True)
+    viewer.sync()
+    io.add_key_event(imgui.Key.enter, False)
+    for _ in range(3):
+        viewer.sync()
+
+
+@pytest.mark.parametrize(
+    "language,scale", [("en", 1.0), ("zh_CN", 1.0), ("en", 1.5), ("zh_CN", 1.5)]
+)
+def test_perturb_strength_settings_edit_save_and_restore(tmp_path, monkeypatch, language, scale):
+    from mojive.tools.keyframe_timeline import show_settings
+    from mojive.tools.ui_runtime import _park_cursor, _save_window_crop
+
+    settings = tmp_path / "settings.json"
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(settings))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    options = {
+        "paused": True,
+        "vsync": False,
+        "width": round(1280 * scale),
+        "height": round(900 * scale),
+        "show_window": False,
+    }
+    with build(Path("assets/joint_types.xml"), **options) as viewer:
+        viewer.app.set_language(language)
+        show_settings(viewer, "Interaction")
+        _edit_strength(viewer, "##perturb_force_scale", 2.0)
+        _edit_strength(viewer, "##perturb_torque_scale", 5.0)
+        assert viewer.app.perturb.force_scale == 2.0
+        assert viewer.app.perturb.torque_scale == 5.0
+        saved = json.loads(settings.read_text())
+        assert saved["perturb_force_scale"] == 2.0
+        assert saved["perturb_torque_scale"] == 5.0
+        output = os.environ.get("MOJIVE_PERTURB_CAPTURE")
+        if output:
+            directory = Path(output)
+            directory.mkdir(parents=True, exist_ok=True)
+            _park_cursor(viewer)
+            for _ in range(4):
+                viewer.sync()
+            _save_window_crop(
+                viewer, "Settings", directory / f"settings-{language}-{scale:g}.png", padding=0
+            )
+    with build(Path("assets/joint_types.xml"), **options) as viewer:
+        assert viewer.app.perturb.force_scale == 2.0
+        assert viewer.app.perturb.torque_scale == 5.0
 
 
 @pytest.mark.parametrize("mode,button", [("translate", 0), ("rotate", 1)])

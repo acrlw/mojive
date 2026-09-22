@@ -52,6 +52,8 @@ from mojive.ui.panels import (
     PanelManager,
 )
 from mojive.ui.perturb import (
+    DEFAULT_PERTURB_SCALE,
+    MAX_PERTURB_SCALE,
     PerturbController,
 )
 from mojive.ui.pointer_bindings import PointerAction
@@ -245,6 +247,14 @@ class ViewerApp(
         self.view_cube = ViewCube(selection_padding)
         self._view_cube_origin_pressed = False
         self.perturb = PerturbController()
+        for name in ("force_scale", "torque_scale"):
+            try:
+                value = float(self.localizer.preference(f"perturb_{name}", DEFAULT_PERTURB_SCALE))
+            except (TypeError, ValueError):
+                value = DEFAULT_PERTURB_SCALE
+            if not np.isfinite(value):
+                value = DEFAULT_PERTURB_SCALE
+            setattr(self.perturb, name, min(MAX_PERTURB_SCALE, max(0.0, value)))
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
         self.input_bindings = InputBindings.from_preferences(
@@ -463,6 +473,21 @@ class ViewerApp(
     def set_view_selection_padding(self, value: float) -> None:
         self.view_cube.selection_padding = value
         self.localizer.set_preferences({"view_selection_padding": self.view_cube.selection_padding})
+
+    def set_perturb_strength(self, force_scale: float, torque_scale: float) -> None:
+        """Persist independent mouse translation and rotation perturbation multipliers."""
+        if not all(
+            np.isfinite(v) and 0.0 <= v <= MAX_PERTURB_SCALE for v in (force_scale, torque_scale)
+        ):
+            raise ValueError(f"Perturbation scales must be between 0 and {MAX_PERTURB_SCALE:g}")
+        self.perturb.force_scale = float(force_scale)
+        self.perturb.torque_scale = float(torque_scale)
+        self.localizer.set_preferences(
+            {
+                "perturb_force_scale": self.perturb.force_scale,
+                "perturb_torque_scale": self.perturb.torque_scale,
+            }
+        )
 
     def set_viewport_overlay_scale(self, value: float, *, persist: bool = True) -> None:
         self._viewport_overlay_scale = min(
@@ -1098,6 +1123,7 @@ class ViewerApp(
             set_selection_style=self.set_selection_style,
             set_precise_input_memory=self.set_precise_input_choice_memory,
             set_view_selection_padding=self.set_view_selection_padding,
+            set_perturb_strength=self.set_perturb_strength,
             viewport_overlay_scale=self._viewport_overlay_scale,
             set_viewport_overlay_scale=self.set_viewport_overlay_scale,
             viewport_overlays=self.viewport_overlays,

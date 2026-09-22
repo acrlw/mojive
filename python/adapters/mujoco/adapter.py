@@ -69,6 +69,7 @@ class MuJoCoAdapter(
                 ("model.components", 1),
                 ("model.keyframe_edit", 1),
                 ("physics.perturb_point", 1),
+                ("physics.perturb_strength", 1),
                 *((("physics.options", 1),) if not external_clock else ()),
             ),
             simulation=True,
@@ -164,6 +165,7 @@ class MuJoCoAdapter(
         self._ray_geomgroup = self._visual_groups["geom"].astype(np.uint8)
 
         self._perturb = mujoco.MjvPerturb()
+        self.perturb_strength = 1.0
         self._physics_options_cache = None
         self._root_options_explicit = False
         self._perturb_body = -1
@@ -899,9 +901,30 @@ class MuJoCoAdapter(
     ) -> bool:
         return self._apply_perturb(node_id, target_position, target_rotation, mode, local_position)
 
-    def _apply_perturb(
-        self, node_id: int, target_position, target_rotation, mode: str, local_position
+    def apply_perturb_with_strength(
+        self,
+        node_id: int,
+        target_position,
+        target_rotation,
+        mode: str,
+        local_position,
+        strength: float,
     ) -> bool:
+        return self._apply_perturb(
+            node_id, target_position, target_rotation, mode, local_position, strength
+        )
+
+    def _apply_perturb(
+        self,
+        node_id: int,
+        target_position,
+        target_rotation,
+        mode: str,
+        local_position,
+        strength: float = 1.0,
+    ) -> bool:
+        if not np.isfinite(strength) or strength < 0:
+            return False
         body = self._node_body.get(int(node_id), -1)
         if body <= 0 or mode not in ("translate", "rotate"):
             return False
@@ -951,6 +974,8 @@ class MuJoCoAdapter(
         # leave its force behind when callers switch mode without releasing.
         self._d.xfrc_applied[body] = 0.0
         mujoco.mjv_applyPerturbForce(self._m, self._d, pert)
+        self._d.xfrc_applied[body] *= strength
+        self.perturb_strength = float(strength)
         return True
 
     def clear_perturb(self) -> None:
@@ -958,6 +983,7 @@ class MuJoCoAdapter(
         self._perturb.active = 0
         self._perturb.active2 = 0
         self._perturb_body = -1
+        self.perturb_strength = 1.0
 
     def raycast(self, origin: np.ndarray, direction: np.ndarray) -> tuple[int, float]:
         self._ray_pnt[:] = np.asarray(origin, np.float64).reshape(3)

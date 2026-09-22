@@ -119,6 +119,91 @@ def test_perturbation_preserves_other_forces_and_clears_after_worker_failure():
         completion_peer.close()
 
 
+@pytest.mark.parametrize("mode", ["translate", "rotate"])
+@pytest.mark.parametrize("strength", [1.0, 3.0])
+def test_display_grab_point_reaches_caller_and_clears_when_switching_or_released(
+    monkeypatch, mode, strength
+):
+    from mojive import math3d
+    from mojive.app.passive import _run_viewer
+    from mojive.session import Session
+    from mojive.session.rates import StepRate
+    from mojive.types import CameraView
+    from mojive.ui.perturb import PerturbController
+
+    model = mujoco.MjModel.from_xml_string("""
+    <mujoco><worldbody>
+      <body name="first"><freejoint/><geom size=".1" mass="1"/></body>
+      <body name="second" pos="1 0 0"><freejoint/><geom size=".1" mass="1"/></body>
+      <body name="unrelated" pos="2 0 0"><freejoint/><geom size=".1" mass="1"/></body>
+    </worldbody></mujoco>
+    """)
+    data = mujoco.MjData(model)
+    data.xfrc_applied[3] = 7.0
+    mujoco.mj_forward(model, data)
+    context = mp.get_context("spawn")
+    mailbox = _Mailbox(
+        context,
+        mujoco.mj_stateSize(model, mujoco.mjtState.mjSTATE_INTEGRATION),
+        model.nu,
+        model.nbody,
+    )
+    viewer = PassiveViewer.__new__(PassiveViewer)
+    viewer._model, viewer._data = model, data
+    viewer._state_spec = mujoco.mjtState.mjSTATE_INTEGRATION
+    viewer._mailbox = mailbox
+    viewer._state, viewer._ctrl, viewer._ctrl_changed, viewer._force, viewer._force_changed = (
+        mailbox.arrays()
+    )
+    viewer._applied_force = np.zeros(model.nbody, dtype=bool)
+    viewer._step, viewer._step_known, viewer._step_rate = 0, False, StepRate()
+    mujoco.mj_getState(model, data, viewer._state, viewer._state_spec)
+    connection, peer = context.Pipe()
+    completion_peer, completion = context.Pipe(duplex=False)
+    events = context.Queue()
+    checked = []
+
+    def exercise_display(adapter, **options):
+        session = Session(adapter)
+        controller = PerturbController()
+        controller.force_scale = controller.torque_scale = strength
+        try:
+            for name in ("first", "second"):
+                node = next(n for n in session.nodes if n.name == name)
+                body = model.body(name).id
+                point = adapter.data.xpos[body] + [0.03, 0.02, 0]
+                controller.begin(session, CameraView(), node, point, mode)
+                session.perturb.target_pos += [0, 0, 0.1]
+                session.perturb.target_mat = math3d.rotvec_to_mat3([0, 0, 0.2])
+                for _ in range(3):
+                    controller.apply(session)
+                    assert viewer._publish()
+                    expected = adapter.data.xfrc_applied[body]
+                    assert np.linalg.norm(expected) > 0
+                    np.testing.assert_allclose(data.xfrc_applied[body], expected)
+                    np.testing.assert_array_equal(data.xfrc_applied[3], 7.0)
+                if name == "second":
+                    assert not data.xfrc_applied[1].any()
+            controller.end(session)
+            assert viewer._publish()
+            assert not data.xfrc_applied[1:3].any()
+            np.testing.assert_array_equal(data.xfrc_applied[3], 7.0)
+            checked.append(True)
+        finally:
+            session.release()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("mojive.app.composition.build_from_adapter", exercise_display)
+    try:
+        _run_viewer(model, mailbox, context.Event(), connection, completion, events, 60, False, {})
+        error = completion_peer.recv()
+        assert error is None, error
+        assert checked
+    finally:
+        peer.close()
+        completion_peer.close()
+
+
 def _complete_with_large_error(connection):
     connection.send("encoder failure: " + "x" * 200_000)
     connection.close()

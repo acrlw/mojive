@@ -190,6 +190,15 @@ physics mutation when the extension is unavailable. MuJoCo uses the selected poi
 for effective mass, damping and moment arm, with the model's native viewer stiffness
 parameters. A zero-mobility pivot uses MuJoCo's `localmass=1` convention.
 
+Adapters supporting adjustable strength advertise `("physics.perturb_strength", 1)`
+and implement `ScaledPerturbation.apply_perturb_with_strength` with the body target,
+mode, optional body-frame grab point, and a finite nonnegative `strength`.
+Scale the complete perturbation wrench, including damping and moment-arm torque.
+`Perturb(strength=...)` requires this capability when the value differs from 1.
+Legacy adapters retain their original calls at unit strength; the Settings multipliers
+are disabled for them. Passive adapters must publish all supported perturbation paths
+back to the physics owner and clear the previous body when the target changes.
+
 ### World physics options
 
 Advertise `("physics.options", 1)` and implement the optional `PhysicsOptions` protocol

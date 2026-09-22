@@ -1547,6 +1547,24 @@ class PointPerturbation(Protocol):
     ) -> bool: ...
 
 
+class ScaledPerturbation(Protocol):
+    """Optional ``physics.perturb_strength`` revision 1, alongside ``perturb``.
+
+    Multiply the complete perturbation wrench, including damping and moment-arm
+    torque, by a finite nonnegative strength. None selects the body origin.
+    """
+
+    def apply_perturb_with_strength(
+        self,
+        node_id: int,
+        target_position: np.ndarray,
+        target_rotation: np.ndarray,
+        mode: str,
+        local_position: np.ndarray | None,
+        strength: float,
+    ) -> bool: ...
+
+
 class PhysicsOptions(Protocol):
     """Optional ``physics.options`` revision 1; independent of model authoring.
 
