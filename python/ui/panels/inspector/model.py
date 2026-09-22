@@ -489,7 +489,7 @@ class _Model:
             text += f" · {ctx.tr('body')} {node.body_index}"
         if node.posable:
             text += f" · {ctx.tr('posable')}"
-        imgui.push_font(None, imgui.get_font_size() * 0.85)
+        imgui.push_font(None, imgui.get_style().font_size_base * 0.85)
         imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(*ctx.theme.text_disabled))
         imgui.text_wrapped(text)
         imgui.pop_style_color()

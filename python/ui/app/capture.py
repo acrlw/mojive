@@ -257,7 +257,7 @@ class _Capture:
         remaining = math.ceil(recording.countdown_remaining)
         imgui.text(self.localizer.text("Recording starts in"))
         if remaining:
-            imgui.push_font(None, imgui.get_font_size() * 1.6)
+            imgui.push_font(None, imgui.get_style().font_size_base * 1.6)
             imgui.text(f"{remaining} {self.localizer.text('s')}")
             imgui.pop_font()
         else:
