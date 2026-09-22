@@ -752,7 +752,7 @@ class _Viewport:
         )
         hint_font_scale = scale / max(style_scale, 1e-6)
         minimum_scale = scale * 0.75
-        imgui.push_font(None, imgui.get_font_size() * hint_font_scale)
+        imgui.push_font(None, imgui.get_style().font_size_base * hint_font_scale)
         measure = ImguiDraw2D(imgui.get_foreground_draw_list())
         while True:
             fitted_scale, rows, sizes = scene_tool_hints_layout(
@@ -769,7 +769,7 @@ class _Viewport:
             # Font sizes are quantized by the atlas; remeasure the chosen size
             # before accepting bounds instead of assuming linear glyph advances.
             imgui.pop_font()
-            imgui.push_font(None, imgui.get_font_size() * fitted_scale / style_scale)
+            imgui.push_font(None, imgui.get_style().font_size_base * fitted_scale / style_scale)
             scale = fitted_scale
         if not rows:
             imgui.pop_font()

@@ -39,10 +39,10 @@ def card_height(scale: float, width: float) -> float:
 def card_heading(ctx, origin, width, name, detail):
     """Reserve a smaller trailing range and align it to the name's text baseline."""
     draw = ImguiDraw2D()
-    font_size = imgui.get_font_size()
+    font_size_base = imgui.get_style().font_size_base
     baseline = imgui.get_font_baked().ascent
     gap = 10.0 * ctx.style_scale
-    imgui.push_font(None, font_size * 0.85)
+    imgui.push_font(None, font_size_base * 0.85)
     detail_width = min(imgui.calc_text_size(detail).x, max(0, (width - gap) * 0.48))
     shown_detail = fit_text(draw, detail, detail_width, middle=True)
     detail_y = origin[1] + baseline - imgui.get_font_baked().ascent
@@ -51,7 +51,7 @@ def card_heading(ctx, origin, width, name, detail):
     shown_name = fit_text(draw, name, name_width)
     draw.text(origin, ctx.theme.text, shown_name)
     detail_x = origin[0] + min(draw.text_size(shown_name)[0], name_width) + gap
-    imgui.push_font(None, font_size * 0.85)
+    imgui.push_font(None, font_size_base * 0.85)
     draw.text((detail_x, detail_y), ctx.theme.text_disabled, shown_detail)
     imgui.pop_font()
     return shown_name != name or shown_detail != detail

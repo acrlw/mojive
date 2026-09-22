@@ -12,8 +12,9 @@ from unittest.mock import patch
 import numpy as np
 from imgui_bundle import imgui
 
-from mojive.app.composition import build
+from mojive.app.composition import build, build_scene
 from mojive.interaction.gizmo import GizmoHandle
+from mojive.scene import Scene
 from mojive.scene.assets import resolve
 
 from .. import commands as cmd
@@ -607,6 +608,76 @@ def capture_backend_info(output: Path, scale: float, language: str) -> list[dict
     return [{"language": language, "scale": scale, "rows": rows}]
 
 
+def capture_font_scaling(output: Path, scale: float, language: str) -> list[dict]:
+    """Check relative text sizes after changing a running viewer's UI scale."""
+    from PIL import Image
+
+    from mojive.config import LayoutConfig, ViewerConfig
+    from mojive.ui.panels.inspector.model import _Model
+
+    folder = output / f"{language}-{scale:g}x"
+    folder.mkdir(parents=True, exist_ok=True)
+    environment = {
+        "MOJIVE_UI_SCALE": "1",
+        "MOJIVE_LANGUAGE": language,
+        "MOJIVE_SETTINGS": str(folder / "settings.json"),
+    }
+    scene = Scene()
+    box = scene.box(name="Workpiece", color=(0.2, 0.75, 0.65, 1))
+    measured = {}
+    identity, wrapped = _Model._identity, imgui.text_wrapped
+
+    def observe_identity(panel, ctx, node):
+        measured["body_font_size"] = imgui.get_font_size()
+        return identity(panel, ctx, node)
+
+    def observe_wrapped(value):
+        if value.startswith(viewer.app.localizer.text("node id")):
+            measured["identity_font_size"] = imgui.get_font_size()
+        return wrapped(value)
+
+    with (
+        patch.dict(os.environ, environment),
+        build_scene(
+            scene,
+            config=ViewerConfig(layout=LayoutConfig(persistence=False)),
+            vsync=False,
+            width=1600,
+            height=1000,
+            show_window=False,
+        ) as viewer,
+        patch.object(_Model, "_identity", observe_identity),
+        patch.object(imgui, "text_wrapped", observe_wrapped),
+    ):
+        viewer.session.submit(cmd.Select(box.object_id))
+        _activate_panel(viewer, "Inspector")
+        viewer.window._scale_override = scale
+        _settle(viewer, 4)
+        image = Image.fromarray(viewer.capture_array(surface="window"))
+        image.save(folder / "editor.png")
+        panel = imgui.internal.find_window_by_name("Inspector")
+        sx = image.width / viewer.window.size_points[0]
+        sy = image.height / viewer.window.size_points[1]
+        image.crop(
+            (
+                round(panel.pos.x * sx),
+                round(panel.pos.y * sy),
+                round((panel.pos.x + panel.size.x) * sx),
+                round((panel.pos.y + panel.size.y) * sy),
+            )
+        ).save(folder / "inspector.png")
+        result = {"language": language, "scale": scale, **measured}
+        (folder / "font-sizes.json").write_text(json.dumps(result, indent=2) + "\n")
+        assert abs(measured["identity_font_size"] - measured["body_font_size"] * 0.85) <= 1
+        viewer.start_recording(folder / "cancelled.mp4", countdown=60)
+        try:
+            _settle(viewer, 3)
+            _save_window_crop(viewer, "##recording_countdown", folder / "countdown.png")
+        finally:
+            viewer.app.stop_recording(report=False)
+    return [result]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run responsive layout acceptance and write an inspectable capture index."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -616,11 +687,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--backend-info", action="store_true", help="Only check backend info labels"
     )
+    parser.add_argument(
+        "--font-scaling", action="store_true", help="Check live UI scaling and relative text sizes"
+    )
     args = parser.parse_args(argv)
     results = []
     for scale in map(float, args.scales.split(",")):
         for language in args.languages.split(","):
             capture_case = capture_backend_info if args.backend_info else capture
+            if args.font_scaling:
+                capture_case = capture_font_scaling
             results.extend(capture_case(args.output, scale, language))
     (args.output / "report.json").write_text(json.dumps(results, indent=2) + "\n")
     return 0

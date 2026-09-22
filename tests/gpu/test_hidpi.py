@@ -16,6 +16,67 @@ from mojive.ui import viewcube  # noqa: E402
 from mojive.ui.viewport_widgets import ToolHint  # noqa: E402
 
 
+@pytest.mark.parametrize("initial_scale", [1.0, 2.0])
+def test_relative_fonts_follow_live_scale_changes_once(initial_scale, tmp_path, monkeypatch):
+    from imgui_bundle import imgui
+
+    from mojive.config import LayoutConfig, ViewerConfig
+    from mojive.tools.ui_runtime import _activate_panel, _settle
+    from mojive.ui.panels.inspector.model import _Model
+
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(initial_scale))
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_LANGUAGE", "en")
+    scene = Scene()
+    box = scene.box(name="Workpiece")
+    measured = {}
+    identity, wrapped, text = _Model._identity, imgui.text_wrapped, imgui.text
+
+    def observe_identity(panel, ctx, node):
+        measured["name"] = imgui.get_font_size()
+        return identity(panel, ctx, node)
+
+    def observe_wrapped(value):
+        if value.startswith("node id "):
+            measured["identity"] = imgui.get_font_size()
+        return wrapped(value)
+
+    def observe_text(value):
+        if value == "Recording starts in":
+            measured["countdown_label"] = imgui.get_font_size()
+        elif value.endswith(" s") and value[:-2].isdigit():
+            measured["countdown"] = imgui.get_font_size()
+        return text(value)
+
+    monkeypatch.setattr(_Model, "_identity", observe_identity)
+    monkeypatch.setattr(imgui, "text_wrapped", observe_wrapped)
+    monkeypatch.setattr(imgui, "text", observe_text)
+    with build_scene(
+        scene,
+        config=ViewerConfig(layout=LayoutConfig(persistence=False)),
+        vsync=False,
+        show_window=False,
+        width=1600,
+        height=1000,
+    ) as viewer:
+        assert viewer.session.submit(cmd.Select(box.object_id))
+        _activate_panel(viewer, "Inspector")
+        viewer.start_recording(tmp_path / "cancelled.mp4", countdown=60)
+        try:
+            for scale, main in ((1, 1), (1.6, 1), (0.75, 1), (2.25, 1), (1.5, 1.2), (1, 1)):
+                measured.clear()
+                viewer.window._scale_override = scale
+                imgui.get_style().font_scale_main = main
+                _settle(viewer, 3)
+                assert measured["identity"] == pytest.approx(measured["name"] * 0.85, abs=1)
+                # Both atlas sizes are rounded: 0.5 * 1.6 + 0.5 pixels of error.
+                assert measured["countdown"] == pytest.approx(
+                    measured["countdown_label"] * 1.6, abs=1.3
+                )
+        finally:
+            viewer.app.stop_recording(report=False)
+
+
 def test_view_gizmo_and_font_share_the_explicit_ui_scale(monkeypatch):
     from imgui_bundle import imgui
 
