@@ -936,6 +936,7 @@ class Perturb(Command):
 
     A body-frame grab point requires ``physics.perturb_point`` revision 1.
     Omitting it retains the adapter's original perturbation behavior.
+    A strength other than 1 requires ``physics.perturb_strength`` revision 1.
     """
 
     node_id: int
@@ -943,6 +944,7 @@ class Perturb(Command):
     target_rotation: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=np.float32))
     mode: str = "translate"
     local_position: np.ndarray | None = None
+    strength: float = 1.0
 
 
 @dataclass(frozen=True)

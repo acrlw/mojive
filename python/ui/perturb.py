@@ -46,6 +46,8 @@ except Exception:
 
 
 DEG_PER_PIXEL = 0.4
+DEFAULT_PERTURB_SCALE = 1.0
+MAX_PERTURB_SCALE = 20.0
 
 
 AXIS_OVERSHOOT = 2.0
@@ -273,6 +275,8 @@ class PerturbController:
     def __init__(self) -> None:
         self.budget = MarkBudget()
         self.outline_corner_radius_pt = OUTLINE_CORNER_RADIUS_PT
+        self.force_scale = DEFAULT_PERTURB_SCALE
+        self.torque_scale = DEFAULT_PERTURB_SCALE
         self._last_note = ""
         self._published = ""
 
@@ -342,6 +346,11 @@ class PerturbController:
                 target_position=np.asarray(st.target_pos, np.float32),
                 target_rotation=np.asarray(st.target_mat, np.float32),
                 mode=st.mode,
+                strength=(
+                    (self.force_scale if st.mode == "translate" else self.torque_scale)
+                    if session.adapter.caps.supports("physics.perturb_strength")
+                    else 1.0
+                ),
                 local_position=(
                     grab_point_local(st)
                     if session.adapter.caps.supports("physics.perturb_point")

@@ -21,7 +21,7 @@ from ..gizmo import (
 )
 from ..input_bindings import InputAction, input_action_name, key_choices
 from ..localization import LANGUAGE_LABELS, Language, parse_language, render_note_text
-from ..perturb import OUTLINE_CORNER_RADIUS_PT
+from ..perturb import DEFAULT_PERTURB_SCALE, MAX_PERTURB_SCALE, OUTLINE_CORNER_RADIUS_PT
 from ..pointer_bindings import NAVIGATION_PRESETS, POINTER_ACTION_NAMES, PointerAction
 from ..viewcube import (
     DEFAULT_SELECTION_PADDING,
@@ -111,7 +111,7 @@ _CATEGORY_SEARCH_TERMS = {
         "reuse mode unit",
         "snap position rotation tick scale",
         "view selection padding",
-        "perturb corner radius",
+        "perturb corner radius drag force twist torque strength scale 力倍率 力矩倍率 扰动",
         "helpers entities influence volumes",
     ),
     "Rendering": (
@@ -841,6 +841,38 @@ class SettingsPanel(Panel):
         if ctx.perturb is not None:
             self._group_heading(t("Perturb"))
             if self._begin_properties("settings_interaction_perturb"):
+                supported = ctx.session.adapter.caps.supports("physics.perturb_strength")
+                imgui.begin_disabled(not supported)
+                for attribute, label in (
+                    ("force_scale", "Drag force scale"),
+                    ("torque_scale", "Twist torque scale"),
+                ):
+                    self._property(t(label))
+                    changed, value = imgui.drag_float(
+                        f"##perturb_{attribute}",
+                        float(getattr(ctx.perturb, attribute)),
+                        0.05,
+                        0.0,
+                        MAX_PERTURB_SCALE,
+                        "%.2fx",
+                        imgui.SliderFlags_.always_clamp,
+                    )
+                    committed = imgui.is_item_deactivated_after_edit()
+                    hovered = imgui.is_item_hovered()
+                    reset = hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET)
+                    if reset:
+                        changed, value = True, DEFAULT_PERTURB_SCALE
+                    if hovered:
+                        imgui.set_tooltip(
+                            t(
+                                "1x uses the default force or torque; 0x disables it. Saved for future sessions."
+                            )
+                        )
+                    if changed:
+                        setattr(ctx.perturb, attribute, value)
+                    if ctx.set_perturb_strength is not None and (committed or reset):
+                        ctx.set_perturb_strength(ctx.perturb.force_scale, ctx.perturb.torque_scale)
+                imgui.end_disabled()
                 self._property(t("Corner radius"))
                 changed, radius = imgui.drag_float(
                     "##perturb_corner_radius",

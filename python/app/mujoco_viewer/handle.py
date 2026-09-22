@@ -244,6 +244,7 @@ class Handle:
                         draw_user_geometries(viewer.backend.debug, self._geometries)
                         self._geometry_pending = False
                     viewer.sync()
+                    exchange.perturb_strength = adapter.perturb_strength
                     presentation.after_frame(viewer)
                     for completed in self._resource_waiters:
                         completed.set()

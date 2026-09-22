@@ -29,6 +29,7 @@ from .base import (
     PhysicsOption,
     PhysicsOptions,
     PointPerturbation,
+    ScaledPerturbation,
     SceneAdapter,
     SceneAdapterBase,
     SceneFrame,
@@ -820,6 +821,21 @@ class WorkspaceAdapter(SceneAdapterBase):
 
     def clear_perturb(self) -> None:
         self.primary.clear_perturb()
+
+    def apply_perturb_with_strength(
+        self,
+        node_id: int,
+        target_position,
+        target_rotation,
+        mode: str,
+        local_position,
+        strength: float,
+    ) -> bool:
+        if not self.caps.supports("physics.perturb_strength"):
+            return False
+        return cast(ScaledPerturbation, self.primary).apply_perturb_with_strength(
+            node_id, target_position, target_rotation, mode, local_position, strength
+        )
 
     def raycast(self, origin, direction):
         return self.primary.raycast(origin, direction)

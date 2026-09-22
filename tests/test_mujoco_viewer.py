@@ -203,6 +203,31 @@ def test_active_perturbation_reapplies_force_on_each_sync(model_data):
     d.xfrc_applied[:] = 0
     exchange.sync(True)
     np.testing.assert_array_equal(d.xfrc_applied, first)
+    exchange.perturb_strength = 3.0
+    for _ in range(3):
+        exchange.sync(True)
+        np.testing.assert_allclose(d.xfrc_applied, first * 3.0)
+    exchange.perturb_strength = 0.0
+    exchange.sync(True)
+    assert not d.xfrc_applied.any()
+
+
+def test_rotation_strength_preserves_linear_force(model_data):
+    m, d = model_data
+    exchange = StateExchange(m, d)
+    pert = exchange.display_perturb
+    pert.select = 1
+    pert.active = mujoco.mjtPertBit.mjPERT_ROTATE
+    pert.refquat[:] = [np.cos(0.2), 0, 0, np.sin(0.2)]
+    d.xfrc_applied[1, :3] = [1, 2, 3]
+    exchange.sync(True)
+    original = d.xfrc_applied.copy()
+    assert np.linalg.norm(original[1, 3:]) > 0
+    exchange.perturb_strength = 3.0
+    for _ in range(3):
+        exchange.sync(True)
+        np.testing.assert_allclose(d.xfrc_applied[1, :3], [1, 2, 3])
+        np.testing.assert_allclose(d.xfrc_applied[1, 3:], original[1, 3:] * 3)
 
 
 def test_model_update_invalidates_only_changed_visual_source(model_data):

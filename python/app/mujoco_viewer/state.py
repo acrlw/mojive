@@ -111,6 +111,7 @@ class StateExchange:
         self.display_cam = copy.copy(self.cam)
         self.display_opt = copy.copy(self.opt)
         self.display_perturb = copy.copy(self.perturb)
+        self.perturb_strength = 1.0
         self.camera_fields = StructExchange(self.cam, self.display_cam)
         self.option_fields = StructExchange(self.opt, self.display_opt)
         self.perturb_fields = StructExchange(self.perturb, self.display_perturb)
@@ -184,6 +185,12 @@ class StateExchange:
         if self.perturb.active or self.perturb.active2:
             mujoco.mjv_applyPerturbPose(m, d, self.perturb, 0)
             mujoco.mjv_applyPerturbForce(m, d, self.perturb)
+            if 0 < self.perturb.select < m.nbody:
+                active = self.perturb.active | self.perturb.active2
+                if active & mujoco.mjtPertBit.mjPERT_TRANSLATE:
+                    d.xfrc_applied[self.perturb.select] *= self.perturb_strength
+                elif active & mujoco.mjtPertBit.mjPERT_ROTATE:
+                    d.xfrc_applied[self.perturb.select, 3:] *= self.perturb_strength
             mujoco.mj_getState(m, d, self.caller_state, self.state_spec)
         if not state_only:
             mujoco.mj_copyData(dd, dm, d)

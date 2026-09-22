@@ -122,6 +122,7 @@ class PanelContext:
     set_selection_style: Callable[[SelectionStyle], None] | None = None
     set_precise_input_memory: Callable[[bool], None] | None = None
     set_view_selection_padding: Callable[[float], None] | None = None
+    set_perturb_strength: Callable[[float, float], None] | None = None
     viewport_overlay_scale: float = 1.0
     set_viewport_overlay_scale: Callable[[float], None] | None = None
     viewport_overlays: ViewportOverlayConfig | None = None

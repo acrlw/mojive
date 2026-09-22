@@ -302,10 +302,36 @@ def test_explicit_grab_point_requires_opt_in_but_legacy_drag_still_works():
         result = session.submit(Perturb(1, local_position=np.ones(3)))
         assert not result.ok and "physics.perturb_point" in result.message
         assert not adapter.perturbs
+        result = session.submit(Perturb(1, strength=2.0))
+        assert not result.ok and "physics.perturb_strength" in result.message
+        assert not adapter.perturbs
         controller = P.PerturbController()
+        controller.force_scale = 5.0
         controller.begin(session, side_camera(), session.selected_node, np.ones(3), "translate")
         controller.apply(session)
         assert len(adapter.perturbs) == 1
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize("mode,expected", [("translate", 2.0), ("rotate", 5.0)])
+def test_controller_uses_independent_strengths(monkeypatch, mode, expected):
+    session, adapter = make_session()
+    adapter.caps = replace(adapter.caps, features=(("physics.perturb_strength", 1),))
+    calls = []
+    monkeypatch.setattr(
+        adapter,
+        "apply_perturb_with_strength",
+        lambda *args: calls.append(args) or True,
+        raising=False,
+    )
+    try:
+        controller = P.PerturbController()
+        controller.force_scale, controller.torque_scale = 2.0, 5.0
+        controller.begin(session, side_camera(), session.selected_node, np.ones(3), mode)
+        controller.apply(session)
+        assert calls[-1][-1] == expected
+        assert calls[-1][-2] is None
     finally:
         session.release()
 

@@ -876,6 +876,30 @@ def test_viewer_restores_precise_input_preferences(tmp_path, monkeypatch):
     assert Localizer.load().preference("view_selection_padding") == pytest.approx(2.25)
 
 
+def test_viewer_restores_and_persists_perturbation_strength(tmp_path, monkeypatch):
+    from mojive.ui.app import ViewerApp
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    session = Session(StaticSceneAdapter(Scene()))
+    try:
+        app = ViewerApp(session, NullBackend())
+        assert app.perturb.force_scale == app.perturb.torque_scale == 1.0
+        app.set_perturb_strength(2.0, 5.0)
+        restored = ViewerApp(session, NullBackend())
+        assert restored.perturb.force_scale == 2.0
+        assert restored.perturb.torque_scale == 5.0
+        for invalid in (-1, float("nan"), float("inf"), 21):
+            with pytest.raises(ValueError):
+                app.set_perturb_strength(invalid, 1.0)
+        assert Localizer.load().preference("perturb_force_scale") == 2.0
+        Localizer.load().set_preferences({"perturb_force_scale": "bad", "perturb_torque_scale": -1})
+        restored = ViewerApp(session, NullBackend())
+        assert restored.perturb.force_scale == 1.0
+        assert restored.perturb.torque_scale == 0.0
+    finally:
+        session.release()
+
+
 def test_viewer_restores_and_persists_shadow_quality(tmp_path, monkeypatch):
     from mojive.ui.app import ViewerApp
 

@@ -145,4 +145,10 @@ def unavailable_reason(caps: AdapterCaps, command: cmd.Command) -> str | None:
         command.path
     ):
         return f"{caps.name} does not support the model format: {command.path}"
+    if (
+        isinstance(command, cmd.Perturb)
+        and command.strength != 1.0
+        and not caps.supports("physics.perturb_strength")
+    ):
+        return f"{caps.name} does not support physics.perturb_strength (revision 1)"
     return None

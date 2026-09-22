@@ -603,10 +603,18 @@ def _run_viewer(
                 ctrl_changed.fill(1)
             return True
 
-        def apply_perturb(self, node_id, target_position, target_rotation, mode):
-            if not super().apply_perturb(node_id, target_position, target_rotation, mode):
+        def _apply_perturb(
+            self, node_id, target_position, target_rotation, mode, local_position, strength=1.0
+        ):
+            previous = self._perturb_body
+            if not super()._apply_perturb(
+                node_id, target_position, target_rotation, mode, local_position, strength
+            ):
                 return False
             with mailbox.lock:
+                if previous >= 0 and previous != self._perturb_body:
+                    force[previous] = 0.0
+                    force_changed[previous] = 2
                 force[self._perturb_body] = self.data.xfrc_applied[self._perturb_body]
                 force_changed[self._perturb_body] = 1
             return True
