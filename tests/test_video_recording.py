@@ -14,6 +14,36 @@ import pytest
 
 from mojive import VideoRecorder
 from mojive.capture import recording as recording_module
+from mojive.capture.video_queue import BufferedVideoRecorder
+
+
+@pytest.mark.integration
+def test_realtime_video_retains_orientation_ownership_and_skipped_sample_duration(tmp_path):
+    path = tmp_path / "sampled.mp4"
+    pixels = np.zeros((24, 32, 3), np.uint8)
+    pixels[:12] = 40
+    pixels[12:] = 180
+    writer = BufferedVideoRecorder(VideoRecorder(path, (32, 24), fps=10), realtime=True)
+    try:
+        assert writer.append(pixels[::-1], repeat=2)
+        pixels[:] = 90
+        writer.append(None, repeat=3)
+        assert writer.append(pixels, repeat=2)
+        pixels[:] = 255
+        writer.append(None)
+    finally:
+        writer.close()
+    with contextlib.closing(imageio_ffmpeg.read_frames(str(path))) as reader:
+        metadata = next(reader)
+        frames = [np.frombuffer(frame, np.uint8).reshape(24, 32, 3) for frame in reader]
+    assert metadata["fps"] == 10
+    assert metadata["duration"] == pytest.approx(0.8)
+    assert len(frames) == 8
+    for frame in frames[:5]:
+        assert frame[:12].mean() == pytest.approx(180, abs=3)
+        assert frame[12:].mean() == pytest.approx(40, abs=3)
+    for frame in frames[5:]:
+        assert frame.mean() == pytest.approx(90, abs=3)
 
 
 @pytest.mark.parametrize("size", ((0, 10), (10, -1), (10, 20, 30)))

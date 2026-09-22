@@ -82,7 +82,67 @@ def test_full_queue_applies_backpressure_without_dropping_or_overwriting():
     assert recorder.values == [1, 2, 3]
 
 
-def test_worker_failure_unblocks_producer_and_is_reported_on_close():
+def test_realtime_full_queue_returns_without_waiting_and_preserves_trailing_duration():
+    entered, release, submitted = threading.Event(), threading.Event(), threading.Event()
+
+    class SlowRecorder(Recorder):
+        def append(self, image):
+            entered.set()
+            assert release.wait(5)
+            super().append(image)
+
+    recorder = SlowRecorder()
+    writer = BufferedVideoRecorder(recorder, realtime=True)
+    image = np.full((6, 8, 3), 1, np.uint8)
+    accepted = []
+    producer = None
+    try:
+        assert writer.append(image, repeat=2)
+        assert entered.wait(2)
+        image[:] = 2
+        assert writer.append(image, repeat=3)
+        image[:] = 3
+        assert writer.append(image)
+        image[:] = 4
+        assert not writer.can_accept_frame()
+
+        def submit():
+            accepted.append(writer.append(image, repeat=4))
+            submitted.set()
+
+        producer = threading.Thread(target=submit)
+        producer.start()
+        assert submitted.wait(1), "Realtime submission waited for the blocked encoder"
+        assert accepted == [False]
+        assert not writer.append(None)
+        writer.begin_close()
+        assert not writer.poll_close()
+    finally:
+        release.set()
+        if producer is not None:
+            producer.join(2)
+        writer.close()
+    assert recorder.values == [1] * 2 + [2] * 3 + [3] * 6
+    assert len(recorder.buffers) == 3
+    assert writer.written_frames == 11
+    assert recorder.closed == 1
+
+
+def test_realtime_skipped_interval_holds_previous_image_before_new_sample():
+    recorder = Recorder()
+    writer = BufferedVideoRecorder(recorder, realtime=True)
+    try:
+        assert writer.append(np.full((6, 8, 3), 1, np.uint8), repeat=2)
+        writer.append(None, repeat=3)
+        assert writer.append(np.full((6, 8, 3), 7, np.uint8), repeat=2)
+        writer.append(None, repeat=4)
+    finally:
+        writer.close()
+    assert recorder.values == [1] * 5 + [7] * 6
+
+
+@pytest.mark.parametrize("realtime", [False, True])
+def test_worker_failure_unblocks_producer_and_is_reported_on_close(realtime):
     failed = threading.Event()
 
     class BrokenRecorder(Recorder):
@@ -91,7 +151,7 @@ def test_worker_failure_unblocks_producer_and_is_reported_on_close():
             raise ValueError("broken pipe fixture")
 
     recorder = BrokenRecorder()
-    writer = BufferedVideoRecorder(recorder)
+    writer = BufferedVideoRecorder(recorder, realtime=realtime)
     image = np.zeros((6, 8, 3), np.uint8)
     writer.append(image)
     assert failed.wait(2)
@@ -155,7 +215,8 @@ def test_begin_close_returns_while_worker_finishes_and_close_drains():
 
 
 @pytest.mark.parametrize("stall", ["append", "close"])
-def test_stalled_encoder_is_aborted_and_worker_is_joined(stall):
+@pytest.mark.parametrize("realtime", [False, True])
+def test_stalled_encoder_is_aborted_and_worker_is_joined(stall, realtime):
     entered, release = threading.Event(), threading.Event()
 
     class Stalled(Recorder):
@@ -174,7 +235,7 @@ def test_stalled_encoder_is_aborted_and_worker_is_joined(stall):
         def abort(self):
             release.set()
 
-    writer = BufferedVideoRecorder(Stalled(), timeout=0.05)
+    writer = BufferedVideoRecorder(Stalled(), timeout=0.05, realtime=realtime)
     writer.append(np.zeros((6, 8, 3), np.uint8))
     writer.begin_close()
     assert entered.wait(1)

@@ -541,16 +541,21 @@ Use `mojive backends` for adapter availability and `mojive probe` for OpenGL cap
 
 ## Video encoding
 
-Interactive recording copies captured RGB frames into two reusable buffers and writes them to
-FFmpeg on one worker. The queue adds `2 × width × height × 3` bytes (about 38.4 MB at 3200×2000),
-preserves frame order, and drains on stop. It absorbs short encoder stalls; if both buffers are
-occupied, capture waits rather than dropping frames. GPU readback still has a cost. The first
-image is also written on the worker; automatic simulation start waits for its success. Encoder
+Interactive recording copies captured RGB frames directly into reusable buffers and writes them
+to FFmpeg on one worker. It owns at most three RGB frames, including the previous image retained
+for repetition: `3 × width × height × 3` bytes (about 74.6 MB at 3840×2160). When the buffers are
+occupied, recording skips sampling without waiting for encoding or requesting its GPU readback.
+The worker holds the previous image across skipped intervals, preserving video duration and
+playback speed. Frame count and duration include these repeated frames; a 60 FPS output does not
+guarantee 60 distinct images per second under load. GPU readback, copies and CPU encoding still
+have a cost. Lowering recording FPS reduces the load. The first image is also written on the
+worker; automatic simulation start waits for its success. Encoder
 failures are reported even while recording is paused. A write or finalization that makes no
 progress for 30 seconds aborts the encoder and reports failure.
 
-Stopping through the UI enters `finalizing`: the viewer remains usable while accepted frames
-drain, and a saved receipt appears only after successful completion. Keep calling `viewer.sync()`
+Stopping through the UI enters `finalizing`: the viewer remains usable while the remaining video
+timeline is encoded, including any repeated tail frames. A saved receipt appears only after
+successful completion. Sustained encoder overload can extend finalization. Keep calling `viewer.sync()`
 while `viewer.recording.active` to observe that completion. A new recording cannot start while
 one is finalizing. `viewer.stop_recording()` and viewer shutdown wait for file completion.
 Offline take export and direct `VideoRecorder` calls remain synchronous.

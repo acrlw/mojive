@@ -71,12 +71,15 @@ def _run(output: Path, frames: int, fps: float, width: int, height: int, preset:
     report = {"platform": platform.platform(), "target_ui_fps": fps, "cases": {}}
     append = VideoRecorder.append
     encode_ms, submit_ms = [], []
+    accepted_samples = []
     submit = BufferedVideoRecorder.append
 
-    def timed_submit(recorder, image):
+    def timed_submit(recorder, image, **kwargs):
         start = time.perf_counter_ns()
         try:
-            return submit(recorder, image)
+            accepted = submit(recorder, image, **kwargs)
+            accepted_samples.append(accepted)
+            return accepted
         finally:
             submit_ms.append((time.perf_counter_ns() - start) / 1e6)
 
@@ -109,6 +112,7 @@ def _run(output: Path, frames: int, fps: float, width: int, height: int, preset:
                 sync_ms, submitted_sync_ms, idle_sync_ms = [], [], []
                 encode_ms.clear()
                 submit_ms.clear()
+                accepted_samples.clear()
                 if recording:
                     app.start_recording(
                         output / "camera-motion.mp4", surface="window", fps=fps, countdown=0
@@ -132,6 +136,8 @@ def _run(output: Path, frames: int, fps: float, width: int, height: int, preset:
                     "sync_without_submission": _summary(idle_sync_ms),
                     "append": _summary(encode_ms),
                     "buffer_submission": _summary(submit_ms),
+                    "sampled_frames": sum(accepted_samples),
+                    "skipped_samples": len(accepted_samples) - sum(accepted_samples),
                     "first_submitted_frame_ms": first_frame_ms,
                     "frames_over_16_67_ms": sum(value > 1000 / 60 for value in sync_ms),
                     "frames_over_33_33_ms": sum(value > 1000 / 30 for value in sync_ms),
@@ -162,6 +168,7 @@ def _run(output: Path, frames: int, fps: float, width: int, height: int, preset:
                     result["finalization_ms"] = (time.perf_counter() - start) * 1000
                     result["finalization_sync"] = _summary(finishing_sync_ms)
                     result["append"] = _summary(encode_ms)
+                    result["video_frames"] = recorder.written_frames
                 report["cases"][name] = result
             report["backend"] = viewer.backend.caps.name
             report["window_points"] = viewer.window.size_points
