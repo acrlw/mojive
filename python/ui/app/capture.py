@@ -290,6 +290,7 @@ class _Capture:
             return False
         self._viewport_recording_phase = RecordingPhase.RECORDING
         self._viewport_record_elapsed = 1.0 / self._viewport_recording_fps
+        self._recording_first_frame = True
         take = getattr(self, "_take_video", None)
         if take is not None and take.started and take.tail_frames is None:
             result = self.session.submit(cmd.PlayStateTake(loop=False, pause_at_end=True))
@@ -432,6 +433,8 @@ class _Capture:
         )
 
     def _needs_presented_readback(self, dt: float) -> bool:
+        from mojive.capture.video_queue import BufferedVideoRecorder
+
         if any(
             surface is not CaptureSurface.SCENE
             for _, surface in getattr(self, "_capture_requests", [])
@@ -445,10 +448,13 @@ class _Capture:
         take = getattr(self, "_take_video", None)
         if take is not None:
             return take.frame_due and self._viewport_recording_surface is not CaptureSurface.SCENE
+        recorder = getattr(self, "_viewport_recorder", None)
+        if isinstance(recorder, BufferedVideoRecorder) and not recorder.can_accept_frame():
+            return False
         return (
             self._viewport_recording_phase is RecordingPhase.RECORDING
             and self._viewport_recording_surface is not CaptureSurface.SCENE
-            and self._viewport_record_elapsed + max(0.0, min(float(dt), 0.1))
+            and self._viewport_record_elapsed + max(0.0, float(dt))
             >= 1.0 / self._viewport_recording_fps
         )
 
@@ -500,7 +506,9 @@ class _Capture:
                     raise RuntimeError("the viewport is outside the presented window")
                 image = image[y0:y1, x0:x1]
         if out is None:
-            return np.ascontiguousarray(image)
+            # Consumers either finish in this frame or copy into their own storage.
+            # Keep the flipped/cropped view to avoid an intermediate full-frame copy.
+            return image
         if out.shape != image.shape or out.dtype != image.dtype or not out.flags.writeable:
             raise ValueError(f"out must be a writable {image.dtype} array with shape {image.shape}")
         np.copyto(out, image)
@@ -581,14 +589,24 @@ class _Capture:
             count = int(take.frame_due)
         elif getattr(self, "_recording_first_frame", False):
             self._recording_first_frame = False
-            count = min(3, int(self._viewport_record_elapsed / period))
+            count = int(self._viewport_record_elapsed / period)
         else:
-            self._viewport_record_elapsed += max(0.0, min(float(dt), 0.1))
-            count = min(3, int(self._viewport_record_elapsed / period))
+            self._viewport_record_elapsed += max(0.0, float(dt))
+            count = int(self._viewport_record_elapsed / period)
         if count <= 0:
             return
         try:
-            image = image_for(self._viewport_recording_surface)
+            from mojive.capture.video_queue import BufferedVideoRecorder
+
+            recorder = self._viewport_recorder
+            skip_sample = isinstance(recorder, BufferedVideoRecorder) and (
+                not recorder.can_accept_frame()
+                or (
+                    self._viewport_recording_surface is not CaptureSurface.SCENE
+                    and presented is None
+                )
+            )
+            image = None if skip_sample else image_for(self._viewport_recording_surface)
             if self._viewport_recorder is None:
                 from mojive.capture.recording import VideoRecorder
 
@@ -610,12 +628,17 @@ class _Capture:
                     else None,
                 )
                 if take is None:
-                    from mojive.capture.video_queue import BufferedVideoRecorder
-
-                    self._viewport_recorder = BufferedVideoRecorder(self._viewport_recorder)
-            elif tuple(self._viewport_recorder.size) != (image.shape[1], image.shape[0]):
+                    self._viewport_recorder = BufferedVideoRecorder(
+                        self._viewport_recorder, realtime=True
+                    )
+            elif image is not None and tuple(self._viewport_recorder.size) != (
+                image.shape[1],
+                image.shape[0],
+            ):
                 raise RuntimeError("capture size changed while recording")
-            for _ in range(count):
+            if isinstance(self._viewport_recorder, BufferedVideoRecorder):
+                self._viewport_recorder.append(image, repeat=count)
+            else:
                 self._viewport_recorder.append(image)
             self._viewport_recording_frames += count
             self._viewport_recording_duration = (

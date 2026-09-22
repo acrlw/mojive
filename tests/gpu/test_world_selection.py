@@ -160,26 +160,28 @@ def test_local_rollout_playback_buttons_scrubbing_shortcuts_and_manual_sync(
         ) as viewer:
             viewer.app.set_language(language)
             t = viewer.app.localizer.text
+
+            def click_control(label):
+                _click(viewer, _item_center(viewer, "button", label, reveal=True))
+
             for _ in range(6):
                 viewer.sync()
             _activate_panel(viewer, "Keyframes")
             assert adapter.replay_info().paused
             requests = store.window_requests
-            _click(viewer, _item_center(viewer, "button", t("Play") + "##replay_play"))
+            click_control(t("Play") + "##replay_play")
             assert not adapter.replay_info().paused
             now[0] += 4.1 / 30
             viewer.sync()
             assert adapter.replay_info().frame_index == 4
-            _click(viewer, _item_center(viewer, "button", t("Pause") + "##replay_play"))
+            click_control(t("Pause") + "##replay_play")
             assert adapter.replay_info().paused
-            _click(viewer, _item_center(viewer, "button", t("Next frame") + "##replay_next"))
+            click_control(t("Next frame") + "##replay_next")
             assert adapter.replay_info().frame_index == 5
-            _click(
-                viewer, _item_center(viewer, "button", t("Previous frame") + "##replay_previous")
-            )
+            click_control(t("Previous frame") + "##replay_previous")
             assert adapter.replay_info().frame_index == 4
             # A held scrub is a draft: apply once on release, rather than doing FK every UI frame.
-            lo, hi = _item_rect(viewer, "slider_int", "##replay_frame")
+            lo, hi = _item_rect(viewer, "slider_int", "##replay_frame", reveal=True)
             io = imgui.get_io()
             io.add_mouse_pos_event(lo[0] + (hi[0] - lo[0]) * 0.65, (lo[1] + hi[1]) / 2)
             viewer.sync()
@@ -192,7 +194,7 @@ def test_local_rollout_playback_buttons_scrubbing_shortcuts_and_manual_sync(
             viewer.sync()
             assert 15 <= adapter.replay_info().frame_index <= 25
             assert adapter.replay_info().paused
-            _click(viewer, _item_center(viewer, "button", t("Restart") + "##replay_restart"))
+            click_control(t("Restart") + "##replay_restart")
             assert adapter.replay_info().frame_index == 0
             x, y, width, height = viewer.app._viewport_rect
             _click(viewer, (x + width * 0.7, y + height * 0.7))
@@ -215,7 +217,7 @@ def test_local_rollout_playback_buttons_scrubbing_shortcuts_and_manual_sync(
             output = Path("output/rollout-preview")
             output.mkdir(parents=True, exist_ok=True)
             viewer.capture(output / f"before-sync-{backend_name}-{language}.png", surface="window")
-            _click(viewer, _item_center(viewer, "button", t("Sync latest rollout")))
+            click_control(t("Sync latest rollout"))
             until = time.monotonic() + 3
             while adapter.rollout_sync_info().pending and time.monotonic() < until:
                 viewer.sync()

@@ -73,6 +73,12 @@ ownership. `make keyframe-timeline ARGS='--recording-settings --language zh_CN'`
 settings controls. Desktop acceptance must also paste a screenshot and a finished video into an
 application accepting images/file attachments; offscreen rendering does not validate that transfer.
 
+`make recording-layers` exercises Layers controls, hinge hover, countdown cancellation and live
+visibility changes in an encoded video using a hidden window. It reveals clipped controls before
+clicking and explicitly enables the hinge rotation tool. `tests/gpu/test_recording_layers.py`
+checks the same scenario in English at normal scale and Chinese at 2.25 scale, including a dock
+that requires scrolling. Run it with both renderer backends when changing this workflow.
+
 Code, executable example, test, and build behavior changes finish with `make check`. The table adds
 checks for each affected behavior; combine applicable rows without rerunning shared prerequisites.
 Pure prose, link, and metadata edits use their own rows instead of the CPU or GPU suites.
@@ -418,7 +424,8 @@ framebuffer scale and workload; stationary caching results do not describe panni
 
 `make recording-benchmark` compares paced camera motion with and without full-window interactive
 recording. Reports include frame percentiles, encoder write and buffer-submission timings,
-late frames, initial capture and finalization cost, and the encoded dimensions. Video and JSON
+accepted/skipped samples, output video frames, late frames, initial capture and finalization
+cost, and the encoded dimensions. Video and JSON
 are written under `output/recording-benchmark/`. Run both benchmarks separately from GPU tests
 and other timed workloads. These are diagnostic measurements, not hardware-independent limits.
 
@@ -489,7 +496,7 @@ is measured after queued work finishes and the model's new keyframe time is veri
 runs omit `--editable`. These timings measure application work, not display scanout latency.
 
 `make recording-benchmark ARGS="--width 1920 --height 1080 --fps 60 --preset slow"` reports
-first-frame submission, encoder writes, bounded-buffer waits, stop-request latency and UI frames
+first-frame submission, encoder writes, bounded-buffer submission cost, stop-request latency and UI frames
 during finalization. Width and height are window points; use the reported `encoded_size` for
 the actual video resolution, especially on HiDPI displays. Vary dimensions, FPS and preset in
 separate output directories; run without competing GPU work. Queue and lifecycle tests include initial-write ordering, paused failures,

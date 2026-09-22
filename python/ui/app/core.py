@@ -745,7 +745,7 @@ class ViewerApp(
         self._sync_display_scale()
         if self._model_load_future is not None and self._poll_model_load():
             self._draw_model_loading_frame()
-            self._present_frame(dt)
+            self._present_frame(elapsed)
             self._frame_index += 1
             return
         if self._rpc_service is not None and self._model_load_completion is None:
@@ -762,7 +762,7 @@ class ViewerApp(
         self._start_pending_model_edits()
         if self._start_model_load():
             self._draw_model_loading_frame()
-            self._present_frame(dt)
+            self._present_frame(elapsed)
             self._frame_index += 1
             return
         self._draw_main_menu()
@@ -868,7 +868,8 @@ class ViewerApp(
         self._draw_model_load_error()
         self._draw_recording_countdown()
         self._sync_window_title()
-        self._present_frame(dt)
+        # Recording uses wall time; interaction/physics retain the bounded dt.
+        self._present_frame(elapsed)
         self._frame_index += 1
 
     def _draw_model_loading_frame(self) -> None:

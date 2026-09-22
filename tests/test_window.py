@@ -616,6 +616,65 @@ def test_presented_capture_surface_flips_and_crops_viewport_pixels() -> None:
     assert np.array_equal(viewport, bottom_up[::-1][1:3, 1:4])
 
 
+def test_live_recording_skips_busy_readback_and_keeps_elapsed_time_and_pause(monkeypatch, tmp_path):
+    import threading
+
+    from mojive.capture import recording
+    from mojive.config import RecordingConfig
+
+    entered, release = threading.Event(), threading.Event()
+    samples = []
+
+    class Recorder:
+        def __init__(self, path, size, **kwargs):
+            self.size = size
+
+        def append(self, image):
+            entered.set()
+            assert release.wait(5)
+            samples.append(image.copy())
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(recording, "VideoRecorder", Recorder)
+    app = ViewerApp.__new__(ViewerApp)
+    app.recording_config = RecordingConfig(
+        surface="window", countdown=0, run_simulation=False, copy_to_clipboard=False
+    )
+    app.localizer = SimpleNamespace(text=lambda value: value)
+    app.session = SimpleNamespace(report_message=lambda *args, **kwargs: None)
+    app._capture_requests = []
+    image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+    app.start_recording(tmp_path / "busy.mp4")
+    app._advance_recording_countdown()
+    try:
+        assert app._needs_presented_readback(0)
+        app._finish_capture_and_recording(image, 0)
+        assert entered.wait(2)
+        app._finish_capture_and_recording(image, 1 / 60)
+        app._finish_capture_and_recording(image, 1 / 60)
+        assert not app._needs_presented_readback(0.5)
+        app._finish_capture_and_recording(None, 0.5)
+        assert app.recording.frames == 33
+        # Explicit screenshots still read the window when recording is busy.
+        app._capture_requests = [(tmp_path / "still.png", CaptureSurface.WINDOW)]
+        assert app._needs_presented_readback(0)
+        app._capture_requests.clear()
+        assert app.pause_recording()
+        app._finish_capture_and_recording(None, 10)
+        assert app.recording.frames == 33
+        assert app.resume_recording()
+        app._finish_capture_and_recording(None, 10)
+        assert app.recording.frames == 34
+        assert app.recording.duration == pytest.approx(34 / 60)
+    finally:
+        release.set()
+        app.stop_recording(report=False)
+    assert len(samples) == 34
+    assert all(np.array_equal(frame, image[::-1]) for frame in samples)
+
+
 def test_file_dialog_filters_translate_descriptions_without_touching_globs() -> None:
     from mojive.adapters.base import AdapterCaps
 

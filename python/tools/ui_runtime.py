@@ -734,28 +734,42 @@ def _item_rect(
     viewer,
     function_name: str,
     label: str,
+    *,
+    reveal: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     original = getattr(imgui, function_name)
     found: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    scroll_to_item = reveal
 
     def spy(item_label, *args, **kwargs):
         result = original(item_label, *args, **kwargs)
         if item_label == label:
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             found.append(((lo.x, lo.y), (hi.x, hi.y)))
+            if scroll_to_item:
+                imgui.set_scroll_here_y(0.5)
         return result
 
     setattr(imgui, function_name, spy)
     try:
         viewer.sync()
+        if reveal:
+            # Clipped items still have layout bounds. Scroll before measuring
+            # their clickable position, allowing the dock's scroll to settle.
+            scroll_to_item = False
+            found.clear()
+            viewer.sync()
+            viewer.sync()
     finally:
         setattr(imgui, function_name, original)
     assert found
     return found[-1]
 
 
-def _item_center(viewer, function_name: str, label: str) -> tuple[float, float]:
-    lo, hi = _item_rect(viewer, function_name, label)
+def _item_center(
+    viewer, function_name: str, label: str, *, reveal: bool = False
+) -> tuple[float, float]:
+    lo, hi = _item_rect(viewer, function_name, label, reveal=reveal)
     return ((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5)
 
 
