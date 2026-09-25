@@ -74,3 +74,17 @@ def test_failed_download_preserves_cache_and_allows_retry(
     monkeypatch.setattr(build_imgui.urllib.request, "urlopen", original_open)
     build_imgui.ensure_source_archive(archive)
     assert archive.read_bytes() == payload
+
+
+def test_patch_reads_utf8_sources_on_non_utf8_hosts(tmp_path, monkeypatch):
+    path = tmp_path / "source.cpp"
+    path.write_bytes("// \u2014 upstream comment\nold\n".encode("utf-8"))
+    original = type(path).read_text
+
+    def local_read(self, encoding=None, errors=None):
+        return original(self, encoding=encoding or "cp936", errors=errors)
+
+    monkeypatch.setattr(type(path), "read_text", local_read)
+    build_imgui.replace_source(path, "old", "new")
+    build_imgui.replace_source(path, "old", "new")
+    assert path.read_bytes() == "// \u2014 upstream comment\nnew\n".encode("utf-8")

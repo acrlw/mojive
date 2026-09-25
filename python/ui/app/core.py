@@ -611,7 +611,7 @@ class ViewerApp(
         """Return rendering to the interactive viewport size."""
         self._fixed_render_size = None
         if self._started:
-            self._sync_viewport_size()
+            self._sync_viewport_size(force=True)
 
     def _startup(self) -> None:
         if self._started:
@@ -621,6 +621,7 @@ class ViewerApp(
         if self.window is None:
             self.window = Window(WindowConfig(title=self.title))
             self.window.apply_theme(self.theme)
+        self.window.clipboard_publisher = self._capture_clipboard
         self._sync_structure()
         if not self._initial_camera_set:
             self._reset_source_camera()
@@ -1046,12 +1047,18 @@ class ViewerApp(
         width, height = self.window.points_to_pixels(self.viewport_surface.size)
         return max(1, int(width)), max(1, int(height))
 
-    def _sync_viewport_size(self) -> None:
+    def _sync_viewport_size(self, *, force: bool = False) -> None:
         if self._fixed_render_size is not None:
             self.backend.resize(*self._fixed_render_size)
             self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
         else:
             settled = self.window.poll_render_size(self.viewport_surface.size)
+            if settled is None and force:
+                # The window's resize cache can still describe the same viewport
+                # while the backend was temporarily resized for fixed output.
+                settled = tuple(
+                    max(1, int(v)) for v in self.window.points_to_pixels(self.viewport_surface.size)
+                )
             if settled is not None:
                 sw, sh = settled
                 self.backend.resize(sw, sh)

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from mojive._local_socket import local_socket
 from mojive.control.contracts import DEFAULT_RPC_LIMITS, RpcLimits
 from mojive.control.errors import ControlError as RpcError
 
@@ -183,7 +184,7 @@ class RpcClient:
     def _connect(self, *, deadline: float) -> socket.socket:
         timeout = _remaining_timeout(deadline)
         if self._client is None:
-            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client = local_socket()
             client.settimeout(timeout)
             try:
                 client.connect(str(self.socket_path))

@@ -87,6 +87,7 @@ class NativeWindow(Window):
         if not handle:
             raise RuntimeError("Failed to create a GLFW window (CLIENT_API=NO_API)")
         self._window = handle
+        _window_module._restore_requested_size(handle, self.config.width, self.config.height)
         self._maximized = bool(glfw.get_window_attrib(handle, glfw.MAXIMIZED))
         self._shown = False
         self._destroyed = False

@@ -14,7 +14,9 @@ namespace mojive::geometry2d {
 // through the C-only tessellation boundary, and reclaim every outstanding block.
 // No C++ object with a nontrivial destructor may be created inside that boundary.
 class TessAllocator {
-    struct alignas(std::max_align_t) Block {
+    // MSVC's jmp_buf requires 16-byte alignment even though max_align_t is 8.
+    // libtess2 embeds that buffer; retain malloc's alignment after our header.
+    struct alignas(std::max_align_t) alignas(std::jmp_buf) Block {
         Block *previous;
         Block *next;
         size_t size;

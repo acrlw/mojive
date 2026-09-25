@@ -14,11 +14,12 @@ PROTOCOL_VERSION = 1
 
 def _default_socket() -> Path:
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    directory = (
-        Path(runtime) / "mojive"
-        if runtime
-        else Path(tempfile.gettempdir()) / f"mojive-{os.getuid()}"
-    )
+    if runtime:
+        directory = Path(runtime) / "mojive"
+    elif hasattr(os, "getuid"):
+        directory = Path(tempfile.gettempdir()) / f"mojive-{os.getuid()}"
+    else:
+        directory = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "mojive"
     return directory / "control.sock"
 
 

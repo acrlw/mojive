@@ -4,11 +4,12 @@ import json
 import select
 import socket
 import socketserver
-import stat
 import threading
 from concurrent.futures import Future
 from contextlib import suppress
 from pathlib import Path
+
+from mojive._local_socket import LocalStreamServer, is_socket, local_socket
 
 from .protocol import _decode_json, _request_deadline, _response
 from .service import ControlService
@@ -77,7 +78,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             return False
 
 
-class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+class ControlServer(socketserver.ThreadingMixIn, LocalStreamServer):
     """Concurrent newline-delimited JSON server over an AF_UNIX socket."""
 
     daemon_threads = True
@@ -181,9 +182,9 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
             info = self.socket_path.lstat()
         except FileNotFoundError:
             return
-        if not stat.S_ISSOCK(info.st_mode):
+        if not is_socket(info):
             raise FileExistsError(f"RPC path exists and is not a socket: {self.socket_path}")
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        with local_socket() as probe:
             probe.settimeout(0.2)
             try:
                 probe.connect(str(self.socket_path))

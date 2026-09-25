@@ -95,6 +95,9 @@ To check that a renderer can create a window and render frames:
 uv run --no-sync mojive doctor joint_types
 ```
 
+For PowerShell launch commands and UI scaling, see
+[Windows](how-to/windows.md).
+
 ## Configure the UI
 
 Open **Edit > Settings...**, **Window > Settings**, or press `F9`. Settings is a dockable,

@@ -7,13 +7,13 @@ import json
 import os
 import queue
 import selectors
-import socket
 import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mojive._local_socket import local_socket
 from mojive.log import get_logger
 from mojive.render.debugdraw import NEVER, DebugDraw, Layer, Occlusion
 
@@ -51,6 +51,19 @@ def live_sockets(app: str = APP) -> list[Path]:
 
 
 def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        import _winapi
+
+        try:
+            handle = _winapi.OpenProcess(0x1000, False, pid)
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        try:
+            return _winapi.GetExitCodeProcess(handle) == 259
+        finally:
+            _winapi.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -442,7 +455,7 @@ class _SocketServer:
 
         if path.exists():
             path.unlink()
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock = local_socket()
         self._sock.bind(str(path))
         self._sock.listen(8)
         path.chmod(0o600)
@@ -532,7 +545,7 @@ class DebugClient:
                 raise FileNotFoundError(f"No viewer socket found in {socket_dir(app)}")
             path = live[0]
         self.path = path
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock = local_socket()
         self._sock.settimeout(timeout)
         self._sock.connect(str(path))
 

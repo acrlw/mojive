@@ -1,7 +1,6 @@
 """Real Unix sockets preserve framing, admission and cancellation under pressure."""
 
 import json
-import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +12,7 @@ import pytest
 
 from mojive import cli
 from mojive import commands as cmd
+from mojive._local_socket import local_socket
 from mojive.adapters.toy import ToyPhysicsAdapter
 from mojive.control.rpc import (
     ControlServer,
@@ -82,7 +82,7 @@ def read_reply(peer):
 
 def test_oversized_frame_closes_without_parsing_its_suffix(tmp_path):
     with running(tmp_path, max_request_bytes=512) as (server, service, session):
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        with local_socket() as peer:
             peer.settimeout(2)
             peer.connect(str(server.socket_path))
             peer.sendall(wire_request(padding="x" * 1024) + wire_request())
@@ -98,7 +98,7 @@ def test_oversized_frame_closes_without_parsing_its_suffix(tmp_path):
 def test_invalid_protocol_version_cannot_execute_mutation(tmp_path, version):
     with (
         running(tmp_path) as (server, _service, session),
-        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer,
+        local_socket() as peer,
     ):
         peer.settimeout(2)
         peer.connect(str(server.socket_path))
@@ -134,7 +134,7 @@ def test_unserializable_result_reports_error_and_keeps_socket_usable(tmp_path, m
 def test_nonfinite_request_envelope_cannot_execute_mutation(tmp_path, value):
     with (
         running(tmp_path) as (server, _service, session),
-        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer,
+        local_socket() as peer,
     ):
         peer.settimeout(2)
         peer.connect(str(server.socket_path))
@@ -174,7 +174,7 @@ def test_connection_limit_rejects_before_starting_work_and_releases_slots(tmp_pa
 
 def test_disconnect_without_deadline_cancels_unstarted_mutation(tmp_path):
     with running(tmp_path, viewer=True) as (server, service, session):
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        with local_socket() as peer:
             peer.connect(str(server.socket_path))
             peer.sendall(wire_request())
             wait_until(lambda: service.stats.snapshot()["counters"]["queued_requests"] == 1)

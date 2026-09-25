@@ -43,6 +43,7 @@ nav:
       - Design UI icons: how-to/ui-icons.md
       - Native renderer probe: guides/native-probe.md
       - Native bgfx backend: how-to/native-viewer.md
+      - Windows: how-to/windows.md
   - Concepts:
       - Architecture: concepts/architecture.md
       - Renderer: concepts/rendering.md

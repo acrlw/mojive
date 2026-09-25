@@ -120,6 +120,6 @@ def test_connect_and_write_share_the_request_deadline(monkeypatch):
     send = peer.sendall
     peer.sendall = lambda data: (timeouts.append(("send", timeouts[-1])), send(data))
     monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(module.socket, "socket", lambda *_args: peer)
+    monkeypatch.setattr(module, "local_socket", lambda: peer)
     assert RpcClient(timeout=1).hello() == {"ok": True}
     assert next(item[1] for item in timeouts if isinstance(item, tuple)) == pytest.approx(0.6)

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import socket
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from mojive._local_socket import local_socket
 from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.cli import main
 from mojive.control.rpc import (
@@ -33,7 +34,7 @@ pytestmark = pytest.mark.physics
 def rpc():
     asset = Path("assets/joint_types.xml").resolve()
     service = ControlService(MuJoCoAdapter(asset), asset)
-    with tempfile.TemporaryDirectory(prefix="fv-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="fv-") as directory:
         server = ControlServer(Path(directory) / "control.sock", service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -189,7 +190,29 @@ def test_viewer_service_marshals_requests_until_the_ui_thread_pumps(rpc):
 def test_control_socket_is_private_to_the_current_user(rpc):
     client, _, _ = rpc
 
-    assert stat.S_IMODE(client.socket_path.stat().st_mode) == 0o600
+    if sys.platform == "win32":
+        import ctypes as c
+
+        api = c.WinDLL("Advapi32.dll", use_last_error=True)
+        read = api.GetFileSecurityW
+        read.argtypes = [c.c_wchar_p, c.c_uint32, c.c_void_p, c.c_uint32, c.POINTER(c.c_uint32)]
+        needed = c.c_uint32()
+        read(str(client.socket_path), 4, None, 0, c.byref(needed))
+        descriptor = c.create_string_buffer(needed.value)
+        assert read(str(client.socket_path), 4, descriptor, needed.value, c.byref(needed))
+        convert = api.ConvertSecurityDescriptorToStringSecurityDescriptorW
+        convert.argtypes = [c.c_void_p, c.c_uint32, c.c_uint32, c.POINTER(c.c_wchar_p), c.c_void_p]
+        text = c.c_wchar_p()
+        assert convert(descriptor, 1, 4, c.byref(text), None)
+        try:
+            assert text.value == "D:P(A;;FA;;;OW)"
+        finally:
+            free = c.WinDLL("Kernel32.dll").LocalFree
+            free.argtypes = [c.c_void_p]
+            free.restype = c.c_void_p
+            free(c.cast(text, c.c_void_p))
+    else:
+        assert stat.S_IMODE(client.socket_path.stat().st_mode) == 0o600
 
 
 def test_rpc_camera_selection_uses_session_overrides(rpc, monkeypatch):
@@ -245,7 +268,7 @@ def test_rpc_returns_structured_errors_and_correlates_requests(rpc):
     assert error.value.code == "unknown_method"
 
     request = {"version": PROTOCOL_VERSION + 1, "id": "version", "method": "get_state"}
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+    with local_socket() as connection:
         connection.connect(str(server.socket_path))
         connection.sendall(json.dumps(request).encode() + b"\n")
         response = json.loads(connection.makefile().readline())
@@ -264,7 +287,7 @@ def test_rpc_reuses_one_connection_for_many_requests(rpc):
 
 def test_rpc_connection_recovers_after_invalid_request(rpc):
     _, _, server = rpc
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+    with local_socket() as connection:
         connection.connect(str(server.socket_path))
         stream = connection.makefile("rwb")
         stream.write(b"not-json\n")
@@ -286,7 +309,7 @@ def test_rpc_connection_recovers_after_invalid_request(rpc):
 
 def test_idle_connection_does_not_block_other_clients(rpc):
     client, _, server = rpc
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as idle:
+    with local_socket() as idle:
         idle.connect(str(server.socket_path))
         assert "physics" in client.call("get_state")
 
@@ -332,9 +355,9 @@ def test_control_cli_prints_json(rpc, capsys):
 
 
 def test_rpc_client_timeout():
-    with tempfile.TemporaryDirectory(prefix="fv-", dir="/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="fv-") as directory:
         path = Path(directory) / "silent.sock"
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener = local_socket()
         listener.bind(str(path))
         listener.listen()
 

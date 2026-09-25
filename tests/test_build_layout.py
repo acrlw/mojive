@@ -92,6 +92,8 @@ print(json.dumps([mojive.value, mojive.cli.value, mojive.__file__, mojive.__path
     ],
 )
 def test_make_cleanup_only_removes_its_named_scope(tmp_path, target, removed):
+    if shutil.which("make") is None:
+        pytest.skip("Makefile cleanup requires GNU Make")
     names = {".pytest_cache", ".ruff_cache", "output", "build", ".venv", "python", "out"}
     for name in names:
         (tmp_path / name).mkdir()

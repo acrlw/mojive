@@ -174,6 +174,50 @@ def test_clipboard_copy_never_blocks_submission_and_coalesces_to_latest(tmp_path
         publisher.close()
 
 
+def test_manual_text_wins_over_an_inflight_capture_on_the_ui_thread(tmp_path):
+    from mojive.ui.window import _install_glfw_clipboard_callbacks
+
+    entered, release = threading.Event(), threading.Event()
+    native_text, copied, writes = ["previous"], [], []
+    ui_thread = threading.get_ident()
+
+    def copy_file(path, kind):
+        entered.set()
+        assert release.wait(3)
+        copied.append(path.name)
+        native_text[0] = None  # File targets do not contain an X11 text selection.
+
+    def set_text(_window, text):
+        writes.append(threading.get_ident())
+        native_text[0] = text
+
+    publisher = clipboard.CaptureClipboard(copy_file)
+    platform = SimpleNamespace()
+    api = SimpleNamespace(
+        get_clipboard_string=lambda _window: native_text[0], set_clipboard_string=set_text
+    )
+    try:
+        publisher.submit(tmp_path / "first.mp4", "file")
+        assert entered.wait(3)
+        publisher.submit(tmp_path / "superseded.mp4", "file")
+        _install_glfw_clipboard_callbacks(
+            api, SimpleNamespace(get_platform_io=lambda: platform), publisher
+        )
+        platform.platform_set_clipboard_text_fn(None, "first path")
+        platform.platform_set_clipboard_text_fn(None, "latest path")
+        assert not release.is_set()  # Manual copy does not wait on a desktop worker.
+        assert platform.platform_get_clipboard_text_fn(None) == "latest path"
+        release.set()
+        publisher.close()
+        assert copied == ["first.mp4"]
+        assert native_text[0] == "latest path"
+        assert writes == [ui_thread]
+        assert platform.platform_get_clipboard_text_fn(None) == "latest path"
+    finally:
+        release.set()
+        publisher.close()
+
+
 def test_failed_clipboard_keeps_saved_file_and_reports_actionable_receipt(app, tmp_path):
     path = tmp_path / "capture.png"
 

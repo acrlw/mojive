@@ -117,6 +117,12 @@ def test_library_offsets_toggle_export_and_drag_without_recomputing(
             result = window.end_frame(readback=readback)
             return result[::-1].copy() if readback else None
 
+        def capture():
+            # Hover tooltips otherwise cover specimens once slow frames exceed their delay.
+            imgui.get_io().add_mouse_pos_event(-100, -100)
+            frame(False)
+            return frame()
+
         def click(label, index=0, fraction=0.5):
             x0, y0, x1, y1 = rectangles[label][index]
             assert 0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height
@@ -172,7 +178,7 @@ def test_library_offsets_toggle_export_and_drag_without_recomputing(
         assert state.icon_manual_offset("helper-camera")[1] < -0.5
         enter_value("##glyph-offset-x", 1.23)
         enter_value("##glyph-offset-y", -0.67)
-        manual = frame()
+        manual = capture()
         assert state.icon_manual_offset("helper-camera") == pytest.approx((1.23, -0.67))
         assert state.icon_manual_offset("helper-light") == (0, -0.65)
         assert not np.array_equal(crop(original, "helper-camera"), crop(manual, "helper-camera"))
@@ -181,7 +187,7 @@ def test_library_offsets_toggle_export_and_drag_without_recomputing(
         saved_offsets = state.icon_offsets_by_glyph.copy()
         click("Auto align")
         assert state.icon_auto_align
-        automatic = frame()
+        automatic = capture()
         assert not np.array_equal(crop(manual, "helper-camera"), crop(automatic, "helper-camera"))
         save(automatic, "auto")
         drag("##glyph-offset-x", 70)
@@ -191,7 +197,7 @@ def test_library_offsets_toggle_export_and_drag_without_recomputing(
         click("Copy icon parameters")
         assert copied[-1] == _icon_values_text(state)
         click("Auto align")
-        restored = frame()
+        restored = capture()
         assert state.icon_offsets_by_glyph == saved_offsets
         assert np.array_equal(crop(manual, "helper-camera"), crop(restored, "helper-camera"))
 
@@ -284,7 +290,7 @@ def test_library_offsets_toggle_export_and_drag_without_recomputing(
         click("menu-Probe")
         click("Apply icon X/Y offsets")
         imgui.get_io().add_mouse_pos_event(-100, -100)
-        restored = frame()
+        restored = capture()
         assert state.apply_icon_offsets and state.icon_offsets_by_glyph == saved_offsets
         assert np.array_equal(viewport_crop(applied), viewport_crop(restored))
         state.page = "Geometry"

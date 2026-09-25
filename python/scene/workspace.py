@@ -184,10 +184,11 @@ def repair_workspace_resources(path: str | Path, search_root: str | Path) -> Res
 
 
 def _relative_path(path: Path, directory: Path) -> str:
-    try:
-        return path.resolve().relative_to(directory.resolve()).as_posix()
-    except ValueError:
-        return Path(os.path.relpath(path.resolve(), directory.resolve())).as_posix()
+    resolved, base = path.resolve(), directory.resolve()
+    # Windows cannot express a relative path between different drive letters.
+    if resolved.drive != base.drive:
+        return resolved.as_posix()
+    return Path(os.path.relpath(resolved, base)).as_posix()
 
 
 def _resource_path(path: Path, roots: tuple[Path, ...]) -> str:

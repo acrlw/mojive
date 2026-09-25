@@ -1,8 +1,20 @@
 uniform vec4 u_options;
-uniform vec4 u_cameraPosition, u_cameraDirection, u_ambient;
-uniform vec4 u_headlightDiffuse, u_headlightSpecular;
-uniform vec4 u_fog, u_fogColor, u_hazeColor, u_depthRange, u_lightCount, u_imageLight;
-uniform vec4 u_lightPosition[100], u_lightDirection[100], u_lightDiffuse[100], u_lightSpecular[100], u_lightAttenuation[100];
+uniform vec4 u_cameraPosition;
+uniform vec4 u_cameraDirection;
+uniform vec4 u_ambient;
+uniform vec4 u_headlightDiffuse;
+uniform vec4 u_headlightSpecular;
+uniform vec4 u_fog;
+uniform vec4 u_fogColor;
+uniform vec4 u_hazeColor;
+uniform vec4 u_depthRange;
+uniform vec4 u_lightCount;
+uniform vec4 u_imageLight;
+uniform vec4 u_lightPosition[100];
+uniform vec4 u_lightDirection[100];
+uniform vec4 u_lightDiffuse[100];
+uniform vec4 u_lightSpecular[100];
+uniform vec4 u_lightAttenuation[100];
 SAMPLERCUBE(s_imageLight, 2);
 #include "shadows.sh"
 #include "color.sh"
@@ -10,7 +22,7 @@ vec3 lightColor(vec3 c) { return u_options.y > .5 ? linearToSrgb(c) : c; }
 vec3 lightTerm(vec3 albedo, vec3 n, vec3 l, vec3 viewDir, vec3 diffuse, vec3 specularColor,
     vec3 specularMod, float specular, float shininess, float atten, float shadow) {
     float ndl = max(dot(n, l), 0.0);
-    if (ndl <= 0 || atten <= 0) return vec3(0);
+    if (ndl <= 0 || atten <= 0) return vec3_splat(0);
     vec3 h = normalize(l + viewDir);
     float spec = specular * pow(max(dot(n, h), 0.0), max(shininess * 128.0, 1e-3));
     diffuse = lightColor(diffuse);
@@ -22,7 +34,7 @@ vec3 shade(vec3 albedo, vec3 normal, vec3 world, vec3 material, vec3 texel, floa
     vec3 n = normalize(normal), viewDir = normalize(u_cameraPosition.xyz - world);
     vec3 ambient = u_options.y > .5 ? clamp(u_ambient.rgb, 0, 1) : srgbToLinear(clamp(u_ambient.rgb, 0, 1));
     vec3 color = ambient * albedo;
-    vec3 specularMod = u_options.y > .5 ? texel : vec3(1);
+    vec3 specularMod = u_options.y > .5 ? texel : vec3_splat(1);
     if (u_imageLight.x > 0) {
         vec3 r = reflect(-viewDir, n);
         vec3 diffuse = textureCubeLod(s_imageLight, vec3(n.x, n.z, -n.y), u_imageLight.y).rgb;

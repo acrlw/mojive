@@ -1,8 +1,10 @@
 $input a_position, i_data0, i_data1, i_data2, i_data3, i_data4
 $output v_pixel, v_a, v_b, v_core_color, v_edge_color, v_width, v_radius, v_edge, v_smoothing
 #include <bgfx_shader.sh>
-uniform mat4 u_debugViewProj, u_debugProj;
-uniform vec4 u_debugParams, u_debugDepth;
+uniform mat4 u_debugViewProj;
+uniform mat4 u_debugProj;
+uniform vec4 u_debugParams;
+uniform vec4 u_debugDepth;
 #define u_viewport (u_debugParams.xy)
 #define u_px_scale (u_debugParams.z)
 #define u_alpha (u_debugParams.w)

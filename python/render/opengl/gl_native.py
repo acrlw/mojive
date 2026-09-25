@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import threading
 from ctypes import c_float, c_int, c_ubyte, c_uint, c_void_p
 
 GL_ARRAY_BUFFER = 0x8892
@@ -63,7 +64,7 @@ def _load_gl() -> ctypes.CDLL | None:
         candidates = ("opengl32.dll",)
     for name in candidates:
         try:
-            return ctypes.CDLL(name)
+            return ctypes.WinDLL(name) if sys.platform == "win32" else ctypes.CDLL(name)
         except OSError:
             continue
     return None
@@ -72,6 +73,12 @@ def _load_gl() -> ctypes.CDLL | None:
 class GLNative:
     def __init__(self) -> None:
         self._lib = _load_gl()
+        self._current_context = lambda: None
+        if self._lib is not None and sys.platform == "win32":
+            self._current_context = self._lib.wglGetCurrentContext
+            self._current_context.argtypes = []
+            self._current_context.restype = c_void_p
+        self._context_handle = self._current_context()
         self.has_clear_buffer_uiv = False
         self.has_clear_buffer_iv = False
         self.has_clear_buffer_fv = False
@@ -185,7 +192,16 @@ class GLNative:
         try:
             fn = getattr(self._lib, name)
         except AttributeError:
-            return False
+            if sys.platform != "win32":
+                return False
+            # opengl32 exports GL 1.1 only; newer entry points belong to WGL.
+            resolve = self._lib.wglGetProcAddress
+            resolve.argtypes = [ctypes.c_char_p]
+            resolve.restype = c_void_p
+            address = resolve(name.encode("ascii"))
+            if address in (None, 0, 1, 2, 3, c_void_p(-1).value):
+                return False
+            fn = ctypes.WINFUNCTYPE(restype, *argtypes)(address)
         fn.argtypes = argtypes
         fn.restype = restype
         setattr(self, "_" + name, fn)
@@ -389,10 +405,18 @@ class GLNative:
 
 
 _INSTANCE: GLNative | None = None
+_WINDOWS_LOCAL = threading.local()
 
 
 def native() -> GLNative:
     global _INSTANCE
+    if sys.platform == "win32":
+        # WGL pointers are context/pixel-format specific, and contexts are thread-local.
+        instance = getattr(_WINDOWS_LOCAL, "instance", None)
+        if instance is None or instance._context_handle != instance._current_context():
+            instance = GLNative()
+            _WINDOWS_LOCAL.instance = instance
+        return instance
     if _INSTANCE is None:
         _INSTANCE = GLNative()
     return _INSTANCE

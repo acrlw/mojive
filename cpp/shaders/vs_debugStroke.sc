@@ -1,8 +1,10 @@
 $input a_position, i_data0, i_data1, i_data2, i_data3
 $output v_color0
 #include <bgfx_shader.sh>
-uniform mat4 u_debugViewProj, u_debugProj;
-uniform vec4 u_debugParams, u_debugDepth;
+uniform mat4 u_debugViewProj;
+uniform mat4 u_debugProj;
+uniform vec4 u_debugParams;
+uniform vec4 u_debugDepth;
 #define u_viewport (u_debugParams.xy)
 #define u_px_scale (u_debugParams.z)
 #define u_alpha (u_debugParams.w)
@@ -73,7 +75,7 @@ void main() {
         );
         clip = c_a;
         if (corner == 0 || abs(turn) < 1e-5) {
-            offset = vec2(0.0);
+            offset = vec2_splat(0.0);
         } else {
             float step = float(wedge + corner - 1) / float(STROKE_JOIN_SEGMENTS);
             vec2 incoming_normal = vec2(-incoming.y, incoming.x);

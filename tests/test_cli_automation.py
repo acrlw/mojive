@@ -53,7 +53,13 @@ def test_control_socket_uses_user_runtime_and_user_scoped_temp_fallback(tmp_path
     assert protocol._default_socket() == tmp_path / "runtime/mojive/control.sock"
     monkeypatch.delenv("XDG_RUNTIME_DIR")
     monkeypatch.setattr(protocol.tempfile, "gettempdir", lambda: str(tmp_path))
-    assert protocol._default_socket() == tmp_path / f"mojive-{protocol.os.getuid()}/control.sock"
+    if hasattr(protocol.os, "getuid"):
+        assert (
+            protocol._default_socket() == tmp_path / f"mojive-{protocol.os.getuid()}/control.sock"
+        )
+    else:
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        assert protocol._default_socket() == tmp_path / "mojive/control.sock"
 
 
 @pytest.mark.parametrize("rpc_fails", [False, True])

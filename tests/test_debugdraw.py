@@ -5,7 +5,6 @@ import inspect
 import json
 import os
 import shutil
-import socket
 import tempfile
 import time
 import tracemalloc
@@ -14,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from mojive._local_socket import local_socket
 from mojive.remote.bridge import APP, DebugBridge, socket_path
 from mojive.render.backend import BackendCaps, NullBackend
 from mojive.render.debugdraw import (
@@ -812,7 +812,7 @@ def test_external_json_lines_are_received_off_thread_and_applied_on_the_main_thr
                 "radius_px": 5,
             },
         ]
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        with local_socket() as client:
             client.settimeout(2.0)
             client.connect(str(path))
             client.sendall(b"".join(json.dumps(m).encode() + b"\n" for m in payload))
@@ -841,7 +841,7 @@ def test_external_bad_line_does_not_take_the_connection_down(short_dir):
     br = DebugBridge(backend)
     path = br.serve(short_dir / "v.sock")
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        with local_socket() as client:
             client.settimeout(2.0)
             client.connect(str(path))
             client.sendall(b"{ this is not json }\n")
