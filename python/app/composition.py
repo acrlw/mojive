@@ -483,6 +483,7 @@ class Viewer:
             self.app.set_fixed_render_size(*size)
         recorder = None
         pending = deque()
+        capture_size = size
 
         def append(image: np.ndarray) -> None:
             nonlocal recorder
@@ -497,8 +498,10 @@ class Viewer:
                 if before_frame is not None:
                     before_frame(index, self)
                 self.sync()
+                if capture_size is None:
+                    capture_size = (self.backend.target.width, self.backend.target.height)
                 target = self.app._scene_capture.render(
-                    self.backend, self.session, self.app._camera_view()
+                    self.backend, self.session, self.app._camera_view(), size=capture_size
                 )
                 async_read = getattr(target, "read_rgb_async", None)
                 if callable(async_read):

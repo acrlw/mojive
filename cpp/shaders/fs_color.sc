@@ -14,8 +14,8 @@ void main()
     vec3 eye = mul(u_invView, vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     vec3 halfway = normalize(normalize(eye - v_world) + normalize(vec3(0.4, -0.5, 0.8)));
     float specular = u_material.y * pow(max(dot(normal, halfway), 0.0), max(1.0, u_material.z * 128.0));
-    vec3 shaded = color * (light + u_material.x) + vec3(specular);
+    vec3 shaded = color * (light + u_material.x) + vec3_splat(specular);
     if (u_material.w > 0.5)
-        shaded = pow(max(shaded, vec3(0.0)), vec3(1.0 / 2.2));
+        shaded = pow(max(shaded, vec3_splat(0.0)), vec3_splat(1.0 / 2.2));
     gl_FragColor = vec4(shaded, opacity * texel.a);
 }

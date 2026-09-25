@@ -939,6 +939,7 @@ def test_workspace_relocates_one_missing_resource_and_reopens(tmp_path: Path) ->
     payload["models"][0]["path"] = "missing/robot.xml"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     path.chmod(0o640)
+    original_mode = path.stat().st_mode & 0o777
     replacement = tmp_path / "recovered" / "replacement.xml"
     replacement.parent.mkdir()
     replacement.write_text((ASSETS / "test_scene.xml").read_text(), encoding="utf-8")
@@ -951,7 +952,7 @@ def test_workspace_relocates_one_missing_resource_and_reopens(tmp_path: Path) ->
     result = relocate_workspace_resource(path, missing[0].model_index, replacement)
     assert result.repaired == 1
     assert result.missing == ()
-    assert path.stat().st_mode & 0o777 == 0o640
+    assert path.stat().st_mode & 0o777 == original_mode
     restored = workspace()
     restored.open_scene(path)
     assert restored.scene_models()[0].path == replacement.resolve()

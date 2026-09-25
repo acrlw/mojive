@@ -1,7 +1,11 @@
 $input a_position
 $output v_color0
 #include <bgfx_shader.sh>
-uniform vec4 u_skyEyeDistance, u_hazeGeometry, u_hazeBasisX, u_hazeBasisY, u_hazeNormal;
+uniform vec4 u_skyEyeDistance;
+uniform vec4 u_hazeGeometry;
+uniform vec4 u_hazeBasisX;
+uniform vec4 u_hazeBasisY;
+uniform vec4 u_hazeNormal;
 void main() {
     float layer=a_position.z;
     float height=layer<.5?0.0:layer<1.5?u_hazeGeometry.w:1.0;

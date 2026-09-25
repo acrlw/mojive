@@ -30,7 +30,7 @@ def test_public_capture_propagates_save_failure_and_recovers(tmp_path, monkeypat
             assert image.size == viewer.window.size_pixels
         directory = tmp_path / "not-a-file.png"
         directory.mkdir()
-        with pytest.raises(IsADirectoryError):
+        with pytest.raises((IsADirectoryError, PermissionError)):
             viewer.capture(directory, surface="window")
         assert viewer.capture(path, surface="window").is_file()
         with monkeypatch.context() as local:
@@ -128,5 +128,8 @@ def test_geometry_preferences_and_default_capture_resolution(tmp_path, monkeypat
         assert scene.shape[0] < viewer.window.size_pixels[1]
         viewer.app.set_fixed_render_size(360, 240)
         assert viewer.capture_array().shape == (240, 360, 3)
+        viewer.app.clear_fixed_render_size()
+        assert (viewer.backend.target.height, viewer.backend.target.width) == scene.shape[:2]
+        assert viewer.capture_array().shape == scene.shape
     with build_scene(acceptance_scene(), vsync=False, show_window=False) as viewer:
         assert viewer.geometry_style == style

@@ -1,8 +1,10 @@
 $input a_position, i_data0, i_data1, i_data2, i_data3
 $output v_color0
 #include <bgfx_shader.sh>
-uniform mat4 u_debugViewProj, u_debugProj;
-uniform vec4 u_debugParams, u_debugDepth;
+uniform mat4 u_debugViewProj;
+uniform mat4 u_debugProj;
+uniform vec4 u_debugParams;
+uniform vec4 u_debugDepth;
 #define u_viewport (u_debugParams.xy)
 #define u_px_scale (u_debugParams.z)
 #define u_alpha (u_debugParams.w)
@@ -29,24 +31,24 @@ void main() {
     float ref_len = length(ref);
     if (ref_len < 1e-9) {
         gl_Position = nativeClip(vec4(0.0, 0.0, 2.0, 1.0));
-        return;
-    }
-    vec3 axis = angle > 1e-9 ? rotvec / angle : vec3(0.0, 0.0, 1.0);
-    vec3 dir = ref / ref_len;
+    } else {
+        vec3 axis = angle > 1e-9 ? rotvec / angle : vec3(0.0, 0.0, 1.0);
+        vec3 dir = ref / ref_len;
 
-    float radius = ref_len;
-    if (in_radius > 0.0) {
-        float w = mul(u_debugProj, mul(u_view, vec4(c,1.0))).w;
-        radius = in_radius * u_px_scale * w;
-    }
+        float radius = ref_len;
+        if (in_radius > 0.0) {
+            float w = mul(u_debugProj, mul(u_view, vec4(c,1.0))).w;
+            radius = in_radius * u_px_scale * w;
+        }
 
-    int tri = int(a_position.x) / 3;
-    int corner = int(a_position.x) % 3;
-    vec3 p = c;
-    if (corner > 0) {
-        float t = angle * float(tri + corner - 1) / float(SECTOR_SEGMENTS);
-        vec3 v = dir * cos(t) + cross(axis, dir) * sin(t) + axis * dot(axis, dir) * (1.0 - cos(t));
-        p = c + v * radius;
+        int tri = int(a_position.x) / 3;
+        int corner = int(a_position.x) % 3;
+        vec3 p = c;
+        if (corner > 0) {
+            float t = angle * float(tri + corner - 1) / float(SECTOR_SEGMENTS);
+            vec3 v = dir * cos(t) + cross(axis, dir) * sin(t) + axis * dot(axis, dir) * (1.0 - cos(t));
+            p = c + v * radius;
+        }
+        gl_Position = nativeClip(mul(u_debugViewProj, vec4(p, 1.0)));
     }
-    gl_Position = nativeClip(mul(u_debugViewProj, vec4(p, 1.0)));
 }

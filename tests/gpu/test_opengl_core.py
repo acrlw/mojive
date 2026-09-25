@@ -139,10 +139,11 @@ def test_integer_attachment_clear_is_exact(gl):
         fbo_i = gl.framebuffer([tex_i])
         try:
             fbo_i.use()
-            fbo_i.clear(0.13, 0.13, 0.13, 1.0)
+            # Float clears have no portable uint bit-pattern contract across drivers.
+            assert n.clear_color_uint(0, 16_777_217)
             got = int(np.frombuffer(fbo_i.read(components=1, dtype="u4"), np.uint32)[0])
-            n.drain_errors()
-            assert got == int(np.float32(0.13).view(np.uint32))
+            assert n.drain_errors() == 0
+            assert got == 16_777_217
         finally:
             tgt.use_main()
             fbo_i.release()

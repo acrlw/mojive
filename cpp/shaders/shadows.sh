@@ -1,19 +1,24 @@
 SAMPLER2DSHADOW(s_shadowAtlas, 3);
 SAMPLER2DARRAY(s_localShadow, 4);
-uniform vec4 u_shadowConfig, u_shadowSplits, u_shadowTexels;
-uniform mat4 u_shadowMatrix[3], u_localMatrix[8];
-uniform vec4 u_localPosition[8], u_localParams[8], u_localSlots[100];
+uniform vec4 u_shadowConfig;
+uniform vec4 u_shadowSplits;
+uniform vec4 u_shadowTexels;
+uniform mat4 u_shadowMatrix[3];
+uniform mat4 u_localMatrix[8];
+uniform vec4 u_localPosition[8];
+uniform vec4 u_localParams[8];
+uniform vec4 u_localSlots[100];
 float directionalCompare(vec2 uv,float reference,vec2 lo,vec2 hi) {
     return shadow2D(s_shadowAtlas,vec3(clamp(uv,lo,hi),reference));
 }
 float directionalShadow(vec3 world,vec3 normal,float viewDepth) {
     int cascade=2;
     for(int i=0;i<3;++i) if(viewDepth<u_shadowSplits[i]) { cascade=i; break; }
-    vec3 p=vec3(0); bool inside=false;
+    vec3 p=vec3_splat(0); bool inside=false;
     for(;cascade<3;++cascade) {
         vec4 clip=mul(u_shadowMatrix[cascade],vec4(world,1));
         p=clip.xyz/clip.w*.5+.5;
-        if(all(greaterThanEqual(p,vec3(0)))&&all(lessThanEqual(p,vec3(1)))) {inside=true;break;}
+        if(all(greaterThanEqual(p,vec3_splat(0)))&&all(lessThanEqual(p,vec3_splat(1)))) {inside=true;break;}
     }
     if(!inside) return 1.0;
     // bgfx compiles matrix indexing through HLSL row semantics on Metal/Vulkan.
@@ -26,7 +31,7 @@ float directionalShadow(vec3 world,vec3 normal,float viewDepth) {
     if(u_shadowConfig.w>.5) p.y=1.0-p.y;
     vec2 origin=vec2(mod(float(cascade),2.0),floor(float(cascade)/2.0))*.5;
     vec2 uv=origin+p.xy*.5;
-    vec2 lo=origin+vec2(.5/4096.0),hi=origin+vec2(.5-.5/4096.0);
+    vec2 lo=origin+vec2_splat(.5/4096.0),hi=origin+vec2_splat(.5-.5/4096.0);
     float ref=p.z-bias;
     if(u_shadowConfig.z<.5) return directionalCompare(uv,ref,lo,hi);
     float offset=(u_shadowConfig.z<1.5?.75:1.25)/4096.0;
@@ -40,7 +45,7 @@ float localSample(vec2 uv,int layer) {
     return texture2DArrayLod(s_localShadow,vec3(uv,float(layer)),0.0).r;
 }
 float bilinearLocal(vec2 uv,int layer,float reference) {
-    vec2 dims=vec2(u_localParams[0].w);
+    vec2 dims=vec2_splat(u_localParams[0].w);
     vec2 t=uv*dims-.5,base=floor(t),f=fract(t);
     float a=step(reference,localSample((base+.5)/dims,layer));
     float b=step(reference,localSample((base+vec2(1.5,.5))/dims,layer));
@@ -50,7 +55,7 @@ float bilinearLocal(vec2 uv,int layer,float reference) {
 }
 float filteredLocal(vec2 uv,int layer,float reference) {
     if(u_shadowConfig.z<.5) return bilinearLocal(uv,layer,reference);
-    vec2 delta=vec2(u_shadowConfig.z<1.5?.75:1.25)/vec2(u_localParams[0].w);
+    vec2 delta=vec2_splat(u_shadowConfig.z<1.5?.75:1.25)/vec2_splat(u_localParams[0].w);
     float lit=u_shadowConfig.z<1.5?0.0:bilinearLocal(uv,layer,reference);
     for(int y=-1;y<=1;y+=2) for(int x=-1;x<=1;x+=2)
         lit+=bilinearLocal(uv+vec2(float(x),float(y))*delta,layer,reference);
@@ -77,7 +82,7 @@ float localShadow(int type,int slot,vec3 world,vec3 normal) {
     if(type==2) {
         vec4 clip=mul(u_localMatrix[slot],vec4(world,1));if(clip.w<=0)return 1.0;
         vec3 p=clip.xyz/clip.w*.5+.5;
-        if(any(lessThan(p,vec3(0)))||any(greaterThan(p,vec3(1))))return 1.0;
+        if(any(lessThan(p,vec3_splat(0)))||any(greaterThan(p,vec3_splat(1))))return 1.0;
         return filteredLocal(p.xy,int(u_localParams[slot].z+.5),distance-bias);
     }
     vec3 seed=abs(direction.z)<.9?vec3(0,0,1):vec3(0,1,0);

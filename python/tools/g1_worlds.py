@@ -12,7 +12,6 @@ import argparse
 import hashlib
 import json
 import math
-import resource
 import socket
 import subprocess
 import sys
@@ -370,8 +369,10 @@ def worker(args):
                     "lod_meshes_pending",
                 ):
                     result[key] = getattr(stats, key)
-        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        result["peak_rss_bytes"] = rss if sys.platform == "darwin" else rss * 1024
+        from mojive.tools.renderer_benchmark_worker import _rss_mb
+
+        peak_rss_mb = _rss_mb()
+        result["peak_rss_bytes"] = None if peak_rss_mb is None else int(peak_rss_mb * 1024 * 1024)
     (args.output / "report.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
 

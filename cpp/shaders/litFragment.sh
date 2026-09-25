@@ -19,7 +19,7 @@ vec4 sampleAlbedo(vec2 uv) {
     vec2 span = axis * majorLength / dimensions;
     float taps = ceil(clamp(majorLength / max(minorLength, 1.0), 1.0, 16.0));
     float lod = max(log2(max(minorLength, 1e-8)) + 1.0, 0.0);
-    vec4 color = vec4(0.0);
+    vec4 color = vec4_splat(0.0);
     for (int i = 0; i < 16; ++i) {
         if (float(i) >= taps) break;
         color += texture2DLod(s_image, uv + span * ((float(i)+0.5)/taps-0.5), lod);
@@ -41,10 +41,10 @@ void main()
     int mode = int(u_options.w + .5);
     if (mode == 1) { gl_FragColor = vec4(u_options.y > .5 ? albedo : gammaEncode(albedo), alpha); return; }
     if (mode == 2) { gl_FragColor = vec4(normalize(v_normal) * .5 + .5, alpha); return; }
-    if (mode == 3) { gl_FragColor = vec4(vec3(1.0 - clamp((v_depth-u_depthRange.x)/max(u_depthRange.y-u_depthRange.x, 1e-6), 0, 1)), alpha); return; }
-    if (mode == 4) { gl_FragColor = vec4(vec3(1.0/16.0), 0); return; }
+    if (mode == 3) { gl_FragColor = vec4(vec3_splat(1.0 - clamp((v_depth-u_depthRange.x)/max(u_depthRange.y-u_depthRange.x, 1e-6), 0, 1)), alpha); return; }
+    if (mode == 4) { gl_FragColor = vec4(vec3_splat(1.0/16.0), 0); return; }
     vec3 lit = shade(albedo, v_normal, v_world, material, texel.rgb, v_depth);
-    if (u_options.y > .5) lit = clamp(lit, vec3(0), texel.rgb);
+    if (u_options.y > .5) lit = clamp(lit, vec3_splat(0), texel.rgb);
     if (u_reflectionConfig.x < .5 && v_litIdentity.y > .5) lit += v_litMaterial.w * reflectedColor(v_litIdentity.y, gl_FragCoord.xy);
     float fog = u_fog.z * smoothstep(u_fog.x, max(u_fog.y, u_fog.x+1e-6), v_depth);
     float haze = 1.0 - exp(-max(u_fog.w, 0.0) * max(v_depth, 0.0));

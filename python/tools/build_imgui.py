@@ -70,15 +70,19 @@ def ensure_source_archive(archive: Path) -> None:
         candidate.replace(archive)
 
 
+def replace_source(path: Path, old: str, new: str, *, count: int = 1) -> None:
+    """Patch upstream UTF-8 sources independently of the host locale."""
+    content = path.read_text(encoding="utf-8")
+    if new in content:
+        return
+    if content.count(old) != count:
+        raise RuntimeError(f"unexpected upstream source at {path}: {old[:80]}")
+    path.write_text(content.replace(old, new, count), encoding="utf-8", newline="\n")
+
+
 def patch(source: Path) -> None:
     def change(relative, old, new, *, count=1):
-        path = source / relative
-        content = path.read_text()
-        if new in content:
-            return
-        if content.count(old) != count:
-            raise RuntimeError(f"unexpected upstream source at {relative}: {old[:80]}")
-        path.write_text(content.replace(old, new, count))
+        replace_source(source / relative, old, new, count=count)
 
     imgui = "external/imgui/imgui/"
     # Preserve Bundle's FreeType version without fetching the complete Git history.
@@ -306,8 +310,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        default=ROOT / "build/imgui",
+        help="Separate source and compiler cache directory for this platform",
+    )
     args = parser.parse_args()
-    build = ROOT / "build/imgui"
+    build = args.build_dir.resolve()
     build.mkdir(parents=True, exist_ok=True)
     archive = build / f"imgui_bundle-{VERSION}.tar.gz"
     ensure_source_archive(archive)
@@ -320,7 +330,7 @@ def main() -> None:
     recipe = hashlib.sha256(recipe_bytes).hexdigest()
     prepared = build / "source-patch.sha256"
     unchanged = {}
-    if not prepared.exists() or prepared.read_text().strip() != recipe:
+    if not prepared.exists() or prepared.read_text(encoding="utf-8").strip() != recipe:
         # Reapply changed recipes to upstream sources, including removal of old
         # patches. Keep the CMake tree and untouched sources for incremental builds.
         with tarfile.open(archive) as tf:
@@ -340,7 +350,7 @@ def main() -> None:
     for path, (content, modified) in unchanged.items():
         if path.read_bytes() == content:
             os.utime(path, ns=(path.stat().st_atime_ns, modified))
-    prepared.write_text(recipe + "\n")
+    prepared.write_text(recipe + "\n", encoding="utf-8")
     if args.prepare_only:
         print(source)
         return
@@ -354,7 +364,7 @@ def main() -> None:
     record = build / "wheel-build.json"
     wheel = None
     if record.exists():
-        previous = json.loads(record.read_text())
+        previous = json.loads(record.read_text(encoding="utf-8"))
         candidate = Path(previous["wheel"])
         if previous["signature"] == signature and candidate.is_file():
             wheel = candidate
@@ -362,6 +372,9 @@ def main() -> None:
         env = dict(os.environ)
         env.setdefault("UV_CACHE_DIR", str(build / "uv-cache"))
         env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", "6")
+        if sys.platform == "win32":
+            # MSVC otherwise decodes upstream UTF-8 comments using the ANSI code page.
+            env["CL"] = (env.get("CL", "") + " /utf-8").strip()
         subprocess.run(
             [
                 "uv",
@@ -380,7 +393,8 @@ def main() -> None:
         )
         wheel = max(wheels.glob("imgui_bundle-*.whl"), key=lambda p: p.stat().st_mtime)
         record.write_text(
-            json.dumps({"signature": signature, "wheel": str(wheel)}, indent=2) + "\n"
+            json.dumps({"signature": signature, "wheel": str(wheel)}, indent=2) + "\n",
+            encoding="utf-8",
         )
     if args.install:
         subprocess.run(

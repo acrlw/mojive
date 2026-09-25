@@ -35,17 +35,22 @@ imgui: Any = None
 GlfwRenderer: Any = None
 
 
-def _install_glfw_clipboard_callbacks(glfw_api: Any, imgui_api: Any) -> None:
+def _install_glfw_clipboard_callbacks(glfw_api: Any, imgui_api: Any, publisher: Any = None) -> None:
     """Connect ImGui to GLFW's process-wide clipboard without a legacy window argument."""
 
     def get_clipboard_text(_ctx: Any) -> str:
+        if publisher is not None and publisher.pending_text is not None:
+            return publisher.pending_text
         value = glfw_api.get_clipboard_string(None)
         if value is None:
             return ""
         return value.decode("utf-8") if isinstance(value, bytes) else str(value)
 
     def set_clipboard_text(_ctx: Any, text: str) -> None:
-        glfw_api.set_clipboard_string(None, text)
+        if publisher is None:
+            glfw_api.set_clipboard_string(None, text)
+        else:
+            publisher.submit_text(text, lambda value: glfw_api.set_clipboard_string(None, value))
 
     platform_io = imgui_api.get_platform_io()
     platform_io.platform_get_clipboard_text_fn = get_clipboard_text
@@ -95,6 +100,19 @@ def layout_settings_path() -> Path:
     else:
         root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "mojive"
     return root / "imgui.ini"
+
+
+def _restore_requested_size(handle, width: int, height: int) -> None:
+    """Allow Windows captures to request a window larger than the desktop."""
+    if sys.platform != "win32" or glfw.get_window_size(handle) == (width, height):
+        return
+    # Win32's default maximum tracking size clamps creation to the work area,
+    # even for hidden windows. Lift it for this resize, then restore user limits.
+    glfw.set_window_size_limits(handle, glfw.DONT_CARE, glfw.DONT_CARE, width, height)
+    try:
+        glfw.set_window_size(handle, width, height)
+    finally:
+        glfw.set_window_size_limits(handle, *(glfw.DONT_CARE,) * 4)
 
 
 def layout_scale(ui_scale: float, framebuffer_scale: float) -> float:
@@ -286,6 +304,7 @@ class Window:
                 f"core context with GLFW {self._context_api}"
             )
         self._window = handle
+        _restore_requested_size(handle, self.config.width, self.config.height)
         self._maximized = bool(glfw.get_window_attrib(handle, glfw.MAXIMIZED))
         self._shown = False
         self._destroyed = False
@@ -374,6 +393,17 @@ class Window:
     @property
     def renderer_name(self) -> str:
         return gl.glGetString(gl.GL_RENDERER).decode()
+
+    @property
+    def clipboard_publisher(self) -> Any:
+        """Coordinate UI text with asynchronous capture clipboard ownership."""
+        return getattr(self, "_clipboard_publisher", None)
+
+    @clipboard_publisher.setter
+    def clipboard_publisher(self, publisher: Any) -> None:
+        self._clipboard_publisher = publisher
+        imgui.set_current_context(self._imgui_context)
+        _install_glfw_clipboard_callbacks(glfw, imgui, publisher)
 
     @property
     def ui_scale(self) -> float:
@@ -646,6 +676,8 @@ class Window:
         return self._frame_index
 
     def read_frame(self) -> np.ndarray:
+        # Another viewer may have rendered or closed since our last frame.
+        glfw.make_context_current(self._window)
         w, h = self.size_pixels
         if self._readback is None or self._readback.shape[:2] != (h, w):
             self._readback = np.empty((h, w, 3), np.uint8)

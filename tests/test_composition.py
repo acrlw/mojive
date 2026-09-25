@@ -27,7 +27,7 @@ class Resource:
 class App:
     def __init__(self, backend, session, bridge) -> None:
         self.backend = backend
-        self._scene_capture = SimpleNamespace(render=lambda *args: backend.target)
+        self._scene_capture = SimpleNamespace(render=lambda *args, **kwargs: backend.target)
         self._camera_view = lambda: None
         self.session = session
         self.bridge = bridge
@@ -208,6 +208,8 @@ def test_viewer_record_pipelines_async_readback_in_frame_order(tmp_path, monkeyp
     viewer, app, backend, *_ = _viewer()
 
     class Target:
+        width, height = 6, 4
+
         def __init__(self):
             self.index = 0
 

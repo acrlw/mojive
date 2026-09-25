@@ -10,10 +10,11 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
+from mojive.app.ui.window import create_window
 from mojive.ui.camera import OrbitCamera
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.viewcube import ViewCube
-from mojive.ui.window import Window, WindowConfig
+from mojive.ui.window import WindowConfig
 
 
 class LabelProbe(ImguiDraw2D):
@@ -50,13 +51,7 @@ def capture(backend, scale):
         docking=False,
         show_on_start=False,
     )
-    if backend == "bgfx":
-        from mojive.render.native.device import acquire_device
-        from mojive.ui.window_native import NativeWindow
-
-        window = NativeWindow(config, device=acquire_device())
-    else:
-        window = Window(config)
+    window = create_window(config, backend)
     cube, sink, frames, errors = ViewCube(), CameraSink(), [], []
     try:
         for axis, sign in ((0, 1), (0, -1), (1, 1), (1, -1)):

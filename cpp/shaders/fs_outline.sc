@@ -1,8 +1,9 @@
 #include <bgfx_shader.sh>
 SAMPLER2D(s_selectionMask,0);
-uniform vec4 u_outlineSize, u_outlineColor;
+uniform vec4 u_outlineSize;
+uniform vec4 u_outlineColor;
 float coverage(vec2 p) {
-    if(any(lessThan(p,vec2(0)))||any(greaterThanEqual(p,u_outlineSize.xy)))return 0.0;
+    if(any(lessThan(p,vec2_splat(0)))||any(greaterThanEqual(p,u_outlineSize.xy)))return 0.0;
     return texture2DLod(s_selectionMask,(p+.5)/u_outlineSize.xy,0).r;
 }
 bool borderRun(vec2 p,vec2 stepDirection,float toBorder) {

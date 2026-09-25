@@ -19,11 +19,11 @@ void main()
         dot(cross(i_data0.xyz, i_data1.xyz), a_normal)) / determinant;
     if(dot(v_normal,v_normal)<1e-20)v_normal=vec3(0,0,1);
     if (i_data4.z > 1.5) {
-        v_texcoord0 = a_position.xy * i_data4.xy - vec2(0.5);
+        v_texcoord0 = a_position.xy * i_data4.xy - vec2_splat(0.5);
     } else if (i_data4.z > .5) {
         vec3 extent = vec3(length(vec3(i_data0.x, i_data1.x, i_data2.x)),
             length(vec3(i_data0.y, i_data1.y, i_data2.y)), length(vec3(i_data0.z, i_data1.z, i_data2.z)));
-        vec2 repeat = i_data4.xy / max(extent.xy, vec2(1e-7));
+        vec2 repeat = i_data4.xy / max(extent.xy, vec2_splat(1e-7));
         vec3 axis = abs(a_normal);
         vec2 scale = i_data4.xy;
         if (axis.x >= axis.y && axis.x >= axis.z) scale = vec2(extent.y * repeat.x, extent.z * repeat.y);
@@ -31,5 +31,5 @@ void main()
         v_texcoord0 = a_texcoord0 * scale;
     } else v_texcoord0 = a_texcoord0 * i_data4.xy + i_data4.zw;
     v_litCube = vec4(a_position * i_data6.xyz + vec3(0, 0, i_data6.w),
-        dot(abs(i_data6.xyz), vec3(1)) > 0 ? 1.0 : 0.0);
+        dot(abs(i_data6.xyz), vec3_splat(1)) > 0 ? 1.0 : 0.0);
 }

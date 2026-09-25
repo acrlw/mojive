@@ -413,8 +413,16 @@ def test_canvas_records_streaming_video(canvas, tmp_path):
 
     def move(index, _viewer):
         scene.object("ball").set_pose((0.3 + 0.15 * index, -0.3, 0.42))
+        if index == 1:
+            # Viewport changes must not change an active video's encoded dimensions.
+            viewer.app.set_fixed_render_size(320, 240)
 
-    viewer.record(output, frames=4, fps=24, before_frame=move)
+    try:
+        viewer.record(output, frames=4, fps=24, before_frame=move)
+    finally:
+        viewer.app.clear_fixed_render_size()
+        for _ in range(4):
+            viewer.sync()
     reader = read_frames(str(output))
     metadata = next(reader)
     count = sum(1 for _ in reader)

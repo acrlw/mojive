@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import socket
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -11,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from mojive import commands as cmd
+from mojive._local_socket import is_socket, local_socket
 from mojive.adapters.toy import ToyPhysicsAdapter
 from mojive.control.rpc import (
     PROTOCOL_VERSION,
@@ -59,16 +59,24 @@ def service():
     value.close()
 
 
-def test_rpc_preserves_existing_file_and_symlink(tmp_path, service):
+@pytest.mark.parametrize("symlink", [False, True])
+def test_rpc_preserves_existing_file_and_symlink(tmp_path, service, symlink):
     path = tmp_path / "document.txt"
     path.write_text("user document")
-    link = tmp_path / "control.sock"
-    link.symlink_to(path)
-    for target in (path, link):
-        with pytest.raises(FileExistsError, match="not a socket"):
-            ControlServer(target, service)
-        assert path.read_text() == "user document"
-        assert link.is_symlink()
+    target = path
+    if symlink:
+        target = tmp_path / "control.sock"
+        try:
+            target.symlink_to(path)
+        except OSError as error:
+            if getattr(error, "winerror", None) == 1314:
+                pytest.skip("Windows symlink creation requires Developer Mode or privilege")
+            raise
+    with pytest.raises(FileExistsError, match="not a socket"):
+        ControlServer(target, service)
+    assert path.read_text() == "user document"
+    if symlink:
+        assert target.is_symlink()
 
 
 def test_rpc_rejects_an_active_socket_and_preserves_its_owner(tmp_path, service):
@@ -76,13 +84,13 @@ def test_rpc_rejects_an_active_socket_and_preserves_its_owner(tmp_path, service)
     with ControlServer(path, service):
         with pytest.raises(FileExistsError, match="already in use"):
             ControlServer(path, service)
-        assert path.is_socket()
+        assert is_socket(path.lstat())
     assert not path.exists()
 
 
 def test_rpc_reclaims_a_stale_socket(tmp_path, service):
     path = tmp_path / "stale.sock"
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+    with local_socket() as stale:
         stale.bind(str(path))
     with ControlServer(path, service) as server:
         assert server.socket.getsockname() == str(path)
@@ -96,7 +104,7 @@ def test_rpc_close_preserves_a_replacement_socket(tmp_path, service):
     try:
         with ControlServer(path, service):
             first.server_close()
-            assert path.is_socket()
+            assert is_socket(path.lstat())
     finally:
         first.server_close()
 

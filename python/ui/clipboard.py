@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,6 +145,7 @@ class CaptureClipboard:
         self._executor = None
         self._future = None
         self._pending = None
+        self._pending_text: tuple[str, Callable[[str], None]] | None = None
         self._closed = False
 
     def submit(self, path: Path, kind: str) -> None:
@@ -151,9 +153,25 @@ class CaptureClipboard:
             raise RuntimeError("The clipboard publisher is closed")
         # A clipboard has one selection; coalesce bursts without an unbounded
         # worker queue or allowing an older copy to finish after a newer one.
+        self._pending_text = None
         self._pending = (path.resolve(), kind)
         if self._future is None:
             self._start_pending()
+
+    @property
+    def pending_text(self) -> str | None:
+        """Expose the latest local text while an older desktop copy finishes."""
+        return self._pending_text[0] if self._pending_text is not None else None
+
+    def submit_text(self, text: str, publish: Callable[[str], None]) -> None:
+        """Publish on the UI thread after any older file/image clipboard transfer."""
+        if self._closed:
+            raise RuntimeError("The clipboard publisher is closed")
+        self._pending = None
+        if self._future is None:
+            publish(text)
+        else:
+            self._pending_text = (text, publish)
 
     def _start_pending(self) -> None:
         if self._executor is None:
@@ -175,6 +193,11 @@ class CaptureClipboard:
             return None
         result = self._future.result()
         self._future = None
+        if self._pending_text is not None:
+            text, publish = self._pending_text
+            self._pending_text = None
+            publish(text)
+            return None
         if self._pending is not None:
             self._start_pending()
             return None
