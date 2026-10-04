@@ -1,15 +1,16 @@
-"""Editor preference persistence and localized UI text."""
+"""Localized UI text and compatibility access to editor preferences."""
 
 from __future__ import annotations
 
-import json
 import os
 import re
-import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+
+from .preferences import Preferences
+from .preferences import settings_path as settings_path
 
 
 class Language(StrEnum):
@@ -1272,19 +1273,6 @@ def render_note_text(value: str, tr: Callable[[str], str]) -> str:
     return value
 
 
-def settings_path() -> Path:
-    override = os.environ.get("MOJIVE_SETTINGS")
-    if override:
-        return Path(override).expanduser()
-    if sys.platform == "darwin":
-        root = Path.home() / "Library" / "Application Support"
-    elif os.name == "nt":
-        root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    else:
-        root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return root / "mojive" / "settings.json"
-
-
 def parse_language(value: Language | str) -> Language:
     if isinstance(value, Language):
         return value
@@ -1294,14 +1282,6 @@ def parse_language(value: Language | str) -> Language:
     if normalized in {"en", "en_us", "en_gb"}:
         return Language.ENGLISH
     raise ValueError(f"Unsupported language: {value}")
-
-
-def _read_settings(path: Path) -> dict[str, object]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return dict(value) if isinstance(value, dict) else {}
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return {}
 
 
 def _read_language(settings: dict[str, object]) -> Language:
@@ -1318,17 +1298,53 @@ def _read_language(settings: dict[str, object]) -> Language:
         return Language.ENGLISH
 
 
-@dataclass
+@dataclass(init=False)
 class Localizer:
     language: Language = Language.ENGLISH
-    path: Path | None = None
-    preferences: dict[str, object] = field(default_factory=dict)
+    path: Path | None
+    preferences: dict[str, object]
+
+    def __init__(
+        self,
+        language: Language = Language.ENGLISH,
+        path: Path | None = None,
+        preferences: dict[str, object] | None = None,
+        *,
+        store: Preferences | None = None,
+    ) -> None:
+        self.language = language
+        self._store = (
+            store
+            if store is not None
+            else Preferences(path, preferences if preferences is not None else {})
+        )
+
+    @classmethod
+    def from_preferences(cls, preferences: Preferences) -> Localizer:
+        """Use the application's existing preference owner without copying its state."""
+        return cls(_read_language(preferences.values), store=preferences)
 
     @classmethod
     def load(cls) -> Localizer:
-        path = settings_path()
-        preferences = _read_settings(path)
-        return cls(_read_language(preferences), path, preferences)
+        return cls.from_preferences(Preferences.load())
+
+    @property
+    def path(self) -> Path | None:
+        """Compatibility alias for the preference store's destination."""
+        return self._store.path
+
+    @path.setter
+    def path(self, value: Path | None) -> None:
+        self._store.path = value
+
+    @property
+    def preferences(self) -> dict[str, object]:
+        """Compatibility view of the shared preference values."""
+        return self._store.values
+
+    @preferences.setter
+    def preferences(self, value: dict[str, object]) -> None:
+        self._store.values = value
 
     def text(self, value: str) -> str:
         if self.language is Language.SIMPLIFIED_CHINESE:
@@ -1336,19 +1352,13 @@ class Localizer:
         return value
 
     def set_language(self, value: Language | str, *, persist: bool = True) -> None:
-        self.language = parse_language(value)
+        language = parse_language(value)
         if persist:
-            self.set_preferences({"language": self.language.value})
+            self.set_preferences({"language": language.value})
+        self.language = language
 
     def preference(self, name: str, default: object = None) -> object:
-        return self.preferences.get(str(name), default)
+        return self._store.get(name, default)
 
     def set_preferences(self, values: dict[str, object], *, persist: bool = True) -> None:
-        self.preferences.update({str(name): value for name, value in values.items()})
-        if not persist or self.path is None:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(self.preferences, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        self._store.update(values, persist=persist)

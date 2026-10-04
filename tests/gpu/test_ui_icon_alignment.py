@@ -15,10 +15,119 @@ from mojive.tools.ui_feasibility.fixtures import _apply_concept_theme
 from mojive.tools.ui_feasibility.icon_alignment import candidate_centroid
 from mojive.tools.ui_feasibility.tuning import _icon_values_text
 from mojive.tools.ui_feasibility.workspace import _draw_workspace
-from mojive.ui.icons import ICON_FAMILIES, _icon_draw_commands
+from mojive.ui.icons import ICON_FAMILIES
+from mojive.ui.icons.drawing import _icon_draw_commands
 from mojive.ui.window import WindowConfig
 
 pytestmark = pytest.mark.gpu
+
+
+@pytest.mark.parametrize("scale", (1.0, 2.25))
+def test_reference_styles_switch_independently_without_moving_glyphs(
+    backend_name, monkeypatch, scale
+):
+    rectangles, specimens, references = {}, {}, []
+    native_combo = imgui.combo
+    native_specimen = icon_library._draw_concept_icon_specimen
+
+    def combo(label, *args, **kwargs):
+        result = native_combo(label, *args, **kwargs)
+        rectangles[label] = (*imgui.get_item_rect_min(), *imgui.get_item_rect_max())
+        return result
+
+    def specimen(draw, center, size, name, *args, **kwargs):
+        specimens[name, size / scale] = (*center, size)
+        references.append((kwargs["circle_style"], kwargs["square_style"]))
+        return native_specimen(draw, center, size, name, *args, **kwargs)
+
+    monkeypatch.setattr(imgui, "combo", combo)
+    monkeypatch.setattr(icon_library, "_draw_concept_icon_specimen", specimen)
+    width, height = round(1600 * scale), round(850 * scale)
+    config = WindowConfig(
+        width=width,
+        height=height,
+        ui_scale=scale,
+        vsync=False,
+        docking=False,
+        ini_path="",
+        show_on_start=False,
+    )
+    output = Path("output/ui-icon-references")
+    output.mkdir(parents=True, exist_ok=True)
+    with create_window(config, backend_name) as window:
+        _apply_concept_theme(window.style_scale)
+        state = ProbeState(
+            page="Geometry",
+            geometry_tab="Icon library",
+            renderer=backend_name,
+            icon_library_tab="Viewport playback",
+        )
+        parameters = _icon_values_text(state)
+
+        def frame():
+            specimens.clear()
+            references.clear()
+            window.begin_frame()
+            _draw_workspace(window, state)
+            return window.end_frame(readback=True)[::-1].copy()
+
+        def select(shape, index):
+            x0, y0, x1, y1 = rectangles[f"##icon_{shape}_style"]
+            assert 0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height
+            io = imgui.get_io()
+            io.add_mouse_pos_event((x0 + x1) / 2, (y0 + y1) / 2)
+            frame()
+            for down in (True, False):
+                io.add_mouse_button_event(0, down)
+                frame()
+            for key in (imgui.Key.home, *([imgui.Key.down_arrow] * index), imgui.Key.enter):
+                for down in (True, False):
+                    io.add_key_event(key, down)
+                    frame()
+            io.add_mouse_pos_event(-100, -100)
+            frame()
+
+        def glyphs(pixels):
+            sx, sy = imgui.get_io().display_framebuffer_scale
+            result = []
+            for size in (14, 24, 56, 112):
+                x, y, extent = specimens["playback-previous", size]
+                x0, x1 = (round(v * sx) for v in (x - extent / 2, x + extent / 2))
+                y0, y1 = (round(v * sy) for v in (y - extent / 2, y + extent / 2))
+                result.append(pixels[y0:y1, x0:x1])
+            return result
+
+        for _ in range(4):
+            original = frame()
+        original_positions = specimens.copy()
+        original_glyphs = glyphs(original)
+        Image.fromarray(original).save(output / f"{backend_name}-{scale:g}-outline.png")
+        for circle, square in ((1, 0), (1, 2), (0, 1), (2, 1), (2, 2), (0, 0)):
+            select("circle", circle)
+            select("square", square)
+            pixels = frame()
+            expected = tuple(("outline", "filled", "hidden")[i] for i in (circle, square))
+            assert references and set(references) == {expected}
+            assert specimens == original_positions
+            assert _icon_values_text(state) == parameters
+            for before, after in zip(original_glyphs, glyphs(pixels), strict=True):
+                # Only fully covered glyph pixels are background-independent.
+                # Antialiased edges blend with the selected reference fill.
+                core = np.all(before == before.max(axis=(0, 1)), axis=2)
+                assert core.any() and before[core].min() > 160
+                assert np.array_equal(before[core], after[core])
+            if (circle, square) != (0, 0):
+                assert not np.array_equal(original, pixels)
+                Image.fromarray(pixels).save(
+                    output / f"{backend_name}-{scale:g}-{expected[0]}-{expected[1]}.png"
+                )
+        state.icon_library_tab = "Overview"
+        select("circle", 1)
+        select("square", 2)
+        assert set(references) == {("filled", "hidden")}
+        state.icon_library_tab = "Panels"
+        frame()
+        assert set(references) == {("filled", "hidden")}
 
 
 @pytest.mark.parametrize("scale", (1.0, 2.25))

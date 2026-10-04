@@ -726,7 +726,7 @@ def test_application_layout_reset_restores_viewport_capsule_positions() -> None:
         config=SimpleNamespace(ini_path="layout.ini"),
         reset_layout=lambda: events.append("layout"),
     )
-    app.localizer = SimpleNamespace(set_preferences=lambda value: events.append(value))
+    app.preferences = SimpleNamespace(update=lambda value: events.append(value))
     app.viewport_overlays = ViewportOverlayConfig(
         playback_scale=1.2,
         tool_scale=0.9,

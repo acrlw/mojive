@@ -118,9 +118,9 @@ class _ModelEdits:
 
     def set_live_model_updates(self, value: bool) -> None:
         self.live_model_updates = bool(value)
-        self.localizer.set_preferences({"live_model_updates": self.live_model_updates})
         if value and self.model_edits.active:
             self._apply_model_edits_requested = True
+        self.preferences.update({"live_model_updates": self.live_model_updates})
 
     def set_theme(self, theme: Theme) -> None:
         """Replace this viewer's colors without changing scene or session state."""

@@ -356,7 +356,7 @@ def test_ui_switches_hide_but_do_not_disable_features_and_tab_restores(monkeypat
     monkeypatch.setattr(glfw, "set_key_callback", install)
     presets = []
     app = SimpleNamespace(
-        localizer=SimpleNamespace(preference=lambda name, default: default),
+        preferences=SimpleNamespace(get=lambda name, default: default),
         set_navigation_preset=lambda name, **kwargs: presets.append((name, kwargs)),
     )
     display = SimpleNamespace(window=SimpleNamespace(_window=object()), panels=panels, app=app)
@@ -374,7 +374,7 @@ def test_ui_switches_hide_but_do_not_disable_features_and_tab_restores(monkeypat
     installed[0](None, glfw.KEY_TAB, 0, glfw.PRESS, 0)
     installed[0](None, glfw.KEY_TAB, 0, glfw.PRESS, 0)
     assert panels.get("assets").open and not panels.get("hierarchy").open
-    app.localizer.preference = lambda *args: {"orbit": "middle"}
+    app.preferences.get = lambda *args: {"orbit": "middle"}
     install_key_callback(display, None)
     assert len(presets) == 1
 

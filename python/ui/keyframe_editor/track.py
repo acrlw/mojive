@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
-from mojive.adapters.base import KeyframeInfo
+from mojive.adapters.base import KeyframeInfo, SceneModelInfo
 from mojive.interaction.input import InputClaim, physical_ctrl_super
 from mojive.interaction.timeline import MarkerProjection, TimelineMarkerIndex
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels import PanelContext
 from mojive.ui.text_layout import text_line_y
 
-from ..input_bindings import DEFAULT_INPUT_BINDINGS
-from ..pointer_bindings import PointerAction, PointerChord
+from ..input_bindings import DEFAULT_INPUT_BINDINGS, InputBindings
+from ..pointer_bindings import PointerAction, PointerChord, PointerFrame
 from ..theme import with_alpha
 from ..timeline import (
     fitted_timeline_range,
@@ -28,12 +29,13 @@ from ..timeline import (
     timeline_x_to_time,
     zoom_timeline_range,
 )
-from . import controls
 from .controller import TimelineEditor, TimelineHit
 from .controls import (
     _COMMAND_HEIGHT_PT,
     _LOOP_COLOR,
     _MARKER_SPACING_FACTOR,
+    CommandIconDrawer,
+    _draw_command_icon,
     _format_tick,
     _rounded_command_icon_path,
     timeline_status_hints,
@@ -41,62 +43,95 @@ from .controls import (
 from .toolbar import draw_model_header
 
 
-def draw_dope_sheet(
-    editor: TimelineEditor,
-    ctx: PanelContext,
-    models,
-    keyframes: tuple[KeyframeInfo, ...],
-    keyframe_by_id: dict[int, KeyframeInfo],
-    take_times: Sequence[float],
-    editable: bool,
-) -> None:
-    scale = ctx.style_scale
-    available = max(1.0, float(imgui.get_content_region_avail().x))
-    ruler_height = (_COMMAND_HEIGHT_PT + 4) * scale
-    tracks = 3
-    height = max(
-        ruler_height + tracks * 20 * scale,
-        min(ruler_height + tracks * 30 * scale, imgui.get_content_region_avail().y - 8 * scale),
-    )
-    channel_width = timeline_channel_width(available, scale)
-    lo_vec = imgui.get_cursor_screen_pos()
-    lo = (float(lo_vec.x), float(lo_vec.y))
-    hi = (lo[0] + available, lo[1] + height)
-    time_lo = lo[0] + channel_width
-    time_hi = hi[0]
-    time_width = max(1.0, time_hi - time_lo)
+@dataclass(frozen=True)
+class TimelineLayout:
+    """The geometry shared by track input, marker projection and painting."""
 
-    draw_list = imgui.get_window_draw_list()
-    splitter = imgui.ImDrawListSplitter()
-    splitter.split(draw_list, 2)
-    splitter.set_current_channel(draw_list, 1)
-    imgui.set_cursor_screen_pos((lo[0] + 2 * scale, lo[1] + 2 * scale))
-    imgui.push_style_var(imgui.StyleVar_.item_spacing, (5 * scale, 0))
-    imgui.push_style_var(
-        imgui.StyleVar_.frame_padding,
-        (8 * scale, max(0, (_COMMAND_HEIGHT_PT * scale - imgui.get_font_size()) * 0.5)),
-    )
-    draw_model_header(editor, ctx, models, keyframes, editable, channel_width - 4 * scale)
-    imgui.pop_style_var(2)
-    imgui.set_cursor_screen_pos(lo)
-    splitter.set_current_channel(draw_list, 0)
+    lo: tuple[float, float]
+    width: float
+    height: float
+    ruler_height: float
+    channel_width: float
+    marker_radius: float
 
+    @classmethod
+    def measure(
+        cls, origin: Sequence[float], available: Sequence[float], scale: float
+    ) -> TimelineLayout:
+        ruler = (_COMMAND_HEIGHT_PT + 4) * scale
+        width = max(1.0, float(available[0]))
+        height = max(ruler + 60 * scale, min(ruler + 90 * scale, available[1] - 8 * scale))
+        return cls(
+            tuple(origin), width, height, ruler, timeline_channel_width(width, scale), 7 * scale
+        )
+
+    @property
+    def hi(self) -> tuple[float, float]:
+        return self.lo[0] + self.width, self.lo[1] + self.height
+
+    @property
+    def time_bounds(self) -> tuple[float, float]:
+        return self.lo[0] + self.channel_width, self.hi[0]
+
+    @property
+    def ruler_bottom(self) -> float:
+        return self.lo[1] + self.ruler_height
+
+    @property
+    def row_height(self) -> float:
+        return (self.height - self.ruler_height) / 3
+
+    def lane_y(self, index: int) -> float:
+        return self.ruler_bottom + self.row_height * (index + 0.5)
+
+    def lane_at(self, y: float) -> str:
+        return (
+            "model"
+            if y < self.lane_y(0) + self.row_height * 0.5
+            else ("take" if y < self.lane_y(1) + self.row_height * 0.5 else "snapshots")
+        )
+
+
+@dataclass(frozen=True)
+class TimelineInput:
+    """One sampled ImGui frame; gesture updates below do not query input again."""
+
+    position: tuple[float, float]
+    hovered: bool
+    over_timeline: bool
+    timeline_id: int
+    pointer: PointerFrame
+    bindings: InputBindings
+    pan: PointerChord | None
+    range: PointerChord | None
+    select: PointerChord | None
+    load: PointerChord | None
+    clear_range: bool
+    escape: bool
+    wheel: float
+    delta_x: float
+    drag_threshold: float
+
+
+def _sample_timeline_input(
+    editor: TimelineEditor, ctx: PanelContext, layout: TimelineLayout
+) -> TimelineInput:
     flags = (
         imgui.ButtonFlags_.mouse_button_left.value
         | imgui.ButtonFlags_.mouse_button_right.value
         | imgui.ButtonFlags_.mouse_button_middle.value
     )
-    imgui.invisible_button("##keyframe-dope-sheet", imgui.ImVec2(available, height), flags)
+    imgui.invisible_button(
+        "##keyframe-dope-sheet", imgui.ImVec2(layout.width, layout.height), flags
+    )
     timeline_id = imgui.get_item_id()
     hovered = imgui.is_item_hovered()
     mouse = imgui.get_mouse_pos()
-    mouse_xy = (float(mouse.x), float(mouse.y))
-    over_timeline = hovered and time_lo <= mouse_xy[0] <= time_hi
+    position = (float(mouse.x), float(mouse.y))
+    over_timeline = hovered and layout.time_bounds[0] <= mouse.x <= layout.time_bounds[1]
     if over_timeline:
-        # The dope sheet uses the wheel for zoom. Owning the wheel here
-        # prevents the docked Keyframes window from scrolling as well.
+        # Track zoom owns the wheel instead of scrolling its docked parent.
         imgui.set_item_key_owner(imgui.Key.mouse_wheel_y)
-
     claim = ctx.input_claim or InputClaim()
     owns_escape = (
         imgui.is_window_focused()
@@ -113,7 +148,50 @@ def draw_dope_sheet(
         imgui.internal.set_key_owner(
             imgui.Key.escape, timeline_id, imgui.internal.InputFlagsPrivate_.lock_until_release
         )
+    io = imgui.get_io()
+    bindings = ctx.input_bindings or DEFAULT_INPUT_BINDINGS
+    pointer = bindings.pointer_frame(claim)
 
+    def press(action):
+        return bindings.pointer_match(action, pointer, press=True)
+
+    select = press(PointerAction.TIMELINE_SCRUB)
+    modifier = "ctrl" if "ctrl" in pointer.keys else "super"
+    additive = PointerChord((0,), (modifier,))
+    if pointer.keys & {"ctrl", "super"} and pointer.matches(additive, press=True):
+        select = additive
+    return TimelineInput(
+        position,
+        hovered,
+        over_timeline,
+        timeline_id,
+        pointer,
+        bindings,
+        press(PointerAction.TIMELINE_PAN),
+        press(PointerAction.TIMELINE_RANGE),
+        select,
+        press(PointerAction.TIMELINE_LOAD),
+        bool(press(PointerAction.TIMELINE_CLEAR_RANGE)),
+        bool(
+            owns_escape
+            and not io.want_text_input
+            and imgui.internal.is_key_pressed(imgui.Key.escape, 0, timeline_id)
+        ),
+        float(io.mouse_wheel),
+        float(io.mouse_delta.x),
+        float(io.mouse_drag_threshold),
+    )
+
+
+def _update_timeline_view(
+    editor: TimelineEditor,
+    ctx: PanelContext,
+    layout: TimelineLayout,
+    inputs: TimelineInput,
+    keyframes: tuple[KeyframeInfo, ...],
+    take_times: Sequence[float],
+) -> None:
+    time_lo, time_hi = layout.time_bounds
     fitted = editor.view_needs_fit or editor.view_model_id != editor.model_id
     if fitted:
         editor.view_start, editor.view_end = fitted_timeline_range(
@@ -125,61 +203,44 @@ def draw_dope_sheet(
         )
         editor.view_model_id = editor.model_id
         editor.view_needs_fit = False
-
-    io = imgui.get_io()
-    bindings = ctx.input_bindings or DEFAULT_INPUT_BINDINGS
-    pointer = bindings.pointer_frame(claim)
-    pan_press = bindings.pointer_match(PointerAction.TIMELINE_PAN, pointer, press=True)
-    range_press = bindings.pointer_match(PointerAction.TIMELINE_RANGE, pointer, press=True)
-    clear_range_press = bindings.pointer_match(
-        PointerAction.TIMELINE_CLEAR_RANGE, pointer, press=True
-    )
-    select_press = bindings.pointer_match(PointerAction.TIMELINE_SCRUB, pointer, press=True)
-    additive = bool(pointer.keys & {"ctrl", "super"})
-    additive_modifier = "ctrl" if "ctrl" in pointer.keys else "super"
-    if additive and pointer.matches(PointerChord((0,), (additive_modifier,)), press=True):
-        select_press = PointerChord((0,), (additive_modifier,))
-    load_press = bindings.pointer_match(PointerAction.TIMELINE_LOAD, pointer, press=True)
-    if over_timeline and (pan_press or range_press) and not editor.pointer_mode:
-        editor.drag_start_x = mouse_xy[0]
+    if inputs.over_timeline and (inputs.pan or inputs.range) and not editor.pointer_mode:
+        editor.drag_start_x = inputs.position[0]
         editor.pan_moved = False
-        editor.pointer_chord = range_press or pan_press
-        if range_press:
+        editor.pointer_chord = inputs.range or inputs.pan
+        if inputs.range:
             if len(take_times) > 1 and not ctx.session.state_take_recording:
                 editor.pointer_mode = "range"
                 time = timeline_x_to_time(
-                    mouse_xy[0], editor.view_start, editor.view_end, time_lo, time_hi
+                    inputs.position[0], editor.view_start, editor.view_end, time_lo, time_hi
                 )
                 editor.range_anchor = nearest_take_frame(take_times, time)
                 editor.range_preview = (editor.range_anchor, editor.range_anchor)
         else:
             editor.pointer_mode = "pan"
-
     zooming = bool(
-        over_timeline
-        and bindings.pointer_match(PointerAction.TIMELINE_ZOOM, pointer)
+        inputs.over_timeline
         and not editor.pointer_mode
+        and inputs.bindings.pointer_match(PointerAction.TIMELINE_ZOOM, inputs.pointer)
     )
     if zooming:
         anchor = timeline_x_to_time(
-            mouse_xy[0], editor.view_start, editor.view_end, time_lo, time_hi
+            inputs.position[0], editor.view_start, editor.view_end, time_lo, time_hi
         )
         if editor.follow_mode == "locked":
             anchor = editor.playhead
         editor.view_start, editor.view_end = zoom_timeline_range(
-            editor.view_start, editor.view_end, anchor, float(io.mouse_wheel)
+            editor.view_start, editor.view_end, anchor, inputs.wheel
         )
     if (
         editor.pointer_mode == "pan"
-        and pointer.held(editor.pointer_chord)
-        and abs(mouse_xy[0] - editor.drag_start_x) >= float(io.mouse_drag_threshold)
+        and inputs.pointer.held(editor.pointer_chord)
+        and abs(inputs.position[0] - editor.drag_start_x) >= inputs.drag_threshold
     ):
         editor.pan_moved = True
         editor.follow_mode = "off"
-        shift = -float(io.mouse_delta.x) * (editor.view_end - editor.view_start) / time_width
+        shift = -inputs.delta_x * (editor.view_end - editor.view_start) / max(1, time_hi - time_lo)
         editor.view_start += shift
         editor.view_end += shift
-
     if (
         not editor.pointer_mode
         and not zooming
@@ -199,29 +260,20 @@ def draw_dope_sheet(
         )
     editor.last_followed_playhead = editor.playhead
 
-    row_height = (height - ruler_height) / tracks
-    marker_y = lo[1] + ruler_height + row_height * 0.5
-    take_y = marker_y + row_height
-    snapshot_y = take_y + row_height
-    lane = (
-        "model"
-        if mouse_xy[1] < marker_y + row_height * 0.5
-        else "take"
-        if mouse_xy[1] < take_y + row_height * 0.5
-        else "snapshots"
-    )
-    if hovered and mouse_xy[1] >= lo[1] + ruler_height and (select_press or load_press):
-        editor.edit_lane = lane
-    marker_radius = 7.0 * scale
+
+def _project_timeline(
+    editor: TimelineEditor, ctx: PanelContext, layout: TimelineLayout, inputs: TimelineInput
+) -> tuple[MarkerProjection, MarkerProjection, TimelineHit]:
+    time_lo, time_hi = layout.time_bounds
+    radius = layout.marker_radius + 4
     projection = editor.marker_index.project(
         editor.view_start,
         editor.view_end,
         time_lo,
         time_hi,
-        marker_radius + 4.0,
+        radius,
         moved=(editor.drag_id, editor.drag_preview_time) if editor.drag_moved else None,
     )
-    marker_positions = projection.positions
     snapshots = ctx.session.scene_snapshots
     if snapshots is not editor.snapshot_cache:
         editor.snapshot_index = TimelineMarkerIndex(
@@ -229,72 +281,69 @@ def draw_dope_sheet(
         )
         editor.snapshot_cache = snapshots
     snapshot_projection = editor.snapshot_index.project(
-        editor.view_start, editor.view_end, time_lo, time_hi, marker_radius + 4.0
+        editor.view_start, editor.view_end, time_lo, time_hi, radius
     )
-    snapshot_positions = snapshot_projection.positions
-    snapshot_hit = (
-        snapshot_projection.hit(mouse_xy[0], marker_radius + 4.0)
-        if hovered and abs(snapshot_y - mouse_xy[1]) <= marker_radius + 4.0
-        else -1
-    )
-    hit_id = (
-        projection.hit(mouse_xy[0], marker_radius + 4.0)
-        if hovered and abs(marker_y - mouse_xy[1]) <= marker_radius + 4.0
-        else -1
-    )
-
+    x, y = inputs.position
     hit = TimelineHit(
-        mouse_xy,
-        (time_lo, time_hi),
-        lane,
-        mouse_xy[1] >= lo[1] + ruler_height,
-        hit_id,
-        snapshot_hit,
-        marker_positions,
+        inputs.position,
+        layout.time_bounds,
+        layout.lane_at(y),
+        y >= layout.ruler_bottom,
+        projection.hit(x, radius) if inputs.hovered and abs(layout.lane_y(0) - y) <= radius else -1,
+        snapshot_projection.hit(x, radius)
+        if inputs.hovered and abs(layout.lane_y(2) - y) <= radius
+        else -1,
+        projection.positions,
     )
+    return projection, snapshot_projection, hit
+
+
+def _edit_timeline(
+    editor: TimelineEditor,
+    ctx: PanelContext,
+    inputs: TimelineInput,
+    hit: TimelineHit,
+    keyframes: tuple[KeyframeInfo, ...],
+    keyframe_by_id: dict[int, KeyframeInfo],
+    take_times: Sequence[float],
+    editable: bool,
+) -> None:
+    if inputs.hovered and hit.on_track and (inputs.select or inputs.load):
+        editor.edit_lane = hit.lane
     if (
-        over_timeline
-        and (select_press or load_press)
+        inputs.over_timeline
+        and (inputs.select or inputs.load)
         and not editor.pointer_mode
         and not ctx.take_video_active
     ):
-        editor.pointer_chord = load_press or select_press
+        editor.pointer_chord = inputs.load or inputs.select
         editor.begin_timeline_edit(
             ctx,
             keyframe_by_id,
             take_times,
             hit,
             editable=editable,
-            load=bool(load_press),
-            additive=bool(additive),
+            load=bool(inputs.load),
+            additive=bool(inputs.pointer.keys & {"ctrl", "super"}),
         )
-
-    escape = (
-        owns_escape
-        and not io.want_text_input
-        and imgui.internal.is_key_pressed(imgui.Key.escape, 0, timeline_id)
-    )
     released = editor.update_timeline_drag(
         ctx,
         keyframes,
         take_times,
         hit,
-        pointer,
+        inputs.pointer,
         editable=editable,
-        clear_range=bool(over_timeline and clear_range_press),
-        escape=bool(escape),
+        clear_range=inputs.over_timeline and inputs.clear_range,
+        escape=inputs.escape,
     )
-    if released and editor.finish_timeline_range(ctx, hit, hovered=hovered):
+    if released and editor.finish_timeline_range(ctx, hit, hovered=inputs.hovered):
         imgui.open_popup("timeline-selection-menu")
-
-    handle_editor_keys(editor, ctx, keyframes, take_times, editable, timeline_id)
+    handle_editor_keys(editor, ctx, keyframes, take_times, editable, inputs.timeline_id)
     ctx.status_hints = timeline_status_hints(
         ctx.tr,
         has_range=ctx.session.state_take_range is not None,
-        edit_lane=(editor.edit_lane if mouse_xy[1] < lo[1] + ruler_height else lane)
-        if hovered
-        else "",
-        over_ruler=mouse_xy[1] < lo[1] + ruler_height,
+        edit_lane=(hit.lane if hit.on_track else editor.edit_lane) if inputs.hovered else "",
+        over_ruler=not hit.on_track,
         has_selection=bool(
             editor.take_selection
             if editor.edit_lane == "take"
@@ -302,53 +351,108 @@ def draw_dope_sheet(
             if editor.edit_lane == "model"
             else False
         ),
-        bindings=bindings,
+        bindings=inputs.bindings,
     )
-    paint_dope_sheet(
-        editor,
-        ctx,
-        lo,
-        hi,
-        time_lo,
-        time_hi,
-        ruler_height,
-        marker_y,
-        take_y,
-        marker_radius,
-        marker_positions,
-        keyframe_by_id,
-        take_times,
-        hit_id,
-        projection,
-    )
+
+
+def _paint_snapshot_track(
+    editor: TimelineEditor,
+    ctx: PanelContext,
+    layout: TimelineLayout,
+    projection: MarkerProjection,
+    hit: TimelineHit,
+    keyframes: dict[int, KeyframeInfo],
+    icon_drawer: CommandIconDrawer,
+) -> None:
+    time_lo, time_hi = layout.time_bounds
+    radius = layout.marker_radius
     overlay = ctx.painter()
-    imgui.push_clip_rect((time_lo, lo[1] + ruler_height), (time_hi, hi[1]), True)
-    for snapshot_id in snapshot_projection.draw_ids(
-        time_lo,
-        time_hi,
-        marker_radius * 1.5,
-        (editor.selected_snapshot, snapshot_hit),
+    imgui.push_clip_rect((time_lo, layout.ruler_bottom), (time_hi, layout.hi[1]), True)
+    for snapshot_id in projection.draw_ids(
+        time_lo, time_hi, radius * 1.5, (editor.selected_snapshot, hit.snapshot_id)
     ):
-        x = snapshot_positions[snapshot_id]
-        radius = marker_radius * 0.7
-        controls._draw_command_icon(
+        icon_drawer(
             overlay,
-            (x, snapshot_y),
+            (projection.positions[snapshot_id], layout.lane_y(2)),
             "key-keyframe",
             ctx.theme.info if snapshot_id != editor.selected_snapshot else ctx.theme.primary,
-            radius / 6,
+            radius * 0.7 / 6,
         )
     imgui.pop_clip_rect()
-    if snapshot_hit >= 0 and hovered:
+    if hit.snapshot_id >= 0:
         snapshot = next(
-            item for item in ctx.session.scene_snapshots if item.snapshot_id == snapshot_hit
+            item for item in ctx.session.scene_snapshots if item.snapshot_id == hit.snapshot_id
         )
         imgui.set_tooltip(f"{snapshot.name}  {snapshot.time:g} s\n{ctx.tr('Double-click to load')}")
-    elif hit_id >= 0 and hovered:
-        key = keyframe_by_id[hit_id]
+    elif hit.keyframe_id >= 0:
+        key = keyframes[hit.keyframe_id]
         imgui.set_tooltip(
             f"{key.name or ctx.tr('keyframe')}  ·  {key.time:g} s\n{ctx.tr('Double-click to load')}"
         )
+
+
+def draw_dope_sheet(
+    editor: TimelineEditor,
+    ctx: PanelContext,
+    models: tuple[SceneModelInfo, ...],
+    take_times: Sequence[float],
+    editable: bool,
+    *,
+    icon_drawer: CommandIconDrawer = _draw_command_icon,
+) -> None:
+    layout = TimelineLayout.measure(
+        imgui.get_cursor_screen_pos(), imgui.get_content_region_avail(), ctx.style_scale
+    )
+    draw_list = imgui.get_window_draw_list()
+    splitter = imgui.ImDrawListSplitter()
+    splitter.split(draw_list, 2)
+    splitter.set_current_channel(draw_list, 1)
+    imgui.set_cursor_screen_pos(
+        (layout.lo[0] + 2 * ctx.style_scale, layout.lo[1] + 2 * ctx.style_scale)
+    )
+    imgui.push_style_var(imgui.StyleVar_.item_spacing, (5 * ctx.style_scale, 0))
+    imgui.push_style_var(
+        imgui.StyleVar_.frame_padding,
+        (
+            8 * ctx.style_scale,
+            max(0, (_COMMAND_HEIGHT_PT * ctx.style_scale - imgui.get_font_size()) * 0.5),
+        ),
+    )
+    draw_model_header(
+        editor,
+        ctx,
+        models,
+        editable,
+        layout.channel_width - 4 * ctx.style_scale,
+        icon_drawer=icon_drawer,
+    )
+    imgui.pop_style_var(2)
+    # The header can change the model. Query its keys only after that choice, so
+    # fitting, hit testing and paint all use the same model in this frame.
+    keyframes, keyframe_by_id = editor.keyframes(ctx)
+    imgui.set_cursor_screen_pos(layout.lo)
+    splitter.set_current_channel(draw_list, 0)
+    inputs = _sample_timeline_input(editor, ctx, layout)
+    _update_timeline_view(editor, ctx, layout, inputs, keyframes, take_times)
+    projection, snapshots, hit = _project_timeline(editor, ctx, layout, inputs)
+    _edit_timeline(editor, ctx, inputs, hit, keyframes, keyframe_by_id, take_times, editable)
+    paint_dope_sheet(
+        editor,
+        ctx,
+        layout.lo,
+        layout.hi,
+        *layout.time_bounds,
+        layout.ruler_height,
+        layout.lane_y(0),
+        layout.lane_y(1),
+        layout.marker_radius,
+        projection.positions,
+        keyframe_by_id,
+        take_times,
+        hit.keyframe_id,
+        projection,
+    )
+    _paint_snapshot_track(editor, ctx, layout, snapshots, hit, keyframe_by_id, icon_drawer)
     splitter.merge(draw_list)
     draw_selection_menu(editor, ctx, editable)
 

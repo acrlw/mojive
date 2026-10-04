@@ -5,8 +5,10 @@ from __future__ import annotations
 import random
 import sys
 import webbrowser
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,292 +46,320 @@ class _Menus:
         return opened
 
     def _draw_main_menu(self) -> None:
-        t = self.localizer.text
-        caps = self.session.adapter.caps
-        can_load = bool(_model_filters(caps))
-        can_edit = bool(caps.scene_authoring)
-        can_new = caps.supports("scene_new")
-        can_open = caps.supports("scene_open")
-        can_save = caps.supports("scene_save")
-        can_scene_files = can_new or can_open or can_save
+        actions: list[Callable[[], object]] = []
         shortcut = "Cmd" if sys.platform == "darwin" else "Ctrl"
-        new_scene = False
-        open_scene = False
-        save_scene = False
-        save_scene_as = False
-        open_model = False
-        add_model = False
-        remove_model_id = -1
-        add_resource_root = False
-        remove_resource_root: Path | None = None
-        reload_model = False
-        undo = False
-        redo = False
-        open_settings = False
-        open_physics_options = False
-        open_recording_settings = False
-        frame_scene = False
-        capture_surface: CaptureSurface | None = None
-        start_recording_surface: CaptureSurface | None = None
-        pause_recording = False
-        stop_recording = False
-        reset_layout = False
-        open_help = False
-        open_documentation = False
-        open_about = False
-        quit_viewer = False
         imgui.push_style_var(
             imgui.StyleVar_.item_spacing,
             imgui.ImVec2(20.0 * self.window.style_scale, 8.0 * self.window.style_scale),
         )
         if imgui.begin_main_menu_bar():
             imgui.set_cursor_pos_x(4.0 * self.window.style_scale)
-            if self._begin_main_menu(t("File")):
-                if can_new:
-                    new_scene, _ = imgui.menu_item(t("New Scene"), f"{shortcut}+N", False)
-                if can_open:
-                    open_scene, _ = imgui.menu_item(
-                        t("Open Scene..."),
-                        f"{shortcut}+O",
-                        False,
-                        self._scene_dialog is None,
-                    )
-                if can_save:
-                    save_scene, _ = imgui.menu_item(
-                        t("Save"), f"{shortcut}+S", False, self.session.dirty
-                    )
-                    save_scene_as, _ = imgui.menu_item(
-                        t("Save As..."), f"{shortcut}+Shift+S", False
-                    )
-                if can_load:
-                    if can_scene_files:
-                        imgui.separator()
-                    open_model, _ = imgui.menu_item(
-                        t("Open Model..."),
-                        f"{shortcut}+O" if not can_open else "",
-                        False,
-                        self._model_dialog is None,
-                    )
-                    if caps.model_composition:
-                        add_model, _ = imgui.menu_item(
-                            t("Add Models..."),
-                            "",
-                            False,
-                            self._model_dialog is None,
-                        )
-                        removable = [item for item in self.session.scene_models if item.removable]
-                        if imgui.begin_menu(t("Remove Model"), bool(removable)):
-                            for item in removable:
-                                clicked, _ = imgui.menu_item(item.name, "", False)
-                                if clicked:
-                                    remove_model_id = item.model_id
-                            imgui.end_menu()
-                    reload_model, _ = imgui.menu_item(
-                        t("Reload Model"),
-                        f"{shortcut}+Shift+O",
-                        False,
-                        caps.reload and self.session.asset_path is not None,
-                    )
-                if can_edit and imgui.begin_menu(t("Resource Directories")):
-                    add_resource_root, _ = imgui.menu_item(
-                        t("Add Directory..."), "", False, self._resource_dialog is None
-                    )
-                    for root in self.session.adapter.resource_roots:
-                        clicked, _ = imgui.menu_item(f"{t('Remove')} {root}", "", False)
-                        if clicked:
-                            remove_resource_root = root
-                    imgui.end_menu()
-                imgui.separator()
-                quit_viewer, _ = imgui.menu_item(t("Quit"), f"{shortcut}+Q", False, True)
-                imgui.end_menu()
-            if self._begin_main_menu(t("Edit")):
-                undo, _ = imgui.menu_item(
-                    t("Undo"),
-                    f"{shortcut}+Z",
-                    False,
-                    caps.edit_history and self.session.can_undo,
-                )
-                redo, _ = imgui.menu_item(
-                    t("Redo"),
-                    f"{shortcut}+Shift+Z",
-                    False,
-                    caps.edit_history and self.session.can_redo,
-                )
-                imgui.separator()
-                open_settings, _ = imgui.menu_item(t("Settings..."), f"{shortcut}+,", False)
-                imgui.end_menu()
-            self._draw_entity_menu(shortcut, can_edit)
-            if self._begin_main_menu(t("View")):
-                frame_scene, _ = imgui.menu_item(
-                    t("Frame All"),
-                    self.input_bindings.label(InputAction.FRAME_SCENE),
-                    False,
-                    self._model_camera_id < 0,
-                )
-                if imgui.begin_menu(t("Capture")):
-                    clicked, _ = imgui.menu_item(t("Scene Image"), f"{shortcut}+Shift+P", False)
-                    if clicked:
-                        capture_surface = CaptureSurface.SCENE
-                    clicked, _ = imgui.menu_item(t("Viewport with UI"), "", False)
-                    if clicked:
-                        capture_surface = CaptureSurface.VIEWPORT
-                    clicked, _ = imgui.menu_item(t("Entire Window"), "", False)
-                    if clicked:
-                        capture_surface = CaptureSurface.WINDOW
-                    imgui.end_menu()
-                if self.recording.phase is RecordingPhase.COUNTDOWN:
-                    stop_recording, _ = imgui.menu_item(
-                        t("Cancel Recording"), f"{shortcut}+Shift+R", False
-                    )
-                elif self.recording.phase is RecordingPhase.FINALIZING:
-                    imgui.menu_item(t("Finalizing recording"), "", False, False)
-                elif self.recording.active:
-                    if self._viewport_recording_phase is RecordingPhase.PAUSED:
-                        pause_recording, _ = imgui.menu_item(t("Resume Recording"), "", False)
-                    else:
-                        pause_recording, _ = imgui.menu_item(t("Pause Recording"), "", False)
-                    stop_recording, _ = imgui.menu_item(
-                        t("Stop Recording"), f"{shortcut}+Shift+R", False
-                    )
-                elif imgui.begin_menu(t("Record")):
-                    clicked, _ = imgui.menu_item(t("Scene Only"), "", False)
-                    if clicked:
-                        start_recording_surface = CaptureSurface.SCENE
-                    clicked, _ = imgui.menu_item(t("Viewport with UI"), "", False)
-                    if clicked:
-                        start_recording_surface = CaptureSurface.VIEWPORT
-                    clicked, _ = imgui.menu_item(t("Entire Window"), "", False)
-                    if clicked:
-                        start_recording_surface = CaptureSurface.WINDOW
-                    imgui.end_menu()
-                open_recording_settings, _ = imgui.menu_item(t("Recording Settings..."), "", False)
-                imgui.separator()
-                layers, _ = imgui.menu_item(t("Layers..."), "", False)
-                if layers:
-                    self.panels.open_panel("Layers")
-                helpers, _ = imgui.menu_item(
-                    t("Camera & Light Helpers"), "", bool(self.scene_entities.visible)
-                )
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(t("Show camera and light icons in the scene"))
-                if helpers:
-                    self.scene_entities.visible = not self.scene_entities.visible
-                influence, _ = imgui.menu_item(
-                    t("Selected Camera & Light Volumes"),
-                    "",
-                    bool(self.scene_entities.show_influence),
-                    bool(self.scene_entities.visible),
-                )
-                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value):
-                    imgui.set_tooltip(t("Show the selected camera frustum or light range"))
-                if influence:
-                    self.scene_entities.show_influence = not self.scene_entities.show_influence
-                imgui.end_menu()
-            if self._begin_main_menu(t("Window")):
-                for panel in self.panels:
-                    if not panel.enabled or panel.modal:
-                        continue
-                    label = t(panel.name)
-                    clicked, _ = imgui.menu_item(
-                        label,
-                        panel.shortcut,
-                        panel.open,
-                    )
-                    if clicked:
-                        panel.toggle()
-                for panel_id, title in self.panels.unloaded_builtins():
-                    if imgui.menu_item(t(title), "", False)[0]:
-                        self.panels.open(panel_id)
-                imgui.separator()
-                reset_layout, _ = imgui.menu_item(t("Reset Layout"), "", False)
-                open_physics_options, _ = imgui.menu_item(
-                    t("Physics Options..."),
-                    "",
-                    False,
-                    caps.simulation or caps.supports("physics.options"),
-                )
-                imgui.end_menu()
-            if self._begin_main_menu(t("Help")):
-                open_help, _ = imgui.menu_item(t("Interaction Reference"), "F1", False)
-                open_documentation, _ = imgui.menu_item(t("Documentation"), "", False)
-                imgui.separator()
-                open_about, _ = imgui.menu_item(t("About"), "", False)
-                imgui.end_menu()
-            path = self.session.asset_path
-            document = ""
-            if path is not None:
-                document = path.name + (" ●" if self.session.dirty else "")
-            elif can_scene_files:
-                document = t("Untitled") + (" ●" if self.session.dirty else "")
-            if document:
-                target_x = imgui.get_window_width() - imgui.calc_text_size(document).x - 10.0
-                imgui.set_cursor_pos_x(max(imgui.get_cursor_pos_x(), target_x))
-                imgui.text_disabled(document)
+            self._draw_file_menu(actions, shortcut)
+            self._draw_edit_menu(actions, shortcut)
+            self._draw_entity_menu(
+                actions, shortcut, bool(self.session.adapter.caps.scene_authoring)
+            )
+            self._draw_view_menu(actions, shortcut)
+            self._draw_window_menu(actions)
+            self._draw_help_menu(actions)
+            self._draw_menu_document_name()
             imgui.end_main_menu_bar()
         imgui.pop_style_var()
 
-        if open_physics_options:
-            self.show_physics_options()
-        if new_scene:
-            self._request_document_action("new_scene")
-        if undo:
-            self.session.submit(cmd.Undo())
-        if redo:
-            self.session.submit(cmd.Redo())
-        if open_settings or open_recording_settings:
-            self.panels.open_panel("Settings")
-            if open_recording_settings:
-                self.panels.get("Settings").show_category("Recording")
-        if frame_scene:
-            self._leave_model_camera()
-            self._frame_scene(animate=True)
-        if capture_surface is not None:
-            self.request_capture(surface=capture_surface)
-        if start_recording_surface is not None:
-            try:
-                self.start_recording(surface=start_recording_surface)
-            except Exception as exc:
-                self.session.report_message(
-                    f"{self.localizer.text('Recording failed')}: {exc}", level="error"
+        # Document replacement and panel creation must run outside the menu's ImGui scope.
+        for action in actions:
+            action()
+
+    def _menu_action(
+        self,
+        actions: list[Callable[[], object]],
+        label: str,
+        action: Callable[..., object],
+        *args: object,
+        shortcut: str = "",
+        enabled: bool = True,
+        **kwargs: object,
+    ) -> None:
+        if imgui.menu_item(self.localizer.text(label), shortcut, False, enabled)[0]:
+            actions.append(partial(action, *args, **kwargs))
+
+    def _draw_file_menu(self, actions, shortcut: str) -> None:
+        t = self.localizer.text
+        if not self._begin_main_menu(t("File")):
+            return
+        caps = self.session.adapter.caps
+        can_new = caps.supports("scene_new")
+        can_open = caps.supports("scene_open")
+        can_save = caps.supports("scene_save")
+        if can_new:
+            self._menu_action(
+                actions,
+                "New Scene",
+                self._request_document_action,
+                "new_scene",
+                shortcut=f"{shortcut}+N",
+            )
+        if can_open:
+            self._menu_action(
+                actions,
+                "Open Scene...",
+                self._open_scene_dialog,
+                "open",
+                shortcut=f"{shortcut}+O",
+                enabled=self._scene_dialog is None,
+            )
+        if can_save:
+            self._menu_action(
+                actions,
+                "Save",
+                self._save_current_scene,
+                shortcut=f"{shortcut}+S",
+                enabled=self.session.dirty,
+            )
+            self._menu_action(
+                actions,
+                "Save As...",
+                self._open_scene_dialog,
+                "save",
+                shortcut=f"{shortcut}+Shift+S",
+            )
+        if _model_filters(caps):
+            if can_new or can_open or can_save:
+                imgui.separator()
+            self._menu_action(
+                actions,
+                "Open Model...",
+                self._open_model_dialog,
+                shortcut=f"{shortcut}+O" if not can_open else "",
+                enabled=self._model_dialog is None,
+            )
+            if caps.model_composition:
+                self._menu_action(
+                    actions,
+                    "Add Models...",
+                    self._open_model_dialog,
+                    "add",
+                    enabled=self._model_dialog is None,
                 )
-        if pause_recording:
-            if self._viewport_recording_phase is RecordingPhase.PAUSED:
-                self.resume_recording()
-            else:
-                self.pause_recording()
-        if stop_recording:
-            self._request_recording_stop()
-        if reset_layout:
-            self.reset_layout()
-        if open_help:
-            self.panels.open_panel("Help")
-        if open_documentation:
-            webbrowser.open("https://github.com/acrlw/mojive#readme")
-        if open_about:
-            self.panels.open_panel("Info")
-        if open_scene:
-            self._open_scene_dialog("open")
-        if save_scene:
-            if self.session.asset_path is None:
-                self._open_scene_dialog("save")
-            else:
-                self._request_scene_save(self.session.asset_path)
-        if save_scene_as:
+                removable = [item for item in self.session.scene_models if item.removable]
+                if imgui.begin_menu(t("Remove Model"), bool(removable)):
+                    for item in removable:
+                        if imgui.menu_item(item.name, "", False)[0]:
+                            actions.append(partial(self.remove_model, item.model_id))
+                    imgui.end_menu()
+            self._menu_action(
+                actions,
+                "Reload Model",
+                self._queue_model_load,
+                "reload",
+                self.session.asset_path,
+                shortcut=f"{shortcut}+Shift+O",
+                enabled=caps.reload and self.session.asset_path is not None,
+            )
+        if caps.scene_authoring and imgui.begin_menu(t("Resource Directories")):
+            self._menu_action(
+                actions,
+                "Add Directory...",
+                self._open_resource_dialog,
+                enabled=self._resource_dialog is None,
+            )
+            for root in self.session.adapter.resource_roots:
+                if imgui.menu_item(f"{t('Remove')} {root}", "", False)[0]:
+                    actions.append(partial(self.session.submit, cmd.RemoveResourceRoot(root)))
+            imgui.end_menu()
+        imgui.separator()
+        self._menu_action(
+            actions, "Quit", self._request_document_action, "quit", shortcut=f"{shortcut}+Q"
+        )
+        imgui.end_menu()
+
+    def _save_current_scene(self) -> None:
+        if self.session.asset_path is None:
             self._open_scene_dialog("save")
-        if open_model:
-            self._open_model_dialog()
-        if add_model:
-            self._open_model_dialog("add")
-        if remove_model_id >= 0:
-            self.remove_model(remove_model_id)
-        if add_resource_root:
-            self._open_resource_dialog()
-        if remove_resource_root is not None:
-            self.session.submit(cmd.RemoveResourceRoot(remove_resource_root))
-        if reload_model:
-            self._queue_model_load("reload", self.session.asset_path)
-        if quit_viewer:
-            self._request_document_action("quit")
+        else:
+            self._request_scene_save(self.session.asset_path)
+
+    def _draw_edit_menu(self, actions, shortcut: str) -> None:
+        if not self._begin_main_menu(self.localizer.text("Edit")):
+            return
+        history = self.session.adapter.caps.edit_history
+        self._menu_action(
+            actions,
+            "Undo",
+            self.session.submit,
+            cmd.Undo(),
+            shortcut=f"{shortcut}+Z",
+            enabled=history and self.session.can_undo,
+        )
+        self._menu_action(
+            actions,
+            "Redo",
+            self.session.submit,
+            cmd.Redo(),
+            shortcut=f"{shortcut}+Shift+Z",
+            enabled=history and self.session.can_redo,
+        )
+        imgui.separator()
+        self._menu_action(
+            actions, "Settings...", self.panels.open_panel, "Settings", shortcut=f"{shortcut}+,"
+        )
+        imgui.end_menu()
+
+    def _draw_view_menu(self, actions, shortcut: str) -> None:
+        t = self.localizer.text
+        if not self._begin_main_menu(t("View")):
+            return
+        self._menu_action(
+            actions,
+            "Frame All",
+            self._frame_all_from_menu,
+            shortcut=self.input_bindings.label(InputAction.FRAME_SCENE),
+            enabled=self._model_camera_id < 0,
+        )
+        if imgui.begin_menu(t("Capture")):
+            self._menu_action(
+                actions,
+                "Scene Image",
+                self.request_capture,
+                surface=CaptureSurface.SCENE,
+                shortcut=f"{shortcut}+Shift+P",
+            )
+            self._menu_action(
+                actions,
+                "Viewport with UI",
+                self.request_capture,
+                surface=CaptureSurface.VIEWPORT,
+            )
+            self._menu_action(
+                actions,
+                "Entire Window",
+                self.request_capture,
+                surface=CaptureSurface.WINDOW,
+            )
+            imgui.end_menu()
+        self._draw_recording_menu(actions, shortcut)
+        self._menu_action(actions, "Recording Settings...", self._open_recording_settings)
+        imgui.separator()
+        self._menu_action(actions, "Layers...", self.panels.open_panel, "Layers")
+        self._draw_entity_visibility_menu()
+        imgui.end_menu()
+
+    def _frame_all_from_menu(self) -> None:
+        self._leave_model_camera()
+        self._frame_scene(animate=True)
+
+    def _draw_recording_menu(self, actions, shortcut: str) -> None:
+        t = self.localizer.text
+        if self.recording.phase is RecordingPhase.COUNTDOWN:
+            self._menu_action(
+                actions,
+                "Cancel Recording",
+                self._request_recording_stop,
+                shortcut=f"{shortcut}+Shift+R",
+            )
+        elif self.recording.phase is RecordingPhase.FINALIZING:
+            imgui.menu_item(t("Finalizing recording"), "", False, False)
+        elif self.recording.active:
+            if self._viewport_recording_phase is RecordingPhase.PAUSED:
+                self._menu_action(actions, "Resume Recording", self.resume_recording)
+            else:
+                self._menu_action(actions, "Pause Recording", self.pause_recording)
+            self._menu_action(
+                actions,
+                "Stop Recording",
+                self._request_recording_stop,
+                shortcut=f"{shortcut}+Shift+R",
+            )
+        elif imgui.begin_menu(t("Record")):
+            for label, surface in (
+                ("Scene Only", CaptureSurface.SCENE),
+                ("Viewport with UI", CaptureSurface.VIEWPORT),
+                ("Entire Window", CaptureSurface.WINDOW),
+            ):
+                self._menu_action(actions, label, self._start_recording_from_menu, surface)
+            imgui.end_menu()
+
+    def _start_recording_from_menu(self, surface: CaptureSurface) -> None:
+        try:
+            self.start_recording(surface=surface)
+        except Exception as exc:
+            self.session.report_message(
+                f"{self.localizer.text('Recording failed')}: {exc}", level="error"
+            )
+
+    def _open_recording_settings(self) -> None:
+        self.panels.open_panel("Settings")
+        self.panels.get("Settings").show_category("Recording")
+
+    def _draw_entity_visibility_menu(self) -> None:
+        t = self.localizer.text
+        if imgui.menu_item(t("Camera & Light Helpers"), "", bool(self.scene_entities.visible))[0]:
+            self.scene_entities.visible = not self.scene_entities.visible
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(t("Show camera and light icons in the scene"))
+        if imgui.menu_item(
+            t("Selected Camera & Light Volumes"),
+            "",
+            bool(self.scene_entities.show_influence),
+            bool(self.scene_entities.visible),
+        )[0]:
+            self.scene_entities.show_influence = not self.scene_entities.show_influence
+        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value):
+            imgui.set_tooltip(t("Show the selected camera frustum or light range"))
+
+    def _draw_window_menu(self, actions) -> None:
+        t = self.localizer.text
+        if not self._begin_main_menu(t("Window")):
+            return
+        for panel in self.panels:
+            if (
+                panel.enabled
+                and not panel.modal
+                and imgui.menu_item(t(panel.name), panel.shortcut, panel.open)[0]
+            ):
+                actions.append(panel.toggle)
+        for panel_id, title in self.panels.unloaded_builtins():
+            self._menu_action(actions, title, self.panels.open, panel_id)
+        imgui.separator()
+        self._menu_action(actions, "Reset Layout", self.reset_layout)
+        caps = self.session.adapter.caps
+        self._menu_action(
+            actions,
+            "Physics Options...",
+            self.show_physics_options,
+            enabled=caps.simulation or caps.supports("physics.options"),
+        )
+        imgui.end_menu()
+
+    def _draw_help_menu(self, actions) -> None:
+        if not self._begin_main_menu(self.localizer.text("Help")):
+            return
+        self._menu_action(
+            actions, "Interaction Reference", self.panels.open_panel, "Help", shortcut="F1"
+        )
+        self._menu_action(
+            actions, "Documentation", webbrowser.open, "https://github.com/acrlw/mojive#readme"
+        )
+        imgui.separator()
+        self._menu_action(actions, "About", self.panels.open_panel, "Info")
+        imgui.end_menu()
+
+    def _draw_menu_document_name(self) -> None:
+        path = self.session.asset_path
+        if path is not None:
+            document = path.name
+        elif any(
+            self.session.adapter.caps.supports(name)
+            for name in ("scene_new", "scene_open", "scene_save")
+        ):
+            document = self.localizer.text("Untitled")
+        else:
+            return
+        if self.session.dirty:
+            document += " ●"
+        target_x = imgui.get_window_width() - imgui.calc_text_size(document).x - 10.0
+        imgui.set_cursor_pos_x(max(imgui.get_cursor_pos_x(), target_x))
+        imgui.text_disabled(document)
 
     def show_physics_options(self) -> None:
         """Reveal the environment's physics controls from the Window menu."""
@@ -339,60 +369,59 @@ class _Menus:
             self.panels.open_panel("Inspector")
             self.panels.get("Inspector").show_environment_physics()
 
-    def _draw_entity_menu(self, shortcut: str, enabled: bool) -> None:
+    def _draw_entity_menu(self, actions, shortcut: str, enabled: bool) -> None:
         t = self.localizer.text
         if not self._begin_main_menu(t("Entity"), enabled):
             return
         if imgui.begin_menu(t("Create")):
-            for label, shape in (
-                ("Box", MeshShape.BOX),
-                ("Sphere", MeshShape.SPHERE),
-                ("Cylinder", MeshShape.CYLINDER),
-                ("Cone", MeshShape.CONE),
-                ("Plane", MeshShape.PLANE),
-            ):
-                clicked, _ = imgui.menu_item(t(label), "", False)
-                if clicked:
-                    self._add_scene_object(shape, label.lower())
-            ellipsoid, _ = imgui.menu_item(t("Ellipsoid"), "", False)
-            capsule, _ = imgui.menu_item(
-                t("Capsule"), "", False, self.session.adapter.caps.topology_editing
-            )
-            if ellipsoid:
-                self._add_scene_object(
-                    MeshShape.SPHERE,
-                    "ellipsoid",
-                    size=(0.65, 0.45, 0.35),
-                )
-            if capsule:
-                self._add_model_primitive("capsule", "capsule")
-            imgui.separator()
-            point_light, _ = imgui.menu_item(t("Point Light"), "", False)
-            camera, _ = imgui.menu_item(t("Camera"), "", False)
-            site, _ = imgui.menu_item(
-                t("Site"), "", False, self.session.adapter.caps.topology_editing
-            )
-            if point_light:
-                self._add_scene_light()
-            if camera:
-                self._add_scene_camera()
-            if site:
-                self._add_model_site()
+            self._draw_create_entity_menu(actions)
             imgui.end_menu()
-        scene_selected = bool(self._selected_entity())
-        model_selected = self._selected_model_element() is not None
-        duplicate, _ = imgui.menu_item(
-            t("Duplicate"), f"{shortcut}+D", False, scene_selected or model_selected
+        selected = bool(self._selected_entity()) or self._selected_model_element() is not None
+        self._menu_action(
+            actions,
+            "Duplicate",
+            self._duplicate_selected,
+            shortcut=f"{shortcut}+D",
+            enabled=selected,
         )
-        rename, _ = imgui.menu_item(t("Rename"), "F2", False, scene_selected or model_selected)
-        remove, _ = imgui.menu_item(t("Delete"), "Delete", False, scene_selected or model_selected)
-        if duplicate:
-            self._duplicate_selected()
-        if rename:
-            self._request_selected_rename()
-        if remove:
-            self._remove_selected()
+        self._menu_action(
+            actions, "Rename", self._request_selected_rename, shortcut="F2", enabled=selected
+        )
+        self._menu_action(
+            actions, "Delete", self._remove_selected, shortcut="Delete", enabled=selected
+        )
         imgui.end_menu()
+
+    def _draw_create_entity_menu(self, actions) -> None:
+        for label, shape in (
+            ("Box", MeshShape.BOX),
+            ("Sphere", MeshShape.SPHERE),
+            ("Cylinder", MeshShape.CYLINDER),
+            ("Cone", MeshShape.CONE),
+            ("Plane", MeshShape.PLANE),
+        ):
+            self._menu_action(actions, label, self._add_scene_object, shape, label.lower())
+        self._menu_action(
+            actions,
+            "Ellipsoid",
+            self._add_scene_object,
+            MeshShape.SPHERE,
+            "ellipsoid",
+            size=(0.65, 0.45, 0.35),
+        )
+        topology = self.session.adapter.caps.topology_editing
+        self._menu_action(
+            actions,
+            "Capsule",
+            self._add_model_primitive,
+            "capsule",
+            "capsule",
+            enabled=topology,
+        )
+        imgui.separator()
+        self._menu_action(actions, "Point Light", self._add_scene_light)
+        self._menu_action(actions, "Camera", self._add_scene_camera)
+        self._menu_action(actions, "Site", self._add_model_site, enabled=topology)
 
     def _entity_name(self, base: str) -> str:
         names = {node.name for node in self.session.nodes}

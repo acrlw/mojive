@@ -36,6 +36,7 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
     from mojive.ui.panels.hierarchy import HierarchyPanel
     from mojive.ui.panels.inspector import InspectorPanel
     from mojive.ui.panels.settings import SettingsPanel
+    from mojive.ui.preferences import Preferences
 
     class Backend(NullBackend):
         def set_geometry_style(self, style):
@@ -67,7 +68,8 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
     session.submit(cmd.SelectNode(link.node_id))
     backend = Backend()
     backend.caps = replace(backend.caps, render_flags=frozenset(RenderFlag))
-    localizer = Localizer(path=output / "preferences.json")
+    preferences = Preferences(output / "preferences.json")
+    localizer = Localizer.from_preferences(preferences)
     localizer.set_language(language, persist=False)
     ctx = PanelContext(session, backend, style_scale=scale, translate=localizer.text)
     panels = (HierarchyPanel(), InspectorPanel())
@@ -209,7 +211,7 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
         settings = SettingsPanel()
         settings._category = "MuJoCo Visuals"
         panels = (settings,)
-        owner = SimpleNamespace(backend=backend, localizer=localizer)
+        owner = SimpleNamespace(backend=backend, preferences=preferences)
         ctx.set_geometry_style = lambda style: ViewerApp.set_geometry_style(owner, style)
         for _ in range(3):
             frame()
@@ -220,7 +222,7 @@ def capture(output: Path, language: str, scale: float, panel_width: int) -> dict
             before = getattr(backend.get_geometry_style(), name)
             click("settings", label)
             assert getattr(backend.get_geometry_style(), name) != before
-            assert localizer.preference("geometry_style")[name] == getattr(
+            assert preferences.get("geometry_style")[name] == getattr(
                 backend.get_geometry_style(), name
             )
         for label in ("##visual_opacity", "##collision_opacity", "##collision_color"):

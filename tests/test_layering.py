@@ -62,6 +62,11 @@ def _hits(imports: set[str], prefix: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def test_shared_icons_do_not_depend_on_viewport_widgets():
+    for path in [*_files("ui/icons"), SRC / "ui/overlay_geometry.py"]:
+        assert not _hits(_imports(path), "mojive.ui.viewport_widgets"), path
+
+
 def test_render_layer_does_not_import_ui():
     """Render modules remain independent of the UI layer."""
 

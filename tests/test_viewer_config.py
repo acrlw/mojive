@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+import pytest
+
 from mojive import (
     THEME,
     CameraInputConfig,
@@ -162,8 +164,6 @@ def test_camera_navigation_preferences_round_trip_and_recover_invalid_saved_valu
 
 
 def test_camera_navigation_configuration_rejects_invalid_runtime_limits():
-    import pytest
-
     from mojive import CameraNavigationConfig
 
     for values in (
@@ -176,3 +176,217 @@ def test_camera_navigation_configuration_rejects_invalid_runtime_limits():
     ):
         with pytest.raises(ValueError):
             CameraNavigationConfig(**values)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_config_resolution_preserves_group_and_optional_field_precedence(explicit):
+    from mojive import CameraNavigationConfig, CameraTrackingConfig, ViewportLayers
+    from mojive.render.backend import ShadowQuality
+    from mojive.types import ContactStyle, GeometryStyle
+    from mojive.ui.app.settings import resolve_viewer_config
+    from mojive.ui.preferences import Preferences
+
+    saved = ViewerConfig(
+        interactions=InteractionConfig(gizmo=False),
+        selection=SelectionStyle(outline=False),
+        navigation=CameraNavigationConfig(focus_margin=2.0),
+        viewport_overlays=ViewportOverlayConfig(playback_scale=1.2, tool_scale=1.2),
+        layers=ViewportLayers(gizmos=False),
+        recording=RecordingConfig(fps=48),
+        tracking=CameraTrackingConfig(smoothing=0.8),
+        geometry_style=GeometryStyle(visual_opacity=0.4),
+        contact_style=ContactStyle(shape="sphere"),
+        shadow_quality=ShadowQuality.HIGH,
+        live_model_updates=True,
+    )
+    keys = {
+        "interactions": "interactions",
+        "selection": "selection_style",
+        "navigation": "camera_navigation",
+        "viewport_overlays": "viewport_overlays",
+        "layers": "viewport_layers",
+        "recording": "recording",
+        "tracking": "camera_tracking",
+        "geometry_style": "geometry_style",
+        "contact_style": "contact_style",
+    }
+    preferences = Preferences(
+        values={
+            **{key: asdict(getattr(saved, name)) for name, key in keys.items()},
+            "shadow_quality": "high",
+            "live_model_updates": True,
+        }
+    )
+    supplied = ViewerConfig() if explicit else None
+    resolved = resolve_viewer_config(supplied, preferences)
+    expected_groups = supplied if explicit else saved
+    for name in (
+        "interactions",
+        "selection",
+        "navigation",
+        "viewport_overlays",
+        "layers",
+        "recording",
+        "tracking",
+    ):
+        assert getattr(resolved, name) == getattr(expected_groups, name)
+    for name in ("geometry_style", "contact_style", "shadow_quality", "live_model_updates"):
+        assert getattr(resolved, name) == getattr(saved, name)
+    if supplied is not None:
+        assert supplied.live_model_updates is None
+        assert supplied.geometry_style is None
+
+
+def test_explicit_optional_config_overrides_saved_values_and_keeps_embedding_policy():
+    from mojive.config import PanelConfig
+    from mojive.render.backend import ShadowQuality
+    from mojive.types import ContactStyle, GeometryStyle
+    from mojive.ui.app.settings import resolve_viewer_config
+    from mojive.ui.preferences import Preferences
+
+    config = ViewerConfig(
+        live_model_updates=False,
+        shadow_quality=ShadowQuality.PERFORMANCE,
+        geometry_style=GeometryStyle(),
+        contact_style=ContactStyle(),
+        panels={"settings": PanelConfig(open=True)},
+        builtin_panels=("settings",),
+        threaded_physics=False,
+        debug_server=False,
+        layout=LayoutConfig(persistence=False),
+    )
+    preferences = Preferences(
+        values={
+            "live_model_updates": True,
+            "shadow_quality": "high",
+            "geometry_style": {"visual_opacity": 0.1},
+            "contact_style": {"shape": "sphere"},
+        }
+    )
+    assert resolve_viewer_config(config, preferences) == config
+
+
+@pytest.mark.parametrize("value", [None, [], "bad", {"unknown": True}])
+def test_invalid_saved_config_groups_recover_without_rewriting_preferences(value):
+    from mojive.render.backend import ShadowQuality
+    from mojive.types import ContactStyle, GeometryStyle
+    from mojive.ui.app.settings import resolve_viewer_config
+    from mojive.ui.preferences import Preferences
+
+    values = dict.fromkeys(
+        (
+            "interactions",
+            "selection_style",
+            "camera_navigation",
+            "viewport_overlays",
+            "viewport_layers",
+            "recording",
+            "camera_tracking",
+            "geometry_style",
+            "contact_style",
+            "shadow_quality",
+        ),
+        value,
+    )
+    resolved = resolve_viewer_config(None, Preferences(values=values))
+    defaults = ViewerConfig()
+    assert resolved.interactions == defaults.interactions
+    assert resolved.selection == defaults.selection
+    assert resolved.navigation == defaults.navigation
+    assert resolved.viewport_overlays == defaults.viewport_overlays
+    assert resolved.layers == defaults.layers
+    assert resolved.recording == defaults.recording
+    assert resolved.tracking == defaults.tracking
+    assert resolved.geometry_style == GeometryStyle()
+    assert resolved.contact_style == ContactStyle()
+    assert resolved.shadow_quality == ShadowQuality.BALANCED
+    assert all(item is value for item in values.values())
+
+
+def test_viewer_uses_resolved_values_and_one_store_for_later_preferences(tmp_path, monkeypatch):
+    from mojive.adapters.static import StaticSceneAdapter
+    from mojive.render.backend import NullBackend
+    from mojive.scene import Scene
+    from mojive.session import Session
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.preferences import Preferences
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    Preferences.load().update(
+        {
+            "interactions": {"gizmo": False},
+            "precise_gizmo_absolute": True,
+            "take_pause_at_end": False,
+            "perturb_force_scale": 3.0,
+            "perturb_torque_scale": 2.0,
+        }
+    )
+    session = Session(StaticSceneAdapter(Scene()))
+    try:
+        app = ViewerApp(session, NullBackend())
+        assert not app.interactions.gizmo
+        assert not session.state_take_pause_at_end
+        assert app.perturb.force_scale == 3.0
+        assert app.perturb.torque_scale == 2.0
+        assert app.preferences.values is app.localizer.preferences
+        app.set_perturb_strength(4.0, 5.0)
+        app.set_language("zh_CN")
+        assert app.localizer.preference("perturb_force_scale") == 4.0
+        assert app.preferences.get("language") == "zh_CN"
+        assert Preferences.load().get("perturb_torque_scale") == 5.0
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize(
+    "attribute,value",
+    [
+        ("interactions", InteractionConfig(gizmo=False, perturb=False)),
+        ("selection_style", SelectionStyle(gizmo=False)),
+    ],
+)
+def test_failed_policy_save_keeps_applied_runtime_but_exposes_save_error(
+    tmp_path, monkeypatch, attribute, value
+):
+    from pathlib import Path
+
+    from mojive.adapters.static import StaticSceneAdapter
+    from mojive.render.backend import NullBackend
+    from mojive.scene import Scene
+    from mojive.session import Session
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.preferences import Preferences
+
+    path = tmp_path / "settings.json"
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(path))
+    Preferences.load().update({"unrelated": "preserved"})
+    session = Session(StaticSceneAdapter(Scene()))
+    try:
+        app = ViewerApp(session, NullBackend())
+        original_values = dict(app.preferences.values)
+        original_file = path.read_bytes()
+        gestures = []
+        monkeypatch.setattr(app.gizmo, "cancel", lambda: gestures.append("gizmo"))
+        monkeypatch.setattr(app.perturb, "end", lambda session: gestures.append("perturb"))
+        session.perturb.active = True
+
+        def reject_replace(self, target):
+            raise OSError("settings disk unavailable")
+
+        with monkeypatch.context() as failing:
+            failing.setattr(Path, "replace", reject_replace)
+            with pytest.raises(OSError, match="settings disk unavailable"):
+                getattr(app, f"set_{attribute}")(value)
+        assert getattr(app, attribute) == value
+        assert app.preferences.values == original_values
+        assert path.read_bytes() == original_file
+        expected = ["gizmo", "perturb"] if attribute == "interactions" else ["gizmo"]
+        assert gestures == expected
+        gestures.clear()
+
+        getattr(app, f"set_{attribute}")(value)
+        assert getattr(app, attribute) == value
+        assert Preferences.load().get(attribute) == asdict(value)
+        assert gestures == (["gizmo", "perturb"] if attribute == "interactions" else ["gizmo"])
+    finally:
+        session.release()

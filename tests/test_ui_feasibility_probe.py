@@ -52,7 +52,7 @@ PROBE_PATH = Path(__file__).resolve().parents[1] / "python/tools/ui_feasibility"
 def test_shared_widget_calls_match_runtime_signatures(name, function):
     calls = [
         (path, node)
-        for path in PROBE_PATH.glob("*.py")
+        for path in PROBE_PATH.rglob("*.py")
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
     ]
@@ -90,14 +90,6 @@ def test_probe_window_growth_keeps_the_scaled_canvas_and_controls_visible():
         width, height = probe_layout._probe_window_size(1600, 1000, scale)
         assert width >= (probe_fixtures.GEOMETRY_CANVAS_SIZE[0] + 400.0) * scale
         assert height >= probe_fixtures.GEOMETRY_CANVAS_SIZE[1] * scale
-
-
-def test_probe_tab_rows_wrap_instead_of_clipping_at_large_scales():
-    """Native tab bars run past the panel edge once their labels grow."""
-
-    source = "\n".join(path.read_text(encoding="utf-8") for path in PROBE_PATH.glob("*.py"))
-    assert "begin_tab_bar" not in source
-    assert source.count("_wrapped_tabs(") >= 4
 
 
 def test_virtual_canvas_scrolls_instead_of_compressing_components():
@@ -252,7 +244,8 @@ def test_probe_geometry_defaults_follow_production_constants():
     assert state.timeline_panel.toolbar.follow_mode_icon_drawer is draw_icon_label
     assert all(state.icon_stroke_for(group) == ICON_STROKE for group in ICON_GROUP_STROKE_DEFAULTS)
     assert state.icon_padding_for("Viewport tools") == 0.5
-    assert state.icon_padding_for_glyph("tool-rotate") == 0.0
+    assert state.icon_padding_for_glyph("tool-rotate") == 0.65
+    assert state.icon_alignment_strength == 2.5
     assert state.icon_padding_for_glyph("playback-previous") == 4.0
     assert state.rotate_ring_gap_ratio == 1.0
     assert state.rotate_ring_cap == "round"

@@ -759,6 +759,40 @@ def test_end_checkbox_persists_and_continues_the_playhead_without_physics(viewer
     assert session.frame.time == session.state_take_times[-1]
 
 
+def test_timeline_recording_options_commit_and_recover_from_failed_save(viewer, monkeypatch):
+    viewer.app.set_recording_config(viewer.app.recording_config)
+    original_countdown = viewer.app.recording_config.countdown
+    before = viewer.app.preferences.path.read_bytes()
+    _click(viewer, _item_center(viewer, "invisible_button", "##timeline-options"))
+
+    def edit_countdown(value):
+        lo, hi = _item_rect(viewer, "input_float", "##timeline-countdown")
+        _click(viewer, (lo[0] + 20, (lo[1] + hi[1]) * 0.5))
+        _key(viewer, imgui.Key.a, ctrl=True)
+        imgui.get_io().add_input_characters_utf8(str(value))
+        viewer.sync()
+
+    def reject_save(values):
+        raise OSError("recording preferences unavailable")
+
+    with monkeypatch.context() as failing:
+        failing.setattr(viewer.app.preferences, "_save", reject_save)
+        edit_countdown(2.5)
+        # Native InputFloat publishes typed values on deactivation, unlike drag previews.
+        assert viewer.app.recording_config.countdown == original_countdown
+        assert viewer.app.preferences.path.read_bytes() == before
+        _key(viewer, imgui.Key.enter)
+        assert "could not be saved" in viewer.session.last_message
+        assert "recording preferences unavailable" in viewer.session.last_message
+        assert viewer.app.recording_config.countdown == 2.5
+        assert viewer.app.preferences.path.read_bytes() == before
+    edit_countdown(3.5)
+    assert viewer.app.preferences.path.read_bytes() == before
+    _key(viewer, imgui.Key.enter)
+    assert viewer.app.recording_config.countdown == 3.5
+    assert viewer.app.preferences.get("recording")["countdown"] == 3.5
+
+
 def test_playhead_pages_at_edge_and_stays_stationary_when_locked(viewer):
     session, panel = viewer.session, viewer.panels.get("Keyframes")
     assert session.submit(cmd.SeekStateTake(360))
@@ -821,3 +855,87 @@ def test_transport_status_geometry_stays_stable_across_time_and_frame_digits(vie
         if baseline is None:
             baseline = rows.copy()
         assert rows == baseline
+
+
+@pytest.mark.parametrize("viewer", ["workspace"], indirect=True)
+def test_live_multi_key_delete_has_one_rebuild_and_one_undo(viewer, monkeypatch, backend_name):
+    import time
+    from pathlib import Path
+
+    from mojive.tools.ui_runtime import _save_window_crop
+
+    session = viewer.session
+    model_id = session.scene_models[0].model_id
+    for index in (90, 180, 270):
+        assert session.submit(cmd.SeekStateTake(index)).ok
+        assert session.submit(cmd.AddModelKeyframe(model_id, f"delete{index}")).ok
+    original = tuple(session.keyframes)
+    viewer.app.set_live_model_updates(True)
+    viewer.sync()
+    adapter = session.adapter.primary
+    compile_model = adapter._compile_composed_model
+    compiles = []
+
+    def counted_compile():
+        if not adapter._model_edit_batch_depth:
+            compiles.append(True)
+        return compile_model()
+
+    monkeypatch.setattr(adapter, "_compile_composed_model", counted_compile)
+    _click(viewer, timeline_point(viewer, original[0].time, "model"))
+    _key(viewer, imgui.Key.a, ctrl=True)
+    assert viewer.panels.get("Keyframes").editor.selected_keyframes == {
+        key.keyframe_id for key in original
+    }
+    _key(viewer, imgui.Key.delete)
+    deadline = time.monotonic() + 10
+    while viewer.app._model_load_queue or viewer.app._model_load_future is not None:
+        assert time.monotonic() < deadline, "model delete did not complete"
+        viewer.sync()
+        time.sleep(0.001)
+    assert not session.keyframes
+    assert len(compiles) == 1
+    assert session.submit(cmd.Undo()).ok
+    assert tuple(session.keyframes) == original
+    viewer.sync()
+    output = Path("output/keyframe-timeline") / backend_name
+    output.mkdir(parents=True, exist_ok=True)
+    _save_window_crop(viewer, "Keyframes", output / "multi-delete-undone.png")
+
+
+def test_model_switch_fits_new_model_keys_in_the_selection_frame(
+    tmp_path, monkeypatch, backend_name
+):
+    from pathlib import Path
+
+    from mojive.app.composition import build_workspace
+    from mojive.tools.ui_runtime import _save_window_crop
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    early, late = tmp_path / "early.xml", tmp_path / "late.xml"
+    for path, value in ((early, 1), (late, 1000)):
+        path.write_text(
+            '<mujoco><worldbody><body><joint/><geom size=".1"/></body></worldbody>'
+            f'<keyframe><key name="marker" time="{value}"/></keyframe></mujoco>'
+        )
+    with build_workspace(
+        early, paused=True, vsync=False, show_window=False, width=1600, height=1000
+    ) as viewer:
+        assert viewer.app.add_model(late).ok
+        show_timeline(viewer)
+        panel = viewer.panels.get("Keyframes")
+        models = viewer.session.scene_models
+        panel.editor.set_model(models[0].model_id)
+        panel.editor.set_follow_mode("off")
+        viewer.sync()
+        assert panel.editor.view_end < 1000
+        _click(viewer, _item_center(viewer, "combo", "##keyframe-model"))
+        _key(viewer, imgui.Key.down_arrow)
+        _key(viewer, imgui.Key.enter)
+        assert panel.editor.model_id == models[1].model_id
+        assert panel.editor.view_start <= 1000 <= panel.editor.view_end
+        assert all(key.model_id == models[1].model_id for key in panel.editor.keyframe_cache)
+        viewer.sync()
+        output = Path("output/keyframe-timeline") / backend_name
+        output.mkdir(parents=True, exist_ok=True)
+        _save_window_crop(viewer, "Keyframes", output / "model-switch-fitted.png")

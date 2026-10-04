@@ -40,8 +40,9 @@
 的批量执行策略；`editing.py` 保留历史与恢复检查点的所有权。不要在 UI 或控制层再次实现
 重建循环、Undo 事务或失败回滚。
 处理函数直接操作所属 Session，并在写入边界检查 adapter 能力。新增命令时更新命令契约、
-对应领域的处理函数和路由表；不要恢复一个持续增长的 `isinstance` 分支链。命令子类仍按
-原有匹配顺序解析，未知命令仍返回失败结果。
+对应领域的处理函数和路由表；不要恢复一个持续增长的 `isinstance` 分支链。
+`session/command_support.py` 的 `resolve_command_type` 沿 Python MRO 查找子类的公开
+命令声明，能力检查、派发和草稿合并共用同一个结果；未知命令仍返回失败结果。
 
 `control/operations.py` 定义 RPC 与 CLI 共用的操作目录，`schema.py` 负责校验，
 `rpc/` 仅处理传输和请求调度。队列数、字节数、连接数及帧内工作由 `RpcLimits` 约束；
@@ -53,6 +54,7 @@
 | 功能 | 实现位置 |
 |---|---|
 | 主循环、初始化、退出 | `ui/app/core.py` |
+| 偏好存储、启动配置优先级 | `ui/preferences.py`、`ui/app/settings.py`；本地化只处理语言，旧入口共享同一个偏好对象 |
 | 模型加载、编辑预览、资源选择 | `ui/app/loading.py`、`model_edits.py`、`resource_dialogs.py` |
 | 时间线面板装配 | `ui/panels/keyframes.py`；只组合编辑器、工具栏、轨道与属性视图 |
 | 时间线编辑状态、选择、拖动与命令 | `ui/keyframe_editor/controller.py`；不依赖 ImGui、PanelContext、renderer 或 ViewerApp |
@@ -64,16 +66,27 @@
 | gizmo 状态、投影、拖拽、范围、辅助线 | `ui/gizmo/core.py`、`projection.py`、`dragging.py`、`joint_ranges.py`、`guides.py` |
 | gizmo 绘制与目标解析 | `ui/gizmo/overlay.py`、`targets.py` |
 | Inspector 属性分类 | `ui/panels/inspector/model.py`、`transform.py`、`physics.py`、`geometry.py`、`environment.py` |
-| Inspector 复用字段布局 | `ui/panels/inspector/fields.py` |
+| Inspector 复用字段布局 | `ui/panels/inspector/fields.py`；接触、关节限位和摩擦共用 solver 参数行，未编辑的分量保留原精度 |
+| Inspector 高级关节编辑 | `physics.py` 的字段函数返回编辑结果；Inspector 保留唯一草稿，Apply/Revert 管理一次完整提交 |
+| Inspector 材质编辑 | `geometry.py` 组合尺寸和外观编辑并提交命令；`materials.py` 绘制分配、表面、纹理字段，返回本帧编辑结果 |
 | viewport 胶囊、图标、输入提示、状态信息 | `ui/viewport_widgets/capsules.py`、`glyphs.py`、`hints.py`、`status.py` |
 | 胶囊外壳、选中圆、分隔线与按键框资源 | `ui/viewport_widgets/chrome.py`；位置和颜色不进入几何缓存键，可行性工具共用外壳定义 |
-| 图标设计参数、生产图标、预计算布局 | `ui/icons.py`、`ui/icon_presets.json` |
+| 图标参数、几何、布局、缓存提交 | `ui/icons/model.py`、`glyphs.py`、`painter.py`、`layout.py`、`drawing.py`；预计算仍在 `ui/icon_presets.json` |
+| 图标与 viewport 共用几何 | `ui/overlay_geometry.py`；不依赖 viewport 控件组合 |
 | 面板绘制入口 | `PanelContext.painter()` 由 Window 注入；在当前 child/table 内创建，控件通过 `draw=` 接收，不另找全局 Window |
 | 中立绘制协议、ImGui 适配 | `ui/paint_protocol.py`、`ui/imgui_draw.py`；`ui/draw2d.py` 只保留旧导入兼容 |
 | 文字布局、拖拽连线提交 | `ui/text_layout.py`、`ui/drag_link.py` |
 | 生产与设计工具的窗口及 UI 后端装配 | `app/ui/window.py`；工具不需要为纯 UI 预览创建 3D renderer |
-| UI Feasibility 参数、图标审阅、几何实验 | `tools/ui_feasibility/state.py`、`tuning.py`、`icon_library.py`、`geometry.py` |
+| UI Feasibility 参数、图标审阅、几何实验 | `tools/ui_feasibility/state.py`、`tuning.py`、`icon_library.py`；`geometry.py` 管画布，`geometry_scenes.py` 管独立展示内容 |
 | UI Feasibility 面板、导航、启动 | `tools/ui_feasibility/panels.py`、`workspace.py`、`runtime.py` |
+
+Feasibility 通过面板实例的绘制回调预览图标：`TimelineToolbar.command_icon_drawer`、
+`follow_mode_icon_drawer` 和 `OutputPanel.search_icon_drawer`。这些回调只负责表现，
+不改变 editor 状态，也不临时覆盖生产模块的全局函数；同一帧可同时绘制设计稿和正式面板。
+
+MuJoCo 的 `adapters/mujoco/source.py` 在 `_build_source` 中编排 geom、site、deformable
+及元数据转换。geom 和 site 共用基础形状转换；实例列由短期 `_SourceInstances` 一起组装，
+构建后仍由 `SceneSource` 持有数据，动态 mesh 缓冲仍沿用 adapter 的生命周期。
 
 私有方法分组之间不重复定义同名方法，不额外增加构造、资源释放或权威状态。
 只有调用者确实需要独立生命周期时，才提取成独立对象。避免仅为了满足行数限制而拆文件；

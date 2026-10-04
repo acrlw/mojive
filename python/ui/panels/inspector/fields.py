@@ -56,8 +56,10 @@ def _property_button_row(
     ctx: PanelContext,
     label: str,
     buttons: tuple[str, ...],
+    *,
+    enabled: tuple[bool, ...] | None = None,
 ) -> tuple[bool, ...]:
-    """Draw a wrapping row of compact property actions."""
+    """Draw a wrapping row with optional availability for each independent action."""
 
     _property_control_row(ctx, label)
     translated = tuple(ctx.tr(button) for button in buttons)
@@ -71,7 +73,12 @@ def _property_button_row(
     for index, button in enumerate(translated):
         if layout[index]:
             imgui.same_line()
+        disabled = enabled is not None and not enabled[index]
+        if disabled:
+            imgui.begin_disabled()
         pressed.append(imgui.button(f"{button}##{label}-{index}"))
+        if disabled:
+            imgui.end_disabled()
     return tuple(pressed)
 
 
@@ -91,6 +98,49 @@ def _property_color_edit4(ctx: PanelContext, item_id: str, value):
     if imgui.get_content_region_avail().x < 190.0 * ctx.style_scale:
         flags |= imgui.ColorEditFlags_.no_inputs
     return imgui.color_edit4(item_id, value, flags)
+
+
+def _edited_float_components(original, edited) -> tuple[float, ...]:
+    """Retain authored precision for components only round-tripped through ImGui floats."""
+    return tuple(
+        float(before) if float(after) == float(np.float32(before)) else float(after)
+        for before, after in zip(original, edited, strict=True)
+    )
+
+
+def _property_solver_rows(
+    ctx: PanelContext,
+    name: str,
+    reference: tuple[float, float],
+    impedance: tuple[float, float, float, float, float],
+    *,
+    label_prefix: str = "",
+    reference_tooltip: str = "",
+) -> tuple[bool, tuple[float, float], tuple[float, float, float, float, float]]:
+    """Edit the shared solver rows, preserving untouched rows and vector components."""
+    _property_control_row(ctx, f"{label_prefix}solver reference")
+    reference_changed, reference_values = imgui.drag_float2(
+        f"##{name}_solver_reference", reference, 0.001, -1000000.0, 1000000.0, "%.5g"
+    )
+    if reference_tooltip:
+        imgui.set_item_tooltip(ctx.tr(reference_tooltip))
+    _property_control_row(ctx, f"{label_prefix}impedance min / max / width")
+    first_changed, first = imgui.drag_float3(
+        f"##{name}_impedance_first", impedance[:3], 0.001, 0.0, 1.0, "%.5g"
+    )
+    _property_control_row(ctx, f"{label_prefix}impedance midpoint / power")
+    shape_changed, shape = imgui.drag_float2(
+        f"##{name}_impedance_shape", impedance[3:], 0.01, 0.0, 1000.0, "%.4g"
+    )
+    updated_reference = (
+        _edited_float_components(reference, reference_values) if reference_changed else reference
+    )
+    updated_impedance = (
+        *(_edited_float_components(impedance[:3], first) if first_changed else impedance[:3]),
+        *(_edited_float_components(impedance[3:], shape) if shape_changed else impedance[3:]),
+    )
+    changed = updated_reference != reference or updated_impedance != impedance
+    return changed, updated_reference, updated_impedance
 
 
 def _property_vector_row(

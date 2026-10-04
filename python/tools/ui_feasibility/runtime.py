@@ -61,10 +61,15 @@ def render(
     preview_icon_library: bool = False,
     renderer: str | None = None,
     icon_glyph: str | None = None,
+    icon_circle_style: str = "outline",
+    icon_square_style: str = "outline",
     component_tab: str = "corners",
     corner_scene: str = "basic",
+    corner_surface: str = "panel",
     blur_sigma: float = 3.0,
     auto_align_centroid: bool = False,
+    svg_directory: Path | None = None,
+    svg_glyph: str = "tool-rotate",
 ) -> None:
     renderer = render_backend_name(renderer)
     if icon_glyph is not None:
@@ -95,13 +100,19 @@ def render(
             geometry_tab=initial_geometry_tab,
             icon_library_tab=initial_icon_group,
             icon_glyph=icon_glyph,
+            icon_circle_style=icon_circle_style,
+            icon_square_style=icon_square_style,
             rotate_ring_cap=initial_rotate_cap,
             capsule_outline=capsule_outline,
             preview_icon_library=preview_icon_library,
         )
         state.redesign.language = redesign_language
+        if svg_directory is not None:
+            state.svg.directory = svg_directory
+        state.svg.glyph = svg_glyph
         state.components.tab = int(component_tab == "optical")
         state.components.scene = CORNER_SCENE_KEYS.index(corner_scene)
+        state.components.card_background = corner_surface == "card"
         state.components.optical.sigma = blur_sigma
         state.components.optical.auto_align = auto_align_centroid
         state.icon_auto_align = auto_align_centroid
@@ -204,6 +215,7 @@ def main() -> None:
     parser.add_argument("--redesign-language", choices=("en", "zh"), default="en")
     parser.add_argument("--component-tab", choices=("corners", "optical"), default="corners")
     parser.add_argument("--corner-scene", choices=CORNER_SCENE_KEYS, default="basic")
+    parser.add_argument("--corner-surface", choices=("panel", "card"), default="panel")
     parser.add_argument(
         "--auto-align-centroid",
         action="store_true",
@@ -230,6 +242,7 @@ def main() -> None:
             "playback",
             "tools",
             "icons",
+            "svg",
             "hints",
             "gizmos",
             "helpers",
@@ -249,6 +262,14 @@ def main() -> None:
         help="Initial family on the concept-only Icon library geometry tab",
     )
     parser.add_argument(
+        "--svg-directory", type=Path, help="SVG asset folder for the SVG icons study"
+    )
+    parser.add_argument(
+        "--svg-glyph",
+        choices=tuple(name for _family, icons in ICON_FAMILIES for _label, name in icons),
+        default="tool-rotate",
+    )
+    parser.add_argument(
         "--icon-glyph",
         choices=tuple(name for _family, icons in ICON_FAMILIES for _label, name in icons),
         help="Capture one glyph at every review size without an oversized family canvas",
@@ -259,6 +280,13 @@ def main() -> None:
         default=ICON_ROTATE_RING_CAP,
         help="Initial Rotate inner-ring cap style",
     )
+    for shape in ("circle", "square"):
+        parser.add_argument(
+            f"--icon-{shape}-style",
+            choices=("outline", "filled", "hidden"),
+            default="outline",
+            help=f"Icon Library {shape} reference: outline, dark gray fill, or hidden",
+        )
     parser.add_argument(
         "--tool-stroke",
         type=float,
@@ -375,6 +403,7 @@ def main() -> None:
             "playback": "Playback",
             "tools": "Tools",
             "icons": "Icon library",
+            "svg": "SVG icons",
             "hints": "Hints & input",
             "gizmos": "Transform gizmos",
             "helpers": "Joint & helpers",
@@ -386,8 +415,11 @@ def main() -> None:
         }[args.geometry_tab],
         initial_icon_group=ICON_GROUP_BY_SLUG[args.icon_group],
         icon_glyph=args.icon_glyph,
+        icon_circle_style=args.icon_circle_style,
+        icon_square_style=args.icon_square_style,
         component_tab=args.component_tab,
         corner_scene=args.corner_scene,
+        corner_surface=args.corner_surface,
         blur_sigma=args.blur_sigma,
         auto_align_centroid=args.auto_align_centroid,
         initial_rotate_cap=args.rotate_cap,
@@ -407,5 +439,7 @@ def main() -> None:
         capsule_outline=args.capsule_outline.replace("-", " ").capitalize(),
         preview_icon_library=args.preview_icon_library,
         renderer=args.renderer,
+        svg_directory=args.svg_directory,
+        svg_glyph=args.svg_glyph,
     )
     print("interactive probe closed" if args.interactive else output)

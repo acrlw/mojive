@@ -8,9 +8,6 @@ from functools import lru_cache
 
 from mojive.geometry2d.curves import (
     CORNER_SMOOTHING,
-    clip_polygon_rect,
-    offset_closed_path,
-    smooth_rect_points,
 )
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
 from mojive.ui.paint_protocol import Draw2D
@@ -18,6 +15,8 @@ from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import text_line_y
 from mojive.ui.theme import RGBA, Theme
 
+from ..overlay_geometry import mouse_button_geometry as mouse_button_geometry
+from ..overlay_geometry import mouse_wheel_geometry as mouse_wheel_geometry
 from .capsules import (
     draw_capsule,
 )
@@ -25,14 +24,9 @@ from .chrome import draw_keycap_background, draw_separator
 from .model import (
     DEFAULT_VIEWPORT_LABELS,
     OVERLAY_GEOMETRY,
-    MouseButtonGeometry,
-    MouseWheelGeometry,
     OverlayGeometry,
     ToolHint,
     ViewportLabels,
-)
-from .rotate import (
-    _counterclockwise,
 )
 
 _OVERFLOW_HINT = ToolHint("text", label="…", hint_id="scene.hints.overflow")
@@ -103,77 +97,6 @@ def _mouse_width(
 ) -> float:
     width = OVERLAY_GEOMETRY.hint_mouse_width * scale
     return width if not suffix else width + 5.0 * scale + draw.text_size(suffix)[0] * text_scale
-
-
-@lru_cache(maxsize=128)
-def mouse_button_geometry(
-    x: float,
-    y: float,
-    width: float,
-    height: float,
-    button: str,
-    *,
-    outline_width: float,
-    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
-    smoothing: float = CORNER_SMOOTHING,
-) -> MouseButtonGeometry | None:
-    """Return true-knockout shell and fill geometry for one mouse button."""
-
-    if button not in {"left", "right"}:
-        return None
-    half_stroke = outline_width * 0.5
-    shell_gap = outline_width * geometry.hint_mouse_button_shell_ratio
-    button_bottom = y + height * geometry.hint_mouse_button_height_ratio
-    shell_radius = min(width * 0.22, height * 0.18)
-    outer_left = x - half_stroke
-    button_width = (width + outline_width) * geometry.hint_mouse_button_width_ratio
-    inner_edge = outer_left + button_width
-    shell = smooth_rect_points(x, y, x + width, y + height, shell_radius, smoothing=smoothing)
-    outer = offset_closed_path(shell, half_stroke)
-    fill = clip_polygon_rect(outer, (outer_left, y - half_stroke, inner_edge, button_bottom))
-    other_corners = smooth_rect_points(
-        x, y, x + width, y + height, shell_radius, (False, True, True, True), smoothing=smoothing
-    )
-    visible_shell = (
-        (inner_edge + shell_gap, y),
-        *other_corners[1:],
-        (x, button_bottom + shell_gap),
-    )
-    if button == "right":
-        mirror_x = x * 2.0 + width
-        visible_shell = tuple((mirror_x - point[0], point[1]) for point in visible_shell)
-        fill = tuple((mirror_x - point[0], point[1]) for point in fill)
-    fill = _counterclockwise(fill)
-    return MouseButtonGeometry(visible_shell, fill)
-
-
-@lru_cache(maxsize=128)
-def mouse_wheel_geometry(
-    x: float,
-    y: float,
-    width: float,
-    height: float,
-    *,
-    outline_width: float,
-    pixel_size: float,
-    geometry: OverlayGeometry = OVERLAY_GEOMETRY,
-) -> MouseWheelGeometry:
-    """Return wheel geometry with a scalable gap and one-pixel minimum."""
-
-    gap = max(
-        outline_width * geometry.hint_mouse_wheel_gap_ratio,
-        max(float(pixel_size), 1e-6),
-    )
-    top = y + outline_width * 0.5 + gap
-    wheel_width = width * geometry.hint_mouse_wheel_width_ratio
-    wheel_height = height * geometry.hint_mouse_wheel_height_ratio
-    center_x = x + width * 0.5
-    return MouseWheelGeometry(
-        (center_x - wheel_width * 0.5, top),
-        (center_x + wheel_width * 0.5, top + wheel_height),
-        wheel_width * 0.42,
-        gap,
-    )
 
 
 def mouse_hint_colors(theme: Theme, *, muted: bool = False) -> tuple[RGBA, RGBA, RGBA]:

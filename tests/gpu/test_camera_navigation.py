@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,8 @@ def test_explicit_camera_before_startup_survives_first_sync(tmp_path, monkeypatc
 def _enter_number(viewer, name, value):
     point = _item_center(viewer, "drag_float", f"##camera_{name}")
     io = imgui.get_io()
+    # A new double-click must not become the third/fourth click of the previous edit.
+    time.sleep(io.mouse_double_click_time + 0.01)
     _click(viewer, point)
     _click(viewer, point)
     modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
@@ -189,4 +192,63 @@ def test_extreme_wheel_zoom_keeps_native_ground_finite_and_recovers(
         output.mkdir(parents=True, exist_ok=True)
         viewer.capture(
             output / f"{backend_name}-zoom-recovered-{mode}-{orthographic}.png", surface="viewport"
+        )
+
+
+def test_return_from_model_camera_preserves_viewport_projection(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    scene = Scene()
+    scene.box(position=(0, 0, 0.5))
+    view = CameraView(eye=np.array([3, -5, 2.5]), target=np.array([0, 0, 0.5]))
+    camera_id = scene.add_camera("shot", view)
+    with build_scene(scene, width=1000, height=600, vsync=False, show_window=False) as viewer:
+        for _ in range(5):
+            viewer.sync()
+        # Public cameras default to a square aspect; the viewport owns presentation.
+        viewer.set_camera(view)
+        _, _, width, height = viewer.app._viewport_rect
+        assert width / height != pytest.approx(view.aspect)
+        expected = view.with_aspect(width / height).proj_matrix()
+        assert viewer.app.camera.view().proj_matrix() == pytest.approx(expected)
+        viewer.app.select_model_camera(camera_id)
+        viewer.sync()
+        viewer.app.select_model_camera(-1, animate=True)
+        for _ in range(20):
+            viewer.app._advance_camera(1 / 30)
+            assert viewer.session.camera.proj_matrix() == pytest.approx(expected, abs=1e-5)
+        assert viewer.app._camera_transition is None
+
+
+def test_settings_save_failure_keeps_window_usable_and_reports_unsaved_value(
+    tmp_path, monkeypatch, backend_name
+):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    scene = Scene()
+    scene.box()
+    with build_scene(scene, width=1440, height=1000, vsync=False, show_window=False) as viewer:
+        show_settings(viewer, "Camera")
+        viewer.app.set_camera_navigation(viewer.app.camera.navigation)
+        before = viewer.app.preferences.path.read_bytes()
+
+        def reject_save(values):
+            raise OSError("settings destination unavailable")
+
+        with monkeypatch.context() as failing:
+            failing.setattr(viewer.app.preferences, "_save", reject_save)
+            _enter_number(viewer, "zoom_speed", 2.5)
+            for _ in range(3):
+                viewer.sync()
+            assert viewer.app.camera.navigation.zoom_speed == 2.5
+            assert viewer.app.preferences.path.read_bytes() == before
+            assert "could not be saved" in viewer.session.last_message
+            assert "settings destination unavailable" in viewer.session.last_message
+            output = Path("output/camera-navigation") / backend_name
+            output.mkdir(parents=True, exist_ok=True)
+            _save_window_crop(viewer, "Settings", output / "unsaved-preview.png")
+        _enter_number(viewer, "zoom_speed", 3.0)
+        assert viewer.app.camera.navigation.zoom_speed == 3.0
+        assert viewer.app.preferences.get("camera_navigation")["zoom_speed"] == 3.0
+        assert (
+            json.loads(viewer.app.preferences.path.read_text())["camera_navigation"]["zoom_speed"]
+            == 3.0
         )

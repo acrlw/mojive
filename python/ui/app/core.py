@@ -19,7 +19,6 @@ from mojive.config import (
     CameraNavigationConfig,
     CameraTrackingConfig,
     InteractionConfig,
-    RecordingConfig,
     SelectionStyle,
     ViewerConfig,
     ViewportLayers,
@@ -43,7 +42,7 @@ from mojive.ui.camera_preview import CameraPreview
 from mojive.ui.camera_tracking import CameraTracker
 from mojive.ui.clipboard import CaptureClipboard
 from mojive.ui.gizmo import ObjectGizmo, PreciseGizmoInput
-from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
 from mojive.ui.layers import visible_debug_layers
 from mojive.ui.localization import Localizer
 from mojive.ui.messages import OutputBuffer
@@ -52,19 +51,18 @@ from mojive.ui.panels import (
     PanelManager,
 )
 from mojive.ui.perturb import (
-    DEFAULT_PERTURB_SCALE,
     MAX_PERTURB_SCALE,
     PerturbController,
 )
 from mojive.ui.pointer_bindings import PointerAction
+from mojive.ui.preferences import Preferences
 from mojive.ui.scene_capture import SceneCapture
 from mojive.ui.scene_entities import SceneEntityHelpers
 from mojive.ui.take_video import TakeVideo
 from mojive.ui.theme import THEME, Theme
-from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING, ViewCube
+from mojive.ui.viewcube import ViewCube
 from mojive.ui.viewport_surface import ViewportSurface
 from mojive.ui.viewport_widgets import (
-    DEFAULT_VIEWPORT_OVERLAY_SCALE,
     MAX_VIEWPORT_CAPSULE_SCALE,
     MAX_VIEWPORT_OVERLAY_SCALE,
     MIN_VIEWPORT_CAPSULE_SCALE,
@@ -87,6 +85,7 @@ from .menus import _Menus
 from .model_edits import _ModelEdits
 from .navigation import _Navigation
 from .resource_dialogs import _ResourceDialogs
+from .settings import EditorPreferences, resolve_viewer_config
 from .status import _Status
 from .support import (
     _NO_INPUT_CLAIM,
@@ -133,50 +132,21 @@ class ViewerApp(
         if self.window is not None:
             self.window.apply_theme(self.theme)
         self.debug_bridge = debug_bridge
-        self.localizer = Localizer.load()
-        explicit_config = config is not None
-        viewer_config = config or ViewerConfig(
-            interactions=InteractionConfig.from_mapping(
-                self.localizer.preference("interactions", {})
-            ),
-            selection=SelectionStyle.from_mapping(self.localizer.preference("selection_style", {})),
-        )
+        self.preferences = Preferences.load()
+        self.localizer = Localizer.from_preferences(self.preferences)
+        viewer_config = resolve_viewer_config(config, self.preferences)
+        editor_preferences = EditorPreferences.resolve(self.preferences)
         self.model_edits = ModelEditDraft(session)
-        self.live_model_updates = bool(
-            self.localizer.preference("live_model_updates", False)
-            if viewer_config.live_model_updates is None
-            else viewer_config.live_model_updates
-        )
+        self.live_model_updates = viewer_config.live_model_updates
         self._apply_model_edits_requested = False
         self.interactions = viewer_config.interactions
         self._threaded_physics = viewer_config.threaded_physics
         self.selection_style = viewer_config.selection
-        overlay_config = ViewportOverlayConfig.from_mapping(
-            asdict(viewer_config.viewport_overlays)
-            if explicit_config
-            else self.localizer.preference("viewport_overlays", {})
-        )
-        self.viewport_overlays = overlay_config
-        self.viewport_layers = ViewportLayers.from_mapping(
-            asdict(viewer_config.layers)
-            if explicit_config
-            else self.localizer.preference("viewport_layers", {})
-        )
-        self.recording_config = RecordingConfig.from_mapping(
-            asdict(viewer_config.recording)
-            if explicit_config
-            else self.localizer.preference("recording", {})
-        )
-        self.set_take_pause_at_end(
-            self.localizer.preference("take_pause_at_end", True) is not False, persist=False
-        )
-        self.camera_tracker = CameraTracker(
-            CameraTrackingConfig.from_mapping(
-                asdict(viewer_config.tracking)
-                if explicit_config
-                else self.localizer.preference("camera_tracking", {})
-            )
-        )
+        self.viewport_overlays = viewer_config.viewport_overlays
+        self.viewport_layers = viewer_config.layers
+        self.recording_config = viewer_config.recording
+        self.set_take_pause_at_end(editor_preferences.take_pause_at_end, persist=False)
+        self.camera_tracker = CameraTracker(viewer_config.tracking)
         self._tracking_adapter = None
         self._input_handler = None
         self._input_claim = _NO_INPUT_CLAIM
@@ -188,78 +158,33 @@ class ViewerApp(
         self._selection_bounds_corners = np.empty((8, 3), np.float32)
         self._selection_bounds_starts = np.empty((12, 3), np.float32)
         self._selection_bounds_ends = np.empty((12, 3), np.float32)
-        geometry_style = viewer_config.geometry_style
-        if geometry_style is None:
-            try:
-                geometry_style = GeometryStyle(**self.localizer.preference("geometry_style", {}))
-            except (TypeError, ValueError):
-                geometry_style = GeometryStyle()
-        self.backend.set_geometry_style(geometry_style)
-        contact_style = viewer_config.contact_style
-        if contact_style is None:
-            try:
-                contact_style = ContactStyle(**self.localizer.preference("contact_style", {}))
-            except (TypeError, ValueError):
-                contact_style = ContactStyle()
-        self.backend.set_contact_style(contact_style)
-        requested_shadow_quality = (
-            viewer_config.shadow_quality
-            if viewer_config.shadow_quality is not None
-            else self.localizer.preference("shadow_quality", ShadowQuality.BALANCED.value)
-        )
-        try:
-            shadow_quality = ShadowQuality(requested_shadow_quality)
-        except (TypeError, ValueError):
-            shadow_quality = ShadowQuality.BALANCED
+        self.backend.set_geometry_style(viewer_config.geometry_style)
+        self.backend.set_contact_style(viewer_config.contact_style)
         set_shadow_quality = getattr(self.backend, "set_shadow_quality", None)
         if set_shadow_quality is not None:
-            set_shadow_quality(shadow_quality)
+            set_shadow_quality(viewer_config.shadow_quality)
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
-        metric_mode = self.localizer.preference("status_metric", "time")
-        self._status_metric_mode = "steps" if metric_mode == "steps" else "time"
+        self._status_metric_mode = editor_preferences.status_metric
         self._panel_status_hints: tuple[ToolHint, ...] = ()
         self._status_panel = "Viewport"
-        self.camera = OrbitCamera(
-            navigation=(
-                viewer_config.navigation
-                if explicit_config
-                else CameraNavigationConfig.from_mapping(
-                    self.localizer.preference("camera_navigation", {})
-                )
-            )
-        )
+        self.camera = OrbitCamera(navigation=viewer_config.navigation)
 
         self.camera_out = CameraOut(backend=backend, session=session)
         self.camera.attach(self.camera_out)
         self.camera_preview = CameraPreview()
         self._scene_capture = SceneCapture()
         self.gizmo = ObjectGizmo(enabled=False)
-        remember_precise = self.localizer.preference("remember_precise_input_choices", True)
-        if isinstance(remember_precise, bool):
-            self.gizmo.remember_precise_input_choices = remember_precise
-        selection_padding = self.localizer.preference(
-            "view_selection_padding", DEFAULT_SELECTION_PADDING
+        self.gizmo.remember_precise_input_choices = (
+            editor_preferences.remember_precise_input_choices
         )
-        try:
-            selection_padding = float(selection_padding)
-        except (TypeError, ValueError):
-            selection_padding = DEFAULT_SELECTION_PADDING
-        self.view_cube = ViewCube(selection_padding)
+        self.view_cube = ViewCube(editor_preferences.view_selection_padding)
         self._view_cube_origin_pressed = False
         self.perturb = PerturbController()
-        for name in ("force_scale", "torque_scale"):
-            try:
-                value = float(self.localizer.preference(f"perturb_{name}", DEFAULT_PERTURB_SCALE))
-            except (TypeError, ValueError):
-                value = DEFAULT_PERTURB_SCALE
-            if not np.isfinite(value):
-                value = DEFAULT_PERTURB_SCALE
-            setattr(self.perturb, name, min(MAX_PERTURB_SCALE, max(0.0, value)))
+        self.perturb.force_scale = editor_preferences.perturb_force_scale
+        self.perturb.torque_scale = editor_preferences.perturb_torque_scale
         self.scene_entities = SceneEntityHelpers()
         self.router = gs.GestureRouter()
-        self.input_bindings = InputBindings.from_preferences(
-            self.localizer.preference("input_bindings", {})
-        )
+        self.input_bindings = editor_preferences.input_bindings
         self.viewport_chrome = ViewportChromeRegistry()
         # Kept as a direct public alias for callers that only customize hints.
         self.tool_hints = self.viewport_chrome.tool_hints
@@ -321,14 +246,8 @@ class ViewerApp(
         self._precise_gizmo_edit: PreciseGizmoInput | None = None
         self._precise_gizmo_value = 0.0
         self._precise_gizmo_absolute = False
-        preferred_absolute = self.localizer.preference("precise_gizmo_absolute", False)
-        self._precise_gizmo_preferred_absolute = (
-            preferred_absolute if isinstance(preferred_absolute, bool) else False
-        )
-        angle_unit = self.localizer.preference("precise_gizmo_angle_unit", "degrees")
-        self._precise_gizmo_angle_unit = (
-            str(angle_unit) if angle_unit in ("degrees", "radians") else "degrees"
-        )
+        self._precise_gizmo_preferred_absolute = editor_preferences.precise_gizmo_absolute
+        self._precise_gizmo_angle_unit = editor_preferences.precise_gizmo_angle_unit
         self._precise_gizmo_error = ""
         self._open_precise_gizmo_popup = False
         # When an outside click dismisses precise input, keep ownership until
@@ -387,34 +306,25 @@ class ViewerApp(
         self._overlay_drag_chord = None
         self._overlay_drag_kind = ""
         self._overlay_drag_offset = (0.0, 0.0)
-        overlay_scale = self.localizer.preference(
-            "viewport_overlay_scale", DEFAULT_VIEWPORT_OVERLAY_SCALE
-        )
-        try:
-            overlay_scale = float(overlay_scale)
-        except (TypeError, ValueError):
-            overlay_scale = DEFAULT_VIEWPORT_OVERLAY_SCALE
-        self._viewport_overlay_scale = min(
-            MAX_VIEWPORT_OVERLAY_SCALE,
-            max(MIN_VIEWPORT_OVERLAY_SCALE, overlay_scale),
-        )
+        self._viewport_overlay_scale = editor_preferences.viewport_overlay_scale
 
     def set_language(self, language: str) -> None:
-        self.localizer.set_language(language)
+        self.localizer.set_language(language, persist=False)
         self._viewport_labels = localized_viewport_labels(self.localizer.text)
+        self.preferences.update({"language": self.localizer.language.value})
 
     def set_contact_style(self, style: ContactStyle, *, persist: bool = True) -> bool:
         if not self.backend.set_contact_style(style):
             return False
         if persist:
-            self.localizer.set_preferences({"contact_style": asdict(style)})
+            self.preferences.update({"contact_style": asdict(style)})
         return True
 
     def set_geometry_style(self, style: GeometryStyle, *, persist: bool = True) -> bool:
         if not self.backend.set_geometry_style(style):
             return False
         if persist:
-            self.localizer.set_preferences({"geometry_style": asdict(style)})
+            self.preferences.update({"geometry_style": asdict(style)})
         return True
 
     def set_shadow_quality(self, quality: ShadowQuality | str, *, persist: bool = True) -> bool:
@@ -426,14 +336,14 @@ class ViewerApp(
         if setter is None or not setter(quality):
             return False
         if persist:
-            self.localizer.set_preferences({"shadow_quality": quality.value})
+            self.preferences.update({"shadow_quality": quality.value})
         return True
 
     def set_camera_navigation(self, value: CameraNavigationConfig, *, persist: bool = True) -> None:
         """Apply focus and zoom preferences to the editor camera."""
         self.camera.configure_navigation(value)
         if persist:
-            self.localizer.set_preferences({"camera_navigation": asdict(value)})
+            self.preferences.update({"camera_navigation": asdict(value)})
 
     def set_camera_tracking(self, value: CameraTrackingConfig, *, persist: bool = True) -> None:
         """Change tracking axes or smoothing without moving the camera immediately."""
@@ -441,7 +351,7 @@ class ViewerApp(
             raise TypeError("tracking must be a CameraTrackingConfig")
         self.camera_tracker.config = value
         if persist:
-            self.localizer.set_preferences({"camera_tracking": asdict(value)})
+            self.preferences.update({"camera_tracking": asdict(value)})
 
     def set_viewport_layers(self, value: ViewportLayers, *, persist: bool = True) -> None:
         """Set live viewport visibility while preserving individual tool settings."""
@@ -454,11 +364,11 @@ class ViewerApp(
             self._tool_widget_rect = None
             self._overlay_drag_kind = ""
         if persist:
-            self.localizer.set_preferences({"viewport_layers": asdict(self.viewport_layers)})
+            self.preferences.update({"viewport_layers": asdict(self.viewport_layers)})
 
     def _toggle_status_metric(self) -> None:
         self._status_metric_mode = "steps" if self._status_metric_mode == "time" else "time"
-        self.localizer.set_preferences({"status_metric": self._status_metric_mode})
+        self.preferences.update({"status_metric": self._status_metric_mode})
 
     def set_precise_input_choice_memory(self, enabled: bool) -> None:
         self.gizmo.remember_precise_input_choices = bool(enabled)
@@ -468,13 +378,16 @@ class ViewerApp(
                 precise_gizmo_absolute=self._precise_gizmo_preferred_absolute,
                 precise_gizmo_angle_unit=self._precise_gizmo_angle_unit,
             )
-        self.localizer.set_preferences(values)
+        self.preferences.update(values)
 
-    def set_view_selection_padding(self, value: float) -> None:
+    def set_view_selection_padding(self, value: float, *, persist: bool = True) -> None:
         self.view_cube.selection_padding = value
-        self.localizer.set_preferences({"view_selection_padding": self.view_cube.selection_padding})
+        if persist:
+            self.preferences.update({"view_selection_padding": self.view_cube.selection_padding})
 
-    def set_perturb_strength(self, force_scale: float, torque_scale: float) -> None:
+    def set_perturb_strength(
+        self, force_scale: float, torque_scale: float, *, persist: bool = True
+    ) -> None:
         """Persist independent mouse translation and rotation perturbation multipliers."""
         if not all(
             np.isfinite(v) and 0.0 <= v <= MAX_PERTURB_SCALE for v in (force_scale, torque_scale)
@@ -482,12 +395,13 @@ class ViewerApp(
             raise ValueError(f"Perturbation scales must be between 0 and {MAX_PERTURB_SCALE:g}")
         self.perturb.force_scale = float(force_scale)
         self.perturb.torque_scale = float(torque_scale)
-        self.localizer.set_preferences(
-            {
-                "perturb_force_scale": self.perturb.force_scale,
-                "perturb_torque_scale": self.perturb.torque_scale,
-            }
-        )
+        if persist:
+            self.preferences.update(
+                {
+                    "perturb_force_scale": self.perturb.force_scale,
+                    "perturb_torque_scale": self.perturb.torque_scale,
+                }
+            )
 
     def set_viewport_overlay_scale(self, value: float, *, persist: bool = True) -> None:
         self._viewport_overlay_scale = min(
@@ -495,7 +409,7 @@ class ViewerApp(
             max(MIN_VIEWPORT_OVERLAY_SCALE, float(value)),
         )
         if persist:
-            self.localizer.set_preferences({"viewport_overlay_scale": self._viewport_overlay_scale})
+            self.preferences.update({"viewport_overlay_scale": self._viewport_overlay_scale})
 
     def set_viewport_overlays(self, value: ViewportOverlayConfig, *, persist: bool = True) -> None:
         """Replace playback/tool capsule presentation and movement policy."""
@@ -506,7 +420,7 @@ class ViewerApp(
         if not self.viewport_overlays.movable:
             self._overlay_drag_kind = ""
         if persist:
-            self.localizer.set_preferences({"viewport_overlays": asdict(self.viewport_overlays)})
+            self.preferences.update({"viewport_overlays": asdict(self.viewport_overlays)})
 
     def reset_layout(self, *, persist: bool = True) -> None:
         """Restore dock panels and movable viewport chrome to product defaults."""
@@ -546,7 +460,7 @@ class ViewerApp(
 
         self.input_bindings = self.input_bindings.remap(action, key_id)
         if persist:
-            self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+            self.preferences.update({"input_bindings": self.input_bindings.preferences()})
 
     def set_pointer_binding(
         self, action: PointerAction, identifiers: tuple[str, ...], *, persist: bool = True
@@ -554,13 +468,13 @@ class ViewerApp(
         """Replace one mouse action's alternatives after conflict validation."""
         self.input_bindings = self.input_bindings.remap_pointer(action, identifiers)
         if persist:
-            self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+            self.preferences.update({"input_bindings": self.input_bindings.preferences()})
 
     def set_navigation_preset(self, name: str, *, persist: bool = True) -> None:
         """Apply camera navigation bindings without changing editing gestures."""
         self.input_bindings = self.input_bindings.navigation_preset(name)
         if persist:
-            self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+            self.preferences.update({"input_bindings": self.input_bindings.preferences()})
 
     def set_interactions(self, value: InteractionConfig, *, persist: bool = True) -> None:
         """Replace the built-in input policy without changing application bindings."""
@@ -568,12 +482,12 @@ class ViewerApp(
         if not isinstance(value, InteractionConfig):
             raise TypeError("interactions must be an InteractionConfig")
         self.interactions = value
-        if persist:
-            self.localizer.set_preferences({"interactions": asdict(value)})
         if not value.gizmo:
             self.gizmo.cancel()
         if not value.perturb and self.session.perturb.active:
             self.perturb.end(self.session)
+        if persist:
+            self.preferences.update({"interactions": asdict(value)})
 
     def set_selection_style(self, value: SelectionStyle, *, persist: bool = True) -> None:
         """Replace selection presentation independently from logical selection."""
@@ -581,10 +495,10 @@ class ViewerApp(
         if not isinstance(value, SelectionStyle):
             raise TypeError("selection style must be a SelectionStyle")
         self.selection_style = value
-        if persist:
-            self.localizer.set_preferences({"selection_style": asdict(value)})
         if not value.gizmo:
             self.gizmo.cancel()
+        if persist:
+            self.preferences.update({"selection_style": asdict(value)})
 
     def set_input_handler(self, handler) -> None:
         """Set a callback that observes input and returns an optional InputClaim."""
@@ -595,7 +509,7 @@ class ViewerApp(
 
     def reset_input_bindings(self) -> None:
         self.input_bindings = DEFAULT_INPUT_BINDINGS
-        self.localizer.set_preferences({"input_bindings": self.input_bindings.preferences()})
+        self.preferences.update({"input_bindings": self.input_bindings.preferences()})
 
     def set_fixed_render_size(self, width: int, height: int) -> None:
         self._fixed_render_size = (max(1, int(width)), max(1, int(height)))
@@ -1104,6 +1018,7 @@ class ViewerApp(
             request_model_asset_import=self._open_model_asset_import_dialog,
             request_model_asset_replace=self._open_model_asset_replace_dialog,
             queue_model_edit=self._queue_model_edit,
+            queue_model_edits=self._queue_model_edits,
             model_keyframe_names=self.model_edits.model_keyframe_names,
             live_model_updates=self.live_model_updates,
             set_live_model_updates=self.set_live_model_updates,

@@ -783,23 +783,35 @@ def test_dimension_hit_testing_uses_scale_style_square_endpoints() -> None:
 
 
 def test_dimension_gizmo_drag_resizes_one_box_parameter_and_is_undoable() -> None:
-    session, node = dimension_session()
+    session, _node = dimension_session()
     gizmo = ObjectGizmo("dimensions")
     cam = camera()
-    start = np.array((220.0, 310.0))
+    scale = world_scale(cam, np.zeros(3), RECT[3])
+    center, start = project(cam, ((0.0, 0.0, 0.0), (scale * AXIS_END, 0.0, 0.0)), RECT)[:, :2]
+    direction = (start - center) / np.linalg.norm(start - center)
+    end = start + direction * 30.0
     original = session.source.geom_size.copy()
 
-    assert gizmo.evaluate(session, node).ok
-    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.X)
-    assert gizmo._drag(session, cam, RECT, start + gizmo._axis_screen * 30.0, snap=False)
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.X
+    assert gizmo.interact(
+        session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False
+    )
+    assert gizmo.using
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
     changed = session.source.geom_size.copy()
-    gizmo._end(commit=True)
+    gizmo.interact(session, cam, RECT, tuple(end), claimed=True, left_down=False, released=True)
 
+    assert not gizmo.using
     assert changed[0, 0] > original[0, 0]
     assert changed[0, 1:] == pytest.approx(original[0, 1:])
     assert gizmo.value_label == ""
     assert session.submit(cmd.Undo())
     assert session.source.geom_size == pytest.approx(original)
+    assert not session.can_undo
+    assert session.submit(cmd.Redo())
+    assert session.source.geom_size == pytest.approx(changed)
 
 
 @pytest.mark.parametrize(
@@ -819,22 +831,33 @@ def test_dimension_center_scales_proportionally_returns_to_start_and_undoes(shap
     cam = camera()
     start = project(cam, (np.zeros(3),), RECT)[0, :2]
     original = session.source.geom_size.copy()
-    assert gizmo.update_hover(session, cam, RECT, start) is GizmoHandle.SCREEN
-    assert gizmo._begin_handle(session, cam, RECT, start, GizmoHandle.SCREEN)
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is GizmoHandle.SCREEN
+    assert gizmo.interact(
+        session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False
+    )
+    assert gizmo.using
     end = start + np.array((30, -30))
-    assert gizmo._drag(session, cam, RECT, end, snap=False)
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
     count = 2 if shape is MeshShape.PLANE else 3
     ratios = session.source.geom_size[0, :count] / original[0, :count]
     assert ratios[0] > 1
     assert ratios == pytest.approx(np.full(count, ratios[0]))
-    assert gizmo._drag(session, cam, RECT, start, snap=False)
+    assert gizmo.interact(
+        session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False
+    )
     assert session.source.geom_size == pytest.approx(original)
-    assert gizmo._drag(session, cam, RECT, end, snap=True)
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False, snap=True
+    )
     ratios = session.source.geom_size[0, :count] / original[0, :count]
     assert ratios == pytest.approx(np.full(count, ratios[0]))
-    gizmo._end(commit=True)
+    gizmo.interact(session, cam, RECT, tuple(end), claimed=True, left_down=False, released=True)
+    assert not gizmo.using
     assert session.submit(cmd.Undo())
     assert session.source.geom_size == pytest.approx(original)
+    assert not session.can_undo
 
 
 @pytest.mark.parametrize("handle", [GizmoHandle.XY, GizmoHandle.ZX, GizmoHandle.YZ])
@@ -860,10 +883,15 @@ def test_dimension_plane_drag_resizes_in_the_body_frame_and_preserves_radial_con
     start, end = project(
         cam, (rotation @ local_start, rotation @ (local_start + local_delta)), RECT
     )[:, :2]
-    assert gizmo.update_hover(session, cam, RECT, start) is handle
+    assert gizmo.update_hover(session, cam, RECT, tuple(start)) is handle
     original = session.source.geom_size.copy()
-    assert gizmo._begin_handle(session, cam, RECT, start, handle)
-    assert gizmo._drag(session, cam, RECT, end, snap=False)
+    assert gizmo.interact(
+        session, cam, RECT, tuple(start), claimed=True, left_down=True, released=False
+    )
+    assert gizmo.using
+    assert gizmo.interact(
+        session, cam, RECT, tuple(end), claimed=True, left_down=True, released=False
+    )
     expected = np.array(size)
     if shape is MeshShape.CYLINDER:
         radial_axes = [axis for axis in axes if axis < 2]
@@ -872,22 +900,26 @@ def test_dimension_plane_drag_resizes_in_the_body_frame_and_preserves_radial_con
     else:
         expected += local_delta
     assert session.source.geom_size[0] == pytest.approx(expected, abs=5e-6)
-    gizmo._end(commit=True)
+    gizmo.interact(session, cam, RECT, tuple(end), claimed=True, left_down=False, released=True)
+    assert not gizmo.using
     assert session.submit(cmd.Undo())
     assert session.source.geom_size == pytest.approx(original)
+    assert not session.can_undo
 
 
 def test_uniform_sphere_dimension_uses_one_center_handle_and_precise_input() -> None:
     session, _node = dimension_session(MeshShape.SPHERE, size=(0.4, 0.4, 0.4))
     gizmo = ObjectGizmo("dimensions")
-    gizmo._hovered = GizmoHandle.SCREEN
+    cam = camera()
+    cursor = project(cam, (np.zeros(3),), RECT)[0, :2]
+    assert gizmo.update_hover(session, cam, RECT, tuple(cursor)) is GizmoHandle.SCREEN
 
     edit = gizmo.precise_input(session)
 
     assert edit is not None
     assert (edit.action, edit.label) == ("Resize", "radius")
     assert edit.absolute_value == pytest.approx(0.4)
-    assert gizmo.apply_precise_value(session, camera(), edit, 0.65, absolute=True)
+    assert gizmo.apply_precise_value(session, cam, edit, 0.65, absolute=True)
     assert session.source.geom_size[0] == pytest.approx((0.65, 0.65, 0.65))
 
 
@@ -1204,17 +1236,28 @@ def test_precise_body_frame_input_does_not_claim_an_ambiguous_absolute_value() -
     assert "unavailable" in result.message
 
 
-def test_clicking_a_gizmo_without_motion_does_not_create_an_undo_record() -> None:
+@pytest.mark.parametrize("cancel", [False, True])
+def test_clicking_a_gizmo_without_motion_does_not_create_an_undo_record(cancel) -> None:
     session, _node = session_at()
     gizmo = ObjectGizmo()
     cam = camera()
     scale = world_scale(cam, np.zeros(3), RECT[3])
     cursor = project(cam, (np.array((0.55 * scale, 0.0, 0.0)),), RECT)[0, :2]
 
-    assert gizmo._begin_handle(session, cam, RECT, cursor, GizmoHandle.X)
-    assert gizmo._drag(session, cam, RECT, cursor, snap=False)
-    gizmo.cancel()
+    assert gizmo.update_hover(session, cam, RECT, tuple(cursor)) is GizmoHandle.X
+    for _ in range(2):
+        assert gizmo.interact(
+            session, cam, RECT, tuple(cursor), claimed=True, left_down=True, released=False
+        )
+    assert gizmo.using
+    if cancel:
+        gizmo.cancel()
+    else:
+        gizmo.interact(
+            session, cam, RECT, tuple(cursor), claimed=True, left_down=False, released=True
+        )
 
+    assert not gizmo.using
     assert not session.can_undo
 
 

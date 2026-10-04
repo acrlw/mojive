@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar
 
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.paint_protocol import Draw2D
@@ -49,8 +49,39 @@ class TextureImport(Protocol):
     ) -> None: ...
 
 
+_Setting = TypeVar("_Setting", contravariant=True)
+_SettingArguments = ParamSpec("_SettingArguments")
+_SettingResult = TypeVar("_SettingResult")
+
+
+class PreferenceSetter(Protocol[_Setting]):
+    """Apply a runtime preview, optionally committing its persistent preference."""
+
+    def __call__(self, value: _Setting, *, persist: bool = True) -> bool | None: ...
+
+
 class CameraNavigationSetter(Protocol):
     def __call__(self, value: CameraNavigationConfig, *, persist: bool = True) -> None: ...
+
+
+class CapsuleScaleSetter(Protocol):
+    def __call__(self, name: str, value: float, *, persist: bool = True) -> None: ...
+
+
+class PerturbStrengthSetter(Protocol):
+    def __call__(
+        self, force_scale: float, torque_scale: float, *, persist: bool = True
+    ) -> None: ...
+
+
+class ModelEditsQueue(Protocol):
+    def __call__(
+        self,
+        commands: tuple[Command, ...],
+        completed: Callable[[CommandResult], None] | None = None,
+        *,
+        label: str = "Edit model",
+    ) -> None: ...
 
 
 @dataclass
@@ -68,7 +99,7 @@ class PanelContext:
     tracking: CameraTrackingConfig | None = None
     tracking_node_id: int | None = None
     track_node: Callable[[int | None], None] | None = None
-    set_camera_tracking: Callable[[CameraTrackingConfig], None] | None = None
+    set_camera_tracking: PreferenceSetter[CameraTrackingConfig] | None = None
     focus_node: Callable[[int], bool] | None = None
     focus_joint: Callable[[int], bool] | None = None
     request_rename: Callable[[int], None] | None = None
@@ -82,6 +113,7 @@ class PanelContext:
     queue_model_edit: Callable[[Command, Callable[[CommandResult], None] | None], None] | None = (
         None
     )
+    queue_model_edits: ModelEditsQueue | None = field(default=None, kw_only=True)
     model_keyframe_names: Callable[[int], set[str]] | None = None
     live_model_updates: bool = False
     set_live_model_updates: Callable[[bool], None] | None = None
@@ -113,30 +145,30 @@ class PanelContext:
     language: str = "en"
     translate: Callable[[str], str] | None = None
     set_language: Callable[[str], None] | None = None
-    set_shadow_quality: Callable[[ShadowQuality | str], bool] | None = None
-    set_geometry_style: Callable[[GeometryStyle], bool] | None = None
-    set_contact_style: Callable[[ContactStyle], bool] | None = None
+    set_shadow_quality: PreferenceSetter[ShadowQuality | str] | None = None
+    set_geometry_style: PreferenceSetter[GeometryStyle] | None = None
+    set_contact_style: PreferenceSetter[ContactStyle] | None = None
     interactions: InteractionConfig | None = None
-    set_interactions: Callable[[InteractionConfig], None] | None = None
+    set_interactions: PreferenceSetter[InteractionConfig] | None = None
     selection_style: SelectionStyle | None = None
-    set_selection_style: Callable[[SelectionStyle], None] | None = None
+    set_selection_style: PreferenceSetter[SelectionStyle] | None = None
     set_precise_input_memory: Callable[[bool], None] | None = None
-    set_view_selection_padding: Callable[[float], None] | None = None
-    set_perturb_strength: Callable[[float, float], None] | None = None
+    set_view_selection_padding: PreferenceSetter[float] | None = None
+    set_perturb_strength: PerturbStrengthSetter | None = None
     viewport_overlay_scale: float = 1.0
-    set_viewport_overlay_scale: Callable[[float], None] | None = None
+    set_viewport_overlay_scale: PreferenceSetter[float] | None = None
     viewport_overlays: ViewportOverlayConfig | None = None
-    set_viewport_overlays: Callable[[ViewportOverlayConfig], None] | None = None
+    set_viewport_overlays: PreferenceSetter[ViewportOverlayConfig] | None = None
     viewport_layers: ViewportLayers | None = None
-    set_viewport_layers: Callable[[ViewportLayers], None] | None = None
+    set_viewport_layers: PreferenceSetter[ViewportLayers] | None = None
     recording_config: RecordingConfig | None = None
-    set_recording_config: Callable[[RecordingConfig], None] | None = None
-    set_take_pause_at_end: Callable[[bool], None] | None = None
+    set_recording_config: PreferenceSetter[RecordingConfig] | None = None
+    set_take_pause_at_end: PreferenceSetter[bool] | None = None
     recording: RecordingInfo | None = None
     take_video_active: bool = False
     start_take_video: Callable[[], Path] | None = None
     stop_recording: Callable[[], Path | None] | None = None
-    set_viewport_capsule_scale: Callable[[str, float], None] | None = None
+    set_viewport_capsule_scale: CapsuleScaleSetter | None = None
     input_bindings: InputBindings | None = None
     set_input_binding: Callable[[InputAction, str | None], None] | None = None
     set_pointer_binding: Callable[[PointerAction, tuple[str, ...]], None] | None = None
@@ -148,6 +180,28 @@ class PanelContext:
 
     # Resolve the painter inside the current child/table scope; never retain a draw list.
     painter: Callable[[], Draw2D] = ImguiDraw2D
+
+    def apply_setting(
+        self,
+        setter: Callable[_SettingArguments, _SettingResult],
+        *args: _SettingArguments.args,
+        **kwargs: _SettingArguments.kwargs,
+    ) -> _SettingResult | None:
+        """Keep a failed disk write visible without aborting a settings frame.
+
+        Setters apply runtime values before persistence and preserve save exceptions
+        for programmatic callers. Only this UI boundary converts an I/O failure into
+        a session diagnostic; validation and programming errors still propagate.
+        """
+        try:
+            return setter(*args, **kwargs)
+        except OSError as error:
+            self.report(
+                f"Settings apply to this session but could not be saved: {error}",
+                level="warning",
+                duration=None,
+            )
+            return None
 
     def submit(self, command: Command) -> CommandResult:
         result = self.session.submit(command)
@@ -163,6 +217,23 @@ class PanelContext:
             self.queue_model_edit(command, completed)
         else:
             result = self.submit(command)
+            if completed is not None:
+                completed(result)
+
+    def submit_model_edits(
+        self,
+        commands: tuple[Command, ...],
+        completed: Callable[[CommandResult], None] | None = None,
+        *,
+        label: str = "Edit model",
+    ) -> None:
+        """Submit one user operation with one completion and one undo boundary."""
+        if self.queue_model_edits is not None:
+            self.queue_model_edits(commands, completed, label=label)
+        else:
+            result = self.session.apply_edits(commands, label=label).result
+            if result.message:
+                self.status = result.message
             if completed is not None:
                 completed(result)
 

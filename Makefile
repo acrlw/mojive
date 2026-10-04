@@ -51,6 +51,7 @@ camera-helpers:
 
 recording-layers:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.recording_layers $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_recording_layers.py -k narrow_status
 
 .PHONY: rollout-video
 .PHONY: passive-viewer
@@ -105,6 +106,9 @@ help:
 		'  make ui-components     compare production widgets and local corner experiments' \
 		'  make ui-optical        compare optical offsets across icon sizes and contexts' \
 		'  make ui-icon-concepts  production icon family review captures' \
+		'  make svg-icons         export production icons to standalone SVG assets' \
+		'  make ui-svg-icons      compare production code and SVG files in ImGui' \
+		'  make ui-icon-references compare icon outline and filled references' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
@@ -402,7 +406,10 @@ ui-icon-concepts:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page geometry --geometry-tab workspaces -o output/ui-icon-concepts/context-keyframes.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --preview-icon-library --page redesign -o output/ui-icon-concepts/context-redesign.png
 
-.PHONY: ui-icon-scales
+.PHONY: ui-icon-scales ui-icon-references
+ui-icon-references:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_icon_alignment.py -k reference_styles
+
 ICON_SCALES ?= 0.65 1 1.25 1.5
 ICON_SCALE_GROUPS ?= viewport-tools viewport-playback keyframe-transport keyframes
 ui-icon-scales:
@@ -428,25 +435,38 @@ ui-reset-heads:
 ui-feasibility:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive $(ARGS)
 
+.PHONY: svg-icons ui-svg-icons ui-svg-icons-gallery
+svg-icons:
+	$(PY) -m mojive.tools.svg_icons $(ARGS)
+
+ui-svg-icons:
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page geometry --geometry-tab svg --width 1100 --height 800 $(ARGS)
+
+ui-svg-icons-gallery:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_svg_icons.py
+
 .PHONY: ui-components ui-components-gallery ui-optical ui-optical-gallery
 ui-components:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page components --width 1100 --height 760 $(ARGS)
 
 ui-components-gallery:
 	@set -e; for scale in 1 2.25; do \
-		for scene in basic inspector filters actions; do \
-			MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
-				--page components --corner-scene $$scene --width 1100 --height 800 \
-				--ui-scale $$scale -o output/ui-components/$(BACKEND)-$$scene-$$scale.png $(ARGS); \
+		for surface in panel card; do \
+			for scene in basic inspector filters actions transform material scene joints capture; do \
+				MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility \
+					--page components --corner-scene $$scene --corner-surface $$surface --width 1100 --height 800 \
+					--ui-scale $$scale -o output/ui-components/$(BACKEND)-$$scene-$$surface-$$scale.png $(ARGS); \
+			done; \
 		done; \
 	done
 
 ui-optical:
-	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page components --component-tab optical --width 1100 --height 1100 $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page components --component-tab optical --width 1100 --height 800 $(ARGS)
 
 ui-optical-gallery:
-	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 1100 --ui-scale 1 -o output/ui-optical/$(BACKEND)-1.png $(ARGS)
-	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 1100 --ui-scale 2.25 -o output/ui-optical/$(BACKEND)-2.25.png $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 800 --ui-scale 1 -o output/ui-optical/$(BACKEND)-1.png $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 800 --ui-scale 2.25 -o output/ui-optical/$(BACKEND)-2.25.png $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page components --component-tab optical --width 1100 --height 800 --auto-align-centroid -o output/ui-optical/$(BACKEND)-auto.png $(ARGS)
 
 ui-runtime:
 	$(PY) -m mojive.tools.ui_runtime $(ARGS)
@@ -518,6 +538,7 @@ ui-gallery:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab shell -o output/ui-geometry-shell.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab panels -o output/ui-geometry-panels.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces -o output/ui-geometry-workspaces.png
+	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page geometry --geometry-tab workspaces --preview-icon-library -o output/ui-geometry-workspaces-preview.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 4 --page workspace -o output/ui-workspace-hidpi.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 4 --page panels -o output/ui-panels-hidpi.png
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --ui-scale 4 --page geometry --geometry-tab helpers -o output/ui-geometry-joint-helpers-hidpi.png
@@ -742,6 +763,7 @@ agent-viewer:
 ## Compact Inspector transform acceptance image.
 inspector:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.inspector $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_inspector_solver.py
 
 ## Native gizmo acceptance: G position, R rotation, T frame, F9 settings.
 gizmo:

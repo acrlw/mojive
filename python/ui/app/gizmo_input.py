@@ -324,7 +324,7 @@ class _GizmoInput:
     def _persist_precise_gizmo_choices(self) -> None:
         if not self.gizmo.remember_precise_input_choices:
             return
-        self.localizer.set_preferences(
+        self.preferences.update(
             {
                 "precise_gizmo_absolute": self._precise_gizmo_preferred_absolute,
                 "precise_gizmo_angle_unit": self._precise_gizmo_angle_unit,

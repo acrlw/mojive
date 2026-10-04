@@ -8,7 +8,7 @@ from PIL import Image
 from mojive.geometry2d.curves import CORNER_SMOOTHING
 from mojive.tools.tool_icons import _PillowDraw2D
 from mojive.ui.icons import ICON_GRID, IconStyle, draw_concept_icon, draw_icon
-from mojive.ui.panels.filters import severity_meshes
+from mojive.ui.severity_icons import severity_meshes
 
 _CANVAS = 80.0
 _RESOLUTION = 256

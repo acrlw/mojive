@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from mojive.ui.paint_protocol import Draw2D
 from mojive.ui.text_layout import fit_text
@@ -167,6 +168,110 @@ def _status_performance_layout(
     )
 
 
+@dataclass(frozen=True)
+class _RecordingStatusLayout:
+    text: str = ""
+    width: float = 0.0
+    button_size: float = 0.0
+    pause: bool = False
+    stop: bool = False
+
+
+def _recording_status_layout(
+    draw: Draw2D,
+    available: float,
+    height: float,
+    scale: float,
+    phase: str,
+    duration: float,
+    countdown: float,
+    surface: str,
+    labels: ViewportLabels,
+) -> _RecordingStatusLayout:
+    """Reserve recording actions before spending the remaining width on their label."""
+    if phase not in {"countdown", "recording", "paused", "finalizing"}:
+        return _RecordingStatusLayout()
+    button_size = max(0.0, min(height - 5.0 * scale, 19.0 * scale))
+    stop = phase != "finalizing" and 0.0 < button_size <= available
+    pause = stop and phase in {"recording", "paused"} and 2 * button_size + 4.0 * scale <= available
+    controls_width = (button_size if stop else 0.0) + (button_size + 4.0 * scale if pause else 0.0)
+    seconds = max(0, int(duration))
+    surface_label = {
+        "scene": labels.recording_scene,
+        "viewport": labels.recording_viewport,
+        "window": labels.recording_window,
+    }.get(surface, labels.recording)
+    text = (
+        labels.recording_finalizing
+        if phase == "finalizing"
+        else f"{surface_label} {max(0, math.ceil(countdown))} s"
+        if phase == "countdown"
+        else f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
+    )
+    text = fit_text(draw, text, max(0.0, available - controls_width - 18.0 * scale))
+    text_width = draw.text_size(text)[0] + 18.0 * scale if text else 0.0
+    return _RecordingStatusLayout(text, text_width + controls_width, button_size, pause, stop)
+
+
+def _draw_recording_status(
+    draw: Draw2D,
+    cursor: float,
+    cy: float,
+    theme: Theme,
+    scale: float,
+    phase: str,
+    layout: _RecordingStatusLayout,
+) -> tuple[float, tuple | None, tuple | None]:
+    """Paint the fitted recording group and return its exact interactive rectangles."""
+    accent = theme.warning if phase in {"countdown", "paused"} else theme.danger
+    if layout.text:
+        draw.circle_filled((cursor + 3.5 * scale, cy), 3.5 * scale, accent, segments=20)
+        cursor += 11.0 * scale
+        cursor += _inline_text(draw, cursor, cy, layout.text, accent) + 7.0 * scale
+    button_size = layout.button_size
+    button_y = cy - button_size * 0.5
+    pause_rect = None
+    stop_rect = None
+    if layout.pause:
+        pause_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
+        draw.rect_filled(pause_rect[:2], pause_rect[2:], theme.bg_frame, rounding=3.0 * scale)
+        center_x = cursor + button_size * 0.5
+        if phase == "paused":
+            draw.line(
+                (center_x - 2.0 * scale, cy - 4.0 * scale),
+                (center_x + 3.5 * scale, cy),
+                accent,
+                1.6 * scale,
+            )
+            draw.line(
+                (center_x + 3.5 * scale, cy),
+                (center_x - 2.0 * scale, cy + 4.0 * scale),
+                accent,
+                1.6 * scale,
+            )
+        else:
+            for offset in (-2.0, 2.0):
+                draw.line(
+                    (center_x + offset * scale, cy - 4.0 * scale),
+                    (center_x + offset * scale, cy + 4.0 * scale),
+                    accent,
+                    1.8 * scale,
+                )
+        cursor += button_size + 4.0 * scale
+    if layout.stop:
+        stop_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
+        draw.rect_filled(stop_rect[:2], stop_rect[2:], theme.bg_frame, rounding=3.0 * scale)
+        inset = 5.5 * scale
+        draw.rect_filled(
+            (cursor + inset, button_y + inset),
+            (cursor + button_size - inset, button_y + button_size - inset),
+            accent,
+            rounding=1.0 * scale,
+        )
+        cursor += button_size
+    return cursor, pause_rect, stop_rect
+
+
 def draw_status(
     draw: Draw2D,
     origin,
@@ -238,6 +343,20 @@ def draw_status(
     )
     if passive:
         state_text = f"{labels.passive} · {state_text}" if state_text else labels.passive
+    available = max(0.0, width - 24.0 * scale)
+    recording_layout = _recording_status_layout(
+        draw,
+        available,
+        height,
+        scale,
+        recording_phase,
+        recording_duration,
+        countdown_remaining,
+        recording_surface,
+        labels,
+    )
+    recording_reserve = recording_layout.width + 24.0 * scale if recording_layout.width else 0.0
+    state_text = fit_text(draw, state_text, max(0.0, available - recording_reserve - 12.0 * scale))
     passive_rect = None
     if state_text:
         draw.circle_filled(
@@ -247,84 +366,19 @@ def draw_status(
             segments=20,
         )
         cursor += 12.0 * scale
-    state_width = draw.text_size(state_text)[0]
-    if cursor + state_width <= x + width - 12.0 * scale:
         if passive:
-            passive_rect = (cursor, y, cursor + draw.text_size(labels.passive)[0], y + height)
+            passive_width = min(draw.text_size(labels.passive)[0], draw.text_size(state_text)[0])
+            passive_rect = (cursor, y, cursor + passive_width, y + height)
         cursor += _inline_text(draw, cursor, cy, state_text, state_color)
 
     recording_pause_rect = None
     recording_stop_rect = None
-    if recording and width >= 360.0 * scale:
-        separator()
-        accent = theme.warning if recording_phase in {"countdown", "paused"} else theme.danger
-        draw.circle_filled((cursor + 3.5 * scale, cy), 3.5 * scale, accent, segments=20)
-        cursor += 11.0 * scale
-        seconds = max(0, int(recording_duration))
-        surface_label = {
-            "scene": labels.recording_scene,
-            "viewport": labels.recording_viewport,
-            "window": labels.recording_window,
-        }.get(recording_surface, labels.recording)
-        record_text = (
-            labels.recording_finalizing
-            if recording_phase == "finalizing"
-            else f"{surface_label} {max(0, math.ceil(countdown_remaining))} s"
-            if recording_phase == "countdown"
-            else f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
+    if recording_layout.width:
+        if state_text:
+            separator()
+        cursor, recording_pause_rect, recording_stop_rect = _draw_recording_status(
+            draw, cursor, cy, theme, scale, recording_phase, recording_layout
         )
-        cursor += _inline_text(draw, cursor, cy, record_text, accent)
-        cursor += 7.0 * scale
-        button_size = min(height - 5.0 * scale, 19.0 * scale)
-        button_y = cy - button_size * 0.5
-        if recording_phase not in {"countdown", "finalizing"}:
-            recording_pause_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
-            draw.rect_filled(
-                recording_pause_rect[:2],
-                recording_pause_rect[2:],
-                theme.bg_frame,
-                rounding=3.0 * scale,
-            )
-            icon = accent
-            center_x = cursor + button_size * 0.5
-            if recording_phase == "paused":
-                draw.line(
-                    (center_x - 2.0 * scale, cy - 4.0 * scale),
-                    (center_x + 3.5 * scale, cy),
-                    icon,
-                    1.6 * scale,
-                )
-                draw.line(
-                    (center_x + 3.5 * scale, cy),
-                    (center_x - 2.0 * scale, cy + 4.0 * scale),
-                    icon,
-                    1.6 * scale,
-                )
-            else:
-                for offset in (-2.0, 2.0):
-                    draw.line(
-                        (center_x + offset * scale, cy - 4.0 * scale),
-                        (center_x + offset * scale, cy + 4.0 * scale),
-                        icon,
-                        1.8 * scale,
-                    )
-            cursor += button_size + 4.0 * scale
-        if recording_phase != "finalizing":
-            recording_stop_rect = (cursor, button_y, cursor + button_size, button_y + button_size)
-            draw.rect_filled(
-                recording_stop_rect[:2],
-                recording_stop_rect[2:],
-                theme.bg_frame,
-                rounding=3.0 * scale,
-            )
-            inset = 5.5 * scale
-            draw.rect_filled(
-                (cursor + inset, button_y + inset),
-                (cursor + button_size - inset, button_y + button_size - inset),
-                accent,
-                rounding=1.0 * scale,
-            )
-            cursor += button_size
 
     metric_text = ""
     metric_exact = ""

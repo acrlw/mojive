@@ -8,6 +8,7 @@ import pytest
 from mojive.app.ui.window import create_window
 from mojive.tools.viewcube_transitions import capture_orientation, circle_limits, depth_swaps
 from mojive.ui.viewcube import (
+    BACKDROP_COLOR,
     ORIGIN_BORDER_PT,
     ORIGIN_GAP_PT,
     ORIGIN_RADIUS_PT,
@@ -55,15 +56,17 @@ def test_transitions_and_transparent_origin_shell(backend_name, scale):
                 radius = (
                     np.hypot(x + 0.5 - width * 0.5, y + 0.5 - height * 0.5) / window.pixel_scale
                 )
-                # Exclude both AA fringes; the remaining annulus must expose the
-                # actual background, not a flat-color disk painted over the axes.
+                # Exclude both AA fringes. The shell exposes the translucent
+                # navigation backdrop without an extra origin-colored disk.
                 origin_fringe = min(1.0, ORIGIN_BORDER_PT * scale * 0.5)
                 border_radius = (ORIGIN_RADIUS_PT + ORIGIN_BORDER_PT) * scale
                 clear = (radius > border_radius + origin_fringe + 0.1) & (
                     radius < (ORIGIN_RADIUS_PT + ORIGIN_GAP_PT) * scale - 1.05
                 )
                 assert clear.any()
-                assert np.max(np.abs(pixels[clear].astype(int) - pixels[0, 0].astype(int))) <= 1
+                backdrop = np.array(BACKDROP_COLOR[:3]) * 255
+                expected = backdrop * BACKDROP_COLOR[3] + pixels[0, 0, :3] * (1 - BACKDROP_COLOR[3])
+                assert np.max(np.abs(pixels[clear, :3].astype(int) - expected)) <= 2
             if background[:3] == (1.0, 1.0, 1.0):
                 # The old white-only disk disappeared here. Inspect only the
                 # center neighborhood, away from the colored spoke ends.

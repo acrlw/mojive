@@ -7,13 +7,16 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from mojive import commands as cmd
 from mojive.adapters.base import (
     CameraInfo,
     DiagnosticFrame,
     JointInfo,
     NodeType,
+    SceneAdapterBase,
     SceneFrame,
     SceneNode,
+    SceneSource,
 )
 from mojive.session import Session
 from mojive.types import CameraView
@@ -394,13 +397,27 @@ def test_joint_selection_highlights_its_renderable_parent_without_changing_targe
         body_index=parent.body_index,
         joint_index=2,
     )
-    session = object.__new__(Session)
-    session._selected = 0
-    session._selected_node_id = joint.node_id
-    session._by_node_id = {parent.node_id: parent, joint.node_id: joint}
+    source = SceneSource(nodes=[parent, joint])
 
-    assert session.selected_node is joint
-    assert session.selection_highlight_object_id == parent.object_id
+    class JointAdapter(SceneAdapterBase):
+        def scene_source(self):
+            return source
+
+        def frame(self, needs):
+            return SceneFrame()
+
+    session = Session(JointAdapter())
+    try:
+        assert session.submit(cmd.SelectNode(joint.node_id)).ok
+        assert session.selected_node.node_id == joint.node_id
+        assert session.selected_node.type is NodeType.JOINT
+        assert session.selected == 0
+        assert session.selection_highlight_object_id == parent.object_id
+        assert session.submit(cmd.Select(0)).ok
+        assert session.selected_node is None
+        assert session.selection_highlight_object_id == 0
+    finally:
+        session.release()
 
 
 def test_joint_focus_from_a_link_does_not_replace_its_selection() -> None:

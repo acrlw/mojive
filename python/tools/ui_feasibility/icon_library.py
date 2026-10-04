@@ -40,7 +40,7 @@ from mojive.ui.icons import (
 from mojive.ui.keyframe_editor import controls as keyframes_panel_module
 from mojive.ui.keyframe_editor.controls import _draw_command_icon
 from mojive.ui.localization import Language, Localizer
-from mojive.ui.panels.filters import severity_icon, severity_meshes
+from mojive.ui.severity_icons import severity_icon, severity_meshes
 from mojive.ui.text_layout import text_line_y
 from mojive.ui.theme import THEME
 
@@ -81,27 +81,35 @@ def _draw_concept_icon_specimen(
     alignment: str | None = None,
     offset: tuple[float, float] = (0.0, 0.0),
     centroid: tuple[float, float] | None = None,
+    *,
+    circle_style: str = "outline",
+    square_style: str = "outline",
 ) -> None:
     """Draw one candidate inside the shared circular placement boundary."""
 
     guide_radius = size * ICON_BOUND_DIAMETER / ICON_GRID * 0.5
-    # Keep review guides behind the candidate. Rotate deliberately places its
+    # Keep review guides behind the candidate. At zero padding, Rotate places its
     # outer-ring centerline on the orange circle; drawing the guide afterward
     # recolored the center of that stroke and falsely made the frame look thin.
     # The square has exactly the orange circle's diameter.
-    draw.rect(
-        (center[0] - guide_radius, center[1] - guide_radius),
-        (center[0] + guide_radius, center[1] + guide_radius),
-        (*CONCEPT_THEME.text_disabled[:3], 0.34),
-        max(0.6, 0.72 * scale),
-    )
-    draw.circle(
-        center,
-        guide_radius,
-        (*CONCEPT_THEME.warning[:3], 0.72),
-        max(0.75, 0.9 * scale),
-        segments=max(32, round(guide_radius * 4.0)),
-    )
+    lo = (center[0] - guide_radius, center[1] - guide_radius)
+    hi = (center[0] + guide_radius, center[1] + guide_radius)
+    segments = max(32, round(guide_radius * 4.0))
+    # Paint fills first so neither one erases the other reference's outline.
+    if square_style == "filled":
+        draw.rect_filled(lo, hi, CONCEPT_THEME.bg_frame)
+    if circle_style == "filled":
+        draw.circle_filled(center, guide_radius, CONCEPT_THEME.bg_frame, segments=segments)
+    if square_style == "outline":
+        draw.rect(lo, hi, (*CONCEPT_THEME.text_disabled[:3], 0.34), max(0.6, 0.72 * scale))
+    if circle_style == "outline":
+        draw.circle(
+            center,
+            guide_radius,
+            (*CONCEPT_THEME.warning[:3], 0.72),
+            max(0.75, 0.9 * scale),
+            segments=segments,
+        )
     if centroid is not None:
         for dx, dy in ((4 * scale, 0), (0, 4 * scale)):
             draw.line(
@@ -265,6 +273,8 @@ def _draw_icon_library_overview(
                 state.icon_alignment_for_glyph(name),
                 offset=state.icon_offset(name),
                 centroid=state.icon_centroid(name) if state.show_icon_centroids else None,
+                circle_style=state.icon_circle_style,
+                square_style=state.icon_square_style,
             )
             draw.centered_label(
                 label,
@@ -539,7 +549,7 @@ def _draw_icon_family_detail(
     draw.text(
         (origin[0], header_y + 24.0 * scale),
         CONCEPT_THEME.text_disabled,
-        "Orange circle and gray square share one center · each glyph reports its declared anchor",
+        "Circle and square share one center · hide either reference to inspect the other alone",
     )
     for center_x, size in zip(centers, _ICON_REVIEW_SIZES, strict=True):
         draw.centered_label(
@@ -817,6 +827,8 @@ def _draw_icon_family_detail(
                 alignment,
                 offset=offset,
                 centroid=centroid,
+                circle_style=state.icon_circle_style,
+                square_style=state.icon_square_style,
             )
 
         clearance = _icon_review_metrics(
@@ -1208,6 +1220,23 @@ def _draw_icon_library_page(
     )
     state.icon_alignment_strength = strength / 100
     imgui.end_disabled()
+    for label, attribute in (("Circle", "icon_circle_style"), ("Square", "icon_square_style")):
+        imgui.same_line()
+        imgui.align_text_to_frame_padding()
+        imgui.text(label)
+        imgui.same_line()
+        imgui.set_next_item_width(110.0 * scale)
+        styles = ("outline", "filled", "hidden")
+        _, selected = imgui.combo(
+            f"##{attribute}",
+            styles.index(getattr(state, attribute)),
+            ("Outline", "Filled", "Hidden"),
+        )
+        setattr(state, attribute, styles[selected])
+        imgui.set_item_tooltip(
+            "Outline: placement guide. Filled: dark gray background. Hidden: no reference. "
+            "Applies to the overview and family specimens at every size."
+        )
     imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + 42.0 * scale)
     imgui.text_disabled(
         "X/Y: manual offsets in 24-unit grid. Auto align previews the algorithm; amber dots mark ink centroids."

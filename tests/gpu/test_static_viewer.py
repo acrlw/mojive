@@ -1060,7 +1060,9 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
 
     areas = np.zeros((len(names), len(scales)))
     widths = np.zeros((len(scales), 2))
-    _, (fit, offset, _) = icons._production_icon_layout("tool-body")
+    from mojive.ui.icons.layout import _production_icon_layout
+
+    _, (fit, offset, _) = _production_icon_layout("tool-body")
     # Average pixel phases: an isolated subpixel corner can land directly on
     # or between samples, especially at 1x display density. The invariant is
     # scale-dependent weight, independent of that placement variation.

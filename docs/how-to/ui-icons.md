@@ -65,12 +65,13 @@ tools, Viewport playback, Keyframe transport, Keyframes actions, Panels, Scene h
 & input. Group sliders commit on release to avoid rebuilding every glyph during a drag. Each
 family row provides live per-glyph padding and stroke overrides plus a reset button; family sheets,
 capsule specimens, and the whole-UI preview resolve the same overrides. Viewport tools default to
-padding 0.50; every other group defaults to 2.00. Playback Previous, Next, and More use 4.00 so the
-directional marks remain smaller than Play. Keyframe Add, Clear, Keyframe, Previous, and Next plus
-Transport First, Previous, Next, and More also use 4.00; Transport Play uses 3.00. Rotate defaults
-to a 1.00-stroke crossing gap with round caps and remains frame-aligned: its outer screen-ring
-centerline coincides with the orange placement circle, while its row can adjust frame padding and
-the inner-ring gap/stroke ratio. Half of the outer stroke sits on each side of its centerline.
+group padding 0.50; every other group defaults to 2.00. Reviewed Move, Scale, World, Body, and Snap
+override padding to 1.00. Playback Previous, Next, and More use 4.00; Playback and Transport Play
+use 3.00. Keyframe Add, Clear, Keyframe, Previous, and Next plus Transport First, Previous, Next,
+and More also use 4.00. Rotate defaults to a 1.00-stroke crossing gap with round caps and a 0.65-unit
+frame inset. Its outer screen-ring centerline follows that inset from the placement circle;
+half of the outer stroke sits on each side of the centerline. Its row can adjust frame padding
+and the inner-ring gap/stroke ratio.
 Output's mature Info, Warning, and Error painters are also locked; padding and stroke controls do
 not change their geometry or size. Detail rows report `pad`, the declared anchor before optical
 adjustment, and the currently applied manual or automatic offset.
@@ -88,7 +89,11 @@ Offsets scale with the 24-unit grid and are applied once, after fitting, by the 
 painter. They do not change hit regions, text positions, or cached geometry.
 `production_icon_metrics` describes the fitted shape before optical translation so composite
 layouts stay stable; diagnostic bounds add `production_icon_offset` when drawing guides.
-The Library starts with manual alignment and mirrored links enabled. Its automatic estimator
+Snap uses a +0.83-unit Y optical translation after box fitting. Scale keeps its three-axis
+center and minimum enclosing circle at the slot origin; its asymmetric bounding-box margins
+are not an alignment error. Judge these silhouettes in small controls before adjusting offsets.
+The Library starts with manual alignment, mirrored links enabled, and a 250% automatic-comparison
+strength preset. Its automatic estimator
 continues to measure the unshifted candidate, so it replaces rather than stacks with manual offsets.
 
 In **Probe**, enable **Preview Icon Library**, then toggle **Apply icon X/Y offsets** to compare
@@ -293,8 +298,10 @@ shared design grid, family weight, and intentional optical variants.
 
 ## Output severity contract
 
-`severity_meshes` in `mojive.ui.panels.filters` is the production source for information, warning,
-and error glyphs. The current 24-unit master is:
+`severity_meshes` in `mojive.ui.severity_icons` is the shared production source for information,
+warning, and error glyphs. Output, `draw_icon`, Icon Library and SVG export consume that family;
+`mojive.ui.panels.filters` keeps its existing imports available for compatibility.
+The reviewed frame and internal mark bypass generic per-glyph fitting. The current 24-unit master is:
 
 | Dimension | Grid units | Result |
 | --- | ---: | --- |
@@ -387,7 +394,7 @@ uses that expose weak dots, crowded safe areas, and mismatched weights.
 For the full candidate set, `make ui-icon-concepts` writes 14, 24, 56, and 112-point family pages
 under `output/ui-icon-concepts/`, including separate `viewport-playback.png` and
 `keyframe-transport.png` sheets, plus `tools-max-gap.png` at the configured tool stroke and
-`gap / stroke = 1.00`. Read current defaults from `python/ui/icons.py` and generated
+`gap / stroke = 1.00`. Read current defaults from `python/ui/icons/model.py` and generated
 `python/ui/icon_presets.json` rather than hard-coding a screen-pixel weight. `capsules.png` uses the actual playback and viewport-tool
 capsules with their icon slots and state circles exposed. Viewport playback and Keyframe transport
 each keep their own Previous/Next padding adjustment so
@@ -406,3 +413,36 @@ the always-visible `Icon Library preview` menu-bar switch,
 or the matching item under `Probe`, to apply or remove that substitution across every feasibility
 page. The Icon Library canvas reserves enough scroll extent for the longest family; verify the final
 row is reachable in the normal 1600-by-1000 interactive window.
+
+## Export and review SVG assets
+
+`make svg-icons` exports every glyph in the shared production `ICON_FAMILIES` to
+`output/svg-icons/`, with standalone SVG files, `manifest.json`, and an interactive browser
+gallery in `index.html`. The export consumes `draw_icon`, including reviewed optical offsets.
+The manifest marks those offsets as baked; a future runtime importer must not apply them again.
+Filled contours retain transparent holes and G3 corners. Severity glyphs export the same
+master as Output, keeping the frame as an SVG circle. The native importer rebuilds its filled
+ring at the displayed size with a one-framebuffer-pixel antialias fringe. Original
+mouse glyphs retain native strokes/circles and their established compact-size antialiasing policy.
+
+```bash
+make svg-icons
+make ui-svg-icons BACKEND=opengl
+make ui-svg-icons BACKEND=bgfx
+make ui-svg-icons-gallery BACKEND=bgfx
+```
+
+The feasibility **Geometry > SVG icons** tab compares production drawing with geometry loaded
+from the SVG files at 14, 24, 56, and 112 logical points. Edit an asset and click **Reload SVG files**;
+the right column changes independently of the production column. Theme colors are late-bound,
+rectangular viewBoxes retain their aspect ratio, and buttons retain ordinary ImGui input behavior.
+Reload validates the complete set before replacing it. An invalid file reports its name and leaves
+the last complete set available. **Export production assets** replaces the files with fresh exports.
+Use `--svg-directory` for another folder and `--svg-glyph` for a focused capture.
+
+This experiment accepts flat absolute M/L/Z paths and circles, foreground/accent fills, and native
+butt/miter strokes. Transforms, CSS, curves, masks, filters, images, and other unsupported features
+fail explicitly. The `data-*` attributes preserve native paint roles and antialiasing metadata;
+ordinary SVG viewers ignore them and render the standard geometry. Parsing happens on load/reload,
+and native CPU meshes are cached by contents and logical size. This is a feasibility importer,
+not a general SVG engine or a switch of the production UI to SVG assets.

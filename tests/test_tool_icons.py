@@ -8,7 +8,7 @@ from mojive.tools.tool_icons import render_tool_shell_icon
 
 @pytest.mark.parametrize("width", (0.8, 1.2, 2.4))
 def test_rotate_style_changes_only_intersect_overlapping_edge_bounds(monkeypatch, width):
-    from mojive.ui.viewport_widgets import rotate
+    from mojive.ui import overlay_geometry as rotate
 
     intersections = 0
     original = rotate._segment_intersection

@@ -9,9 +9,10 @@ from mojive.adapters.base import FrameNeeds
 from mojive.ui.controls import IconLabelDrawer
 from mojive.ui.icons import draw_icon_label
 from mojive.ui.keyframe_editor.controller import TimelineEditor
+from mojive.ui.keyframe_editor.controls import CommandIconDrawer, _draw_command_icon
 from mojive.ui.keyframe_editor.controls import timeline_status_hints as timeline_status_hints
 from mojive.ui.keyframe_editor.controls import unique_keyframe_name as unique_keyframe_name
-from mojive.ui.keyframe_editor.properties import draw_error, draw_selected
+from mojive.ui.keyframe_editor.properties import draw_selected
 from mojive.ui.keyframe_editor.toolbar import TimelineToolbar
 from mojive.ui.keyframe_editor.track import draw_dope_sheet
 from mojive.ui.replay_controls import ReplayControls
@@ -61,10 +62,17 @@ class KeyframesPanel(Panel):
     shortcut = ""
     dock_with = "Output"
 
-    def __init__(self, *, follow_mode_icon_drawer: IconLabelDrawer = draw_icon_label) -> None:
+    def __init__(
+        self,
+        *,
+        follow_mode_icon_drawer: IconLabelDrawer = draw_icon_label,
+        command_icon_drawer: CommandIconDrawer = _draw_command_icon,
+    ) -> None:
         super().__init__()
         self.editor = TimelineEditor()
-        self.toolbar = TimelineToolbar(follow_mode_icon_drawer)
+        self.toolbar = TimelineToolbar(
+            follow_mode_icon_drawer, command_icon_drawer=command_icon_drawer
+        )
         self._replay = ReplayControls()
 
     def frame_needs(self) -> FrameNeeds:
@@ -89,7 +97,7 @@ class KeyframesPanel(Panel):
             editor.set_model(
                 preferred if preferred in model_ids else model_ids[0] if model_ids else -1
             )
-        keyframes, keyframe_by_id = editor.keyframes(ctx)
+        _, keyframe_by_id = editor.keyframes(ctx)
         take_times = ctx.session.state_take_times
         editable = bool(
             ctx.session.paused
@@ -100,7 +108,14 @@ class KeyframesPanel(Panel):
         self.toolbar.draw_compact_toolbar(editor, ctx, take_times)
         take_times = ctx.session.state_take_times
         editor.sync_selection(ctx, keyframe_by_id, take_times)
-        draw_dope_sheet(editor, ctx, models, keyframes, keyframe_by_id, take_times, editable)
+        draw_dope_sheet(
+            editor,
+            ctx,
+            models,
+            take_times,
+            editable,
+            icon_drawer=self.toolbar.command_icon_drawer,
+        )
         if editor.selected_snapshot >= 0:
             snapshot = next(
                 (
@@ -118,4 +133,3 @@ class KeyframesPanel(Panel):
                     ctx.submit(cmd.RemoveSceneSnapshot(snapshot.snapshot_id))
                     editor.selected_snapshot = -1
         draw_selected(editor, ctx, editable)
-        draw_error(editor, ctx)

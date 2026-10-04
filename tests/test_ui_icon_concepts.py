@@ -45,6 +45,10 @@ from mojive.ui.icons import (
     icon_metrics,
     production_icon_style,
 )
+from mojive.ui.icons import drawing as icon_drawing
+from mojive.ui.icons import glyphs as icon_glyphs
+from mojive.ui.icons import layout as icon_layout
+from mojive.ui.icons import painter as icon_painter
 from mojive.ui.viewport_widgets import (
     CAPSULE_SMOOTHING,
     OVERLAY_GEOMETRY,
@@ -268,13 +272,13 @@ def test_concept_icon_geometry_stays_inside_circular_placement_bound(name: str) 
 def test_default_layout_fits_candidates_to_the_reference_family_padding(name: str) -> None:
     if name in ICON_LAYOUT_REFERENCES:
         reference = ICON_LAYOUT_REFERENCES[name]
-        assert icon_concepts._icon_layout(name)[0] == pytest.approx(
-            icon_concepts._icon_layout(reference)[0], abs=1e-6
+        assert icon_layout._icon_layout(name)[0] == pytest.approx(
+            icon_layout._icon_layout(reference)[0], abs=1e-6
         )
         return
     group = icon_component_group(name)
     expected = (
-        -ROTATE_FRAME_STROKE_OVERSHOOT
+        ICON_GLYPH_PADDING_DEFAULTS[name] - ROTATE_FRAME_STROKE_OVERSHOOT
         if name == "tool-rotate"
         else REVIEW_LOCKED_PADDING
         if name in icon_concepts.REVIEW_LOCKED_ICONS
@@ -298,22 +302,29 @@ def test_component_groups_own_independent_candidate_names_and_layout_defaults() 
 def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> None:
     assert ICON_ROTATE_RING_GAP_RATIO == 1.0
     assert icon_concepts.ICON_GLYPH_OFFSET_DEFAULTS == {
-        "tool-snap": (0.0, 0.70),
+        "tool-snap": (0.0, 0.83),
         "playback-previous": (-1.0, 0.0),
         "playback-next": (1.0, 0.0),
+        "playback-more": (0.0, 1.0),
         "transport-previous": (-1.0, 0.0),
         "transport-next": (1.0, 0.0),
         "transport-more": (0.0, 1.0),
         "key-snapshot": (0.0, -0.84),
-        "panel-search": (0.98, 0.98),
-        "panel-sort": (-0.43, 0.50),
+        "panel-search": (1.06, 1.06),
+        "panel-sort": (-0.54, 0.41),
         "panel-perspective": (0.27, 0.0),
         "helper-camera": (0.0, -0.84),
         "helper-light": (0.0, -0.65),
     }
     assert ICON_GLYPH_PADDING_DEFAULTS == {
-        "tool-rotate": 0.0,
+        "tool-move": 1.0,
+        "tool-rotate": 0.65,
+        "tool-scale": 1.0,
+        "tool-world": 1.0,
+        "tool-body": 1.0,
+        "tool-snap": 1.0,
         "playback-previous": 4.0,
+        "playback-play": 3.0,
         "playback-next": 4.0,
         "playback-more": 4.0,
         "transport-first": 4.0,
@@ -373,8 +384,8 @@ def test_reviewed_glyph_defaults_match_the_accepted_icon_library_values() -> Non
         "key-follow-page": 1.5,
         "key-follow-locked": 1.5,
         "key-view": 1.5,
-        "panel-search": 1.5,
-        "panel-sort": 1.5,
+        "panel-search": 1.25,
+        "panel-sort": 1.25,
         "panel-clear": 1.5,
         "panel-visible": 1.0,
         "panel-hidden": 1.0,
@@ -405,17 +416,17 @@ def test_production_icon_style_freezes_reviewed_inputs_and_reuses_layout() -> No
     assert style.rotate_ring_gap_ratio == 1.0
     assert style.rotate_ring_cap == "round"
 
-    icon_concepts._production_icon_layout.cache_clear()
-    icon_concepts._icon_draw_commands.cache_clear()
+    icon_layout._production_icon_layout.cache_clear()
+    icon_drawing._icon_draw_commands.cache_clear()
     draw_icon(_RecordingDraw(), (10.0, 20.0), 24.0, "panel-clear", (1.0,) * 4)
-    first = icon_concepts._production_icon_layout.cache_info()
+    first = icon_layout._production_icon_layout.cache_info()
     draw_icon(_RecordingDraw(), (30.0, 40.0), 24.0, "panel-clear", (0.5,) * 4)
-    second = icon_concepts._production_icon_layout.cache_info()
+    second = icon_layout._production_icon_layout.cache_info()
 
     assert first.misses == 1
     assert second.misses == 1
     assert second.hits == first.hits
-    assert icon_concepts._icon_draw_commands.cache_info().hits == 1
+    assert icon_drawing._icon_draw_commands.cache_info().hits == 1
 
 
 def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
@@ -447,18 +458,21 @@ def test_concept_icons_use_the_declared_geometric_anchor_groups() -> None:
     )
 
 
-def test_rotate_outer_frame_matches_the_placement_circle() -> None:
-    metrics = icon_metrics("tool-rotate")
-    draw = _render("tool-rotate", ICON_GRID)
+@pytest.mark.parametrize("padding", (0.0, 0.65))
+def test_rotate_outer_frame_centerline_follows_padding(padding) -> None:
+    metrics = icon_metrics("tool-rotate", padding=padding)
+    draw = _render("tool-rotate", ICON_GRID, padding=padding)
     outer_radius, inner_radius = _annulus_radii(draw.indexed_fills[0])
     ring_radius = (outer_radius + inner_radius) * 0.5
     ring_width = outer_radius - inner_radius
 
     assert metrics.enclosing_center == pytest.approx((0.0, 0.0), abs=1e-6)
     assert not draw.circles
-    assert ring_radius == pytest.approx(ICON_BOUND_DIAMETER * 0.5, abs=1e-6)
+    assert ring_radius == pytest.approx(ICON_BOUND_DIAMETER * 0.5 - padding, abs=1e-6)
     assert ring_width == pytest.approx(ICON_STROKE, abs=1e-6)
-    assert metrics.circular_clearance == pytest.approx(-ROTATE_FRAME_STROKE_OVERSHOOT, abs=1e-5)
+    assert metrics.circular_clearance == pytest.approx(
+        padding - ROTATE_FRAME_STROKE_OVERSHOOT, abs=1e-5
+    )
 
 
 def test_rotate_padding_insets_the_outer_frame_centerline() -> None:
@@ -515,7 +529,7 @@ def test_reviewed_severity_geometry_ignores_candidate_layout_controls(name: str)
 @pytest.mark.parametrize("padding", (ICON_MIN_CLEARANCE, ICON_DEFAULT_PADDING, ICON_MAX_PADDING))
 def test_layout_keeps_the_canonical_stroke_independent_of_icon_fit(padding: float) -> None:
     for name in _icons():
-        layout_scale, _offset, stroke_compensation = icon_concepts._icon_layout(name, padding)
+        layout_scale, _offset, stroke_compensation = icon_layout._icon_layout(name, padding)
         if name in STROKE_SCALE_LOCKED_ICONS:
             assert stroke_compensation == 1.0
         else:
@@ -570,7 +584,7 @@ def test_reviewed_transport_bars_keep_their_authored_width(
     name: str, expected_width: float
 ) -> None:
     draw = _RecordingDraw()
-    icon_concepts._draw_concept_icon_raw(
+    icon_glyphs._draw_glyph(
         draw,
         (0.0, 0.0),
         ICON_GRID,
@@ -667,12 +681,10 @@ def test_world_internal_strokes_stop_at_outer_ring_inner_edge() -> None:
 
 
 @pytest.mark.parametrize("name", ("tool-world", "tool-body"))
-def test_sparse_frame_tools_use_the_shared_near_boundary_envelope(name: str) -> None:
+def test_sparse_frame_tools_use_the_reviewed_padding(name: str) -> None:
     metrics = icon_metrics(name)
 
-    assert metrics.circular_clearance == pytest.approx(
-        ICON_GROUP_LAYOUT_DEFAULTS["Viewport tools"], abs=1e-5
-    )
+    assert metrics.circular_clearance == pytest.approx(ICON_GLYPH_PADDING_DEFAULTS[name], abs=1e-5)
 
 
 def test_camera_candidates_share_one_master_and_box_anchor() -> None:
@@ -719,8 +731,8 @@ def test_mouse_candidates_apply_the_control_accent(name: str) -> None:
 @pytest.mark.parametrize("button", ("left", "right"))
 def test_mouse_candidates_reuse_the_original_knockout_geometry(button: str) -> None:
     draw = _RecordingDraw()
-    painter = icon_concepts._Painter(draw, (0.0, 0.0), ICON_GRID, (1.0, 1.0, 1.0, 1.0))
-    icon_concepts._draw_status(
+    painter = icon_painter._Painter(draw, (0.0, 0.0), ICON_GRID, (1.0, 1.0, 1.0, 1.0))
+    icon_glyphs._draw_status(
         painter,
         f"status-mouse-{button}",
         (0.2, 0.3, 0.4, 1.0),
@@ -762,7 +774,7 @@ def test_filled_triangles_use_rounded_g3_contours(name: str) -> None:
 @pytest.mark.parametrize("name", ("panel-right", "panel-down"))
 def test_panel_disclosures_use_equilateral_triangles_and_circle_anchors(name: str) -> None:
     metrics = icon_metrics(name)
-    source = icon_concepts._triangle_source(1.0)
+    source = icon_painter._triangle_source(1.0)
     side_lengths = tuple(math.dist(source[index], source[(index + 1) % 3]) for index in range(3))
 
     assert icon_alignment_anchor(name) == "circle"
@@ -955,7 +967,7 @@ def test_sort_arrow_tail_and_tip_align_with_visible_bar_extents() -> None:
 
 
 def test_play_triangle_is_equilateral() -> None:
-    points = icon_concepts._triangle_source(1.0)
+    points = icon_painter._triangle_source(1.0)
     lengths = tuple(math.dist(a, b) for a, b in zip(points, points[1:] + points[:1], strict=True))
 
     assert lengths == pytest.approx((lengths[0],) * 3, abs=1e-6)
@@ -963,7 +975,7 @@ def test_play_triangle_is_equilateral() -> None:
 
 @pytest.mark.parametrize("direction", (-1.0, 1.0))
 def test_transport_chevron_tip_is_a_right_angle(direction: float) -> None:
-    chevron = icon_concepts._chevron_centerline(direction, 0.0)
+    chevron = icon_painter._chevron_centerline(direction, 0.0)
 
     def vertex_angle(points, vertex_index: int) -> float:
         vertex = points[vertex_index]
@@ -984,10 +996,8 @@ def test_transport_chevron_tip_is_a_right_angle(direction: float) -> None:
 def test_playback_and_transport_more_share_one_completed_shape() -> None:
     playback = _RecordingDraw()
     transport = _RecordingDraw()
-    icon_concepts._draw_concept_icon_raw(
-        playback, (0.0, 0.0), ICON_GRID, "playback-more", (1.0, 1.0, 1.0, 1.0)
-    )
-    icon_concepts._draw_concept_icon_raw(
+    icon_glyphs._draw_glyph(playback, (0.0, 0.0), ICON_GRID, "playback-more", (1.0, 1.0, 1.0, 1.0))
+    icon_glyphs._draw_glyph(
         transport, (0.0, 0.0), ICON_GRID, "transport-more", (1.0, 1.0, 1.0, 1.0)
     )
 
@@ -995,8 +1005,8 @@ def test_playback_and_transport_more_share_one_completed_shape() -> None:
 
 
 def test_more_is_a_shorter_counterclockwise_rotation_of_previous() -> None:
-    previous = icon_concepts._chevron_centerline(-1.0, 0.0, 1.18)
-    more = icon_concepts._more_centerline(1.18)
+    previous = icon_painter._chevron_centerline(-1.0, 0.0, 1.18)
+    more = icon_painter._more_centerline(1.18)
     rotated = tuple((y, -x) for x, y in previous)
 
     for point, reference in zip(more, rotated, strict=True):
@@ -1044,7 +1054,7 @@ def test_viewport_playback_directions_are_smaller_than_play_and_pause() -> None:
         for kind in ("previous", "play", "pause", "next")
     )
 
-    assert clearances == pytest.approx((4.0, 2.0, 2.0, 4.0), abs=1e-5)
+    assert clearances == pytest.approx((4.0, 3.0, 2.0, 4.0), abs=1e-5)
 
 
 def test_keyframe_transport_directions_keep_the_component_padding() -> None:
@@ -1238,7 +1248,7 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
 
             return record
 
-    style, (fitted, offset, compensation) = icon_concepts._production_icon_layout(name)
+    style, (fitted, offset, compensation) = icon_layout._production_icon_layout(name)
     optical = icon_concepts.production_icon_offset(name)
     for size in (14.0, 24.0, 56.0, 112.0):
         center = (13.25, 17.5)
@@ -1248,7 +1258,7 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
         ):
             expected, actual = Calls(), Calls()
             unit = size / ICON_GRID
-            icon_concepts._draw_concept_icon_raw(
+            icon_glyphs._draw_glyph(
                 expected,
                 (
                     center[0] + (offset[0] + optical[0]) * unit,
@@ -1272,7 +1282,7 @@ def test_cached_submission_preserves_geometry_and_dynamic_colors(name):
 def test_production_presets_match_dynamic_layout_and_visible_metrics():
     from dataclasses import asdict, astuple
 
-    presets = icon_concepts._production_icon_presets()
+    presets = icon_layout._production_icon_presets()
     names = {name for _family, entries in ICON_FAMILIES for _label, name in entries}
     assert presets.keys() == names
     for name in names:
@@ -1280,8 +1290,8 @@ def test_production_presets_match_dynamic_layout_and_visible_metrics():
         assert presets[name]["style"] == asdict(style), f"Regenerate {name} with make icon-presets"
         options = asdict(style)
         options["tuning"] = style.tuning
-        actual = icon_concepts._production_icon_layout(name)[1]
-        expected = icon_concepts._icon_layout(name, **options)
+        actual = icon_layout._production_icon_layout(name)[1]
+        expected = icon_layout._icon_layout(name, **options)
         assert actual[0] == pytest.approx(expected[0], abs=1e-9)
         assert actual[1] == pytest.approx(expected[1], abs=1e-9)
         assert actual[2] == pytest.approx(expected[2], abs=1e-9)
@@ -1295,15 +1305,19 @@ def test_cold_production_icons_skip_dynamic_fitting(monkeypatch):
     def unexpected_fit(*args, **kwargs):
         pytest.fail("Production icon startup must use precomputed layout and metrics")
 
-    for name in ("_production_icon_layout", "production_icon_metrics", "_icon_draw_commands"):
-        getattr(icon_concepts, name).cache_clear()
-    monkeypatch.setattr(icon_concepts, "_icon_layout", unexpected_fit)
-    monkeypatch.setattr(icon_concepts, "_measure_raw_icon", unexpected_fit)
-    monkeypatch.setattr(icon_concepts, "icon_metrics", unexpected_fit)
+    for cached in (
+        icon_layout._production_icon_layout,
+        icon_layout.production_icon_metrics,
+        icon_drawing._icon_draw_commands,
+    ):
+        cached.cache_clear()
+    monkeypatch.setattr(icon_layout, "_icon_layout", unexpected_fit)
+    monkeypatch.setattr(icon_layout, "_measure_raw_icon", unexpected_fit)
+    monkeypatch.setattr(icon_layout, "icon_metrics", unexpected_fit)
     for _family, entries in ICON_FAMILIES:
         for _label, name in entries:
             icon_concepts.production_icon_metrics(name)
-            assert icon_concepts._icon_draw_commands(name, 24.0, None)
+            assert icon_drawing._icon_draw_commands(name, 24.0, None)
 
 
 @pytest.mark.parametrize("head_scale", (0.65, 1.6, 2.0))

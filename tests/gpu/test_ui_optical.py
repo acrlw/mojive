@@ -17,6 +17,114 @@ pytestmark = pytest.mark.gpu
 
 
 @pytest.mark.parametrize(
+    ("scale", "width", "height"), ((1.0, 1100, 580), (2.25, 2500, 1305), (1.0, 650, 900))
+)
+def test_alignment_controls_and_diagnostics_stay_visible_with_independent_scrolling(
+    backend_name, monkeypatch, scale, width, height
+):
+    panes, diagnostics, controls = {}, {}, {}
+    native_child, native_checkbox = imgui.begin_child, imgui.checkbox
+    native_diagnostic = optical._diagnostic
+
+    def child(label, *args, **kwargs):
+        result = native_child(label, *args, **kwargs)
+        if label in {"##study-controls", "##study-preview", "##component-study"}:
+            position, size = imgui.get_window_pos(), imgui.get_window_size()
+            panes[label] = (position.x, position.y, size.x, size.y, imgui.get_scroll_y())
+        return result
+
+    def checkbox(label, *args, **kwargs):
+        result = native_checkbox(label, *args, **kwargs)
+        controls[label] = (*imgui.get_item_rect_min(), *imgui.get_item_rect_max())
+        return result
+
+    def diagnostic(ctx, study, candidate):
+        lo = imgui.get_cursor_screen_pos()
+        native_diagnostic(ctx, study, candidate)
+        diagnostics[candidate] = (lo.x, lo.y, *imgui.get_item_rect_max())
+
+    monkeypatch.setattr(imgui, "begin_child", child)
+    monkeypatch.setattr(imgui, "checkbox", checkbox)
+    monkeypatch.setattr(optical, "_diagnostic", diagnostic)
+    config = WindowConfig(
+        width=width,
+        height=height,
+        ui_scale=scale,
+        vsync=False,
+        docking=False,
+        ini_path="",
+        show_on_start=False,
+    )
+    with create_window(config, backend_name) as window:
+        _apply_concept_theme(window.style_scale)
+        state = ProbeState(page="Components", renderer=backend_name)
+        state.components.tab = 1
+        study = state.components.optical
+        study.offsets["helper-camera"] = (0.25, -0.5)
+
+        def frame():
+            window.begin_frame()
+            _draw_workspace(window, state)
+            return window.end_frame(readback=True)[::-1].copy()
+
+        def click_auto():
+            x0, y0, x1, y1 = controls["Auto-align weighted centroid"]
+            px, py, pw, ph, _ = panes["##study-controls"]
+            assert px <= x0 < x1 <= px + pw and py <= y0 < y1 <= py + ph
+            imgui.get_io().add_mouse_pos_event((x0 + x1) / 2, (y0 + y1) / 2)
+            frame()
+            for down in (True, False):
+                imgui.get_io().add_mouse_button_event(0, down)
+                frame()
+
+        def scroll(pane, delta):
+            x, y, w, h, _ = panes[pane]
+            imgui.get_io().add_mouse_pos_event(x + w / 2, y + h / 2)
+            frame()
+            imgui.get_io().add_mouse_wheel_event(0, delta)
+            for _ in range(4):
+                frame()
+
+        for _ in range(4):
+            frame()
+        px, py, pw, ph, _ = panes["##study-preview"]
+        for x0, y0, x1, y1 in diagnostics.values():
+            assert px <= x0 < x1 <= px + pw
+            assert py <= y0 < y1 <= py + ph <= height
+        assert diagnostics[False][2] <= diagnostics[True][0]
+        original_diagnostics = diagnostics.copy()
+        click_auto()
+        assert study.auto_align
+        assert diagnostics == original_diagnostics
+        output = Path("output/ui-optical")
+        output.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(frame()).save(output / f"{backend_name}-{scale}-{width}-compact.png")
+
+        auto_rect = controls["Auto-align weighted centroid"]
+        scroll("##study-preview", -6)
+        assert panes["##study-preview"][4] > 0
+        assert panes["##study-controls"][4] == panes["##component-study"][4] == 0
+        assert controls["Auto-align weighted centroid"] == auto_rect
+        preview_position = panes["##study-preview"]
+        click_auto()
+        assert not study.auto_align
+        assert study.effective_offset("helper-camera") == (0.25, -0.5)
+        assert panes["##study-preview"] == preview_position
+        scroll("##study-controls", -6)
+        assert panes["##study-controls"][4] > 0
+        assert panes["##study-preview"] == preview_position
+        assert panes["##component-study"][4] == 0
+        # Switching studies retains each pane's scroll without moving the tabs.
+        controls_position = panes["##study-controls"]
+        state.components.tab = 0
+        frame()
+        state.components.tab = 1
+        frame()
+        assert panes["##study-controls"] == controls_position
+        assert panes["##study-preview"] == preview_position
+
+
+@pytest.mark.parametrize(
     ("scale", "width", "height"), ((1.0, 1120, 1100), (2.25, 2500, 2400), (1.0, 650, 2000))
 )
 def test_optical_offsets_are_local_interactive_and_survive_glyph_switch(
@@ -114,6 +222,19 @@ def test_optical_offsets_are_local_interactive_and_survive_glyph_switch(
         Image.fromarray(tuned).save(output / f"{backend_name}-{scale}-{width}-candidate.png")
         click("##optical-x", 0.8)
         assert study.offset("helper-camera")[0] > 0.5
+        io = imgui.get_io()
+        modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        for label, value in (("##optical-x", 1.23), ("##optical-y", -0.67)):
+            io.add_key_event(modifier, True)
+            click(label)
+            io.add_key_event(modifier, False)
+            frame()
+            io.add_input_characters_utf8(str(value))
+            frame()
+            for down in (True, False):
+                io.add_key_event(imgui.Key.enter, down)
+                frame()
+        assert study.offset("helper-camera") == pytest.approx((1.23, -0.67))
         before_blur = frame()
         offsets = study.offsets.copy()
         click("##optical-sigma", 0.9)

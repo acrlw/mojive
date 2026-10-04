@@ -24,7 +24,7 @@ def install_key_callback(viewer, callback):
     import glfw
 
     # Preserve deliberate user remaps; new users get the familiar middle-button dolly.
-    if not viewer.app.localizer.preference("input_bindings", {}):
+    if not viewer.app.preferences.get("input_bindings", {}):
         viewer.app.set_navigation_preset("MuJoCo", persist=False)
     groups = (LEFT_PANELS, RIGHT_PANELS)
     saved = {}

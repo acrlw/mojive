@@ -11,10 +11,9 @@ from mojive.ui.compound_fields import draw_joined_field_frame
 from mojive.ui.icons import draw_concept_icon, draw_icon_label
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
-from mojive.ui.keyframe_editor import controls as keyframes_panel_module
+from mojive.ui.keyframe_editor.controls import _draw_command_icon
 from mojive.ui.messages import OutputBuffer
-from mojive.ui.panels import PanelContext, button_row_layout, button_width, search_input
-from mojive.ui.panels import output as output_panel_module
+from mojive.ui.panels import PanelContext, button_row_layout, button_width
 from mojive.ui.panels.hierarchy import disclosure_triangle
 from mojive.ui.panels.value_cards import value_rail
 from mojive.ui.text_layout import text_line_y
@@ -79,20 +78,12 @@ def _draw_keyframes(size, scale: float, state: ProbeState) -> None:
         if state.preview_icon_library
         else draw_icon_label
     )
-    original_icon = keyframes_panel_module._draw_command_icon
-    if state.preview_icon_library:
-        keyframes_panel_module._draw_command_icon = lambda *args, **kwargs: (
-            _draw_icon_library_command_icon(
-                *args,
-                context_scale=scale,
-                state=state,
-                **kwargs,
-            )
-        )
-    try:
-        state.timeline_panel.draw(ctx)
-    finally:
-        keyframes_panel_module._draw_command_icon = original_icon
+    state.timeline_panel.toolbar.command_icon_drawer = (
+        partial(_draw_icon_library_command_icon, context_scale=scale, state=state)
+        if state.preview_icon_library
+        else _draw_command_icon
+    )
+    state.timeline_panel.draw(ctx)
     imgui.end_child()
 
 
@@ -118,20 +109,10 @@ def _draw_output(size, state: ProbeState, scale: float) -> None:
         painter=state.painter,
         output=state.output_buffer,
     )
-    original_search = output_panel_module.search_input
-    if state.preview_icon_library:
-        output_panel_module.search_input = lambda *args, **kwargs: search_input(
-            *args,
-            **kwargs,
-            icon_drawer=lambda *values: _draw_concept_control_icon(
-                *values,
-                state=state,
-            ),
-        )
-    try:
-        state.output_panel.draw(ctx)
-    finally:
-        output_panel_module.search_input = original_search
+    state.output_panel.search_icon_drawer = (
+        partial(_draw_concept_control_icon, state=state) if state.preview_icon_library else None
+    )
+    state.output_panel.draw(ctx)
     imgui.end_child()
 
 

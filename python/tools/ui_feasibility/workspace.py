@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from imgui_bundle import imgui
 
+from mojive.tools.ui_capsule_geometry import end_padding
+from mojive.tools.ui_redesign import draw_redesign
 from mojive.ui import theme as theme_mod
 from mojive.ui.window import Window
 
-from ..ui_capsule_geometry import end_padding
-from ..ui_redesign import draw_redesign
 from .components import draw_components
 from .fixtures import CONCEPT_THEME, VIEW_A, VIEW_B, WORKSPACE_CANVAS_SIZE
 from .geometry import _draw_geometry_page

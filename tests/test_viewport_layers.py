@@ -39,7 +39,7 @@ def test_hiding_controls_cancels_drag_and_persists_without_changing_tool_policy(
     app._precise_gizmo_edit = object()
     app._tool_widget_rect = app._playback_widget_rect = (1, 2, 3, 4)
     app._overlay_drag_kind = "tools"
-    app.localizer = SimpleNamespace(set_preferences=lambda values: events.append(values))
+    app.preferences = SimpleNamespace(update=lambda values: events.append(values))
     app.set_viewport_layers(ViewportLayers(viewport_ui=False, gizmos=False))
     assert events[0] == "cancel"
     assert events[1]["viewport_layers"]["gizmos"] is False

@@ -20,6 +20,8 @@ RADIUS_PT = 34.0
 BALL_PT = 9.5
 MARGIN_PT = 10.0
 LINE_PT = 2.0
+BACKDROP_RADIUS_PT = RADIUS_PT + BALL_PT + LINE_PT
+BACKDROP_COLOR = (22 / 255, 25 / 255, 28 / 255, 0.55)
 ORIGIN_RADIUS_PT = LINE_PT
 ORIGIN_BORDER_PT = LINE_PT * 0.25
 ORIGIN_BORDER_COLOR = (0.65, 0.65, 0.65, 1.0)
@@ -229,13 +231,14 @@ class ViewCube:
         if not self._balls:
             return
 
-        if self._hover is not None:
-            overlay.circle_filled(
-                self._center,
-                (RADIUS_PT + BALL_PT + 2.0) * style_scale,
-                (0.0, 0.0, 0.0, 0.28),
-                segments=32,
-            )
+        # Keep orientation readable over both light and dark scene geometry.
+        # The backdrop is visual only; axis and origin hit regions stay separate.
+        overlay.circle_filled(
+            self._center,
+            BACKDROP_RADIUS_PT * style_scale,
+            BACKDROP_COLOR,
+            segments=64,
+        )
 
         # Leave the shell transparent by shortening shafts. Draw the origin
         # below the balls so an axis-aligned endpoint can cover it naturally.

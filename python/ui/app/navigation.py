@@ -167,10 +167,10 @@ class _Navigation:
         """Set viewport presentation and synchronize its public Session state."""
         self.track_node(None)
         self._leave_model_camera()
+        view = view.with_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
         self.camera.adopt(view, exact=True)
         self.camera.publish(self.camera_out)
         self.select_model_camera(camera_id)
-        view = view.with_aspect(max(self._viewport_rect[2], 1.0) / max(self._viewport_rect[3], 1.0))
         self.backend.set_camera(view)
         self.session.submit(cmd.SetCamera(view))
         if not self._started:

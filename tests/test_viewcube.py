@@ -224,6 +224,9 @@ def test_origin_border_preserves_white_core_and_scales_with_widget(scale, hovere
         def indexed_fill(self, points, indices, color, **kwargs):
             self.disks.append((np.linalg.norm(points, axis=1), color, kwargs))
 
+        def circle_filled(self, *args, **kwargs):
+            pass
+
         def fringed_concave_fill(self, *args, **kwargs):
             pass
 

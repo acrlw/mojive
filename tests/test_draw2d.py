@@ -167,7 +167,8 @@ def native_draw():
     "name", ("tool-rotate", "tool-snap", "key-next", "key-follow-locked", "status-info")
 )
 def test_icon_motion_reuses_local_geometry_and_preserves_submitted_vertices(native_draw, name):
-    from mojive.ui.icons import _icon_draw_commands, draw_icon
+    from mojive.ui.icons import draw_icon
+    from mojive.ui.icons.drawing import _icon_draw_commands
 
     _icon_draw_commands.cache_clear()
     draw_icon(native_draw, (0.0, 0.0), 24.0, name, (1.0, 0.5, 0.2, 0.5))
@@ -659,17 +660,21 @@ def test_viewcube_submits_balls_back_to_front(scale) -> None:
     overlay = RecordingDraw2D()
     cube.draw(overlay, style_scale=scale)
 
-    border, _indices, border_color = overlay.calls[0][1]
+    backdrop_center, backdrop_radius, backdrop_color = overlay.calls[0][1]
+    assert backdrop_center == vc.widget_center(RECT, scale)
+    assert backdrop_radius == pytest.approx(vc.BACKDROP_RADIUS_PT * scale)
+    assert backdrop_color == vc.BACKDROP_COLOR
+    border, _indices, border_color = overlay.calls[1][1]
     assert np.linalg.norm(border, axis=1) == pytest.approx(
         (vc.ORIGIN_RADIUS_PT + vc.ORIGIN_BORDER_PT) * scale
     )
     assert border_color == vc.ORIGIN_BORDER_COLOR
-    outline, _indices, color = overlay.calls[1][1]
+    outline, _indices, color = overlay.calls[2][1]
     radii = np.linalg.norm(outline, axis=1)
     assert radii == pytest.approx(np.full(len(outline), vc.ORIGIN_RADIUS_PT * scale))
     assert radii.min() * 2 >= vc.LINE_PT * scale
     assert color == vc.LABEL_FILL
-    expected: list[str] = ["indexed_fill", "indexed_fill"]
+    expected: list[str] = ["circle_filled", "indexed_fill", "indexed_fill"]
     for ball in cube.balls:  # layout() is already sorted far-to-near
         if ball.alpha <= 0.0:
             continue

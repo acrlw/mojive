@@ -302,6 +302,7 @@ class Keys:
 @dataclass(frozen=True)
 class _ApplyModelEdits:
     commands: tuple
+    label: str = ""
 
 
 @dataclass(frozen=True)

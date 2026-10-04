@@ -189,6 +189,12 @@ Explicit `ViewerConfig` values apply to that viewer instance. Changes made in Se
 as desktop preferences for later viewers created without an explicit config. Runtime
 `configure_*` calls are also instance-local unless passed `persist=True`.
 
+Continuous Settings controls preview values while dragging or typing and save on commit.
+Persistent setters apply the runtime value before saving it. If the save raises `OSError`, the
+current session keeps that value and the previous settings file remains intact. Python and RPC
+callers receive the error; the Settings panel reports that the value applies only to this session
+and could not be saved. A later successful commit saves the current value.
+
 `ViewerConfig(live_model_updates=None)` uses the persisted editor preference, whose default is
 `False`. Set `True` for immediate UI model edits; public Session/RPC commands remain synchronous.
 

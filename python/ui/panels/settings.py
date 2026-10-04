@@ -295,7 +295,7 @@ class SettingsPanel(Panel):
         self._property(t("Language"))
         changed, index = imgui.combo("##ui_language", languages.index(current), labels)
         if changed and ctx.set_language is not None:
-            ctx.set_language(languages[index].value)
+            ctx.apply_setting(ctx.set_language, languages[index].value)
         self._property(t("Model updates"))
         selected = int(not ctx.live_model_updates)
         value = segmented_control(
@@ -305,7 +305,7 @@ class SettingsPanel(Panel):
             theme=ctx.theme,
         )
         if value != selected and ctx.set_live_model_updates is not None:
-            ctx.set_live_model_updates(value == 0)
+            ctx.apply_setting(ctx.set_live_model_updates, value == 0)
         imgui.set_item_tooltip(
             t("Realtime applies each edit. Deferred edits wait for Apply in the viewport.")
         )
@@ -372,9 +372,9 @@ class SettingsPanel(Panel):
                 except ValueError as error:
                     ctx.report(str(error))
                 else:
-                    ctx.set_camera_navigation(config, persist=False)
+                    ctx.apply_setting(ctx.set_camera_navigation, config, persist=False)
             if committed or reset:
-                ctx.set_camera_navigation(config)
+                ctx.apply_setting(ctx.set_camera_navigation, config)
 
         def choice(name, label, choices):
             nonlocal config
@@ -384,7 +384,7 @@ class SettingsPanel(Panel):
                 for value, text in choices:
                     if imgui.selectable(text, current == value)[0]:
                         config = replace(config, **{name: value})
-                        ctx.set_camera_navigation(config)
+                        ctx.apply_setting(ctx.set_camera_navigation, config)
                 imgui.end_combo()
 
         self._group_heading(t("Focus"))
@@ -448,12 +448,27 @@ class SettingsPanel(Panel):
             )
             imgui.end_table()
         if imgui.button(t("Reset camera navigation")):
-            ctx.set_camera_navigation(defaults)
+            ctx.apply_setting(ctx.set_camera_navigation, defaults)
 
     def _recording(self, ctx: PanelContext) -> None:
         config = ctx.recording_config
         if config is None:
             return
+
+        def number(identifier, label, attribute, step, fast_step, tooltip=""):
+            nonlocal config
+            self._property(ctx.tr(label))
+            changed, value = imgui.input_float(
+                f"##{identifier}", getattr(config, attribute), step, fast_step, "%.1f"
+            )
+            committed = imgui.is_item_deactivated_after_edit()
+            if tooltip:
+                imgui.set_item_tooltip(ctx.tr(tooltip))
+            if changed:
+                config = replace(config, **{attribute: value})
+            if changed or committed:
+                ctx.apply_setting(ctx.set_recording_config, config, persist=committed)
+
         if self._begin_properties("settings_recording"):
             self._property(ctx.tr("Copy to clipboard"))
             changed, value = imgui.checkbox("##capture_clipboard", config.copy_to_clipboard)
@@ -462,7 +477,7 @@ class SettingsPanel(Panel):
             )
             if changed:
                 config = replace(config, copy_to_clipboard=value)
-                ctx.set_recording_config(config)
+                ctx.apply_setting(ctx.set_recording_config, config)
             self._property(ctx.tr("Run simulation when recording starts"))
             clock_control = ctx.session.adapter.caps.clock_control
             imgui.begin_disabled(not clock_control)
@@ -474,30 +489,24 @@ class SettingsPanel(Panel):
                 imgui.set_tooltip(ctx.tr("Simulation is controlled by the external application."))
             if changed:
                 config = replace(config, run_simulation=value)
-                ctx.set_recording_config(config)
-            self._property(ctx.tr("Countdown (s)"))
-            changed, value = imgui.input_float(
-                "##recording_delay", config.countdown, 1.0, 5.0, "%.1f"
+                ctx.apply_setting(ctx.set_recording_config, config)
+            number(
+                "recording_delay",
+                "Countdown (s)",
+                "countdown",
+                1.0,
+                5.0,
+                "Set to 0 to start after menus close.",
             )
-            imgui.set_item_tooltip(ctx.tr("Set to 0 to start after menus close."))
-            if changed:
-                config = replace(config, countdown=value)
-                ctx.set_recording_config(config)
-            self._property(ctx.tr("Take end hold (s)"))
-            changed, value = imgui.input_float(
-                "##recording_end_hold", config.end_hold, 0.5, 5.0, "%.1f"
+            number(
+                "recording_end_hold",
+                "Take end hold (s)",
+                "end_hold",
+                0.5,
+                5.0,
+                "Take videos stop automatically after holding the final frame.",
             )
-            imgui.set_item_tooltip(
-                ctx.tr("Take videos stop automatically after holding the final frame.")
-            )
-            if changed:
-                config = replace(config, end_hold=value)
-                ctx.set_recording_config(config)
-            self._property(ctx.tr("Video frame rate"))
-            changed, value = imgui.input_float("##recording_fps", config.fps, 1.0, 10.0, "%.1f")
-            if changed:
-                config = replace(config, fps=value)
-                ctx.set_recording_config(config)
+            number("recording_fps", "Video frame rate", "fps", 1.0, 10.0)
             self._property(ctx.tr("Default capture area"))
             surfaces = tuple(CaptureSurface)
             labels = ("Scene Only", "Viewport with UI", "Entire Window")
@@ -507,7 +516,7 @@ class SettingsPanel(Panel):
                     clicked, _ = imgui.selectable(ctx.tr(label), index == selected)
                     if clicked:
                         config = replace(config, surface=surfaces[index])
-                        ctx.set_recording_config(config)
+                        ctx.apply_setting(ctx.set_recording_config, config)
                 imgui.end_combo()
             imgui.set_item_tooltip(
                 ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
@@ -522,27 +531,27 @@ class SettingsPanel(Panel):
                 for value, label in modes:
                     if imgui.selectable(ctx.tr(label), value == config.rate_control)[0]:
                         config = replace(config, rate_control=value)
-                        ctx.set_recording_config(config)
+                        ctx.apply_setting(ctx.set_recording_config, config)
                 imgui.end_combo()
             imgui.set_item_tooltip(ctx.tr("Encoding settings apply to the next recording."))
             if config.rate_control == "quality":
                 self._property(ctx.tr("Quality (CRF)"))
                 changed, value = imgui.slider_int("##recording_crf", config.crf, 0, 51)
+                committed = imgui.is_item_deactivated_after_edit()
                 imgui.set_item_tooltip(ctx.tr("Lower CRF gives higher quality and larger files."))
                 if changed:
                     config = replace(config, crf=value)
-                    ctx.set_recording_config(config)
+                if changed or committed:
+                    ctx.apply_setting(ctx.set_recording_config, config, persist=committed)
             else:
-                self._property(ctx.tr("Target bitrate (Mbps)"))
-                changed, value = imgui.input_float(
-                    "##recording_bitrate", config.bitrate_mbps, 1.0, 5.0, "%.1f"
+                number(
+                    "recording_bitrate",
+                    "Target bitrate (Mbps)",
+                    "bitrate_mbps",
+                    1.0,
+                    5.0,
+                    "Target average bitrate; actual bitrate varies with the scene.",
                 )
-                imgui.set_item_tooltip(
-                    ctx.tr("Target average bitrate; actual bitrate varies with the scene.")
-                )
-                if changed:
-                    config = replace(config, bitrate_mbps=value)
-                    ctx.set_recording_config(config)
             self._property(ctx.tr("Encoding speed"))
             presets = (("fast", "Fast"), ("medium", "Balanced"), ("slow", "Slow"))
             label = next(label for value, label in presets if value == config.encoder_preset)
@@ -550,7 +559,7 @@ class SettingsPanel(Panel):
                 for value, label in presets:
                     if imgui.selectable(ctx.tr(label), value == config.encoder_preset)[0]:
                         config = replace(config, encoder_preset=value)
-                        ctx.set_recording_config(config)
+                        ctx.apply_setting(ctx.set_recording_config, config)
                 imgui.end_combo()
             imgui.set_item_tooltip(
                 ctx.tr(
@@ -564,7 +573,7 @@ class SettingsPanel(Panel):
                 for value, label in formats:
                     if imgui.selectable(ctx.tr(label), value == config.pixel_format)[0]:
                         config = replace(config, pixel_format=value)
-                        ctx.set_recording_config(config)
+                        ctx.apply_setting(ctx.set_recording_config, config)
                 imgui.end_combo()
             imgui.set_item_tooltip(
                 ctx.tr("4:4:4 preserves fine color detail but requires a compatible player.")
@@ -599,7 +608,7 @@ class SettingsPanel(Panel):
                 )
                 selected = qualities[index]
                 if selected is not current and ctx.set_shadow_quality is not None:
-                    ctx.set_shadow_quality(selected)
+                    ctx.apply_setting(ctx.set_shadow_quality, selected)
                 imgui.end_table()
 
         renderer_flags = flag_groups()[-1][1]
@@ -634,286 +643,289 @@ class SettingsPanel(Panel):
             imgui.end_table()
 
     def _interaction(self, ctx: PanelContext) -> None:
-        t = ctx.tr
         if ctx.interactions is not None:
             self._interaction_policy(ctx)
         if ctx.selection_style is not None:
             self._selection_presentation(ctx)
         if ctx.gizmo is not None:
-            self._group_heading(t("Gizmo"))
-            if self._begin_properties("settings_interaction_gizmo"):
-                self._property(t("Style"))
-                style_index = segmented_control(
-                    "gizmo-style",
-                    ("2D", "3D"),
-                    1 if ctx.gizmo.style == "3d" else 0,
-                    theme=ctx.theme,
-                )
-                ctx.gizmo.set_style("3d" if style_index == 1 else "2d")
-                self._property(t("Orientation"))
-                frame_index = segmented_control(
-                    "gizmo-frame",
-                    (t("Body"), t("World")),
-                    1 if ctx.gizmo.space == "world" else 0,
-                    theme=ctx.theme,
-                )
-                ctx.gizmo.set_space("world" if frame_index == 1 else "body")
-                self._property(t("Overlay size"))
-                changed, overlay_scale = imgui.drag_float(
-                    "##viewport_overlay_scale",
-                    float(ctx.viewport_overlay_scale),
-                    0.02,
-                    MIN_VIEWPORT_OVERLAY_SCALE,
-                    MAX_VIEWPORT_OVERLAY_SCALE,
-                    "%.2fx",
-                )
-                hovered = imgui.is_item_hovered()
-                committed = imgui.is_item_deactivated_after_edit()
-                reset = False
-                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                    changed = True
-                    reset = True
-                    overlay_scale = DEFAULT_VIEWPORT_OVERLAY_SCALE
-                if hovered:
-                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
-                if (changed or committed or reset) and ctx.set_viewport_overlay_scale is not None:
-                    ctx.set_viewport_overlay_scale(
-                        overlay_scale,
-                        persist=committed or reset,
-                    )
-                if ctx.viewport_overlays is not None:
-                    for name, label, value in (
-                        ("playback", "Capsule size", ctx.viewport_overlays.playback_scale),
-                    ):
-                        self._property(t(label))
-                        changed, relative_scale = imgui.drag_float(
-                            f"##viewport_{name}_scale",
-                            float(value),
-                            0.02,
-                            MIN_VIEWPORT_CAPSULE_SCALE,
-                            MAX_VIEWPORT_CAPSULE_SCALE,
-                            "%.2fx",
-                        )
-                        hovered = imgui.is_item_hovered()
-                        committed = imgui.is_item_deactivated_after_edit()
-                        reset = False
-                        if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                            changed, relative_scale, reset = True, 1.0, True
-                        if hovered:
-                            imgui.set_tooltip(
-                                pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset"))
-                            )
-                        if (
-                            changed or committed or reset
-                        ) and ctx.set_viewport_capsule_scale is not None:
-                            ctx.set_viewport_capsule_scale(
-                                name,
-                                relative_scale,
-                                persist=committed or reset,
-                            )
-                    self._property(t("Status duration"))
-                    changed, duration = imgui.slider_float(
-                        "##viewport_status_duration",
-                        ctx.viewport_overlays.status_duration,
-                        3.0,
-                        5.0,
-                        "%.1f s",
-                    )
-                    if changed and ctx.set_viewport_overlays is not None:
-                        ctx.set_viewport_overlays(
-                            replace(ctx.viewport_overlays, status_duration=duration), persist=True
-                        )
-                    self._property(t("Movable capsules"))
-                    changed, movable = themed_checkbox(
-                        "##viewport_capsules_movable",
-                        bool(ctx.viewport_overlays.movable),
-                        ctx.theme,
-                    )
-                    if changed and ctx.set_viewport_overlays is not None:
-                        ctx.set_viewport_overlays(
-                            replace(ctx.viewport_overlays, movable=movable), persist=True
-                        )
-                imgui.end_table()
-
-            self._group_heading(t("Input"))
-            if self._begin_properties("settings_interaction_input"):
-                self._property(t("Keep mode/unit"))
-                changed, remember = themed_checkbox(
-                    "##remember_precise_input_choices",
-                    bool(ctx.gizmo.remember_precise_input_choices),
-                    ctx.theme,
-                )
-                imgui.set_item_tooltip(
-                    t("Reuse the last relative/absolute mode and angle unit across editor sessions")
-                )
-                if changed:
-                    if ctx.set_precise_input_memory is not None:
-                        ctx.set_precise_input_memory(remember)
-                    else:
-                        ctx.gizmo.remember_precise_input_choices = remember
-                imgui.end_table()
-
+            self._gizmo_settings(ctx)
+            self._precise_input_settings(ctx)
             if ctx.input_bindings is not None:
                 self._shortcut_settings(ctx)
-
-            self._group_heading(t("Snap · Shift"))
-            if self._begin_properties("settings_interaction_snap"):
-                self._property(t("Position"))
-                changed, step = imgui.drag_float(
-                    "##position_snap",
-                    float(ctx.gizmo.translation_snap_m),
-                    0.01,
-                    0.01,
-                    100.0,
-                    "%.3f m",
-                )
-                hovered = imgui.is_item_hovered()
-                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                    changed, step = True, DEFAULT_TRANSLATION_SNAP_M
-                if hovered:
-                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
-                if changed:
-                    ctx.gizmo.translation_snap_m = step
-
-                self._property(t("Rotation"))
-                changed, step = imgui.drag_float(
-                    "##rotation_snap",
-                    float(ctx.gizmo.rotation_snap_deg),
-                    0.1,
-                    0.5,
-                    180.0,
-                    "%.1f deg",
-                )
-                hovered = imgui.is_item_hovered()
-                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                    changed, step = True, DEFAULT_ROTATION_SNAP_DEG
-                if hovered:
-                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
-                if changed:
-                    ctx.gizmo.rotation_snap_deg = step
-
-                self._property(t("Tick scale"))
-                changed, tick_scale = imgui.drag_float(
-                    "##rotation_tick_scale",
-                    float(ctx.gizmo.rotation_tick_scale),
-                    0.05,
-                    0.5,
-                    3.0,
-                    "%.2fx",
-                )
-                hovered = imgui.is_item_hovered()
-                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                    changed, tick_scale = True, DEFAULT_ROTATION_TICK_SCALE
-                if hovered:
-                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
-                if changed:
-                    ctx.gizmo.rotation_tick_scale = tick_scale
-                imgui.end_table()
-
+            self._snap_settings(ctx)
         if ctx.view_cube is not None:
-            self._group_heading(t("View"))
-            if self._begin_properties("settings_interaction_view"):
-                self._property(t("Padding"))
-                changed, padding = imgui.drag_float(
-                    "##view_selection_padding",
-                    float(ctx.view_cube.selection_padding),
-                    0.02,
-                    MIN_SELECTION_PADDING,
-                    MAX_SELECTION_PADDING,
-                    "%.2fx",
-                )
-                hovered = imgui.is_item_hovered()
-                committed = imgui.is_item_deactivated_after_edit()
-                reset = False
-                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                    changed, padding = True, DEFAULT_SELECTION_PADDING
-                    reset = True
-                if hovered:
-                    imgui.set_tooltip(
-                        t("1x is a tight fit; larger values move the view farther away")
-                    )
-                if changed:
-                    ctx.view_cube.selection_padding = padding
-                if ctx.set_view_selection_padding is not None and (committed or reset):
-                    ctx.set_view_selection_padding(ctx.view_cube.selection_padding)
-                imgui.end_table()
-
+            self._view_settings(ctx)
         if ctx.perturb is not None:
-            self._group_heading(t("Perturb"))
-            if self._begin_properties("settings_interaction_perturb"):
-                supported = ctx.session.adapter.caps.supports("physics.perturb_strength")
-                imgui.begin_disabled(not supported)
-                for attribute, label in (
-                    ("force_scale", "Drag force scale"),
-                    ("torque_scale", "Twist torque scale"),
-                ):
-                    self._property(t(label))
-                    changed, value = imgui.drag_float(
-                        f"##perturb_{attribute}",
-                        float(getattr(ctx.perturb, attribute)),
-                        0.05,
-                        0.0,
-                        MAX_PERTURB_SCALE,
-                        "%.2fx",
-                        imgui.SliderFlags_.always_clamp,
-                    )
-                    committed = imgui.is_item_deactivated_after_edit()
-                    hovered = imgui.is_item_hovered()
-                    reset = hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET)
-                    if reset:
-                        changed, value = True, DEFAULT_PERTURB_SCALE
-                    if hovered:
-                        imgui.set_tooltip(
-                            t(
-                                "1x uses the default force or torque; 0x disables it. Saved for future sessions."
-                            )
-                        )
-                    if changed:
-                        setattr(ctx.perturb, attribute, value)
-                    if ctx.set_perturb_strength is not None and (committed or reset):
-                        ctx.set_perturb_strength(ctx.perturb.force_scale, ctx.perturb.torque_scale)
-                imgui.end_disabled()
-                self._property(t("Corner radius"))
-                changed, radius = imgui.drag_float(
-                    "##perturb_corner_radius",
-                    float(ctx.perturb.outline_corner_radius_pt),
-                    0.1,
-                    0.0,
-                    24.0,
-                    "%.1f px",
-                )
-                hovered = imgui.is_item_hovered()
-                if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
-                    changed = True
-                    radius = OUTLINE_CORNER_RADIUS_PT
-                if hovered:
-                    imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
-                if changed:
-                    ctx.perturb.outline_corner_radius_pt = radius
-                imgui.end_table()
-
+            self._perturb_settings(ctx)
         if ctx.scene_entities is not None:
-            self._group_heading(t("Helpers"))
-            if self._begin_properties("settings_interaction_helpers"):
-                self._property(t("Camera & light icons"))
-                changed, visible = themed_checkbox(
-                    "##scene_entity_helpers",
-                    ctx.scene_entities.visible,
-                    ctx.theme,
-                )
-                if changed:
-                    ctx.scene_entities.visible = visible
-                self._property(t("Selected frustum / light range"))
-                imgui.begin_disabled(not ctx.scene_entities.visible)
-                changed, influence = themed_checkbox(
-                    "##selected_influence_volumes",
-                    ctx.scene_entities.show_influence,
-                    ctx.theme,
-                )
-                imgui.end_disabled()
-                if changed:
-                    ctx.scene_entities.show_influence = influence
-                imgui.end_table()
+            self._helper_settings(ctx)
+
+    def _number_setting(
+        self,
+        ctx: PanelContext,
+        identifier: str,
+        label: str,
+        value: float,
+        *,
+        speed: float,
+        low: float,
+        high: float,
+        fmt: str,
+        default: float,
+        tooltip: str = "",
+        clamp: bool = False,
+    ) -> tuple[bool, float, bool]:
+        """Return preview and commit phases without owning or saving the setting."""
+        self._property(ctx.tr(label))
+        changed, edited = imgui.drag_float(
+            identifier,
+            float(value),
+            speed,
+            low,
+            high,
+            fmt,
+            imgui.SliderFlags_.always_clamp if clamp else 0,
+        )
+        committed = imgui.is_item_deactivated_after_edit()
+        hovered = imgui.is_item_hovered()
+        reset = hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET)
+        if reset:
+            changed, edited = True, default
+        if hovered:
+            imgui.set_tooltip(
+                ctx.tr(tooltip)
+                if tooltip
+                else pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset"))
+            )
+        # Idle float widgets may round-trip through float32. A commit on release
+        # must retain the last accepted preview rather than replacing its precision.
+        return changed, edited if changed else value, committed or reset
+
+    def _gizmo_settings(self, ctx: PanelContext) -> None:
+        t = ctx.tr
+        self._group_heading(t("Gizmo"))
+        if not self._begin_properties("settings_interaction_gizmo"):
+            return
+        self._property(t("Style"))
+        style = segmented_control(
+            "gizmo-style", ("2D", "3D"), 1 if ctx.gizmo.style == "3d" else 0, theme=ctx.theme
+        )
+        ctx.gizmo.set_style("3d" if style == 1 else "2d")
+        self._property(t("Orientation"))
+        frame = segmented_control(
+            "gizmo-frame",
+            (t("Body"), t("World")),
+            1 if ctx.gizmo.space == "world" else 0,
+            theme=ctx.theme,
+        )
+        ctx.gizmo.set_space("world" if frame == 1 else "body")
+        changed, value, committed = self._number_setting(
+            ctx,
+            "##viewport_overlay_scale",
+            "Overlay size",
+            ctx.viewport_overlay_scale,
+            speed=0.02,
+            low=MIN_VIEWPORT_OVERLAY_SCALE,
+            high=MAX_VIEWPORT_OVERLAY_SCALE,
+            fmt="%.2fx",
+            default=DEFAULT_VIEWPORT_OVERLAY_SCALE,
+        )
+        if (changed or committed) and ctx.set_viewport_overlay_scale is not None:
+            ctx.apply_setting(ctx.set_viewport_overlay_scale, value, persist=committed)
+        if ctx.viewport_overlays is not None:
+            self._capsule_settings(ctx)
+        imgui.end_table()
+
+    def _capsule_settings(self, ctx: PanelContext) -> None:
+        overlays = ctx.viewport_overlays
+        changed, value, committed = self._number_setting(
+            ctx,
+            "##viewport_playback_scale",
+            "Capsule size",
+            overlays.playback_scale,
+            speed=0.02,
+            low=MIN_VIEWPORT_CAPSULE_SCALE,
+            high=MAX_VIEWPORT_CAPSULE_SCALE,
+            fmt="%.2fx",
+            default=1.0,
+        )
+        if (changed or committed) and ctx.set_viewport_capsule_scale is not None:
+            ctx.apply_setting(ctx.set_viewport_capsule_scale, "playback", value, persist=committed)
+            overlays = replace(overlays, playback_scale=value, tool_scale=value)
+        self._property(ctx.tr("Status duration"))
+        changed, duration = imgui.slider_float(
+            "##viewport_status_duration", overlays.status_duration, 3.0, 5.0, "%.1f s"
+        )
+        committed = imgui.is_item_deactivated_after_edit()
+        if changed:
+            overlays = replace(overlays, status_duration=duration)
+        if (changed or committed) and ctx.set_viewport_overlays is not None:
+            ctx.apply_setting(ctx.set_viewport_overlays, overlays, persist=committed)
+        self._property(ctx.tr("Movable capsules"))
+        changed, movable = themed_checkbox(
+            "##viewport_capsules_movable", bool(overlays.movable), ctx.theme
+        )
+        if changed and ctx.set_viewport_overlays is not None:
+            ctx.apply_setting(ctx.set_viewport_overlays, replace(overlays, movable=movable))
+
+    def _precise_input_settings(self, ctx: PanelContext) -> None:
+        self._group_heading(ctx.tr("Input"))
+        if not self._begin_properties("settings_interaction_input"):
+            return
+        self._property(ctx.tr("Keep mode/unit"))
+        changed, remember = themed_checkbox(
+            "##remember_precise_input_choices",
+            bool(ctx.gizmo.remember_precise_input_choices),
+            ctx.theme,
+        )
+        imgui.set_item_tooltip(
+            ctx.tr("Reuse the last relative/absolute mode and angle unit across editor sessions")
+        )
+        if changed:
+            if ctx.set_precise_input_memory is not None:
+                ctx.apply_setting(ctx.set_precise_input_memory, remember)
+            else:
+                ctx.gizmo.remember_precise_input_choices = remember
+        imgui.end_table()
+
+    def _snap_settings(self, ctx: PanelContext) -> None:
+        self._group_heading(ctx.tr("Snap · Shift"))
+        if not self._begin_properties("settings_interaction_snap"):
+            return
+        for identifier, label, attribute, speed, low, high, fmt, default in (
+            (
+                "position_snap",
+                "Position",
+                "translation_snap_m",
+                0.01,
+                0.01,
+                100.0,
+                "%.3f m",
+                DEFAULT_TRANSLATION_SNAP_M,
+            ),
+            (
+                "rotation_snap",
+                "Rotation",
+                "rotation_snap_deg",
+                0.1,
+                0.5,
+                180.0,
+                "%.1f deg",
+                DEFAULT_ROTATION_SNAP_DEG,
+            ),
+            (
+                "rotation_tick_scale",
+                "Tick scale",
+                "rotation_tick_scale",
+                0.05,
+                0.5,
+                3.0,
+                "%.2fx",
+                DEFAULT_ROTATION_TICK_SCALE,
+            ),
+        ):
+            changed, value, _ = self._number_setting(
+                ctx,
+                f"##{identifier}",
+                label,
+                getattr(ctx.gizmo, attribute),
+                speed=speed,
+                low=low,
+                high=high,
+                fmt=fmt,
+                default=default,
+            )
+            if changed:
+                setattr(ctx.gizmo, attribute, value)
+        imgui.end_table()
+
+    def _view_settings(self, ctx: PanelContext) -> None:
+        self._group_heading(ctx.tr("View"))
+        if not self._begin_properties("settings_interaction_view"):
+            return
+        changed, value, committed = self._number_setting(
+            ctx,
+            "##view_selection_padding",
+            "Padding",
+            ctx.view_cube.selection_padding,
+            speed=0.02,
+            low=MIN_SELECTION_PADDING,
+            high=MAX_SELECTION_PADDING,
+            fmt="%.2fx",
+            default=DEFAULT_SELECTION_PADDING,
+            tooltip="1x is a tight fit; larger values move the view farther away",
+        )
+        if changed or committed:
+            if ctx.set_view_selection_padding is not None:
+                ctx.apply_setting(ctx.set_view_selection_padding, value, persist=committed)
+            elif changed:
+                ctx.view_cube.selection_padding = value
+        imgui.end_table()
+
+    def _perturb_settings(self, ctx: PanelContext) -> None:
+        self._group_heading(ctx.tr("Perturb"))
+        if not self._begin_properties("settings_interaction_perturb"):
+            return
+        imgui.begin_disabled(not ctx.session.adapter.caps.supports("physics.perturb_strength"))
+        for attribute, label in (
+            ("force_scale", "Drag force scale"),
+            ("torque_scale", "Twist torque scale"),
+        ):
+            changed, value, committed = self._number_setting(
+                ctx,
+                f"##perturb_{attribute}",
+                label,
+                getattr(ctx.perturb, attribute),
+                speed=0.05,
+                low=0.0,
+                high=MAX_PERTURB_SCALE,
+                fmt="%.2fx",
+                default=DEFAULT_PERTURB_SCALE,
+                clamp=True,
+                tooltip="1x uses the default force or torque; 0x disables it. Saved for future sessions.",
+            )
+            if changed or committed:
+                if ctx.set_perturb_strength is not None:
+                    force = value if attribute == "force_scale" else ctx.perturb.force_scale
+                    torque = value if attribute == "torque_scale" else ctx.perturb.torque_scale
+                    ctx.apply_setting(ctx.set_perturb_strength, force, torque, persist=committed)
+                elif changed:
+                    setattr(ctx.perturb, attribute, value)
+        imgui.end_disabled()
+        changed, value, _ = self._number_setting(
+            ctx,
+            "##perturb_corner_radius",
+            "Corner radius",
+            ctx.perturb.outline_corner_radius_pt,
+            speed=0.1,
+            low=0.0,
+            high=24.0,
+            fmt="%.1f px",
+            default=OUTLINE_CORNER_RADIUS_PT,
+        )
+        if changed:
+            ctx.perturb.outline_corner_radius_pt = value
+        imgui.end_table()
+
+    def _helper_settings(self, ctx: PanelContext) -> None:
+        self._group_heading(ctx.tr("Helpers"))
+        if not self._begin_properties("settings_interaction_helpers"):
+            return
+        self._property(ctx.tr("Camera & light icons"))
+        changed, visible = themed_checkbox(
+            "##scene_entity_helpers", ctx.scene_entities.visible, ctx.theme
+        )
+        if changed:
+            ctx.scene_entities.visible = visible
+        self._property(ctx.tr("Selected frustum / light range"))
+        imgui.begin_disabled(not ctx.scene_entities.visible)
+        changed, influence = themed_checkbox(
+            "##selected_influence_volumes", ctx.scene_entities.show_influence, ctx.theme
+        )
+        imgui.end_disabled()
+        if changed:
+            ctx.scene_entities.show_influence = influence
+        imgui.end_table()
 
     def _interaction_policy(self, ctx: PanelContext) -> None:
         t = ctx.tr
@@ -925,14 +937,14 @@ class SettingsPanel(Panel):
             config = replace(config, **{attribute: value})
             ctx.interactions = config
             if ctx.set_interactions is not None:
-                ctx.set_interactions(config)
+                ctx.apply_setting(ctx.set_interactions, config)
 
         def update_camera(attribute: str, value: bool) -> None:
             nonlocal config
             config = replace(config, camera=replace(config.camera, **{attribute: value}))
             ctx.interactions = config
             if ctx.set_interactions is not None:
-                ctx.set_interactions(config)
+                ctx.apply_setting(ctx.set_interactions, config)
 
         def update_selection(attribute: str, value: bool) -> None:
             nonlocal config
@@ -942,7 +954,7 @@ class SettingsPanel(Panel):
             )
             ctx.interactions = config
             if ctx.set_interactions is not None:
-                ctx.set_interactions(config)
+                ctx.apply_setting(ctx.set_interactions, config)
 
         rows = (
             ("Camera orbit", config.camera.orbit, update_camera, "orbit"),
@@ -1025,7 +1037,7 @@ class SettingsPanel(Panel):
                 style = replace(style, **{attribute: value})
                 ctx.selection_style = style
                 if ctx.set_selection_style is not None:
-                    ctx.set_selection_style(style)
+                    ctx.apply_setting(ctx.set_selection_style, style)
         imgui.end_table()
 
     def _shortcut_settings(self, ctx: PanelContext) -> None:
@@ -1052,13 +1064,15 @@ class SettingsPanel(Panel):
             imgui.set_item_tooltip(t("A key already in use swaps the two actions"))
             if changed and ctx.set_input_binding is not None:
                 try:
-                    ctx.set_input_binding(action, identifiers[index])
+                    ctx.apply_setting(ctx.set_input_binding, action, identifiers[index])
                     self._pointer_error = ""
                 except ValueError as error:
                     self._pointer_error = str(error)
         self._property("")
         if imgui.button(t("Reset shortcuts")) and ctx.reset_input_bindings is not None:
-            ctx.reset_input_bindings()
+            ctx.apply_setting(
+                ctx.reset_input_bindings,
+            )
         imgui.end_table()
         self._mouse_shortcuts(ctx)
 
@@ -1079,7 +1093,7 @@ class SettingsPanel(Panel):
                 for name in NAVIGATION_PRESETS:
                     if imgui.selectable(name, False)[0] and ctx.set_navigation_preset is not None:
                         try:
-                            ctx.set_navigation_preset(name)
+                            ctx.apply_setting(ctx.set_navigation_preset, name)
                             self._pointer_error = ""
                         except ValueError as error:
                             self._pointer_error = str(error)
@@ -1103,8 +1117,10 @@ class SettingsPanel(Panel):
                 self._pointer_text[action] = value
                 if submitted and ctx.set_pointer_binding is not None:
                     try:
-                        ctx.set_pointer_binding(
-                            action, tuple(part.strip() for part in value.split(";") if part.strip())
+                        ctx.apply_setting(
+                            ctx.set_pointer_binding,
+                            action,
+                            tuple(part.strip() for part in value.split(";") if part.strip()),
                         )
                         self._pointer_error = ""
                     except ValueError as error:
@@ -1139,6 +1155,7 @@ class SettingsPanel(Panel):
         ):
             return
         style = ctx.backend.get_contact_style()
+        committed = False
         if self._begin_properties("contact_style_properties"):
             self._property(t("Show contact points"))
             changed, enabled = themed_checkbox(
@@ -1151,6 +1168,7 @@ class SettingsPanel(Panel):
                 for shape in ("cylinder", "sphere", "point"):
                     if imgui.selectable(shape.title(), style.shape == shape)[0]:
                         style = replace(style, shape=shape)
+                        committed = True
                 imgui.end_combo()
             self._property(t("Use model color"))
             changed, use_model_color = themed_checkbox(
@@ -1158,9 +1176,11 @@ class SettingsPanel(Panel):
             )
             if changed:
                 style = replace(style, use_model_color=use_model_color)
+                committed = True
             self._property(t("Color"))
             imgui.begin_disabled(style.use_model_color)
             changed, color = imgui.color_edit4("##contact_color", style.color)
+            committed |= imgui.is_item_deactivated_after_edit()
             imgui.end_disabled()
             if changed:
                 style = replace(style, color=tuple(color))
@@ -1169,6 +1189,7 @@ class SettingsPanel(Panel):
             changed, scale = imgui.slider_float(
                 "##contact_scale", style.scale, 0.1, 10, "%.2fx", imgui.SliderFlags_.always_clamp
             )
+            committed |= imgui.is_item_deactivated_after_edit()
             if changed:
                 try:
                     style = replace(style, scale=scale)
@@ -1177,9 +1198,12 @@ class SettingsPanel(Panel):
             imgui.end_table()
         if imgui.button(t("Reset contact style")):
             style = ContactStyle()
-        if style != ctx.backend.get_contact_style():
-            setter = ctx.set_contact_style or ctx.backend.set_contact_style
-            setter(style)
+            committed = True
+        if committed or style != ctx.backend.get_contact_style():
+            if ctx.set_contact_style is not None:
+                ctx.apply_setting(ctx.set_contact_style, style, persist=committed)
+            else:
+                ctx.backend.set_contact_style(style)
 
     def _geometry_style(self, ctx: PanelContext) -> None:
         if not imgui.collapsing_header(
@@ -1187,9 +1211,11 @@ class SettingsPanel(Panel):
         ):
             return
         style = ctx.backend.get_geometry_style()
+        committed = False
         if self._begin_properties("geometry_style_properties"):
             self._property(ctx.tr("Collision color"))
             changed, color = imgui.color_edit3("##collision_color", style.collision_color)
+            committed |= imgui.is_item_deactivated_after_edit()
             if changed:
                 style = replace(style, collision_color=tuple(color))
             for name, label in (
@@ -1200,12 +1226,15 @@ class SettingsPanel(Panel):
                 changed, opacity = imgui.slider_float(
                     f"##{name}", getattr(style, name), 0.0, 1.0, "%.2f"
                 )
+                committed |= imgui.is_item_deactivated_after_edit()
                 if changed:
                     style = replace(style, **{name: opacity})
             imgui.end_table()
-        if style != ctx.backend.get_geometry_style():
-            setter = ctx.set_geometry_style or ctx.backend.set_geometry_style
-            setter(style)
+        if committed or style != ctx.backend.get_geometry_style():
+            if ctx.set_geometry_style is not None:
+                ctx.apply_setting(ctx.set_geometry_style, style, persist=committed)
+            else:
+                ctx.backend.set_geometry_style(style)
 
     @staticmethod
     def _begin_toggle_grid(str_id: str, labels: tuple[str, ...]) -> bool:

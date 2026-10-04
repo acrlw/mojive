@@ -57,8 +57,9 @@ class OutputPanel(Panel):
     closable = False
     dock_with = "Stats"
 
-    def __init__(self) -> None:
+    def __init__(self, *, search_icon_drawer=None) -> None:
         super().__init__()
+        self.search_icon_drawer = search_icon_drawer
         self.collapsed = False
         self._last_sequence = 0
         self._filter_text = ""
@@ -189,6 +190,7 @@ class OutputPanel(Panel):
             hint=ctx.tr("Filter text or component..."),
             search_tooltip=ctx.tr("Search output"),
             clear_tooltip=ctx.tr("Clear search"),
+            icon_drawer=self.search_icon_drawer,
         )
         if changed:
             self._last_sequence = 0

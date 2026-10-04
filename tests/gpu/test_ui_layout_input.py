@@ -327,6 +327,41 @@ def test_escape_dismisses_menu_without_clearing_selection(viewer):
     assert viewer.session.selected_node is None
 
 
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_main_menu_actions_create_undo_redo_and_open_panels(tmp_path, monkeypatch, language):
+    from mojive import Scene, build_scene
+    from mojive.tools.ui_runtime import _click, _item_center, _open_main_menu, _settle
+
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    with build_scene(Scene(), width=1280, height=900, vsync=False, show_window=False) as viewer:
+        viewer.app.set_language(language)
+        _settle(viewer, 6)
+        tr = viewer.app.localizer.text
+
+        def choose(menu, action):
+            _open_main_menu(viewer, tr(menu))
+            _click(viewer, _item_center(viewer, "menu_item", tr(action)))
+            assert not imgui.get_current_context().open_popup_stack
+
+        _open_main_menu(viewer, tr("Entity"))
+        _open_main_menu(viewer, tr("Create"))
+        _click(viewer, _item_center(viewer, "menu_item", tr("Box")))
+        assert not imgui.get_current_context().open_popup_stack
+        assert viewer.session.selected_node.name == "box"
+        assert sum(node.name == "box" for node in viewer.session.nodes) == 1
+        choose("Edit", "Undo")
+        assert not any(node.name == "box" for node in viewer.session.nodes)
+        choose("Edit", "Redo")
+        assert sum(node.name == "box" for node in viewer.session.nodes) == 1
+        choose("Edit", "Settings...")
+        assert viewer.panels.get("Settings").open
+        choose("Help", "Interaction Reference")
+        assert viewer.panels.get("Help").open
+        choose("Window", "Layers")
+        assert viewer.panels.get("Layers").open
+
+
 def test_wrapped_checkbox_label_and_keyboard_activate_the_same_control(viewer, monkeypatch):
     from mojive.tools.ui_runtime import _activate_panel, _click
     from mojive.ui.panels import themed_checkbox

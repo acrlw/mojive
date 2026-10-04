@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import math
-from functools import lru_cache
-
-import numpy as np
 from imgui_bundle import imgui
 
-from mojive.geometry2d.curves import CORNER_SMOOTHING, capped_polyline_points, circular_stroke_mesh
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.severity_icons import severity_icon
+from mojive.ui.severity_icons import severity_meshes as severity_meshes
 from mojive.ui.text_layout import text_line_y
 
 from . import PanelContext, button_row_layout
@@ -40,116 +37,6 @@ def node_filter_color(theme, kind):
         "flex": theme.info,
         "skin": theme.node_color("site"),
     }.get(str(kind), theme.node_color(kind))
-
-
-# Author the family on one grid, then scale every dimension together.
-_ICON_GRID = 24.0
-_FRAME_DIAMETER = 22.56
-_FRAME_STROKE = 1.32
-_MARK_STROKE = 1.74
-_DOT_DIAMETER = _MARK_STROKE * 1.18
-_STEM_HEIGHT = 6.96
-_MARK_GAP = 1.74
-_MARK_PADDING = 0.60
-
-
-def _circle_outline(radius: float, count: int):
-    return tuple(
-        (
-            radius * math.cos(index * math.tau / count),
-            radius * math.sin(index * math.tau / count),
-        )
-        for index in range(count)
-    )
-
-
-def _place_interior_mark(contours, inner, padding):
-    """Center the visible mark bounds and fit them inside the frame clearance."""
-    boundary = np.asarray(inner, np.float64)
-    following = np.roll(boundary, -1, axis=0)
-    cross = boundary[:, 0] * following[:, 1] - following[:, 0] * boundary[:, 1]
-    center = (boundary.min(axis=0) + boundary.max(axis=0)) * 0.5
-    edges = following - boundary
-    inward = np.stack((-edges[:, 1], edges[:, 0]), axis=1) * np.sign(cross.sum())
-    lengths = np.linalg.norm(inward, axis=1)
-    inward /= lengths[:, None]
-    ink = np.concatenate(contours)
-    offset = (ink.min(axis=0) + ink.max(axis=0)) * 0.5
-    ink -= offset
-    available = np.sum((center - boundary) * inward, axis=1) - padding
-    extent = np.maximum(-(inward @ ink.T).min(axis=1), 1e-9)
-    factor = min(1.0, float(np.min(available / extent)))
-    return tuple((np.asarray(points) - offset) * factor + center for points in contours)
-
-
-@lru_cache(maxsize=96)
-def severity_meshes(size: float, kind: str, smoothing: float = CORNER_SMOOTHING):
-    """Cache filled contours for one severity glyph at its displayed pixel size.
-
-    The glyph is authored on a 24-unit grid. Frame, stroke, mark, gap, and clearance
-    all use the same scale so smaller Output glyphs retain the large glyph's proportions.
-    """
-
-    scale = size / _ICON_GRID
-    stroke = _FRAME_STROKE * scale
-    radius = _FRAME_DIAMETER * scale * 0.5 - stroke * 0.5
-    ring = circular_stroke_mesh(radius, stroke, max(32, math.ceil(size * 2)))
-    inner = ring[3]
-    meshes = [ring]
-
-    def solid(points):
-        points = tuple(map(tuple, points))
-        indices = tuple(v for i in range(1, len(points) - 1) for v in (0, i, i + 1))
-        meshes.append((points, indices, points, ()))
-
-    inner_radius = radius - stroke * 0.5
-    # One internal stroke unit keeps i, !, their dots, and the cross visibly related.
-    inner_stroke = _MARK_STROKE * scale
-
-    def stem(a, b):
-        return np.asarray(
-            capped_polyline_points(
-                (a, b), inner_stroke, round_start=True, round_end=True, smoothing=smoothing
-            )
-        )
-
-    if kind == "error":
-        # Two diagonals carry more ink than one stem, so control their visual
-        # weight through length while preserving the shared stroke width.
-        reach = inner_radius * 0.34
-        contours = (stem((-reach, -reach), (reach, reach)), stem((-reach, reach), (reach, -reach)))
-    else:
-        # A small circular dot loses visible area to antialiasing on every edge,
-        # so give it slight optical overshoot relative to the shared stem width.
-        dot_radius = _DOT_DIAMETER * scale * 0.5
-        dot = np.asarray(_circle_outline(dot_radius, 32))
-        bar_height = _STEM_HEIGHT * scale
-        axis_half = (bar_height - inner_stroke) * 0.5
-        gap = _MARK_GAP * scale
-        bar = stem((0.0, -axis_half), (0.0, axis_half))
-        bar[:, 1] += dot_radius + gap - bar[:, 1].min()
-        if kind == "warning":
-            # Reflect i into ! before balancing the ink against the frame interior.
-            bar[:, 1] *= -1
-            bar = bar[::-1]
-        contours = (dot, bar)
-    for contour in _place_interior_mark(contours, inner, _MARK_PADDING * scale):
-        solid(contour)
-    return tuple(meshes)
-
-
-def severity_icon(draw, center, size: float, kind: str, color) -> None:
-    """Draw one severity glyph centered on the requested point.
-
-    Every severity uses the same circular frame, optical size, and baseline.
-    """
-
-    density = imgui.get_io().display_framebuffer_scale
-    fringe = 1.0 / max(1.0, density.x, density.y)
-    for vertices, indices, outline, hole in severity_meshes(size, kind, draw.corner_smoothing):
-        draw.indexed_fill(
-            vertices, indices, color, outline=outline, hole=hole, origin=center, fringe_width=fringe
-        )
 
 
 def filter_pills(

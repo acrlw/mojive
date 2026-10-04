@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from mojive.geometry2d.curves import CORNER_SMOOTHING
+from mojive.tools.ui_capsule_geometry import CAPSULE_SMOOTHING
+from mojive.tools.ui_redesign import RedesignState
 from mojive.ui import gizmo as gizmo_ui
 from mojive.ui import theme as theme_mod
 from mojive.ui.icons import (
@@ -35,10 +37,9 @@ from mojive.ui.perturb import OUTLINE_CORNER_RADIUS_PT
 from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING
 from mojive.ui.viewport_widgets import DEFAULT_VIEWPORT_OVERLAY_SCALE, OVERLAY_GEOMETRY
 
-from ..ui_capsule_geometry import CAPSULE_SMOOTHING
-from ..ui_redesign import RedesignState
 from .components import ComponentStudy
 from .icon_alignment import candidate_centroid, update_manual_offset
+from .svg_icons import SvgStudy
 
 
 @dataclass
@@ -48,6 +49,7 @@ class ProbeState:
     page: str = "Workspace"
     redesign: RedesignState = field(default_factory=RedesignState)
     components: ComponentStudy = field(default_factory=ComponentStudy)
+    svg: SvgStudy = field(default_factory=SvgStudy)
     imgui_rounding: float = theme_mod.DEFAULT_CORNER_RADIUS
     imgui_example_value: float = 0.0
     imgui_example_enabled: bool = True
@@ -65,6 +67,8 @@ class ProbeState:
     geometry_tab_initialized: bool = False
     icon_library_tab: str = "Overview"
     icon_glyph: str | None = None
+    icon_circle_style: str = "outline"
+    icon_square_style: str = "outline"
     preview_icon_library: bool = False
     show_playback: bool = True
     show_tool_column: bool = True
@@ -154,7 +158,7 @@ class ProbeState:
     apply_icon_offsets: bool = True
     link_mirrored_icon_offsets: bool = True
     icon_auto_align: bool = False
-    icon_alignment_strength: float = 1.0
+    icon_alignment_strength: float = 2.5
     show_icon_centroids: bool = False
     icon_stroke_by_group: dict[str, float] = field(
         default_factory=lambda: dict(ICON_GROUP_STROKE_DEFAULTS)

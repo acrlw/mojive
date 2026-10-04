@@ -8,61 +8,17 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-CAPSULE_SMOOTHING = 0.382
+from ..overlay_geometry import _ROTATE_HALF_RINGS as _ROTATE_HALF_RINGS
+from ..overlay_geometry import CAPSULE_SMOOTHING as CAPSULE_SMOOTHING
+from ..overlay_geometry import DEFAULT_RESET_HEAD_SCALE as DEFAULT_RESET_HEAD_SCALE
+from ..overlay_geometry import OVERLAY_GEOMETRY as OVERLAY_GEOMETRY
+from ..overlay_geometry import TOOL_GLYPH_SCALE as TOOL_GLYPH_SCALE
+from ..overlay_geometry import MouseButtonGeometry as MouseButtonGeometry
+from ..overlay_geometry import MouseWheelGeometry as MouseWheelGeometry
+from ..overlay_geometry import OverlayGeometry as OverlayGeometry
+
 # Source glyphs keep their authored coordinates before fitting into a control slot.
 GLYPH_REFERENCE_RADIUS = 10.0
-
-
-@dataclass(frozen=True)
-class OverlayGeometry:
-    """Shared logical-pixel geometry for viewport chrome and its design probe."""
-
-    icon_radius: float = 8.0
-    radial_step: float = 6.0
-    center_step: float = 34.0
-    tool_center_step: float = 34.0
-    # Measured by the capsule probe at CAPSULE_SMOOTHING; scales with the shell.
-    end_padding_ratio: float = 1.0176593363285065
-    tool_group_gap: float = 10.0
-    divider_width: float = 20.0
-    tool_stroke: float = 1.46
-    rotate_ring_gap_ratio: float = 1.0
-    rotate_ring_cap: str = "round"
-    hint_control_height: float = 18.0
-    hint_padding_x: float = 16.0
-    hint_padding_y: float = 8.0
-    hint_input_gap: float = 8.0
-    hint_group_gap: float = 24.0
-    hint_chord_gap: float = 10.0
-    hint_key_padding_x: float = 8.0
-    hint_mouse_width: float = 14.0
-    hint_mouse_stroke: float = 1.0
-    hint_mouse_button_width_ratio: float = 0.40
-    hint_mouse_button_shell_ratio: float = 1.25
-    hint_mouse_button_height_ratio: float = 0.40
-    hint_mouse_wheel_width_ratio: float = 0.32
-    hint_mouse_wheel_height_ratio: float = 0.40
-    hint_mouse_wheel_gap_ratio: float = 1.0
-    frame_center_radius: float = 1.45
-    frame_center_gap_ratio: float = 1.4
-    tooltip_padding_x: float = 7.0
-    tooltip_padding_y: float = 4.0
-
-    @property
-    def state_radius(self) -> float:
-        return self.icon_radius + self.radial_step
-
-    @property
-    def shell_radius(self) -> float:
-        return self.state_radius + self.radial_step
-
-    @property
-    def end_padding(self) -> float:
-        return self.shell_radius * self.end_padding_ratio
-
-    @property
-    def rotate_ring_gap(self) -> float:
-        return self.tool_stroke * self.rotate_ring_gap_ratio
 
 
 @dataclass(frozen=True)
@@ -185,7 +141,6 @@ class _StatusPerformanceLayout:
     left: float
 
 
-OVERLAY_GEOMETRY = OverlayGeometry()
 DEFAULT_VIEWPORT_OVERLAY_SCALE = 1.25
 MIN_VIEWPORT_OVERLAY_SCALE = 0.85
 MAX_VIEWPORT_OVERLAY_SCALE = 2.0
@@ -198,7 +153,6 @@ PLAYBACK_RESET_SCALE = 0.92
 TOOL_CHROME_SCALE = PLAYBACK_CHROME_SCALE
 HINT_CHROME_SCALE = PLAYBACK_CHROME_SCALE
 OVERLAY_CLIP_PADDING = 5.0
-TOOL_GLYPH_SCALE = 1.18
 RECORDING_OPTIONS_ENVELOPE_SCALE = 1.25
 RECORDING_OPTIONS_GLYPH_SCALE = 1.00
 RECORDING_OPTIONS_STROKE_SCALE = 0.80
@@ -214,89 +168,6 @@ SHELL_RADIUS = OVERLAY_GEOMETRY.shell_radius
 CENTER_STEP = OVERLAY_GEOMETRY.center_step
 TOOL_GROUP_GAP = OVERLAY_GEOMETRY.tool_group_gap
 DIVIDER_WIDTH = OVERLAY_GEOMETRY.divider_width
-_ROTATE_HALF_RINGS = (
-    (
-        (3.177, 4.765),
-        (3.488, 4.386),
-        (3.740, 3.931),
-        (3.928, 3.410),
-        (4.048, 2.830),
-        (4.099, 2.201),
-        (4.080, 1.535),
-        (3.992, 0.843),
-        (3.835, 0.136),
-        (3.612, -0.573),
-        (3.328, -1.272),
-        (2.986, -1.950),
-        (2.594, -2.594),
-        (2.157, -3.194),
-        (1.683, -3.739),
-        (1.181, -4.220),
-        (0.658, -4.629),
-        (0.124, -4.959),
-        (-0.412, -5.204),
-        (-0.941, -5.360),
-        (-1.454, -5.424),
-        (-1.942, -5.395),
-        (-2.397, -5.274),
-        (-2.811, -5.063),
-        (-3.177, -4.765),
-    ),
-    (
-        (-3.177, 4.765),
-        (-3.488, 4.386),
-        (-3.740, 3.931),
-        (-3.928, 3.410),
-        (-4.048, 2.830),
-        (-4.099, 2.201),
-        (-4.080, 1.535),
-        (-3.992, 0.843),
-        (-3.835, 0.136),
-        (-3.612, -0.573),
-        (-3.328, -1.272),
-        (-2.986, -1.950),
-        (-2.594, -2.594),
-        (-2.157, -3.194),
-        (-1.683, -3.739),
-        (-1.181, -4.220),
-        (-0.658, -4.629),
-        (-0.124, -4.959),
-        (0.412, -5.204),
-        (0.941, -5.360),
-        (1.454, -5.424),
-        (1.942, -5.395),
-        (2.397, -5.274),
-        (2.811, -5.063),
-        (3.177, -4.765),
-    ),
-    (
-        (5.800, 0.000),
-        (5.750, 0.379),
-        (5.602, 0.751),
-        (5.359, 1.110),
-        (5.023, 1.450),
-        (4.601, 1.765),
-        (4.101, 2.051),
-        (3.531, 2.301),
-        (2.900, 2.511),
-        (2.220, 2.679),
-        (1.501, 2.801),
-        (0.757, 2.875),
-        (0.000, 2.900),
-        (-0.757, 2.875),
-        (-1.501, 2.801),
-        (-2.220, 2.679),
-        (-2.900, 2.511),
-        (-3.531, 2.301),
-        (-4.101, 2.051),
-        (-4.601, 1.765),
-        (-5.023, 1.450),
-        (-5.359, 1.110),
-        (-5.602, 0.751),
-        (-5.750, 0.379),
-        (-5.800, 0.000),
-    ),
-)
 _FRAME_AXES = ((0.0, -1.0), (0.866025, 0.5), (-0.866025, 0.5))
 
 
@@ -347,27 +218,8 @@ def _transform_path(
 
 
 RESET_GLYPH_SCALE = 0.88
-DEFAULT_RESET_HEAD_SCALE = 1.5
 _PROJECTION_HALF_WIDTH_PT = 5.2
 _PROJECTION_STROKE_PT = 1.25
-
-
-@dataclass(frozen=True)
-class MouseButtonGeometry:
-    """A highlighted button and the mouse-shell path visible around it."""
-
-    visible_shell: tuple[tuple[float, float], ...]
-    fill: tuple[tuple[float, float], ...]
-
-
-@dataclass(frozen=True)
-class MouseWheelGeometry:
-    """A highlighted wheel separated from the shell by a physical-pixel gap."""
-
-    lo: tuple[float, float]
-    hi: tuple[float, float]
-    rounding: float
-    gap: float
 
 
 _HintGroup = ToolHint

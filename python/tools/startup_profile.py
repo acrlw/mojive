@@ -36,9 +36,9 @@ def _measure(args) -> None:
 
     event("imports_ready")
     if args.dynamic_icons:
-        from mojive.ui import icons
+        from mojive.ui.icons import layout as icon_layout
 
-        icons._production_icon_preset = lambda _name: None
+        icon_layout._production_icon_preset = lambda _name: None
 
     # Exercise the user's layout without writing it during the measurement.
     layout = layout_settings_path()

@@ -6,6 +6,7 @@ from dataclasses import asdict, astuple
 from pathlib import Path
 
 from mojive.ui import icons
+from mojive.ui.icons import layout as icon_layout
 
 
 def generate_presets() -> dict:
@@ -18,7 +19,7 @@ def generate_presets() -> dict:
             options["tuning"] = style.tuning
             presets[name] = {
                 "style": asdict(style),
-                "layout": icons._icon_layout(name, **options),
+                "layout": icon_layout._icon_layout(name, **options),
                 "metrics": astuple(icons.icon_metrics(name, **options)),
             }
     return presets
@@ -28,7 +29,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Verify the committed presets")
     args = parser.parse_args()
-    target = Path(icons.__file__).with_name("icon_presets.json")
+    target = Path(icon_layout.__file__).parent.parent / "icon_presets.json"
     data = generate_presets()
     # One entry per line keeps this generated numeric table compact and reviewable.
     content = (

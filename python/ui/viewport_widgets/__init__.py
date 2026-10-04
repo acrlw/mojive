@@ -3,6 +3,11 @@
 The glyphs share cached G3 corner and stroke geometry. A frame scales and
 translates cached local paths before submitting them to ``Draw2D``."""
 
+from ..overlay_geometry import _counterclockwise as _counterclockwise
+from ..overlay_geometry import _point_in_polygon as _point_in_polygon
+from ..overlay_geometry import _polygon_difference as _polygon_difference
+from ..overlay_geometry import _rotate_stroke_outline as _rotate_stroke_outline
+from ..overlay_geometry import _rotate_visible_ring_polygons as _rotate_visible_ring_polygons
 from .capsules import TOOL_CONTROL_CENTERS as TOOL_CONTROL_CENTERS
 from .capsules import _circle_button as _circle_button
 from .capsules import _set_viewport_tooltip as _set_viewport_tooltip
@@ -121,11 +126,6 @@ from .model import _transform_path as _transform_path
 from .model import tool_control_centers as tool_control_centers
 from .registry import ToolHintRegistry as ToolHintRegistry
 from .registry import ViewportChromeRegistry as ViewportChromeRegistry
-from .rotate import _counterclockwise as _counterclockwise
-from .rotate import _point_in_polygon as _point_in_polygon
-from .rotate import _polygon_difference as _polygon_difference
-from .rotate import _rotate_stroke_outline as _rotate_stroke_outline
-from .rotate import _rotate_visible_ring_polygons as _rotate_visible_ring_polygons
 from .status import _status_performance_layout as _status_performance_layout
 from .status import draw_status as draw_status
 from .status import format_simulation_metric as format_simulation_metric

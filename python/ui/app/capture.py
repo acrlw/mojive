@@ -48,12 +48,12 @@ class _Capture:
         """Update interactive recording defaults without changing display pacing."""
         self.recording_config = RecordingConfig.from_mapping(asdict(value))
         if persist:
-            self.localizer.set_preferences({"recording": asdict(self.recording_config)})
+            self.preferences.update({"recording": asdict(self.recording_config)})
 
     def set_take_pause_at_end(self, enabled: bool, *, persist: bool = True) -> None:
         self.session.submit(cmd.SetStateTakePauseAtEnd(enabled))
         if persist:
-            self.localizer.set_preferences({"take_pause_at_end": bool(enabled)})
+            self.preferences.update({"take_pause_at_end": bool(enabled)})
 
     @staticmethod
     def _capture_output(surface: CaptureSurface, suffix: str) -> Path:

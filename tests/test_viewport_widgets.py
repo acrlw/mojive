@@ -7,7 +7,6 @@ import pytest
 
 from mojive.geometry2d.polygons import segment_intersection
 from mojive.geometry2d.polygons import signed_polygon_area as _polygon_area
-from mojive.ui import icons as production_icons
 from mojive.ui import viewport_widgets
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction
 from mojive.ui.theme import Theme, ViewportChromeColors
@@ -65,13 +64,14 @@ from mojive.ui.viewport_widgets import (
     tool_hints_size,
     viewport_chrome_scale,
 )
+from mojive.ui.viewport_widgets import glyphs as viewport_glyphs
 from tests.curve_assertions import assert_paths_close
 
 
 def test_viewport_callbacks_route_reviewed_icons_with_component_sizes(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
-        production_icons,
+        viewport_glyphs,
         "draw_icon",
         lambda draw, center, size, name, color, **kwargs: calls.append(
             (draw, center, size, name, color, kwargs)
@@ -725,6 +725,7 @@ class _RecordedStatus(_MeasuredText):
         self.circles = []
         self.polylines = []
         self.convex_fills = []
+        self.filled_rects = []
 
     def text(self, position, color, value, *, pixel_snap=True):
         self.texts.append(value)
@@ -742,6 +743,9 @@ class _RecordedStatus(_MeasuredText):
 
     def convex_fill(self, *args, **kwargs):
         self.convex_fills.append((args, kwargs))
+
+    def rect_filled(self, lo, hi, color, **kwargs):
+        self.filled_rects.append((*lo, *hi))
 
     def __getattr__(self, _name):
         return lambda *_args, **_kwargs: None
@@ -931,6 +935,101 @@ def test_status_exposes_localized_recording_controls(
     for text, (text_x, _) in positions.items():
         if text == "OpenGL" or text.startswith("Δt"):
             assert layout.recording_stop_rect[2] < text_x
+
+
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+@pytest.mark.parametrize("scale", (0.65, 1.0, 2.25))
+@pytest.mark.parametrize("phase", ("countdown", "recording", "paused", "finalizing"))
+@pytest.mark.parametrize("width", (72.0, 160.0, 360.0, 500.0))
+def test_recording_status_reserves_controls_before_long_activity(language, scale, phase, width):
+    from mojive.ui.localization import Localizer, parse_language
+    from mojive.ui.viewport_widgets.capsules import localized_viewport_labels
+
+    class ScaledStatus(_RecordedStatus):
+        def text_size(self, value):
+            return sum(14.0 if ord(char) > 127 else 7.0 for char in value) * scale, 14.0 * scale
+
+    labels = localized_viewport_labels(Localizer(parse_language(language)).text)
+    activity = (
+        "Connecting to remote publisher with a very long application name"
+        if language == "en"
+        else "正在连接名称很长的远程发布应用程序并等待场景同步"
+    )
+    draw = ScaledStatus()
+    origin = (17.25, 32.5)
+    width *= scale
+    height = 28.0 * scale
+    layout = draw_status(
+        draw,
+        origin,
+        width,
+        height,
+        Theme(),
+        scale,
+        selected="Selected body with a long name",
+        state="paused",
+        sim_time=0.2,
+        step=10,
+        metric_mode="time",
+        backend="OpenGL",
+        dt=0.002,
+        fps=60.0,
+        activity=activity,
+        passive=True,
+        recording_phase=phase,
+        recording_duration=65.2,
+        countdown_remaining=2.1,
+        recording_surface="window",
+        labels=labels,
+    )
+    assert (layout.recording_pause_rect is not None) == (phase in {"recording", "paused"})
+    assert (layout.recording_stop_rect is not None) == (phase != "finalizing")
+    for rect in (layout.recording_pause_rect, layout.recording_stop_rect, layout.passive_rect):
+        if rect is None:
+            continue
+        x0, y0, x1, y1 = rect
+        assert origin[0] <= x0 < x1 <= origin[0] + width - 12.0 * scale + 1e-6
+        assert origin[1] <= y0 < y1 <= origin[1] + height
+    controls = [r for r in (layout.recording_pause_rect, layout.recording_stop_rect) if r]
+    for rect in controls:
+        assert rect in draw.filled_rects
+    if len(controls) == 2:
+        assert controls[0][2] < controls[1][0]
+    for (text_x, _), text in draw.text_positions:
+        text_right = text_x + draw.text_size(text)[0]
+        assert origin[0] <= text_x <= text_right <= origin[0] + width - 12.0 * scale + 1e-6
+        if controls:
+            assert text_right <= controls[0][0] or text_x >= controls[-1][2]
+    assert activity not in draw.texts
+
+
+@pytest.mark.parametrize("width,has_stop", ((40.0, False), (43.0, True), (65.0, True)))
+def test_recording_status_keeps_stop_when_only_one_control_fits(width, has_stop):
+    draw = _RecordedStatus()
+    layout = draw_status(
+        draw,
+        (0, 0),
+        width,
+        28,
+        Theme(),
+        1,
+        selected="",
+        state="paused",
+        sim_time=0,
+        step=0,
+        metric_mode="time",
+        backend="OpenGL",
+        dt=0.002,
+        fps=60,
+        activity="Connecting to remote publisher",
+        recording_phase="recording",
+    )
+    assert layout.recording_pause_rect is None
+    assert (layout.recording_stop_rect is not None) == has_stop
+    if has_stop:
+        assert layout.recording_stop_rect in draw.filled_rects
+        assert layout.recording_stop_rect[2] <= width - 12
+    assert draw.texts == []
 
 
 def test_right_aligned_telemetry_has_no_separator_against_empty_space():

@@ -12,6 +12,7 @@ from mojive import commands as cmd
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.scene import Scene
 from mojive.session import Session
+from mojive.tools.ui_capsule_geometry import capsule_layout, draw_capsule_shell
 from mojive.types import MeshShape
 from mojive.ui.controls import action_menu_popup
 from mojive.ui.icons import (
@@ -47,8 +48,6 @@ from mojive.ui.viewport_widgets import (
 from mojive.ui.viewport_widgets import RESET_GLYPH_SCALE as RESET_GLYPH_SCALE
 from mojive.ui.viewport_widgets import expand_glyph_path as expand_glyph_path
 from mojive.ui.viewport_widgets import reset_glyph_path as reset_glyph_path
-
-from .ui_capsule_geometry import capsule_layout, draw_capsule_shell
 
 # Match the stop square's nominal area for comparable visual weight across recording states.
 RECORD_GLYPH_RADIUS = 2 * PLAYBACK_HALF_HEIGHT_PT * PLAYBACK_RESET_SCALE / sqrt(pi)

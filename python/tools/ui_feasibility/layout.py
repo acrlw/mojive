@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from imgui_bundle import imgui
 
+from mojive.tools.ui_capsule_geometry import capsule_layout
 from mojive.ui.icons import (
     ICON_MAX_PADDING,
     ICON_MAX_STROKE,
@@ -16,7 +17,6 @@ from mojive.ui.panels import button_row_layout
 from mojive.ui.text_layout import text_line_y
 from mojive.ui.viewport_widgets import draw_projection_label
 
-from ..ui_capsule_geometry import capsule_layout
 from .fixtures import _ICON_REVIEW_SIZES, CONCEPT_THEME, GEOMETRY_CANVAS_SIZE
 from .state import ProbeState
 

@@ -154,6 +154,20 @@ class _Loading:
         path = self.session.asset_path or Path("Untitled")
         self._model_load_queue.append(_ModelLoadJob("edit", path, command, completed))
 
+    def _queue_model_edits(self, commands, completed=None, *, label="Edit model") -> None:
+        """Keep a multi-selection edit atomic in queued and deferred modes."""
+        commands = tuple(commands)
+        if self.live_model_updates:
+            path = self.session.asset_path or Path("Untitled")
+            self._model_load_queue.append(
+                _ModelLoadJob("edit", path, _ApplyModelEdits(commands, label), completed)
+            )
+            return
+        result = self.model_edits.stage_many(commands, label=label)
+        self.session._record_result(result)
+        if completed is not None:
+            completed(result)
+
     def _start_model_load(self) -> bool:
         if self._model_load_completion is not None:
             return False
@@ -188,11 +202,14 @@ class _Loading:
         return True
 
     def _load_model(self, command):
-        result = (
-            self.session.apply_model_edits(command.commands)
-            if isinstance(command, _ApplyModelEdits)
-            else self.session.submit(command)
-        )
+        if isinstance(command, _ApplyModelEdits):
+            result = (
+                self.session.apply_edits(command.commands, label=command.label).result
+                if command.label
+                else self.session.apply_model_edits(command.commands)
+            )
+        else:
+            result = self.session.submit(command)
         self._model_source_prepared = time.monotonic()
         prepare = getattr(getattr(self, "backend", None), "prepare_scene", None)
         if result.ok and prepare is not None and not isinstance(command, cmd.SaveScene):

@@ -192,24 +192,47 @@ make ui-components
 make ui-components BACKEND=bgfx ARGS='--ui-scale 2.25'
 make ui-components-gallery BACKEND=bgfx
 make ui-components BACKEND=bgfx ARGS='--corner-scene inspector'
+make ui-components ARGS='--corner-scene material --corner-surface card'
 ```
 
-The same page is available under **Probe > Components**. The scene selector offers basic controls,
-an Inspector card, a search/filter toolbar, and an action group. All scenes retain current/candidate
-columns with shared sample values. The gallery captures every scene at 1x and 2.25x.
-Inspector fields, filter reset, and action buttons are interactive without changing the viewer.
-Both columns call the production
-search input, value rail, joined numeric/unit field, segmented control, and icon painters with
-shared sample values. The current column keeps the production frame radius; the candidate uses
-a local override. Its nested child surface is a test fixture: **Link outer radius to inset**
-sets its radius to the inner control radius plus the shared inset. The search pill retains its
-own half-height radius. **Camera extra Y** moves only the candidate camera glyph relative to its
-reviewed production offset on the 24-unit grid. Hide the guides
-to compare visual balance. **Reset experiment** restores the trial parameters. Nothing is saved
-to viewer settings or production defaults.
+The same page is available under **Probe > Components > Corners & controls**. Choose an example
+from the selector or use **Previous example / Next example** to browse all nine studies:
 
-The corner candidate starts at inner radius **4**, inset **2**, outer radius **6** logical
-pixels. This is a probe preset, independent of production defaults.
+| Example | Controls and states to compare |
+|---|---|
+| Basic controls | Search, numeric fields, projection segments and icon placement |
+| Inspector properties | Text, combo, checkbox and exposure reset |
+| Search & filters | Search pill, type segments and filter reset |
+| Action group | Full-width buttons, focus and disabled actions |
+| Transform properties | Production XYZ fields, axis reset and locked editing |
+| Material editor | Color picker, roughness/metallic sliders and collapsible surface options |
+| Scene browser | Search, selection, visibility, empty results and selection details |
+| Joint controls | Production value cards, unit fields, rails, individual/global reset and locking |
+| Capture settings | Format segments, resolution, conditional options and an output summary |
+
+These are sample layouts built from Mojive controls, not exact replicas of complete viewer panels.
+**A / Default controls** always retains the production control radius on the panel background.
+**B / Candidate controls** previews local changes with shared sample values. Controls and previews
+scroll independently. Example edits stay in the probe, and capture preview only shows a summary
+without writing a file. Use `--corner-scene`
+with `transform`, `material`, `scene`, `joints`, or `capture` to open a new study directly.
+
+**Candidate surface > Panel** is the default: sections have no extra fill, border, rounding or
+inset. Controls and selection states retain their own backgrounds. **Card** adds experimental
+section backgrounds only to B, exposing **Card inset / B** and **Link card radius to inset**.
+The link sets the card radius to the control radius plus its inset. This rule applies only to
+visible nested surfaces; it does not change panel padding or the reference column. Switching
+between modes retains sample edits and card settings. The gallery captures all nine examples
+in both modes at 1x and 2.25x, with the surface mode included in each filename.
+
+Both columns call the production search input, value rail, joined numeric/unit field, segmented
+control and icon painters. The search pill retains its own half-height radius. **Camera extra Y**
+moves only the candidate camera glyph relative to its reviewed production offset on the 24-unit
+grid. Hide the guides to compare visual balance. **Reset experiment** restores the trial
+parameters and returns to Panel mode. Nothing is saved to viewer settings or production defaults.
+
+The candidate control radius starts at **4** logical pixels. The optional card starts at inset
+**2** and linked outer radius **6**. These are probe presets, independent of production defaults.
 
 The **Optical alignment** tab covers all 50 Icon Library production glyphs except
 Info/Warning/Error. Open it directly with:

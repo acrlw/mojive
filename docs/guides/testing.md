@@ -62,6 +62,11 @@ and disabling the last owner are covered by `tests/native/test_native_lod.py`.
 Chinese at narrow, standard and HiDPI sizes, checks that Help remains visible in the real menu
 bar, and captures the resulting panels. Inspect the captures under `output/geometry-ui`.
 
+`make inspector` also edits contact and joint solver fields through real window input in English
+at normal scale and Chinese at 2.25 scale. It checks that joint drafts commit once and a single
+Undo restores the source values. Inspect the idle, edited, applied and undone controls under
+`output/inspector/solver/<backend>/` when changing these shared property rows.
+
 `make physics-options-check` exercises **Window > Physics Options...** and the environment
 Inspector in English and Chinese at normal and 150% scale. It checks numeric commit and
 validation, enum and flag writes, Undo/Redo, live worker timestep changes, and workspace/MJCF
@@ -77,7 +82,9 @@ application accepting images/file attachments; offscreen rendering does not vali
 visibility changes in an encoded video using a hidden window. It reveals clipped controls before
 clicking and explicitly enables the hinge rotation tool. `tests/gpu/test_recording_layers.py`
 checks the same scenario in English at normal scale and Chinese at 2.25 scale, including a dock
-that requires scrolling. Run it with both renderer backends when changing this workflow.
+that requires scrolling. The Make target also checks countdown cancellation, pause, resume and
+stop in a narrow status bar with long activity text. Run it with both renderer backends when
+changing this workflow.
 
 Code, executable example, test, and build behavior changes finish with `make check`. The table adds
 checks for each affected behavior; combine applicable rows without rerunning shared prerequisites.
@@ -113,8 +120,9 @@ acceptance or changes that affect that breadth of behavior.
 Keep `make reverse` exclusive in its checkout: it temporarily mutates source files and restores
 them. Run GPU/window checks sequentially when they compete for the same device or desktop.
 Independent CPU checks can run together when they do not share mutable files or services.
-On macOS, `TMPDIR=/private/tmp make check` keeps temporary Unix socket paths within the platform
-length limit when the system's default temporary directory is too long.
+On macOS, use `TMPDIR=/private/tmp` with `make check` and `make test-physics` to keep temporary
+Unix socket paths within the platform length limit when the default temporary directory is too
+long. The physics suite includes passive-viewer RPC tests as well as adapter tests.
 
 If a dependency, display, or device blocks a gate, attempt recovery within the authorized scope
 and complete independent checks. Report the blocked command, reason, and remaining coverage;

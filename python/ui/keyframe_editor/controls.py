@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import sys
 from functools import lru_cache
+from typing import Protocol
 
 from imgui_bundle import imgui
 
@@ -169,6 +170,14 @@ def unique_keyframe_name(existing: set[str]) -> str:
     return name
 
 
+class CommandIconDrawer(Protocol):
+    """Draw a timeline command glyph without owning editor state."""
+
+    def __call__(
+        self, draw, center, kind: str, color, scale: float, *, smoothing: float = CORNER_SMOOTHING
+    ) -> None: ...
+
+
 def _draw_command_icon(
     draw, center, kind: str, color, scale: float, *, smoothing: float = CORNER_SMOOTHING
 ) -> None:
@@ -207,6 +216,7 @@ def _command_button(
     width: float | None = None,
     layouts: dict | None = None,
     draw: Draw2D | None = None,
+    icon_drawer: CommandIconDrawer = _draw_command_icon,
 ) -> bool:
     """Render a compact 28 pt semantic button with a vector glyph."""
 
@@ -269,7 +279,7 @@ def _command_button(
             pixel_snap=False,
         )
     icon_color = theme.danger if kind == "record" and enabled else foreground
-    _draw_command_icon(draw, icon_center, kind, icon_color, scale, smoothing=smoothing)
+    icon_drawer(draw, icon_center, kind, icon_color, scale, smoothing=smoothing)
     imgui.set_item_tooltip(tooltip)
     return bool(clicked and enabled)
 

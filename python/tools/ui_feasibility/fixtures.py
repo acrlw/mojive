@@ -29,6 +29,7 @@ GEOMETRY_TABS = (
     "Playback",
     "Tools",
     "Icon library",
+    "SVG icons",
     "Hints & input",
     "Transform gizmos",
     "Joint & helpers",

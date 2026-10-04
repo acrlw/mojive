@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from imgui_bundle import imgui
 
+from mojive.tools.ui_capsule_geometry import CAPSULE_OUTLINE_LABELS, end_padding, spacing_metrics
 from mojive.ui import theme as theme_mod
 from mojive.ui.icons import (
     ICON_ALIGNMENT_EDITABLE_ICONS,
@@ -19,7 +20,6 @@ from mojive.ui.icons import (
 )
 from mojive.ui.viewport_widgets import OVERLAY_GEOMETRY, overlay_divider_length
 
-from ..ui_capsule_geometry import CAPSULE_OUTLINE_LABELS, end_padding, spacing_metrics
 from .fixtures import CORNER_CONTROLS
 from .layout import _deferred_icon_group_slider, _even_slider, _flags, _property_label
 from .state import ProbeState

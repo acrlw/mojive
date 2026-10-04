@@ -18,8 +18,11 @@ from mojive.interaction.gizmo import (
     DIMENSION_CORNER_RADIUS_RATIO,
     _rounded_polygon_corners,
 )
+from mojive.ui.icons import draw_icon, draw_icon_label
 from mojive.ui.paint_protocol import Draw2D
 
+from ..overlay_geometry import _rotate_visible_ring_polygons
+from ..overlay_geometry import _snap_glyph_shape as _snap_glyph_shape
 from .model import (
     _FRAME_ARROW_CORNER_RADIUS_PT,
     _FRAME_AXES,
@@ -44,9 +47,6 @@ from .model import (
     TOOL_GLYPH_SCALE,
     OverlayGeometry,
     _transform_path,
-)
-from .rotate import (
-    _rotate_visible_ring_polygons,
 )
 
 
@@ -199,32 +199,22 @@ def _rounded_playback_triangle(
 
 
 def _play_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    from mojive.ui.icons import draw_icon
-
     draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-play", color)
 
 
 def _pause_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    from mojive.ui.icons import draw_icon
-
     draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-pause", color)
 
 
 def _step_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    from mojive.ui.icons import draw_icon
-
     draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-next", color)
 
 
 def _previous_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    from mojive.ui.icons import draw_icon
-
     draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-previous", color)
 
 
 def _reset_icon(draw: Draw2D, center, color, scale: float, _payload) -> None:
-    from mojive.ui.icons import draw_icon
-
     draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-reset", color)
 
 
@@ -260,8 +250,6 @@ def draw_projection_glyph(
 def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, label: str) -> None:
     """Center the visible pair horizontally and its shared body line vertically."""
 
-    from mojive.ui.icons import draw_icon_label
-
     icon_name = "panel-perspective" if kind == "persp" else "panel-orthographic"
     draw_icon_label(draw, lo, hi, color, scale, icon_name, label)
 
@@ -269,8 +257,6 @@ def draw_projection_label(draw: Draw2D, lo, hi, color, scale: float, kind: str, 
 def _tool_icon(draw: Draw2D, center, color, scale: float, packed) -> None:
     _surface, payload = packed
     kind, space = payload
-    from mojive.ui.icons import draw_icon
-
     name = {
         "move": "tool-move",
         "rotate": "tool-rotate",
@@ -383,13 +369,6 @@ def _draw_axis_arrow_glyph(
         corner_radius=corner_radius,
         smoothing=smoothing,
     )
-
-
-@lru_cache(maxsize=64)
-def _snap_glyph_shape(scale: float, smoothing: float = CORNER_SMOOTHING):
-    radius = 6.4 * scale
-    cap = smooth_line_cap((0.0, 0.0), (0.0, 1.0), 2.0 * radius, smoothing=smoothing)
-    return ((-radius, -6.2 * scale), *map(tuple, cap.tolist()), (radius, -6.2 * scale))
 
 
 def _dimensions_glyph_geometry(
@@ -589,8 +568,6 @@ def draw_recording_glyph(draw, center, color, scale, *, recording=False):
 
 def _record_icon(draw, center, color, scale, packed):
     _surface, (recording, accent, action) = packed
-    from mojive.ui.icons import draw_icon
-
     size = 2.0 * OVERLAY_GEOMETRY.icon_radius * scale
     if recording and action in ("pause", "resume"):
         name = "playback-pause" if action == "pause" else "playback-play"
@@ -615,6 +592,4 @@ def draw_recording_options_glyph(
 
 
 def _recording_options_icon(draw, center, color, scale, _packed):
-    from mojive.ui.icons import draw_icon
-
     draw_icon(draw, center, 2.0 * OVERLAY_GEOMETRY.icon_radius * scale, "playback-more", color)

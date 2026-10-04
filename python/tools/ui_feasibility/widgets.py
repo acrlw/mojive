@@ -7,6 +7,8 @@ from dataclasses import replace
 from imgui_bundle import imgui
 
 from mojive.geometry2d.curves import CORNER_SMOOTHING
+from mojive.tools.ui_capsule_geometry import draw_capsule_shell
+from mojive.tools.ui_redesign import _capsule, _recording_menu, draw_reset_glyph
 from mojive.ui.icons import (
     ICON_DEFAULT_PADDING,
     ICON_STROKE,
@@ -27,8 +29,6 @@ from mojive.ui.viewport_widgets import (
 )
 from mojive.ui.viewport_widgets.chrome import draw_selection_disc
 
-from ..ui_capsule_geometry import draw_capsule_shell
-from ..ui_redesign import _capsule, _recording_menu, draw_reset_glyph
 from .fixtures import CONCEPT_THEME, OVERLAY_ICON_RADIUS, OVERLAY_STATE_RADIUS
 from .layout import _draw_segmented, _flags, _property_label
 from .state import ProbeState

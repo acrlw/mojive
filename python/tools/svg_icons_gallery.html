@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mojive · Production SVG icons</title>
+<style>
+  * { box-sizing: border-box; }
+  :root { color-scheme: dark; --bg:#181b1e; --panel:#202429; --line:#353c43; --ink:#dce0e5; --muted:#a1aab4; --accent:#9bbf88; --size:24px; }
+  body.light { color-scheme:light; --bg:#f4f5f6; --panel:#fff; --line:#d8dde2; --ink:#29323a; --muted:#626d78; --accent:#4c713b; }
+  body { margin:0; padding:40px; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,sans-serif; }
+  main { max-width:1300px; margin:auto; }
+  h1 { font-size:24px; margin:0 0 8px; font-weight:600; }
+  p { color:var(--muted); margin:0 0 24px; }
+  .controls { display:flex; flex-wrap:wrap; gap:16px; align-items:center; padding:16px 0 24px; }
+  input, select, button { font:inherit; color:inherit; }
+  select, button, input[type=search] { border:1px solid var(--line); background:var(--panel); padding:8px 12px; border-radius:5px; }
+  button { cursor:pointer; }
+  button:hover, a:hover { color:var(--accent); }
+  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+  label { display:flex; align-items:center; gap:8px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+  article { min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px; }
+  article[hidden] { display:none; }
+  .slot { height:140px; display:flex; align-items:center; justify-content:center; position:relative; isolation:isolate; }
+  svg { width:var(--size); height:var(--size); color:var(--ink); overflow:visible; }
+  svg [data-color-role=accent]:not([fill=none]) { fill:var(--accent); }
+  svg [data-color-role=accent][fill=none] { stroke:var(--accent); }
+  .slot > svg[data-icon] { position:relative; }
+  .placement-guide { position:absolute; pointer-events:none; }
+  .placement-guide .square-fill, .placement-guide .circle-fill { fill:none; }
+  .placement-guide .square-outline { fill:none; stroke:rgb(123 129 137 / 34%); stroke-width:0.72; }
+  .placement-guide .circle-outline { fill:none; stroke:rgb(201 161 92 / 72%); stroke-width:0.9; }
+  .placement-guide * { vector-effect:non-scaling-stroke; }
+  body[data-square=filled] .square-fill, body[data-circle=filled] .circle-fill { fill:var(--guide-fill,#2b2f34); }
+  body[data-square=filled] .square-outline, body[data-square=hidden] .square-outline,
+  body[data-circle=filled] .circle-outline, body[data-circle=hidden] .circle-outline { stroke:none; }
+  body.light { --guide-fill:#e8ebee; }
+  .guide-note { font-size:12px; margin-bottom:16px; }
+  strong, small, a { display:block; }
+  strong { font-weight:500; }
+  small { color:var(--muted); font-size:11px; margin-top:4px; overflow-wrap:anywhere; }
+  a { color:var(--muted); font-size:12px; margin-top:12px; text-decoration:none; }
+  #count { color:var(--muted); margin-bottom:16px; }
+  @media(max-width:600px) { body { padding:20px; } }
+</style>
+<main>
+  <h1>Mojive · Production SVG icons</h1>
+  <p>Exported from the production painter. Outlined paths retain holes, smooth corners and optical offsets. SVG is rendered directly by your browser.</p>
+  <div class="controls">
+    <input id="search" type="search" placeholder="Find an icon" aria-label="Find an icon">
+    <select id="family" aria-label="Icon family"><option value="">All families</option></select>
+    <label>Size <input id="size" type="range" min="12" max="112" value="24"><output id="value">24 px</output></label>
+    <label>Circle <select id="circle" aria-label="Circle guide"><option value="outline">Outline</option><option value="filled">Filled</option><option value="hidden">Hidden</option></select></label>
+    <label>Square <select id="square" aria-label="Square guide"><option value="outline">Outline</option><option value="filled">Filled</option><option value="hidden">Hidden</option></select></label>
+    <button id="theme" type="button">Light background</button>
+  </div>
+  <p class="guide-note">UI Feasibility guides: orange circle = 24-unit placement boundary; gray square = the same 24 × 24 canvas. Both stay centered when a glyph has an optical offset.</p>
+  <div id="count" aria-live="polite"></div>
+  <div class="grid"><!-- ICON_CARDS --></div>
+</main>
+<template id="placement-guide">
+  <svg class="placement-guide" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect class="square-fill" width="24" height="24" />
+    <circle class="circle-fill" cx="12" cy="12" r="12" />
+    <rect class="square-outline" width="24" height="24" />
+    <circle class="circle-outline" cx="12" cy="12" r="12" />
+  </svg>
+</template>
+<script>
+  document.querySelectorAll('.slot').forEach(slot => slot.prepend(document.querySelector('#placement-guide').content.cloneNode(true)));
+  ['circle', 'square'].forEach(shape => {
+    const control = document.querySelector(`#${shape}`);
+    const update = () => document.body.dataset[shape] = control.value;
+    control.addEventListener('change',update);
+    update();
+  });
+  const cards = [...document.querySelectorAll('article')];
+  const family = document.querySelector('#family');
+  const search = document.querySelector('#search');
+  [...new Set(cards.map(card => card.dataset.family))].forEach(name => family.add(new Option(name,name)));
+  function filter() {
+    const query = search.value.trim().toLowerCase();
+    cards.forEach(card => card.hidden = (family.value && card.dataset.family !== family.value) || !card.textContent.toLowerCase().includes(query));
+    document.querySelector('#count').textContent = `${cards.filter(card => !card.hidden).length} / ${cards.length} icons · 24-unit canvas · xMidYMid meet`;
+  }
+  search.addEventListener('input',filter);
+  family.addEventListener('change',filter);
+  document.querySelector('#size').addEventListener('input',event => {
+    document.documentElement.style.setProperty('--size',`${event.target.value}px`);
+    document.querySelector('#value').textContent = `${event.target.value} px`;
+  });
+  document.querySelector('#theme').addEventListener('click',event => {
+    document.body.classList.toggle('light');
+    event.target.textContent = document.body.classList.contains('light') ? 'Dark background' : 'Light background';
+  });
+  filter();
+</script>
+</html>

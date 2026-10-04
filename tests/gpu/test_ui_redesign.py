@@ -8,7 +8,11 @@ from imgui_bundle import imgui
 from PIL import Image
 
 from mojive.geometry2d.curves import CORNER_SMOOTHING
-from mojive.tools.ui_capsule_geometry import g3_capsule_spans, optical_end_padding, spacing_metrics
+from mojive.tools.ui_capsule_geometry import (
+    g3_capsule_spans,
+    optical_end_padding,
+    spacing_metrics,
+)
 from mojive.tools.ui_feasibility import fixtures as probe_fixtures
 from mojive.tools.ui_feasibility import layout as probe_layout
 from mojive.tools.ui_feasibility import state as probe_state

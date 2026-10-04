@@ -70,6 +70,15 @@ existing names for compatibility; new code should import from the modules that d
 The package root contains shared types and compatibility exports. The
 [Python module map (Chinese)](python-layout.zh.md) lists the modules and their tests.
 
+`ui/preferences.py` owns persistent desktop preferences. `ui/app/settings.py` resolves startup
+configuration; an explicit `ViewerConfig` replaces saved configuration groups, while optional
+`None` fields inherit preferences. `Localizer` translates text and retains a compatibility bridge
+to the same preference store. UI code reads and writes `app.preferences` directly.
+
+`ui/icons/` separates style defaults (`model.py`), canonical glyphs (`glyphs.py` and `painter.py`),
+layout fitting (`layout.py`) and cached submission (`drawing.py`). Shared overlay geometry lives
+in `ui/overlay_geometry.py`; it and icons remain independent of viewport widget composition.
+
 ## Adapter packages
 
 Built-in adapters are implemented in `adapters/mujoco/`, `adapters/static/` and
@@ -180,10 +189,10 @@ units, reference frames, capability requirements, and transaction behavior expli
 hints alone cannot express these contracts. Use `_op` or `Operation` for queries and operations
 whose wire parameters need custom application handling.
 
-RPC dispatch, native remote authoring, discovery, and the generic CLI reuse this catalog. New
-transports, including an MCP adapter, should derive descriptions from the same entries and route
-calls through the existing application boundary. A transport controlling an attached viewer must
-preserve its RPC queue and Session ownership. Domain modules should not import a tool protocol.
+RPC dispatch, native remote authoring, discovery, the generic CLI, and the optional MCP stdio
+bridge reuse this catalog. The MCP bridge derives tool schemas from the connected service and
+routes calls through its existing RPC boundary, preserving the viewer's queue and Session
+ownership. Domain modules do not import a tool protocol.
 
 `find_operations` filters metadata before constructing descriptions. Use
 `operation.specification(include_schemas=False)` for an installed summary and

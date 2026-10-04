@@ -34,13 +34,17 @@ class TimelineCommands(Protocol):
     take_video_active: bool
     style_scale: float
     input_claim: InputClaim | None
-    queue_model_edit: (
-        Callable[[cmd.Command, Callable[[cmd.CommandResult], None] | None], None] | None
-    )
 
     def submit(self, command: cmd.Command) -> cmd.CommandResult: ...
     def submit_model_edit(
         self, command: cmd.Command, completed: Callable[[cmd.CommandResult], None] | None = None
+    ) -> None: ...
+    def submit_model_edits(
+        self,
+        commands: tuple[cmd.Command, ...],
+        completed: Callable[[cmd.CommandResult], None] | None = None,
+        *,
+        label: str = "Edit model",
     ) -> None: ...
     def tr(self, text: str) -> str: ...
 
@@ -92,6 +96,14 @@ class TimelineEditor(TimelineEditorState):
         self.marker_index = TimelineMarkerIndex(())
         self.snapshot_index = TimelineMarkerIndex(())
         self.snapshot_cache = None
+
+    def capture_snapshot(self, ctx: TimelineCommands) -> None:
+        """Select a captured snapshot only after Session accepts the capture."""
+        result = ctx.submit(cmd.CaptureSceneSnapshot())
+        if result.ok:
+            self.select_snapshot(result.entity_id)
+            self.view_needs_fit = True
+        self.error = "" if result.ok else result.message
 
     def toggle_recording(self, ctx: TimelineCommands):
         """Share playhead recording and completed-range selection across both toolbars."""
@@ -331,13 +343,7 @@ class TimelineEditor(TimelineEditorState):
                 cmd.RemoveModelKeyframe(key)
                 for key in sorted(self.selected_keyframes, reverse=True)
             )
-            if ctx.queue_model_edit is not None:
-                for command in commands:
-                    ctx.submit_model_edit(command, self.snapshot_removed)
-            else:
-                self.snapshot_removed(
-                    ctx.session.apply_edits(commands, label="Delete model keyframes").result
-                )
+            ctx.submit_model_edits(commands, self.snapshot_removed, label="Delete model keyframes")
 
     def selection_count(self):
         if self.edit_lane == "take" and self.take_selection is not None:

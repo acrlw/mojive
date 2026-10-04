@@ -185,24 +185,38 @@ def _glyph(draw, center, size, name, study, candidate):
     )
 
 
-def _settings(study, scale):
-    columns = 4 if imgui.get_content_region_avail().x >= 650 * scale else 1
-    _, study.auto_align = imgui.checkbox("Auto-align weighted centroid", study.auto_align)
-    imgui.set_item_tooltip(
-        "Correct each glyph's alpha-weighted ink centroid using the strength below. "
-        "Manual offsets are preserved."
+def draw_optical_settings(study):
+    imgui.text("Adjust optical placement")
+    imgui.text("Family")
+    imgui.set_next_item_width(-1)
+    changed, family_index = imgui.combo(
+        "##optical-family", _FAMILY_NAMES.index(study.family), _FAMILY_NAMES
     )
-    if columns > 1:
-        imgui.same_line()
+    if changed:
+        study.selected = SPECIMEN_INDICES[FAMILIES[_FAMILY_NAMES[family_index]][0][1]]
+    family_icons = FAMILIES[study.family]
+    family_indices = tuple(SPECIMEN_INDICES[name] for _, name in family_icons)
+    imgui.text("Choose icon")
+    imgui.set_next_item_width(-1)
+    _, glyph_index = imgui.combo(
+        "##optical-glyph",
+        family_indices.index(study.selected),
+        [label for label, _ in family_icons],
+    )
+    study.selected = family_indices[glyph_index]
     if imgui.button("Previous icon"):
         study.selected = (study.selected - 1) % len(SPECIMENS)
     imgui.same_line()
     if imgui.button("Next icon"):
         study.selected = (study.selected + 1) % len(SPECIMENS)
+    imgui.separator()
+    _, study.auto_align = imgui.checkbox("Auto-align weighted centroid", study.auto_align)
+    imgui.set_item_tooltip(
+        "Correct each glyph's alpha-weighted ink centroid using the strength below. "
+        "Manual offsets are preserved."
+    )
     imgui.begin_disabled(not study.auto_align)
-    imgui.align_text_to_frame_padding()
     imgui.text("Alignment strength")
-    imgui.same_line()
     imgui.set_next_item_width(-1)
     _, percent = imgui.slider_float(
         "##optical-strength",
@@ -219,26 +233,7 @@ def _settings(study, scale):
         "Strength scales a fixed direction; switch off auto-align for independent X/Y adjustment."
     )
     imgui.end_disabled()
-    if imgui.begin_table("##optical-settings", columns):
-        imgui.table_next_column()
-        imgui.text("Family")
-        imgui.set_next_item_width(-1)
-        changed, family_index = imgui.combo(
-            "##optical-family", _FAMILY_NAMES.index(study.family), _FAMILY_NAMES
-        )
-        if changed:
-            study.selected = SPECIMEN_INDICES[FAMILIES[_FAMILY_NAMES[family_index]][0][1]]
-        family_icons = FAMILIES[study.family]
-        family_indices = tuple(SPECIMEN_INDICES[name] for _, name in family_icons)
-        imgui.table_next_column()
-        imgui.text("Choose icon")
-        imgui.set_next_item_width(-1)
-        _, glyph_index = imgui.combo(
-            "##optical-glyph",
-            family_indices.index(study.selected),
-            [label for label, _ in family_icons],
-        )
-        study.selected = family_indices[glyph_index]
+    if imgui.begin_table("##optical-settings", 2):
         name = SPECIMENS[study.selected][1]
         values = list(study.effective_offset(name))
         for axis in range(2):
@@ -251,21 +246,20 @@ def _settings(study, scale):
             )
             if changed:
                 study.set_offset(name, tuple(values))
+            modifier = "Cmd" if imgui.get_io().config_mac_osx_behaviors else "Ctrl"
+            imgui.set_item_tooltip(
+                f"{modifier}+click to enter an exact offset. +X is right; +Y is down."
+            )
             imgui.end_disabled()
         imgui.end_table()
     _, study.guides = imgui.checkbox("Alignment guides", study.guides)
-    imgui.same_line()
     _, study.blurred = imgui.checkbox("Blur diagnostic", study.blurred)
-    if columns > 1:
-        imgui.same_line()
     _, study.link_mirrored_offsets = imgui.checkbox(
         "Link mirrored offsets", study.link_mirrored_offsets
     )
     imgui.set_item_tooltip(
         "Manual edits mirror X and copy Y to Previous/Next, First/Last, or Mouse Left/Right. Existing values stay until edited."
     )
-    if columns > 1:
-        imgui.same_line()
     imgui.begin_disabled(study.auto_align)
     if imgui.button("Reset selected"):
         study.set_offset(SPECIMENS[study.selected][1], None)
@@ -273,7 +267,7 @@ def _settings(study, scale):
     imgui.same_line()
     if imgui.button("Copy offsets"):
         imgui.set_clipboard_text(study.export())
-    if study.blurred and imgui.begin_table("##blur-settings", 2 if columns > 1 else 1):
+    if study.blurred and imgui.begin_table("##blur-settings", 1):
         imgui.table_next_column()
         imgui.text("Gaussian blur / sigma")
         imgui.set_next_item_width(-1)
@@ -286,6 +280,9 @@ def _settings(study, scale):
         )
         study.threshold = percent / 100
         imgui.end_table()
+    imgui.text_wrapped(
+        "Offsets add to production placement on the 24-unit grid. Auto-align preserves manual edits."
+    )
 
 
 def _contexts(ctx, study, candidate):
@@ -413,19 +410,15 @@ def _column(ctx, study, candidate):
     dx, dy = study.effective_offset(name, candidate)
     imgui.text_disabled(f"Offset {dx:+.2f}, {dy:+.2f} U")
     imgui.separator()
-    _contexts(ctx, study, candidate)
     _diagnostic(ctx, study, candidate)
+    _contexts(ctx, study, candidate)
     imgui.pop_id()
 
 
 def draw_optical(ctx, study):
-    imgui.text_wrapped(
-        f"Review {len(SPECIMENS)} glyphs by family, or step through every glyph with Previous/Next. "
-        "Offsets use the 24-unit grid; +X is right, +Y is down."
-    )
-    _settings(study, ctx.style_scale)
-    imgui.separator()
-    columns = 2 if imgui.get_content_region_avail().x >= 800 * ctx.style_scale else 1
+    label, _ = SPECIMENS[study.selected]
+    imgui.text(f"{study.family} / {label}")
+    columns = 2 if imgui.get_content_region_avail().x >= 560 * ctx.style_scale else 1
     if imgui.begin_table("##optical-comparison", columns):
         for candidate in (False, True):
             imgui.table_next_column()

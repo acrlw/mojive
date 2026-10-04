@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
@@ -22,30 +22,80 @@ from .controller import TimelineEditor
 from .controls import (
     _COMMAND_HEIGHT_PT,
     FOLLOW_MODE_TOOLTIPS,
+    CommandIconDrawer,
     _command_button,
     _command_button_width,
+    _draw_command_icon,
     _toolbar_status,
     unique_keyframe_name,
 )
+
+_FOLLOW_ICONS = ("key-follow-off", "key-follow-page", "key-follow-locked")
+
+
+@dataclass(frozen=True)
+class _ToolbarLayout:
+    """Measured captions and group widths for one toolbar frame."""
+
+    labels: tuple[str, ...]
+    captions: tuple[str, ...]
+    command_widths: tuple[float, ...]
+    transport_width: float
+    time_width: float
+    range_widths: tuple[float, ...]
+    range_width: float
+    view_width: float
+    follow_labels: tuple[str, ...]
+    follow_width: float
+    icon_width: float
 
 
 class TimelineToolbar:
     """Toolbar layout cache and presentation; editing state lives in TimelineEditor."""
 
-    def __init__(self, icon_drawer: IconLabelDrawer = draw_icon_label) -> None:
+    def __init__(
+        self,
+        icon_drawer: IconLabelDrawer = draw_icon_label,
+        *,
+        command_icon_drawer: CommandIconDrawer = _draw_command_icon,
+    ) -> None:
         self.follow_mode_icon_drawer = icon_drawer
+        self.command_icon_drawer = command_icon_drawer
         self.command_layouts: dict = {}
 
-    def draw_compact_toolbar(self, editor: TimelineEditor, ctx, take_times):
+    def draw_compact_toolbar(
+        self, editor: TimelineEditor, ctx: PanelContext, take_times: Sequence[float]
+    ) -> None:
         scale = ctx.style_scale
-        gap = 5 * scale
-        width = max(1.0, imgui.get_content_region_avail().x)
         height = _COMMAND_HEIGHT_PT * scale
-        # Measure with the same padding and glyph scale used by the actual controls.
+        width = max(1.0, imgui.get_content_region_avail().x)
+        # Measurement and drawing use identical control padding and glyph scale.
         imgui.push_style_var(
             imgui.StyleVar_.frame_padding,
             (8 * scale, max(0, (height - imgui.get_font_size()) * 0.5)),
         )
+        layout = self._measure_toolbar(editor, ctx, take_times, width)
+        right = imgui.get_cursor_screen_pos().x + width
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (5 * scale, 6 * scale))
+        imgui.begin_group()
+        self._draw_capture_actions(editor, ctx, take_times, layout)
+        imgui.end_group()
+        self._begin_toolbar_group(ctx, layout.transport_width, right)
+        self.draw_transport_header(editor, ctx, take_times, layout.time_width)
+        imgui.end_group()
+        self._begin_toolbar_group(ctx, layout.range_width, right)
+        self.draw_take_range(editor, ctx, take_times, layout.range_widths)
+        imgui.end_group()
+        self._begin_toolbar_group(ctx, layout.view_width, right)
+        self._draw_view_group(editor, ctx, layout)
+        imgui.end_group()
+        imgui.pop_style_var(2)
+
+    def _measure_toolbar(
+        self, editor: TimelineEditor, ctx: PanelContext, take_times: Sequence[float], width: float
+    ) -> _ToolbarLayout:
+        scale = ctx.style_scale
+        gap = 5 * scale
         labels = (
             ctx.tr(
                 "Stop Recording"
@@ -74,8 +124,9 @@ class TimelineToolbar:
         range_widths = (take_width, field_width, field_width, icon_width)
         range_width = sum(range_widths) + 3 * gap
         follow_labels = tuple(ctx.tr(text) for text in FOLLOW_MODE_TOOLTIPS)
-        follow_icons = ("key-follow-off", "key-follow-page", "key-follow-locked")
-        follow_width = segmented_control_width(follow_labels, icons=follow_icons, show_labels=False)
+        follow_width = segmented_control_width(
+            follow_labels, icons=_FOLLOW_ICONS, show_labels=False
+        )
         view_width = follow_width + 2 * (icon_width + gap)
         separator_width = 13 * scale
         fixed_width = transport_width + range_width + view_width + 3 * separator_width
@@ -92,31 +143,46 @@ class TimelineToolbar:
             if total <= caption_budget:
                 break
             shown[index] = ""
-        widths = [_command_button_width(label, scale) for label in shown]
-        right = imgui.get_cursor_screen_pos().x + width
-        first_group = True
+        widths = tuple(_command_button_width(label, scale) for label in shown)
+        return _ToolbarLayout(
+            labels=labels,
+            captions=tuple(shown),
+            command_widths=widths,
+            transport_width=transport_width,
+            time_width=time_width,
+            range_widths=range_widths,
+            range_width=range_width,
+            view_width=view_width,
+            follow_labels=follow_labels,
+            follow_width=follow_width,
+            icon_width=icon_width,
+        )
 
-        def group(group_width):
-            nonlocal first_group
-            if (
-                not first_group
-                and imgui.get_item_rect_max().x + separator_width + group_width <= right
-            ):
-                imgui.same_line(0, 6 * scale)
-                pos = imgui.get_cursor_screen_pos()
-                imgui.dummy((scale, height))
-                ImguiDraw2D().line(
-                    (pos.x, pos.y + 5 * scale),
-                    (pos.x, pos.y + height - 5 * scale),
-                    (*ctx.theme.text_disabled[:3], 0.25),
-                    scale,
-                )
-                imgui.same_line(0, 6 * scale)
-            first_group = False
-            imgui.begin_group()
+    @staticmethod
+    def _begin_toolbar_group(ctx: PanelContext, width: float, right: float) -> None:
+        scale = ctx.style_scale
+        height = _COMMAND_HEIGHT_PT * scale
+        if imgui.get_item_rect_max().x + 13 * scale + width <= right:
+            imgui.same_line(0, 6 * scale)
+            pos = imgui.get_cursor_screen_pos()
+            imgui.dummy((scale, height))
+            ImguiDraw2D().line(
+                (pos.x, pos.y + 5 * scale),
+                (pos.x, pos.y + height - 5 * scale),
+                (*ctx.theme.text_disabled[:3], 0.25),
+                scale,
+            )
+            imgui.same_line(0, 6 * scale)
+        imgui.begin_group()
 
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap, 6 * scale))
-        group(sum(widths) + 2 * gap)
+    def _draw_capture_actions(
+        self,
+        editor: TimelineEditor,
+        ctx: PanelContext,
+        take_times: Sequence[float],
+        layout: _ToolbarLayout,
+    ) -> None:
+        scale = ctx.style_scale
         recording = ctx.session.state_take_recording
         supported = (
             ctx.session.adapter.caps.simulation
@@ -128,30 +194,32 @@ class TimelineToolbar:
             "stop" if recording else "record",
             ctx.tr("Keep frames through the playhead and overwrite later frames")
             if take_times and not recording
-            else labels[0],
+            else layout.labels[0],
             ctx.theme,
             scale,
-            label=shown[0],
-            width=widths[0],
+            label=layout.captions[0],
+            width=layout.command_widths[0],
             layouts=self.command_layouts,
             enabled=supported and not ctx.take_video_active,
             selected=recording,
             draw=ctx.painter(),
+            icon_drawer=self.command_icon_drawer,
         ):
             editor.toggle_recording(ctx)
         imgui.same_line()
         if _command_button(
             "##take-video",
             "view",
-            labels[1],
+            layout.labels[1],
             ctx.theme,
             scale,
-            label=shown[1],
+            label=layout.captions[1],
             draw=ctx.painter(),
-            width=widths[1],
+            width=layout.command_widths[1],
             layouts=self.command_layouts,
             enabled=ctx.start_take_video is not None
             and (ctx.take_video_active or (bool(take_times) and not recording)),
+            icon_drawer=self.command_icon_drawer,
         ):
             try:
                 ctx.stop_recording() if ctx.take_video_active else ctx.start_take_video()
@@ -165,40 +233,32 @@ class TimelineToolbar:
             ctx.tr("Capture complete scene state"),
             ctx.theme,
             scale,
-            label=shown[2],
+            label=layout.captions[2],
             draw=ctx.painter(),
-            width=widths[2],
+            width=layout.command_widths[2],
             layouts=self.command_layouts,
             enabled=ctx.session.adapter.caps.state_snapshots and not ctx.take_video_active,
+            icon_drawer=self.command_icon_drawer,
         ):
-            result = ctx.submit(cmd.CaptureSceneSnapshot())
-            if result.ok:
-                editor.selected_snapshot = result.entity_id
-                editor.selected_id = -1
-                editor.selected_keyframes.clear()
-                editor.edit_lane = "snapshots"
-                editor.view_needs_fit = True
-            editor.error = "" if result.ok else result.message
-        imgui.end_group()
-        group(transport_width)
-        self.draw_transport_header(editor, ctx, take_times, time_width)
-        imgui.end_group()
-        group(range_width)
-        self.draw_take_range(editor, ctx, take_times, range_widths)
-        imgui.end_group()
-        group(view_width)
+            editor.capture_snapshot(ctx)
+
+    def _draw_view_group(
+        self, editor: TimelineEditor, ctx: PanelContext, layout: _ToolbarLayout
+    ) -> None:
+        scale = ctx.style_scale
+        gap = 5 * scale
         follow_inline = button_row_layout(
-            (follow_width, icon_width, icon_width),
+            (layout.follow_width, layout.icon_width, layout.icon_width),
             imgui.get_content_region_avail().x,
             gap,
         )
         mode = segmented_control(
             "timeline-follow",
-            follow_labels,
+            layout.follow_labels,
             ("off", "page", "locked").index(editor.follow_mode),
-            width=min(follow_width, imgui.get_content_region_avail().x),
+            width=min(layout.follow_width, imgui.get_content_region_avail().x),
             theme=ctx.theme,
-            icons=follow_icons,
+            icons=_FOLLOW_ICONS,
             icon_label_drawer=self.follow_mode_icon_drawer,
             draw=ctx.painter(),
             show_labels=False,
@@ -217,8 +277,13 @@ class TimelineToolbar:
             ctx.theme,
             scale,
             draw=ctx.painter(),
+            icon_drawer=self.command_icon_drawer,
         ):
             imgui.open_popup("timeline-options")
+        self._draw_options(ctx)
+
+    def _draw_options(self, ctx: PanelContext) -> None:
+        scale = ctx.style_scale
         imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
         if imgui.begin_popup("timeline-options"):
             imgui.begin_disabled(ctx.take_video_active)
@@ -230,44 +295,49 @@ class TimelineToolbar:
             )
             if changed:
                 if ctx.set_take_pause_at_end is not None:
-                    ctx.set_take_pause_at_end(value)
+                    ctx.apply_setting(ctx.set_take_pause_at_end, value)
                 else:
                     ctx.submit(cmd.SetStateTakePauseAtEnd(value))
             imgui.end_disabled()
             if ctx.recording_config is not None:
                 imgui.separator()
-                titles = (ctx.tr("Start delay (s)"), ctx.tr("End hold (s)"))
-                label_width = max(imgui.calc_text_size(title).x for title in titles) + 8 * scale
-                flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
-                if imgui.begin_table(
-                    "timeline_recording_settings", 2, flags, (label_width + 140 * scale, 0)
-                ):
-                    imgui.table_setup_column(
-                        "label", imgui.TableColumnFlags_.width_fixed, label_width
-                    )
-                    imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-                    for field, title in zip(("countdown", "end_hold"), titles, strict=True):
-                        imgui.table_next_row()
-                        imgui.table_next_column()
-                        imgui.align_text_to_frame_padding()
-                        imgui.text_disabled(title)
-                        imgui.table_next_column()
-                        imgui.set_next_item_width(-1)
-                        changed, value = imgui.input_float(
-                            "##timeline-" + field,
-                            getattr(ctx.recording_config, field),
-                            0.5,
-                            5.0,
-                            "%.1f",
-                        )
-                        if changed:
-                            ctx.set_recording_config(
-                                replace(ctx.recording_config, **{field: value})
-                            )
-                    imgui.end_table()
+                self._draw_recording_options(ctx)
             imgui.end_popup()
-        imgui.end_group()
-        imgui.pop_style_var(3)
+        imgui.pop_style_var()
+
+    @staticmethod
+    def _draw_recording_options(ctx: PanelContext) -> None:
+        scale = ctx.style_scale
+        config = ctx.recording_config
+        titles = (ctx.tr("Start delay (s)"), ctx.tr("End hold (s)"))
+        label_width = max(imgui.calc_text_size(title).x for title in titles) + 8 * scale
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_pad_outer_x
+        if imgui.begin_table(
+            "timeline_recording_settings", 2, flags, (label_width + 140 * scale, 0)
+        ):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, label_width)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            for field, title in zip(("countdown", "end_hold"), titles, strict=True):
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.align_text_to_frame_padding()
+                imgui.text_disabled(title)
+                imgui.table_next_column()
+                imgui.set_next_item_width(-1)
+                changed, value = imgui.input_float(
+                    "##timeline-" + field,
+                    getattr(config, field),
+                    0.5,
+                    5.0,
+                    "%.1f",
+                )
+                committed = imgui.is_item_deactivated_after_edit()
+                if changed:
+                    config = replace(config, **{field: value})
+                    ctx.apply_setting(ctx.set_recording_config, config, persist=False)
+                if committed:
+                    ctx.apply_setting(ctx.set_recording_config, config)
+            imgui.end_table()
 
     def draw_take_range(self, editor: TimelineEditor, ctx, take_times, widths):
         scale = ctx.style_scale
@@ -341,6 +411,7 @@ class TimelineToolbar:
             selected=ctx.session.state_take_loop_enabled,
             draw=ctx.painter(),
             enabled=len(take_times) > 1 and not recording,
+            icon_drawer=self.command_icon_drawer,
         ):
             ctx.submit(cmd.SetStateTakeLoopEnabled(not ctx.session.state_take_loop_enabled))
         imgui.end_disabled()
@@ -444,6 +515,7 @@ class TimelineToolbar:
                 ),
                 draw=ctx.painter(),
                 selected=name == "play-pause" and playing,
+                icon_drawer=self.command_icon_drawer,
             ):
                 if name == "first" and not take_times:
                     editor.playhead = 0.0
@@ -470,6 +542,7 @@ class TimelineToolbar:
             ctx.theme,
             ctx.style_scale,
             draw=ctx.painter(),
+            icon_drawer=self.command_icon_drawer,
         ):
             editor.view_needs_fit = True
 
@@ -489,7 +562,15 @@ class TimelineToolbar:
         return ctx.tr("no recorded take" if supported else "state recording unavailable")
 
 
-def draw_model_header(editor: TimelineEditor, ctx, models, keyframes, editable, width):
+def draw_model_header(
+    editor: TimelineEditor,
+    ctx,
+    models,
+    editable,
+    width,
+    *,
+    icon_drawer: CommandIconDrawer = _draw_command_icon,
+):
     scale = ctx.style_scale
     gap = 5 * scale
     icon_width = _command_button_width("", scale)
@@ -513,11 +594,12 @@ def draw_model_header(editor: TimelineEditor, ctx, models, keyframes, editable, 
         scale,
         enabled=editable and editor.model_id >= 0,
         draw=ctx.painter(),
+        icon_drawer=icon_drawer,
     ):
         existing = (
             ctx.model_keyframe_names(editor.model_id)
             if ctx.model_keyframe_names is not None
-            else {key.name for key in keyframes}
+            else {key.name for key in editor.keyframes(ctx)[0]}
         )
         name = unique_keyframe_name(existing)
         editor.edit_lane = "model"

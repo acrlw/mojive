@@ -10,6 +10,7 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive import math3d
 from mojive.adapters.base import (
+    JointAdvancedProperties,
     JointInfo,
     NodeType,
     SceneNode,
@@ -20,14 +21,132 @@ from mojive.ui.panels import (
 
 from .fields import (
     _begin_property_table,
+    _edited_float_components,
     _property_control_row,
     _property_section,
+    _property_solver_rows,
     _property_vector_row,
     _vector_fields,
 )
 from .support import (
     _nearest_euler_degrees,
 )
+
+
+def _joint_dynamics_rows(
+    ctx: PanelContext, joint: JointInfo, properties: JointAdvancedProperties
+) -> JointAdvancedProperties:
+    """Edit dynamic values in display units without round-tripping idle values."""
+    edited = properties
+    _property_control_row(ctx, "group")
+    changed, group = imgui.combo(
+        "##joint_advanced_group", properties.group, tuple(str(value) for value in range(6))
+    )
+    if changed:
+        edited = replace(edited, group=int(group))
+    _property_control_row(ctx, "armature")
+    changed, armature = imgui.drag_float(
+        "##joint_armature", properties.armature, 0.001, 0.0, 1000000000.0, "%.6g"
+    )
+    if changed:
+        edited = replace(edited, armature=float(armature))
+    _property_control_row(ctx, "friction loss")
+    changed, friction_loss = imgui.drag_float(
+        "##joint_friction_loss", properties.friction_loss, 0.001, 0.0, 1000000000.0, "%.6g"
+    )
+    if changed:
+        edited = replace(edited, friction_loss=float(friction_loss))
+    rotational = joint.type in ("hinge", "ball")
+    for label, field, value in (
+        ("reference", "reference", properties.reference),
+        ("spring reference", "spring_reference", properties.spring_reference),
+    ):
+        _property_control_row(ctx, label)
+        changed, value = imgui.drag_float(
+            f"##joint_{field}",
+            float(np.degrees(value)) if rotational else float(value),
+            0.25 if rotational else 0.001,
+            -360000.0 if rotational else -1000000.0,
+            360000.0 if rotational else 1000000.0,
+            "%.3f deg" if rotational else "%.6g m",
+        )
+        if changed:
+            edited = replace(edited, **{field: float(np.radians(value) if rotational else value)})
+    _property_control_row(ctx, "limit margin")
+    changed, margin = imgui.drag_float(
+        "##joint_limit_margin", properties.margin, 0.001, 0.0, 1000000.0, "%.6g"
+    )
+    if changed:
+        edited = replace(edited, margin=float(margin))
+    return edited
+
+
+def _joint_actuator_rows(
+    ctx: PanelContext, properties: JointAdvancedProperties
+) -> JointAdvancedProperties:
+    edited = properties
+    force_modes = ("auto", "unlimited", "limited")
+    _property_control_row(ctx, "actuator force limit")
+    changed, mode = imgui.combo(
+        "##joint_actuator_force_limit",
+        force_modes.index(properties.actuator_force_limit_mode),
+        tuple(ctx.tr(value) for value in force_modes),
+    )
+    if changed:
+        edited = replace(edited, actuator_force_limit_mode=force_modes[mode])
+    _property_control_row(ctx, "actuator force range")
+    changed, values = imgui.drag_float2(
+        "##joint_actuator_force_range",
+        properties.actuator_force_range,
+        0.01,
+        -1000000000.0,
+        1000000000.0,
+        "%.6g N",
+    )
+    imgui.set_item_tooltip(
+        ctx.tr(
+            "Auto enables the limit when a valid range is configured; unlimited ignores the range"
+        )
+    )
+    if changed:
+        edited = replace(
+            edited,
+            actuator_force_range=_edited_float_components(properties.actuator_force_range, values),
+        )
+    _property_control_row(ctx, "actuator gravity compensation")
+    changed, gravity = imgui.checkbox(
+        "##joint_actuator_gravity_compensation", properties.actuator_gravity_compensation
+    )
+    if changed:
+        edited = replace(edited, actuator_gravity_compensation=bool(gravity))
+    return edited
+
+
+def _joint_advanced_rows(
+    ctx: PanelContext, joint: JointInfo, properties: JointAdvancedProperties
+) -> JointAdvancedProperties:
+    edited = _joint_dynamics_rows(ctx, joint, properties)
+    changed, reference, impedance = _property_solver_rows(
+        ctx,
+        "joint_limit",
+        properties.limit_solver_reference,
+        properties.limit_solver_impedance,
+        label_prefix="limit ",
+    )
+    if changed:
+        edited = replace(edited, limit_solver_reference=reference, limit_solver_impedance=impedance)
+    changed, reference, impedance = _property_solver_rows(
+        ctx,
+        "joint_friction",
+        properties.friction_solver_reference,
+        properties.friction_solver_impedance,
+        label_prefix="friction ",
+    )
+    if changed:
+        edited = replace(
+            edited, friction_solver_reference=reference, friction_solver_impedance=impedance
+        )
+    return _joint_actuator_rows(ctx, edited)
 
 
 class _Physics:
@@ -448,222 +567,23 @@ class _Physics:
         )
         if not editable:
             imgui.begin_disabled()
-
-        rotational = joint.type in ("hinge", "ball")
-        group_changed, group = False, int(properties.group)
-        armature_changed, armature = False, float(properties.armature)
-        friction_changed, friction_loss = False, float(properties.friction_loss)
-        reference = (
-            float(np.degrees(properties.reference)) if rotational else float(properties.reference)
-        )
-        spring_reference = (
-            float(np.degrees(properties.spring_reference))
-            if rotational
-            else float(properties.spring_reference)
-        )
-        reference_changed = False
-        spring_reference_changed = False
-        margin_changed, margin = False, float(properties.margin)
-        limit_reference_changed = False
-        limit_reference = np.asarray(properties.limit_solver_reference, np.float32)
-        limit_impedance_first_changed = False
-        limit_impedance_first = np.asarray(properties.limit_solver_impedance[:3], np.float32)
-        limit_impedance_shape_changed = False
-        limit_impedance_shape = np.asarray(properties.limit_solver_impedance[3:], np.float32)
-        friction_reference_changed = False
-        friction_reference = np.asarray(properties.friction_solver_reference, np.float32)
-        friction_impedance_first_changed = False
-        friction_impedance_first = np.asarray(properties.friction_solver_impedance[:3], np.float32)
-        friction_impedance_shape_changed = False
-        friction_impedance_shape = np.asarray(properties.friction_solver_impedance[3:], np.float32)
-        force_modes = ("auto", "unlimited", "limited")
-        force_mode = force_modes.index(properties.actuator_force_limit_mode)
-        force_mode_changed = False
-        force_range_changed = False
-        force_range = np.asarray(properties.actuator_force_range, np.float32)
-        gravity_changed = False
-        gravity_compensation = properties.actuator_gravity_compensation
-
         if _begin_property_table("joint_advanced_properties_table"):
-            _property_control_row(ctx, "group")
-            group_changed, group = imgui.combo(
-                "##joint_advanced_group", group, tuple(str(value) for value in range(6))
-            )
-            _property_control_row(ctx, "armature")
-            armature_changed, armature = imgui.drag_float(
-                "##joint_armature", armature, 0.001, 0.0, 1000000000.0, "%.6g"
-            )
-            _property_control_row(ctx, "friction loss")
-            friction_changed, friction_loss = imgui.drag_float(
-                "##joint_friction_loss",
-                friction_loss,
-                0.001,
-                0.0,
-                1000000000.0,
-                "%.6g",
-            )
-            _property_control_row(ctx, "reference")
-            reference_changed, reference = imgui.drag_float(
-                "##joint_reference",
-                reference,
-                0.25 if rotational else 0.001,
-                -360000.0 if rotational else -1000000.0,
-                360000.0 if rotational else 1000000.0,
-                "%.3f deg" if rotational else "%.6g m",
-            )
-            _property_control_row(ctx, "spring reference")
-            spring_reference_changed, spring_reference = imgui.drag_float(
-                "##joint_spring_reference",
-                spring_reference,
-                0.25 if rotational else 0.001,
-                -360000.0 if rotational else -1000000.0,
-                360000.0 if rotational else 1000000.0,
-                "%.3f deg" if rotational else "%.6g m",
-            )
-            _property_control_row(ctx, "limit margin")
-            margin_changed, margin = imgui.drag_float(
-                "##joint_limit_margin", margin, 0.001, 0.0, 1000000.0, "%.6g"
-            )
-            _property_control_row(ctx, "limit solver reference")
-            limit_reference_changed, limit_reference = imgui.drag_float2(
-                "##joint_limit_solver_reference",
-                limit_reference,
-                0.001,
-                -1000000.0,
-                1000000.0,
-                "%.5g",
-            )
-            _property_control_row(ctx, "limit impedance min / max / width")
-            limit_impedance_first_changed, limit_impedance_first = imgui.drag_float3(
-                "##joint_limit_impedance_first",
-                limit_impedance_first,
-                0.001,
-                0.0,
-                1.0,
-                "%.5g",
-            )
-            _property_control_row(ctx, "limit impedance midpoint / power")
-            limit_impedance_shape_changed, limit_impedance_shape = imgui.drag_float2(
-                "##joint_limit_impedance_shape",
-                limit_impedance_shape,
-                0.01,
-                0.0,
-                1000.0,
-                "%.4g",
-            )
-            _property_control_row(ctx, "friction solver reference")
-            friction_reference_changed, friction_reference = imgui.drag_float2(
-                "##joint_friction_solver_reference",
-                friction_reference,
-                0.001,
-                -1000000.0,
-                1000000.0,
-                "%.5g",
-            )
-            _property_control_row(ctx, "friction impedance min / max / width")
-            friction_impedance_first_changed, friction_impedance_first = imgui.drag_float3(
-                "##joint_friction_impedance_first",
-                friction_impedance_first,
-                0.001,
-                0.0,
-                1.0,
-                "%.5g",
-            )
-            _property_control_row(ctx, "friction impedance midpoint / power")
-            friction_impedance_shape_changed, friction_impedance_shape = imgui.drag_float2(
-                "##joint_friction_impedance_shape",
-                friction_impedance_shape,
-                0.01,
-                0.0,
-                1000.0,
-                "%.4g",
-            )
-            _property_control_row(ctx, "actuator force limit")
-            force_mode_changed, force_mode = imgui.combo(
-                "##joint_actuator_force_limit",
-                force_mode,
-                tuple(ctx.tr(value) for value in force_modes),
-            )
-            _property_control_row(ctx, "actuator force range")
-            force_range_changed, force_range = imgui.drag_float2(
-                "##joint_actuator_force_range",
-                force_range,
-                0.01,
-                -1000000000.0,
-                1000000000.0,
-                "%.6g N",
-            )
-            imgui.set_item_tooltip(
-                ctx.tr(
-                    "Auto enables the limit when a valid range is configured; "
-                    "unlimited ignores the range"
-                )
-            )
-            _property_control_row(ctx, "actuator gravity compensation")
-            gravity_changed, gravity_compensation = imgui.checkbox(
-                "##joint_actuator_gravity_compensation", gravity_compensation
-            )
+            self._joint_advanced_edit = _joint_advanced_rows(ctx, joint, properties)
             imgui.end_table()
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled(ctx.tr("Pause the simulation to edit advanced joint properties"))
+        self._joint_advanced_actions(ctx, current, self._joint_advanced_edit, editable=editable)
 
-        edited = properties
-        if group_changed:
-            edited = replace(edited, group=int(group))
-        if armature_changed:
-            edited = replace(edited, armature=float(armature))
-        if friction_changed:
-            edited = replace(edited, friction_loss=float(friction_loss))
-        if reference_changed:
-            edited = replace(
-                edited,
-                reference=float(np.radians(reference) if rotational else reference),
-            )
-        if spring_reference_changed:
-            edited = replace(
-                edited,
-                spring_reference=float(
-                    np.radians(spring_reference) if rotational else spring_reference
-                ),
-            )
-        if margin_changed:
-            edited = replace(edited, margin=float(margin))
-        if limit_reference_changed:
-            edited = replace(
-                edited,
-                limit_solver_reference=tuple(float(value) for value in limit_reference),
-            )
-        if limit_impedance_first_changed or limit_impedance_shape_changed:
-            edited = replace(
-                edited,
-                limit_solver_impedance=tuple(
-                    float(value) for value in (*limit_impedance_first, *limit_impedance_shape)
-                ),
-            )
-        if friction_reference_changed:
-            edited = replace(
-                edited,
-                friction_solver_reference=tuple(float(value) for value in friction_reference),
-            )
-        if friction_impedance_first_changed or friction_impedance_shape_changed:
-            edited = replace(
-                edited,
-                friction_solver_impedance=tuple(
-                    float(value) for value in (*friction_impedance_first, *friction_impedance_shape)
-                ),
-            )
-        if force_mode_changed:
-            edited = replace(edited, actuator_force_limit_mode=force_modes[force_mode])
-        if force_range_changed:
-            edited = replace(
-                edited,
-                actuator_force_range=tuple(float(value) for value in force_range),
-            )
-        if gravity_changed:
-            edited = replace(edited, actuator_gravity_compensation=bool(gravity_compensation))
-        self._joint_advanced_edit = edited
-
+    def _joint_advanced_actions(
+        self,
+        ctx: PanelContext,
+        current: JointAdvancedProperties,
+        edited: JointAdvancedProperties,
+        *,
+        editable: bool,
+    ) -> None:
+        """Apply one complete draft transaction, or discard it without changing the model."""
         dirty = edited != current
         invalid_force_range = (
             edited.actuator_force_limit_mode == "limited"
