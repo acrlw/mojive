@@ -97,7 +97,7 @@ make native-spirv
 make native-wheel-test
 ```
 
-`native-parity` 比较颜色、深度、object ID、分割及功能开启／关闭的可见贡献；`native-model-parity` 还检查真实刚体、skin、flex、变形恢复和 RGBA。对照图从左到右为 OpenGL、wgpu、bgfx。截图、JSON 和性能数据位于 `output/`。详细结论见[本轮验收记录](../plans/native-renderer-parity.zh.md)。
+`native-parity` 比较颜色、深度、object ID、分割及功能开启／关闭的可见贡献；`native-model-parity` 还检查真实刚体、skin、flex、变形恢复和 RGBA。对照图从左到右为 OpenGL、wgpu、bgfx。截图、JSON 和性能数据位于 `output/`。
 
 `native-motion-parity` 保存连续近景平移、环绕、缩放的逐帧 PNG、并排动画和指标；`native-corpus-parity` 通过公开 MuJoCo Renderer 逐个加载本地模型，默认在单采样下严格对照八个视角的 RGB 和分割，MSAA 图像另由 motion／Viewer 验收覆盖；生成每模型最差视角、总览图和失败清单。缺少依赖或非独立 XML 片段会单独报告，不能计作通过。
 

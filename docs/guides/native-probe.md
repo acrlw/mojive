@@ -2,8 +2,7 @@
 
 The optional `cpp/` project evaluates a C++ renderer without changing the Python Viewer,
 Session, renderer selection, dependencies, or public rendering APIs. It is an experimental
-subset, not a replacement editor. See the [Chinese migration proposal](../plans/native-cpp-bgfx.zh.md)
-for the broader plan. The [current backend decision](../plans/native-backend-decision.zh.md) selects bgfx for the native implementation and records the latest evidence and remaining platform gates.
+subset, not a replacement editor.
 
 ## Boundaries
 

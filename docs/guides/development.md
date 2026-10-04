@@ -189,12 +189,10 @@ the Python Viewer currently uses `imgui-bundle` for UI generation on all renderi
 Editing the tracked core does not change the installed Bundle wheel. See the dependency README
 for the source/build relationship and the requirements for global corner customization.
 
-The [native dependency plan (Chinese)](../plans/cpp-dependencies.zh.md) recommends GLM for
-graphics math and spdlog for runtime-owned native output and bounded log history. Python can
-publish records, configure output and subscribe through optional Loguru/logging bridges; native
+GLM and spdlog are pinned build dependencies for graphics math and native output. Python can
+publish records, configure output, and subscribe through optional Loguru/logging bridges; native
 output must not depend on a Python consumer. C++ provides rendering and runtime infrastructure;
-business algorithms and extension policy remain in Python. Eigen and native business solvers are
-outside the current roadmap. EnTT requires a demonstrated infrastructure need. GLM and spdlog are pinned build dependencies; Eigen and EnTT are not included.
+business algorithms and extension policy remain in Python. Eigen and EnTT are not included.
 
 ## Shared UI controls
 
@@ -277,5 +275,4 @@ remain specific to those implementations. Automated composition tests hide their
 run explicit shown-window lifecycle tools on a separate display when desktop focus must
 remain uninterrupted.
 
-See the [Viewer guide (Chinese)](../how-to/native-viewer.zh.md) for public usage and the
-[acceptance record (Chinese)](../plans/native-renderer-parity.zh.md) for measured coverage and limits.
+See the [Viewer guide (Chinese)](../how-to/native-viewer.zh.md) for public usage.
