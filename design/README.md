@@ -93,6 +93,3 @@ deterministic Draw2D data with:
 
 The generated module is written under `output/`; Mojive does not parse SVG or rasterize icons in the
 frame loop.
-
-`index.html` and `style.css` remain a browser-readable design history. They are not the production
-theme or the current feature inventory.
