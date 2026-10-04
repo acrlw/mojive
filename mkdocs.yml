@@ -42,7 +42,6 @@ nav:
   - Concepts:
       - Architecture: concepts/architecture.md
       - Renderer: RENDERER.md
-      - Batch rendering for RL: BATCH_RENDERING.md
       - Platform support: PLATFORM.md
       - C++ foundation (中文): plans/cpp-foundation.zh.md
       - C++ implementation checklist: plans/cpp-implementation.zh.md
