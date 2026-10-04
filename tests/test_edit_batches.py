@@ -110,7 +110,9 @@ def test_finalization_failure_retains_checkpoint_until_rollback(edited, monkeypa
         transaction(service, [operation("set_scale", node_id=node.node_id, scale=[2, 2, 2])])
     assert error.value.code == "command_failed"
     assert not session.editing and not session.can_undo
-    assert service.dispatch("get_scene", {})["document"] == before
+    after = service.dispatch("get_scene", {})["document"]
+    assert (after["id"], after["revision"]) == (before["id"], before["revision"])
+    assert after["structure_revision"] > before["structure_revision"]
     np.testing.assert_allclose(scene.source.geom_size[0], [0.2, 0.3, 0.4])
 
 

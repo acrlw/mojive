@@ -44,18 +44,17 @@ def exercise(socket_path: Path, output: Path) -> None:
         )
         assert len(matches) == 1
         node = matches[0]
-        inspected = client.call("inspect_object", {"object_id": node["object_id"]})
-        geometry = inspected["geometries"][0]
         camera = next(item for item in metadata["cameras"] if item["name"] == "inspection")
         client.call("set_capture_camera", {"camera_id": camera["camera_id"]})
         captures, counts = [], []
         for label, visible in (("visible", True), ("hidden", False), ("restored", True)):
+            inspected = client.call("inspect_object", {"object_id": node["object_id"]})
             client.call(
                 "set_visible",
                 {
-                    "node_id": node["node_id"],
+                    "node_id": inspected["node_id"],
                     "visible": visible,
-                    "expected_document": metadata["document"],
+                    "expected_document": inspected["document"],
                 },
             )
             assert (
@@ -79,11 +78,13 @@ def exercise(socket_path: Path, output: Path) -> None:
                         int(np.count_nonzero(np.load(result["path"]) == node["object_id"]))
                     )
         assert counts[0] > 100 and counts[1] == 0 and counts[2] == counts[0]
+        inspected = client.call("inspect_object", {"object_id": node["object_id"]})
+        geometry = inspected["geometries"][0]
         edited = client.call(
             "edit_scene",
             {
                 "label": "Arrange inspection box",
-                "expected_document": metadata["document"],
+                "expected_document": inspected["document"],
                 "operations": [
                     {
                         "method": "rename_scene_entity",
@@ -92,7 +93,7 @@ def exercise(socket_path: Path, output: Path) -> None:
                     {
                         "method": "set_pose",
                         "params": {
-                            "node_id": node["node_id"],
+                            "node_id": inspected["node_id"],
                             "position": [0, -1, 0.8],
                             "rotation": np.eye(3).tolist(),
                         },
@@ -103,7 +104,7 @@ def exercise(socket_path: Path, output: Path) -> None:
                     },
                     {
                         "method": "set_scale",
-                        "params": {"node_id": node["node_id"], "scale": [1.2, 1, 0.8]},
+                        "params": {"node_id": inspected["node_id"], "scale": [1.2, 1, 0.8]},
                     },
                     {
                         "method": "set_geometry_color",

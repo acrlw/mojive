@@ -16,6 +16,15 @@ def handle_session_command(session, message: dict):
     revision = message.get("operation_version", 1)
     if type(revision) is not int or revision != 1:
         return CommandResult.bad(f"Unsupported revision {revision!r} of remote command {op}")
+    if "expected_structure_revision" in message:
+        expected = message["expected_structure_revision"]
+        if type(expected) is not int or expected < 0:
+            return CommandResult.bad("expected_structure_revision must be a non-negative integer")
+        # pump_commands runs on the publisher's scene owner. Check the same
+        # generation advertised by snapshot_structure before resolving command IDs.
+        session.sync_structure()
+        if session.structure_generation != expected:
+            return CommandResult.bad("Scene structure changed after command validation")
     if op == "raycast":
         try:
             return session.query(cmd.Pick(message["origin"], message["direction"]))
@@ -54,7 +63,7 @@ def handle_session_command(session, message: dict):
                 {
                     key: value
                     for key, value in message.items()
-                    if key not in {"op", "operation_version"}
+                    if key not in {"op", "operation_version", "expected_structure_revision"}
                 },
             )
         except ControlError as exc:

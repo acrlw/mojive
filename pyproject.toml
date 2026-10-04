@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mujoco = ["mujoco>=3.1"]
+mcp = ["mcp>=2.3,<3"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 native = ["cmake>=3.24", "ninja>=1.11"]
 docs = [
@@ -31,6 +32,7 @@ docs = [
 
 [project.scripts]
 mojive = "mojive.cli:main"
+mojive-mcp = "mojive.control.mcp:main"
 
 [project.urls]
 Repository = "https://github.com/acrlw/mojive"

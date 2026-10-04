@@ -86,11 +86,20 @@ def set_material(self: Session, c: cmd.SetMaterial) -> CommandResult:
     index = int(c.material_index)
     if self._source is None or not 0 <= index < len(self._source.materials):
         return CommandResult.bad(f"material index {index} is unavailable")
+    target = self._scene_overrides.material_targets.get(index)
+    if target is None:
+        target = self._material_target(index)
     writeback = self._adapter.set_material(index, c.material)
-    if self._retain_scene_override(writeback):
+    # A successful local write belongs to the adapter. Keeping a second copy by
+    # runtime index would overwrite a different asset after material reindexing.
+    if not writeback or self._adapter.caps.external_clock:
+        if self._source is self._adapter_source:
+            self._source = replace(self._source, materials=list(self._source.materials))
         self._scene_overrides.materials[index] = c.material
+        self._scene_overrides.material_targets[index] = target
     else:
         self._scene_overrides.materials.pop(index, None)
+        self._scene_overrides.material_targets.pop(index, None)
     self._source.materials[index] = c.material
     self._structure_generation += 1
     message = "" if writeback else "edited in the viewer; adapter write-back is unavailable"

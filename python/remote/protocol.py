@@ -31,6 +31,7 @@ from mojive.types import CameraView
 DEFAULT_PORT = 47650
 AUTHKEY = b"mojive-local"
 STREAM_PROTOCOL_VERSION = 1
+STRUCTURE_PRECONDITION = "structure_precondition"
 _REMOTE_REQUIREMENTS = {
     **dict.fromkeys(("pause", "play"), "clock_control"),
     "step": "simulation",
@@ -76,15 +77,18 @@ _REMOTE_REQUIREMENTS = {
 
 def remote_command_versions(caps: AdapterCaps) -> tuple[tuple[str, int], ...]:
     """Advertise only wire commands supported by this publisher's adapter."""
-    return tuple(
-        (name, 1)
-        for name, feature in _REMOTE_REQUIREMENTS.items()
-        if (not feature or caps.supports(feature))
-        and not (
-            name in {"pause", "play", "step", "reset"}
-            and caps.simulation
-            and not caps.clock_control
-        )
+    return (
+        (STRUCTURE_PRECONDITION, 1),
+        *(
+            (name, 1)
+            for name, feature in _REMOTE_REQUIREMENTS.items()
+            if (not feature or caps.supports(feature))
+            and not (
+                name in {"pause", "play", "step", "reset"}
+                and caps.simulation
+                and not caps.clock_control
+            )
+        ),
     )
 
 

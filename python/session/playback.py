@@ -519,28 +519,32 @@ class _Playback:
             self._pending_steps = 0
             self._step_physics(count)
 
-        prepare_frame = getattr(self._adapter, "prepare_frame", None)
-        if prepare_frame is not None:
-            prepare_frame(needs)
-        if self._adapter.structure_revision != self._adapter_revision:
-            self._refresh_structure()
+        with self._scene_read():
+            prepare_frame = getattr(self._adapter, "prepare_frame", None)
+            if prepare_frame is not None:
+                prepare_frame(needs)
+            if self._adapter.structure_revision != self._adapter_revision:
+                self._refresh_structure()
 
-        self._frame = self._adapter.frame(needs)
-        if self._model_edit_preview is not None and self._model_edit_preview.geometry is not None:
-            self._model_edit_preview.geometry._base_frame = None
-        self._sync_equality_state()
-        self._compose_lights()
-        self._compose_cameras()
-        if self._adapter.caps.external_clock:
-            self._paused = bool(self._frame.paused)
-        else:
-            self._frame.paused = self._paused
-            self._frame.step = self._step_counter
-            self._frame.physics_hz = (
-                self._physics_rate.update(self._step_counter, self._frame.time)
-                if self._adapter.caps.simulation
-                else None
-            )
+            self._frame = self._adapter.frame(needs)
+            if (
+                self._model_edit_preview is not None
+                and self._model_edit_preview.geometry is not None
+            ):
+                self._model_edit_preview.geometry._base_frame = None
+            self._sync_equality_state()
+            self._compose_lights()
+            self._compose_cameras()
+            if self._adapter.caps.external_clock:
+                self._paused = bool(self._frame.paused)
+            else:
+                self._frame.paused = self._paused
+                self._frame.step = self._step_counter
+                self._frame.physics_hz = (
+                    self._physics_rate.update(self._step_counter, self._frame.time)
+                    if self._adapter.caps.simulation
+                    else None
+                )
         if (
             self._state_take_recording
             and (not self._take.frames or self._take.frames[-1].step != self._step_counter)

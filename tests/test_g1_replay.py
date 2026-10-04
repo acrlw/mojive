@@ -166,6 +166,7 @@ def test_world_selection_rpc_preserves_camera_and_document(archive):
         session = service.session
         assert session.submit(cmd.Select(4)).ok
         assert session.submit(cmd.SetVisible(4, False)).ok
+        selected_node_id = session.selected_node.node_id
         camera = session.camera
         document = document_state(session)
         info = service.dispatch("get_world_selection", {})
@@ -177,7 +178,17 @@ def test_world_selection_rpc_preserves_camera_and_document(archive):
         assert not session.selected_node.visible
         assert not next(n for n in session.source.nodes if n.object_id == 4).visible
         assert session.camera is camera
-        assert document_state(session) == document
+        current = document_state(session)
+        assert current["id"] == document["id"]
+        assert current["revision"] == document["revision"]
+        assert current["structure_revision"] > document["structure_revision"]
+        with pytest.raises(RpcError) as stale:
+            service.dispatch(
+                "set_visible",
+                {"node_id": selected_node_id, "visible": True, "expected_document": document},
+            )
+        assert stale.value.code == "stale_document"
+        assert not session.selected_node.visible
         assert not session.can_undo
         for ids in ([0, 1, 2], [1, 1], [4]):
             with pytest.raises(RpcError):

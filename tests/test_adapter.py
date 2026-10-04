@@ -518,7 +518,10 @@ def test_image_light_preserves_its_cube_texture_and_intensity(tmp_path):
         image_adapter.release()
 
 
-def test_attached_image_light_writes_its_local_texture_name(tmp_path):
+@pytest.mark.parametrize("material_overlay", [False, True])
+def test_attached_image_light_writes_its_local_texture_name(
+    tmp_path, monkeypatch, material_overlay
+):
     from mojive import commands as cmd
     from mojive.session import Session
 
@@ -545,6 +548,11 @@ def test_attached_image_light_writes_its_local_texture_name(tmp_path):
     try:
         assert session.submit(cmd.Pause())
         assert session.submit(cmd.AddSceneModel(child, np.zeros(3, np.float32)))
+        if material_overlay:
+            monkeypatch.setattr(image_adapter, "set_material", lambda index, material: False)
+            assert session.submit(
+                cmd.SetMaterial(0, replace(session.source.materials[0], roughness=0.2))
+            )
         light = session.source.lights.lights[0]
         assert light.texture == "opengl_1_studio"
         assert image_adapter.set_light(0, replace(light, intensity=3200.0))

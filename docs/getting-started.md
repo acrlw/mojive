@@ -13,6 +13,7 @@ make setup
 Optional dependencies are grouped into the following extras:
 
 - `mujoco` loads MJCF/URDF, runs simulation, and enables the compatible `Renderer` API;
+- `mcp` connects MCP agents to an existing viewer or standalone RPC service;
 - `dev` installs pytest and Ruff; and
 - `docs` installs the documentation build tools.
 

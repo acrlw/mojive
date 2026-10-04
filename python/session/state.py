@@ -108,6 +108,15 @@ class _LightOverride:
 
 
 @dataclass
+class _MaterialTarget:
+    """Evidence tying an overlay to its original material and surviving geometry."""
+
+    revision: int
+    material: Material
+    object_ids: frozenset[int]
+
+
+@dataclass
 class SceneOverrides:
     """Camera, light and appearance overrides retained over adapter-owned scene values."""
 
@@ -117,6 +126,7 @@ class SceneOverrides:
     geometry_colors: dict[int, np.ndarray] = field(default_factory=dict)
     geometry_color_targets: dict[int, tuple] = field(default_factory=dict)
     cameras: dict[int, CameraView] = field(default_factory=dict)
+    material_targets: dict[int, _MaterialTarget] = field(default_factory=dict)
 
     def clear(self) -> None:
         """Discard property overrides and reveal adapter-owned values."""
@@ -124,6 +134,7 @@ class SceneOverrides:
         self.lights.clear()
         self.environment = None
         self.materials.clear()
+        self.material_targets.clear()
         self.geometry_colors.clear()
         self.geometry_color_targets.clear()
         self.cameras.clear()

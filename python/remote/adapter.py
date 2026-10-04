@@ -9,6 +9,7 @@ import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from dataclasses import replace
 from multiprocessing.connection import Connection, answer_challenge, deliver_challenge
 
@@ -17,6 +18,7 @@ import numpy as np
 from mojive.adapters.base import (
     ActuatorInfo,
     AdapterCaps,
+    AdapterCommandError,
     BodyProperties,
     CameraInfo,
     EqualityConstraintInfo,
@@ -43,6 +45,7 @@ from .protocol import (
     AUTHKEY,
     DEFAULT_PORT,
     STREAM_PROTOCOL_VERSION,
+    STRUCTURE_PRECONDITION,
     RemoteFrame,
     RemoteStructure,
     _close_connection,
@@ -75,6 +78,9 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._closed = False
         self._timeout = float(timeout)
         self._command_lock = threading.Lock()
+        self._expected_structure_revision: ContextVar[int | None] = ContextVar(
+            "mojive_remote_structure_revision", default=None
+        )
         self._command_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="mojive-remote-control"
         )
@@ -240,6 +246,26 @@ class RemoteSceneAdapter(SceneAdapterBase):
         self._wait(lambda: self._structure is not None, self._timeout, "scene structure")
         return self._structure.source
 
+    @contextlib.contextmanager
+    def scene_read(self):
+        # Wait before exposing any fields: frame() must not release this lock
+        # waiting for a first frame after the caller already read its structure.
+        # Condition uses an RLock, so nested Session/Workspace reads are safe.
+        with self._lock:
+            self._wait(lambda: self._latest is not None, self._timeout, "first frame")
+            yield
+
+    @contextlib.contextmanager
+    def command_context(self, expected_structure_revision: int):
+        with self._lock:
+            if self.structure_revision != expected_structure_revision:
+                raise AdapterCommandError("Scene structure changed after command validation")
+        token = self._expected_structure_revision.set(expected_structure_revision)
+        try:
+            yield
+        finally:
+            self._expected_structure_revision.reset(token)
+
     def frame(self, needs: FrameNeeds) -> SceneFrame:
         del needs
         self._wait(lambda: self._latest is not None, self._timeout, "first frame")
@@ -322,28 +348,49 @@ class RemoteSceneAdapter(SceneAdapterBase):
 
     def _send(self, op: str, **args):
         versions = self._command_versions
+        expected = self._expected_structure_revision.get()
+
+        def checked(result):
+            if expected is not None and isinstance(result, CommandResult) and not result.ok:
+                raise AdapterCommandError(result.message)
+            return result
+
+        if expected is not None:
+            if versions.get(STRUCTURE_PRECONDITION) != 1:
+                raise AdapterCommandError(
+                    "Remote publisher does not support structure preconditions"
+                )
+            args["expected_structure_revision"] = expected
         if versions.get(op) != 1:
-            return CommandResult.bad(f"Remote publisher does not support {op} (revision 1)")
+            return checked(
+                CommandResult.bad(f"Remote publisher does not support {op} (revision 1)")
+            )
         deadline = time.monotonic() + self._timeout
         if not self._command_lock.acquire(timeout=self._timeout):
-            return CommandResult.bad("remote command channel is busy; request was not sent")
+            return checked(
+                CommandResult.bad("remote command channel is busy; request was not sent")
+            )
         try:
             if self._command is None:
-                return CommandResult.bad("remote command channel is closed")
-            pending = self._command_executor.submit(
-                self._exchange_command, self._command, {"op": op, "operation_version": 1, **args}
-            )
-            return pending.result(timeout=max(0.0, deadline - time.monotonic()))
+                result = CommandResult.bad("remote command channel is closed")
+            else:
+                pending = self._command_executor.submit(
+                    self._exchange_command,
+                    self._command,
+                    {"op": op, "operation_version": 1, **args},
+                )
+                result = pending.result(timeout=max(0.0, deadline - time.monotonic()))
         except TimeoutError:
             self._close_command_channel()
-            return CommandResult.bad(
+            result = CommandResult.bad(
                 "remote command timed out; completion unknown; inspect before retrying"
             )
         except (EOFError, OSError, RuntimeError):
             self._close_command_channel()
-            return CommandResult.bad("remote command channel is closed; completion unknown")
+            result = CommandResult.bad("remote command channel is closed; completion unknown")
         finally:
             self._command_lock.release()
+        return checked(result)
 
     @staticmethod
     def _exchange_command(connection: Connection, payload: dict):
@@ -648,7 +695,7 @@ class RemoteSceneAdapter(SceneAdapterBase):
         )
 
     def clear_perturb(self) -> None:
-        self._send("clear_perturb")
+        self._run_control_command("clear_perturb")
 
     def raycast(self, origin: np.ndarray, direction: np.ndarray) -> tuple[int, float]:
         result = self._send(

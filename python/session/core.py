@@ -234,13 +234,17 @@ class Session(_Editing, _Playback, _Source):
     @property
     def source(self) -> SceneSource | None:
         """Return the current stable scene source."""
-        preview = getattr(self, "_model_edit_preview", None)
-        return preview.source if preview is not None and preview.visible else self._source
+        preview = self._model_edit_preview
+        if preview is not None and preview.visible:
+            return preview.source
+        if self._source is not None and self._source is not self._adapter_source:
+            self._source.lights = self._configured_lights()
+        return self._source
 
     @property
     def nodes(self) -> list[SceneNode]:
         """Return hierarchy nodes for the current structure generation."""
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return preview.nodes if preview is not None and preview.visible else self._nodes
 
     @property
@@ -417,7 +421,7 @@ class Session(_Editing, _Playback, _Source):
     def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None:
         """Return complete editable state for one model-local keyframe."""
         value = self._adapter.keyframe_properties(keyframe_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             preview.properties("keyframe_properties", keyframe_id, value)
             if preview is not None
@@ -431,7 +435,7 @@ class Session(_Editing, _Playback, _Source):
     def joint_advanced_properties(self, joint_id: int) -> JointAdvancedProperties | None:
         """Return joint properties backed by rebuilt MuJoCo constants."""
         value = self._adapter.joint_advanced_properties(joint_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             preview.properties("joint_advanced_properties", joint_id, value)
             if preview is not None
@@ -441,7 +445,7 @@ class Session(_Editing, _Playback, _Source):
     def site_properties(self, node_id: int) -> SiteProperties | None:
         """Return editable shape and endpoint properties for one model site."""
         value = self._adapter.site_properties(node_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             preview.properties("site_properties", node_id, value) if preview is not None else value
         )
@@ -449,7 +453,7 @@ class Session(_Editing, _Playback, _Source):
     def geometry_advanced_properties(self, node_id: int) -> GeometryAdvancedProperties | None:
         """Return geometry properties backed by rebuilt MuJoCo constants."""
         value = self._adapter.geometry_advanced_properties(node_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             preview.properties("geometry_advanced_properties", node_id, value)
             if preview is not None
@@ -459,7 +463,7 @@ class Session(_Editing, _Playback, _Source):
     def geometry_shape_properties(self, node_id: int) -> GeometryShapeProperties | None:
         """Return geometry type and model-local resource choices."""
         value = self._adapter.geometry_shape_properties(node_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             preview.properties("geometry_shape_properties", node_id, value)
             if preview is not None
@@ -469,7 +473,7 @@ class Session(_Editing, _Playback, _Source):
     def body_properties(self, node_id: int) -> BodyProperties | None:
         """Return editable inertial and dynamic properties for one model body."""
         value = self._adapter.body_properties(node_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             preview.properties("body_properties", node_id, value) if preview is not None else value
         )
@@ -544,7 +548,7 @@ class Session(_Editing, _Playback, _Source):
     @property
     def dirty(self) -> bool:
         """Return whether the current document contains unsaved edits."""
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         return (
             bool(preview is not None and preview.active)
             or self._edit_changed
@@ -588,7 +592,7 @@ class Session(_Editing, _Playback, _Source):
 
     def node(self, node_id: int) -> SceneNode | None:
         """Look up a hierarchy node by node ID."""
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         if preview is not None and preview.visible:
             return preview.by_node_id.get(int(node_id))
         return self._by_node_id.get(int(node_id))
@@ -616,7 +620,7 @@ class Session(_Editing, _Playback, _Source):
     def scale_factors(self, node_id: int) -> tuple[float, float, float]:
         """Return pending local scale; baked geometry always has identity scale."""
         target = self.scale_target(node_id)
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         if target is not None and preview is not None and preview.visible:
             command = preview.pending_scale(target.node_id)
             if command is not None:

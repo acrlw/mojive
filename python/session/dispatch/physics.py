@@ -78,6 +78,9 @@ def perturb(self: Session, c: cmd.Perturb) -> CommandResult:
 
 
 def clear_perturb(self: Session, c: cmd.ClearPerturb) -> CommandResult:
-    self._adapter.clear_perturb()
+    try:
+        self._adapter.clear_perturb()
+    except Exception as error:
+        return CommandResult.bad(str(error))
     self._perturb = PerturbState()
     return CommandResult.good("")

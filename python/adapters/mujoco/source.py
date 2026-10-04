@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 
 import numpy as np
@@ -50,6 +50,131 @@ def _object_names(model, object_type, count: int, prefix: str) -> tuple[str, ...
     )
 
 
+_MeshPart = tuple[MeshKey, np.ndarray, float | None]
+
+
+def _primitive_parts(geom_type: int, size: np.ndarray) -> list[_MeshPart] | None:
+    """Use the same primitive geometry and capsule orientation for geoms and sites."""
+    if geom_type == mujoco.mjtGeom.mjGEOM_SPHERE:
+        parts = [(MeshKey(MeshShape.SPHERE), np.full(3, size[0]), None)]
+    elif geom_type == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
+        parts = [(MeshKey(MeshShape.SPHERE), size[:3].copy(), None)]
+    elif geom_type == mujoco.mjtGeom.mjGEOM_BOX:
+        parts = [(MeshKey(MeshShape.BOX), size[:3].copy(), None)]
+    elif geom_type == mujoco.mjtGeom.mjGEOM_CYLINDER:
+        parts = [(MeshKey(MeshShape.CYLINDER), np.array([size[0], size[0], size[1]]), None)]
+    elif geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
+        r, half = float(size[0]), float(size[1])
+        parts = [
+            (MeshKey(MeshShape.CAPSULE_SHAFT), np.array([r, r, half]), None),
+            (MeshKey(MeshShape.CAPSULE_CAP), np.full(3, r), +half),
+            (MeshKey(MeshShape.CAPSULE_CAP), np.full(3, r), -half),
+        ]
+    else:
+        return None
+    return parts
+
+
+@dataclass
+class _SourceInstances:
+    """Accumulate aligned instance columns, then transfer them to one scene source.
+
+    This assembly is discarded after construction; mesh buffers and runtime
+    deformable state keep their existing source and adapter owners.
+    """
+
+    meshes: dict[MeshKey, MeshData | None] = field(default_factory=dict)
+    mesh_keys: list[MeshKey] = field(default_factory=list)
+    convex_mesh_keys: list[MeshKey] = field(default_factory=list)
+    collision_mesh_keys: list[MeshKey] = field(default_factory=list)
+    roles: list[int] = field(default_factory=list)
+    group_visibility: list[bool] = field(default_factory=list)
+    mats: list[int] = field(default_factory=list)
+    sizes: list[np.ndarray] = field(default_factory=list)
+    rgbas: list[np.ndarray] = field(default_factory=list)
+    object_ids: list[int] = field(default_factory=list)
+    bodies: list[int] = field(default_factory=list)
+    sources: list[int] = field(default_factory=list)
+    pose_sources: list[int] = field(default_factory=list)
+    visuals: list[int] = field(default_factory=list)
+    statics: list[bool] = field(default_factory=list)
+    island_bodies: list[int] = field(default_factory=list)
+    node_ids: list[int] = field(default_factory=list)
+    locals_: list[np.ndarray] = field(default_factory=list)
+    infinite: list[bool] = field(default_factory=list)
+    skipped: set[int] = field(default_factory=set)
+
+    def append(
+        self,
+        parts: list[_MeshPart],
+        *,
+        mat_index: int,
+        rgba: np.ndarray,
+        body: int,
+        source: int,
+        pose_source: InstancePoseSource,
+        node_id: int,
+        object_id: int,
+        is_infinite: bool = False,
+        visual: InstanceVisual = InstanceVisual.DEFAULT,
+        is_static: bool = False,
+        island_body: int = -1,
+        convex_mesh: MeshKey | None = None,
+        collision_mesh: MeshKey | None = None,
+        role: GeometryRole = GeometryRole.VISUAL,
+        group_visible: bool = True,
+    ) -> None:
+        for key, scale, cap_offset in parts:
+            if key.shape not in (MeshShape.ASSET, MeshShape.CONVEX_HULL) and key not in self.meshes:
+                self.meshes[key] = None
+            self.mesh_keys.append(key)
+            self.convex_mesh_keys.append(convex_mesh or key)
+            self.collision_mesh_keys.append(collision_mesh or key)
+            self.roles.append(int(role))
+            self.group_visibility.append(group_visible)
+            self.mats.append(mat_index)
+            self.sizes.append(np.asarray(scale, np.float32))
+            self.rgbas.append(rgba)
+            self.object_ids.append(object_id)
+            self.bodies.append(body)
+            self.sources.append(source)
+            self.pose_sources.append(int(pose_source))
+            self.visuals.append(int(visual))
+            self.statics.append(is_static)
+            self.island_bodies.append(island_body)
+            self.node_ids.append(node_id)
+            local = np.eye(4, dtype=np.float32)
+            if cap_offset is not None:
+                local[2, 3] = cap_offset
+                if cap_offset < 0.0:
+                    local[1, 1] = -1.0
+                    local[2, 2] = -1.0
+            self.locals_.append(local)
+            self.infinite.append(is_infinite)
+
+    def publish(self, src: SceneSource) -> None:
+        src.meshes = {k: v for k, v in self.meshes.items() if v is not None}
+        src.geom_mesh = self.mesh_keys
+        src.geom_convex_mesh = self.convex_mesh_keys
+        src.geom_collision_mesh = self.collision_mesh_keys
+        src.geom_role = np.asarray(self.roles, np.uint8)
+        src.geom_group_visible = np.asarray(self.group_visibility, bool)
+        src.geom_material = self.mats
+        n = len(self.mesh_keys)
+        src.geom_size = np.stack(self.sizes) if n else np.zeros((0, 3), np.float32)
+        src.geom_rgba = np.stack(self.rgbas) if n else np.zeros((0, 4), np.float32)
+        src.geom_object_id = np.array(self.object_ids, np.uint32)
+        src.geom_body = np.array(self.bodies, np.int32)
+        src.geom_source = np.array(self.sources, np.int32)
+        src.geom_pose_source = np.array(self.pose_sources, np.uint8)
+        src.geom_visual = np.array(self.visuals, np.uint8)
+        src.geom_static = np.array(self.statics, bool)
+        src.instance_island_body = np.array(self.island_bodies, np.int32)
+        src.geom_node = np.array(self.node_ids, np.int32)
+        src.geom_local = np.stack(self.locals_) if n else np.zeros((0, 4, 4), np.float32)
+        src.geom_infinite_plane = np.array(self.infinite, bool)
+
+
 class _SceneConversion:
     """Convert compiled MuJoCo structure into neutral scene sources.
 
@@ -72,6 +197,50 @@ class _SceneConversion:
         src.shading_model = ShadingModel.MUJOCO_CLASSIC
         src.nodes = self.nodes()
         src.diagnostics = self._build_diagnostic_source()
+        self._build_actuator_source(src)
+
+        textures = self._build_textures()
+        src.textures = textures
+        src.skybox = next((t.name for t in textures.values() if t.type is TextureType.SKYBOX), None)
+        materials, mat_of_matid = self._build_materials(textures)
+        src.materials = materials
+
+        instances = _SourceInstances()
+        self._add_geom_instances(instances, mat_of_matid)
+        self._add_site_instances(instances, mat_of_matid)
+        self._add_deformable_instances(instances, mat_of_matid)
+        instances.publish(src)
+        src.dynamic_meshes = frozenset(spec.key for spec in self._deformables)
+        self._build_segmentation(src)
+        self._build_source_names(src)
+        self._build_flex_debug_source(src)
+        src.lights = self._build_lights()
+        src.cameras = tuple(self.camera_view(i) for i in range(m.ncam))
+        src.scene_extent = float(m.stat.extent)
+
+        src.shadow_clip = float(m.vis.map.shadowclip) or 1.0
+        src.scene_center = np.asarray(m.stat.center, np.float32)
+        src.debug_frame_length = float(m.stat.meansize) * float(m.vis.scale.framelength)
+
+        src.initial_qpos = np.asarray(m.qpos0, np.float32).copy()
+
+        src.initial_ctrl = np.zeros(m.nu, np.float32)
+        self._build_tendon_source(src, mat_of_matid)
+        self._island_rgba_buf = src.geom_rgba.copy()
+        self._tendon_island_rgba_buf = np.zeros((m.ntendon, 4), np.float32)
+        self._flex_island_rgba_buf = np.zeros((m.nflex, 4), np.float32)
+
+        if instances.skipped:
+            names = ", ".join(sorted(str(mujoco.mjtGeom(t)) for t in instances.skipped))
+
+            note = f"Skipped unsupported geom types: {names}"
+            if note not in self._notes:
+                self._notes.append(note)
+            self.caps = replace(self.caps, notes=tuple(self._notes))
+        return src
+
+    def _build_actuator_source(self, src: SceneSource) -> None:
+        m = self._m
         trn_tendon = np.asarray(m.actuator_trntype) == int(mujoco.mjtTrn.mjTRN_TENDON)
         src.actuator_tendon = np.where(trn_tendon, m.actuator_trnid[:, 0], -1).astype(np.int32)
         src.actuator_visible = self._group_visibility(m.actuator_group, "actuator")
@@ -90,85 +259,12 @@ class _SceneConversion:
         )
         src.actuator_tendon_scale = float(m.vis.map.actuatortendon)
 
-        textures = self._build_textures()
-        src.textures = textures
-        src.skybox = next((t.name for t in textures.values() if t.type is TextureType.SKYBOX), None)
-        materials, mat_of_matid = self._build_materials(textures)
-        src.materials = materials
-
-        meshes: dict[MeshKey, MeshData] = {}
-        mesh_keys: list[MeshKey] = []
-        convex_mesh_keys: list[MeshKey] = []
-        collision_mesh_keys: list[MeshKey] = []
-        roles: list[int] = []
-        group_visibility: list[bool] = []
+    def _add_geom_instances(
+        self, instances: _SourceInstances, mat_of_matid: dict[int, int]
+    ) -> None:
+        m = self._m
         geom_roles, collision_candidates = geometry_roles(m)
-        mats: list[int] = []
-        sizes: list[np.ndarray] = []
-        rgbas: list[np.ndarray] = []
-        object_ids: list[int] = []
-        bodies: list[int] = []
-        sources: list[int] = []
-        pose_sources: list[int] = []
-        visuals: list[int] = []
-        statics: list[bool] = []
-        island_bodies: list[int] = []
-        node_ids: list[int] = []
-        locals_: list[np.ndarray] = []
-        infinite: list[bool] = []
         geom_groups = set(np.flatnonzero(self._visual_groups["geom"]))
-        site_groups = set(np.flatnonzero(self._visual_groups["site"]))
-        flex_groups = set(np.flatnonzero(self._visual_groups["flex"]))
-        skin_groups = set(np.flatnonzero(self._visual_groups["skin"]))
-        skipped: set[int] = set()
-
-        def append_parts(
-            parts,
-            *,
-            mat_index: int,
-            rgba: np.ndarray,
-            body: int,
-            source: int,
-            pose_source: InstancePoseSource,
-            node_id: int,
-            object_id: int,
-            is_infinite: bool = False,
-            visual: InstanceVisual = InstanceVisual.DEFAULT,
-            is_static: bool = False,
-            island_body: int = -1,
-            convex_mesh: MeshKey | None = None,
-            collision_mesh: MeshKey | None = None,
-            role: GeometryRole = GeometryRole.VISUAL,
-            group_visible: bool = True,
-        ) -> None:
-            for key, scale, cap_offset in parts:
-                if key.shape not in (MeshShape.ASSET, MeshShape.CONVEX_HULL) and key not in meshes:
-                    meshes[key] = None
-                mesh_keys.append(key)
-                convex_mesh_keys.append(convex_mesh or key)
-                collision_mesh_keys.append(collision_mesh or key)
-                roles.append(int(role))
-                group_visibility.append(group_visible)
-                mats.append(mat_index)
-                sizes.append(np.asarray(scale, np.float32))
-                rgbas.append(rgba)
-                object_ids.append(object_id)
-                bodies.append(body)
-                sources.append(source)
-                pose_sources.append(int(pose_source))
-                visuals.append(int(visual))
-                statics.append(is_static)
-                island_bodies.append(island_body)
-                node_ids.append(node_id)
-                local = np.eye(4, dtype=np.float32)
-                if cap_offset is not None:
-                    local[2, 3] = cap_offset
-                    if cap_offset < 0.0:
-                        local[1, 1] = -1.0
-                        local[2, 2] = -1.0
-                locals_.append(local)
-                infinite.append(is_infinite)
-
         for gi in range(m.ngeom):
             gtype = int(m.geom_type[gi])
             size = np.asarray(m.geom_size[gi], np.float64)
@@ -189,36 +285,21 @@ class _SceneConversion:
             elif gtype == mujoco.mjtGeom.mjGEOM_HFIELD:
                 data_id = int(m.geom_dataid[gi])
                 if data_id < 0:
-                    skipped.add(gtype)
+                    instances.skipped.add(gtype)
                     continue
                 key = MeshKey(MeshShape.HEIGHTFIELD, data_id)
-                if key not in meshes:
-                    meshes[key] = self._build_heightfield(data_id)
+                if key not in instances.meshes:
+                    instances.meshes[key] = self._build_heightfield(data_id)
                 hs = np.asarray(m.hfield_size[data_id], np.float64)
                 parts = [(key, hs[:3].copy(), None)]
-            elif gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
-                parts = [(MeshKey(MeshShape.SPHERE), np.full(3, size[0]), None)]
-            elif gtype == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
-                parts = [(MeshKey(MeshShape.SPHERE), size[:3].copy(), None)]
-            elif gtype == mujoco.mjtGeom.mjGEOM_BOX:
-                parts = [(MeshKey(MeshShape.BOX), size[:3].copy(), None)]
-            elif gtype == mujoco.mjtGeom.mjGEOM_CYLINDER:
-                parts = [(MeshKey(MeshShape.CYLINDER), np.array([size[0], size[0], size[1]]), None)]
-            elif gtype == mujoco.mjtGeom.mjGEOM_CAPSULE:
-                r, half = float(size[0]), float(size[1])
-                parts = [
-                    (MeshKey(MeshShape.CAPSULE_SHAFT), np.array([r, r, half]), None),
-                    (MeshKey(MeshShape.CAPSULE_CAP), np.full(3, r), +half),
-                    (MeshKey(MeshShape.CAPSULE_CAP), np.full(3, r), -half),
-                ]
             elif gtype in (mujoco.mjtGeom.mjGEOM_MESH, mujoco.mjtGeom.mjGEOM_SDF):
                 data_id = int(m.geom_dataid[gi])
                 if data_id < 0:
-                    skipped.add(gtype)
+                    instances.skipped.add(gtype)
                     continue
                 key = MeshKey(MeshShape.ASSET, data_id)
-                if key not in meshes:
-                    meshes[key] = self._build_mesh(data_id)
+                if key not in instances.meshes:
+                    instances.meshes[key] = self._build_mesh(data_id)
                 parts = [(key, np.ones(3), None)]
                 if int(m.mesh_graphadr[data_id]) >= 0:
                     hull = MeshKey(MeshShape.CONVEX_HULL, data_id)
@@ -227,14 +308,16 @@ class _SceneConversion:
                     # SDF collision uses the plugin surface, not a convex hull.
                     if gtype == mujoco.mjtGeom.mjGEOM_MESH and collision_candidates[gi]:
                         collision_key = hull
-                    if (hull_key or collision_key) and hull not in meshes:
-                        meshes[hull] = self._build_convex_hull(data_id)
+                    if (hull_key or collision_key) and hull not in instances.meshes:
+                        instances.meshes[hull] = self._build_convex_hull(data_id)
             else:
-                skipped.add(gtype)
-                continue
+                parts = _primitive_parts(gtype, size)
+                if parts is None:
+                    instances.skipped.add(gtype)
+                    continue
 
             geom_node = self.nodes()[self._geom_nodes[gi]]
-            append_parts(
+            instances.append(
                 parts,
                 mat_index=mat_index,
                 rgba=rgba,
@@ -252,34 +335,25 @@ class _SceneConversion:
                 group_visible=int(m.geom_group[gi]) in geom_groups,
             )
 
+    def _add_site_instances(
+        self, instances: _SourceInstances, mat_of_matid: dict[int, int]
+    ) -> None:
+        m = self._m
+        site_groups = set(np.flatnonzero(self._visual_groups["site"]))
         for si in range(m.nsite):
             if int(m.site_group[si]) not in site_groups:
                 continue
             stype = int(m.site_type[si])
             size = np.asarray(m.site_size[si], np.float64)
-            if stype == mujoco.mjtGeom.mjGEOM_SPHERE:
-                parts = [(MeshKey(MeshShape.SPHERE), np.full(3, size[0]), None)]
-            elif stype == mujoco.mjtGeom.mjGEOM_ELLIPSOID:
-                parts = [(MeshKey(MeshShape.SPHERE), size[:3].copy(), None)]
-            elif stype == mujoco.mjtGeom.mjGEOM_BOX:
-                parts = [(MeshKey(MeshShape.BOX), size[:3].copy(), None)]
-            elif stype == mujoco.mjtGeom.mjGEOM_CYLINDER:
-                parts = [(MeshKey(MeshShape.CYLINDER), np.array([size[0], size[0], size[1]]), None)]
-            elif stype == mujoco.mjtGeom.mjGEOM_CAPSULE:
-                r, half = float(size[0]), float(size[1])
-                parts = [
-                    (MeshKey(MeshShape.CAPSULE_SHAFT), np.array([r, r, half]), None),
-                    (MeshKey(MeshShape.CAPSULE_CAP), np.full(3, r), +half),
-                    (MeshKey(MeshShape.CAPSULE_CAP), np.full(3, r), -half),
-                ]
-            else:
-                skipped.add(stype)
+            parts = _primitive_parts(stype, size)
+            if parts is None:
+                instances.skipped.add(stype)
                 continue
             body = int(m.site_bodyid[si])
             matid = int(m.site_matid[si])
             mat_index = mat_of_matid[matid] if matid >= 0 else mat_of_matid[-1]
             rgba = self._site_rgba(si, matid)
-            append_parts(
+            instances.append(
                 parts,
                 mat_index=mat_index,
                 rgba=rgba,
@@ -291,10 +365,16 @@ class _SceneConversion:
                 is_static=int(m.body_weldid[body]) == 0,
             )
 
+    def _add_deformable_instances(
+        self, instances: _SourceInstances, mat_of_matid: dict[int, int]
+    ) -> None:
+        m = self._m
+        flex_groups = set(np.flatnonzero(self._visual_groups["flex"]))
+        skin_groups = set(np.flatnonzero(self._visual_groups["skin"]))
         self._deformables = build_deformables(m, self._d, set(range(6)), skin_groups)
         self._mesh_updates = {spec.key: spec.update_data for spec in self._deformables}
         for spec in self._deformables:
-            meshes[spec.key] = spec.mesh
+            instances.meshes[spec.key] = spec.mesh
             mat_index = mat_of_matid[spec.matid] if spec.matid >= 0 else mat_of_matid[-1]
             rgba = spec.rgba
             if spec.matid >= 0 and np.array_equal(rgba, _GEOM_RGBA_DEFAULT):
@@ -306,7 +386,7 @@ class _SceneConversion:
                 else self._skin_nodes.get(spec.key.index, -1)
             )
             object_id = m.nbody + spec.key.index if is_flex else m.nbody + m.nflex + spec.key.index
-            append_parts(
+            instances.append(
                 [(spec.key, np.ones(3), None)],
                 mat_index=mat_index,
                 rgba=np.asarray(rgba, np.float32).copy(),
@@ -324,25 +404,11 @@ class _SceneConversion:
                 group_visible=int(m.flex_group[spec.key.index]) in flex_groups if is_flex else True,
             )
 
-        src.meshes = {k: v for k, v in meshes.items() if v is not None}
-        src.dynamic_meshes = frozenset(spec.key for spec in self._deformables)
-        src.geom_mesh = mesh_keys
-        src.geom_convex_mesh = convex_mesh_keys
-        src.geom_collision_mesh = collision_mesh_keys
-        src.geom_role = np.asarray(roles, np.uint8)
-        src.geom_group_visible = np.asarray(group_visibility, bool)
-        src.geom_material = mats
-        n = len(mesh_keys)
-        src.geom_size = np.stack(sizes) if n else np.zeros((0, 3), np.float32)
-        src.geom_rgba = np.stack(rgbas) if n else np.zeros((0, 4), np.float32)
-        src.geom_object_id = np.array(object_ids, np.uint32)
-        src.geom_body = np.array(bodies, np.int32)
-        src.geom_source = np.array(sources, np.int32)
-        src.geom_pose_source = np.array(pose_sources, np.uint8)
-        src.geom_visual = np.array(visuals, np.uint8)
+    def _build_segmentation(self, src: SceneSource) -> None:
+        m = self._m
         # Semantic pairs belong to the adapter; rendering selection IDs stay
         # unchanged so the viewer and offscreen captures identify the same objects.
-        src.geom_segmentation = np.full((n, 2), -1, np.int32)
+        src.geom_segmentation = np.full((src.instance_count, 2), -1, np.int32)
         for pose_source, object_type in (
             (InstancePoseSource.GEOM, mujoco.mjtObj.mjOBJ_GEOM),
             (InstancePoseSource.SITE, mujoco.mjtObj.mjOBJ_SITE),
@@ -365,11 +431,9 @@ class _SceneConversion:
             src.geom_object_id[skin].astype(np.int32) - m.nbody - m.nflex
         )
         src.geom_segmentation[skin, 1] = int(mujoco.mjtObj.mjOBJ_SKIN)
-        src.geom_static = np.array(statics, bool)
-        src.instance_island_body = np.array(island_bodies, np.int32)
-        src.geom_node = np.array(node_ids, np.int32)
-        src.geom_local = np.stack(locals_) if n else np.zeros((0, 4, 4), np.float32)
-        src.geom_infinite_plane = np.array(infinite, bool)
+
+    def _build_source_names(self, src: SceneSource) -> None:
+        m = self._m
         src.body_names = _object_names(m, mujoco.mjtObj.mjOBJ_BODY, m.nbody, "body")
         src.joint_names = _object_names(m, mujoco.mjtObj.mjOBJ_JOINT, m.njnt, "joint")
         src.geom_names = _object_names(m, mujoco.mjtObj.mjOBJ_GEOM, m.ngeom, "geom")
@@ -380,18 +444,9 @@ class _SceneConversion:
         src.actuator_names = _object_names(m, mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu, "actuator")
         src.constraint_names = _object_names(m, mujoco.mjtObj.mjOBJ_EQUALITY, m.neq, "constraint")
         src.flex_names = _object_names(m, mujoco.mjtObj.mjOBJ_FLEX, m.nflex, "flex")
-        self._build_flex_debug_source(src)
-        src.lights = self._build_lights()
-        src.cameras = tuple(self.camera_view(i) for i in range(m.ncam))
-        src.scene_extent = float(m.stat.extent)
 
-        src.shadow_clip = float(m.vis.map.shadowclip) or 1.0
-        src.scene_center = np.asarray(m.stat.center, np.float32)
-        src.debug_frame_length = float(m.stat.meansize) * float(m.vis.scale.framelength)
-
-        src.initial_qpos = np.asarray(m.qpos0, np.float32).copy()
-
-        src.initial_ctrl = np.zeros(m.nu, np.float32)
+    def _build_tendon_source(self, src: SceneSource, mat_of_matid: dict[int, int]) -> None:
+        m = self._m
         tendon_matid = np.asarray(m.tendon_matid, np.int32)
         src.tendon_material = np.asarray(
             [mat_of_matid[int(matid)] for matid in tendon_matid], np.int32
@@ -400,18 +455,6 @@ class _SceneConversion:
         material_color = (tendon_matid >= 0) & np.all(src.tendon_rgba == _GEOM_RGBA_DEFAULT, axis=1)
         src.tendon_rgba[material_color] = m.mat_rgba[tendon_matid[material_color]]
         src.tendon_visible = self._group_visibility(m.tendon_group, "tendon")
-        self._island_rgba_buf = src.geom_rgba.copy()
-        self._tendon_island_rgba_buf = np.zeros((m.ntendon, 4), np.float32)
-        self._flex_island_rgba_buf = np.zeros((m.nflex, 4), np.float32)
-
-        if skipped:
-            names = ", ".join(sorted(str(mujoco.mjtGeom(t)) for t in skipped))
-
-            note = f"Skipped unsupported geom types: {names}"
-            if note not in self._notes:
-                self._notes.append(note)
-            self.caps = replace(self.caps, notes=tuple(self._notes))
-        return src
 
     @staticmethod
     def _axis_rotation(axis) -> np.ndarray:
@@ -767,9 +810,8 @@ class _SceneConversion:
         return np.clip(total, 0.0, 1.0)
 
     def _build_nodes(self) -> list[SceneNode]:
-        m = self._m
+        """Append in lookup-table order; changing phase order changes node IDs."""
         nodes: list[SceneNode] = []
-        body_node: dict[int, int] = {}
         self._node_body = {}
         self._node_element = {}
         self._geom_nodes = {}
@@ -777,6 +819,41 @@ class _SceneConversion:
         self._flex_nodes = {}
         self._skin_nodes = {}
 
+        body_node = self._build_body_nodes(nodes)
+        self._add_body_element_nodes(nodes, body_node)
+        self._add_light_nodes(nodes, body_node)
+        self._add_camera_nodes(nodes, body_node)
+        self._add_site_nodes(nodes, body_node)
+        self._add_deformable_nodes(nodes, body_node)
+        for node in nodes:
+            if node.source_editable:
+                node.source_name = self._node_element[node.node_id][2]
+        return nodes
+
+    def _add_node(
+        self, nodes: list[SceneNode], name: str, node_type: NodeType, parent: int, body: int, **kw
+    ) -> int:
+        """Append one node and register its hierarchy and physics body lookup."""
+        node_id = len(nodes)
+        nodes.append(
+            SceneNode(
+                node_id=node_id,
+                name=name,
+                type=node_type,
+                parent=parent,
+                body_index=body,
+                **kw,
+            )
+        )
+        if parent >= 0:
+            nodes[parent].children.append(node_id)
+        self._node_body[node_id] = body
+        return node_id
+
+    def _build_body_nodes(self, nodes: list[SceneNode]) -> dict[int, int]:
+        """Build world/model parents and the compiled body hierarchy."""
+        m = self._m
+        body_node: dict[int, int] = {}
         body_parent = np.asarray(m.body_parentid, np.int32)
         has_child = np.zeros(m.nbody, bool)
         if m.nbody > 1:
@@ -787,28 +864,12 @@ class _SceneConversion:
                 bool(m.body_jntnum[body]) or has_kinematic_dof[body_parent[body]]
             )
 
-        def add(name: str, node_type: NodeType, parent: int, body: int, **kw) -> int:
-            node_id = len(nodes)
-            nodes.append(
-                SceneNode(
-                    node_id=node_id,
-                    name=name,
-                    type=node_type,
-                    parent=parent,
-                    body_index=body,
-                    **kw,
-                )
-            )
-            if parent >= 0:
-                nodes[parent].children.append(node_id)
-            self._node_body[node_id] = body
-            return node_id
-
         world_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, 0) or "world"
-        body_node[0] = add(world_name, NodeType.WORLD, -1, 0, object_id=0)
+        body_node[0] = self._add_node(nodes, world_name, NodeType.WORLD, -1, 0, object_id=0)
         self._node_element[body_node[0]] = (0, NodeType.WORLD, world_name)
         model_parents = {
-            item.model_id: add(
+            item.model_id: self._add_node(
+                nodes,
                 item.name,
                 NodeType.MODEL,
                 body_node[0],
@@ -837,7 +898,8 @@ class _SceneConversion:
             parent_node = body_node[parent]
             if parent == 0 and model_id in model_parents:
                 parent_node = model_parents[model_id]
-            body_node[b] = add(
+            body_node[b] = self._add_node(
+                nodes,
                 name,
                 node_type,
                 parent_node,
@@ -849,6 +911,11 @@ class _SceneConversion:
             nodes[body_node[b]].model_id = model_id
             self._node_element[body_node[b]] = (model_id, node_type, raw_name)
 
+        return body_node
+
+    def _add_body_element_nodes(self, nodes: list[SceneNode], body_node: dict[int, int]) -> None:
+        """Preserve per-body geom/joint order because it determines public node IDs."""
+        m = self._m
         for b in range(m.nbody):
             parent = body_node[b]
             adr, num = int(m.body_geomadr[b]), int(m.body_geomnum[b])
@@ -872,7 +939,8 @@ class _SceneConversion:
                     or (b == 0 and is_plane and not is_infinite_plane)
                     else 0
                 )
-                self._geom_nodes[gi] = add(
+                self._geom_nodes[gi] = self._add_node(
+                    nodes,
                     gname,
                     NodeType.GEOM,
                     parent,
@@ -894,7 +962,7 @@ class _SceneConversion:
                     continue
                 compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, ji)
                 jname = compiled_name or f"joint{ji}"
-                node_id = add(jname, NodeType.JOINT, parent, b, joint_index=ji)
+                node_id = self._add_node(nodes, jname, NodeType.JOINT, parent, b, joint_index=ji)
                 model_id, raw_name = self._model_element_name(
                     compiled_name or "", mujoco.mjtObj.mjOBJ_JOINT
                 )
@@ -904,11 +972,15 @@ class _SceneConversion:
                 )
                 self._node_element[node_id] = (model_id, NodeType.JOINT, raw_name)
 
+    def _add_light_nodes(self, nodes: list[SceneNode], body_node: dict[int, int]) -> None:
+        """Append lights with selection IDs and editable model identities."""
+        m = self._m
         for li in range(m.nlight):
             b = int(m.light_bodyid[li])
             compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_LIGHT, li)
             name = compiled_name or f"light{li}"
-            node_id = add(
+            node_id = self._add_node(
+                nodes,
                 name,
                 NodeType.LIGHT,
                 body_node[b],
@@ -925,11 +997,16 @@ class _SceneConversion:
                 self._element(model_id, "light", raw_name) is not None
             )
             self._node_element[node_id] = (model_id, NodeType.LIGHT, raw_name)
+
+    def _add_camera_nodes(self, nodes: list[SceneNode], body_node: dict[int, int]) -> None:
+        """Append cameras after lights, retaining compiled camera slots."""
+        m = self._m
         for ci in range(m.ncam):
             b = int(m.cam_bodyid[ci])
             compiled_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_CAMERA, ci)
             name = compiled_name or f"camera{ci}"
-            node_id = add(
+            node_id = self._add_node(
+                nodes,
                 name,
                 NodeType.CAMERA,
                 body_node[b],
@@ -945,6 +1022,10 @@ class _SceneConversion:
                 self._element(model_id, "camera", raw_name) is not None
             )
             self._node_element[node_id] = (model_id, NodeType.CAMERA, raw_name)
+
+    def _add_site_nodes(self, nodes: list[SceneNode], body_node: dict[int, int]) -> None:
+        """Append visible sites with body-relative authoring transforms."""
+        m = self._m
         for si in range(m.nsite):
             if not self._visual_groups["site"][int(m.site_group[si])]:
                 continue
@@ -957,7 +1038,8 @@ class _SceneConversion:
             source_editable = (
                 bool(raw_name) and self._element(model_id, "site", raw_name) is not None
             )
-            self._site_nodes[si] = add(
+            self._site_nodes[si] = self._add_node(
+                nodes,
                 name,
                 NodeType.SITE,
                 body_node[b],
@@ -970,24 +1052,27 @@ class _SceneConversion:
             )
             nodes[self._site_nodes[si]].model_id = model_id
             self._node_element[self._site_nodes[si]] = (model_id, NodeType.SITE, raw_name)
+
+    def _add_deformable_nodes(self, nodes: list[SceneNode], body_node: dict[int, int]) -> None:
+        """Append flex and visible skin nodes under the world."""
+        m = self._m
         for fi in range(m.nflex):
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_FLEX, fi) or f"flex{fi}"
-            self._flex_nodes[fi] = add(name, NodeType.FLEX, body_node[0], 0, object_id=m.nbody + fi)
+            self._flex_nodes[fi] = self._add_node(
+                nodes, name, NodeType.FLEX, body_node[0], 0, object_id=m.nbody + fi
+            )
         for si in range(m.nskin):
             if not self._visual_groups["skin"][int(m.skin_group[si])]:
                 continue
             name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_SKIN, si) or f"skin{si}"
-            self._skin_nodes[si] = add(
+            self._skin_nodes[si] = self._add_node(
+                nodes,
                 name,
                 NodeType.SKIN,
                 body_node[0],
                 0,
                 object_id=m.nbody + m.nflex + si,
             )
-        for node in nodes:
-            if node.source_editable:
-                node.source_name = self._node_element[node.node_id][2]
-        return nodes
 
     def _rebuild_model_element_names(self) -> None:
         """Index compiled model names by owning editable MjSpec in O(E)."""

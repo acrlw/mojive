@@ -15,6 +15,8 @@ display choices from collision-engine state; renderers consume the same neutral 
 
 ::: mojive.adapters.base.SceneAdapterBase
 
+::: mojive.adapters.base.AdapterCommandError
+
 ::: mojive.adapters.base.SceneAdapter
 
 ## Capability interfaces

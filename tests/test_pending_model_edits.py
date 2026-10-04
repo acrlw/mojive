@@ -29,7 +29,13 @@ def scene(tmp_path):
     yield session, primary, draft
 
 
-def test_staging_coalesces_without_physics_writes_and_apply_has_one_undo(scene, monkeypatch):
+@pytest.mark.parametrize("subclass", [False, True])
+def test_staging_coalesces_without_physics_writes_and_apply_has_one_undo(
+    scene, monkeypatch, subclass
+):
+    class CustomSize(cmd.SetGeometrySize):
+        pass
+
     session, adapter, draft = scene
     box = next(n for n in session.nodes if n.name == "box")
     original = adapter._m
@@ -42,8 +48,9 @@ def test_staging_coalesces_without_physics_writes_and_apply_has_one_undo(scene, 
         return compile_model()
 
     monkeypatch.setattr(adapter, "_compile_composed_model", compile_counted)
-    for value in np.linspace(0.1, 0.5, 60):
-        assert draft.stage(cmd.SetGeometrySize(box.node_id, np.full(3, value))).ok
+    for index, value in enumerate(np.linspace(0.1, 0.5, 60)):
+        command_type = CustomSize if subclass and index % 2 else cmd.SetGeometrySize
+        assert draft.stage(command_type(box.node_id, np.full(3, value))).ok
     assert draft.stage(cmd.RenameModelElement(box.node_id, "edited_box")).ok
     assert len(draft.commands) == 2
     assert compiles == [] and adapter._m is original

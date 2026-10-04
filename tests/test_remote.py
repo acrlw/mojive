@@ -379,12 +379,40 @@ def test_remote_disconnect_reports_eof_instead_of_stale_frames_or_timeout(has_fr
         source_session.release()
 
 
-@pytest.mark.parametrize("operation", ["step", "reset", "reload"])
+@pytest.mark.parametrize("operation", ["step", "reset", "reload", "clear_perturb"])
 def test_remote_control_failure_is_not_silently_accepted(operation, monkeypatch):
     adapter = RemoteSceneAdapter.__new__(RemoteSceneAdapter)
     monkeypatch.setattr(adapter, "_send", lambda *args, **kwargs: CommandResult.bad("rejected"))
     with pytest.raises(RuntimeError, match="rejected"):
         getattr(adapter, operation)()
+
+
+def test_failed_remote_clear_preserves_perturbation_until_acknowledged(monkeypatch):
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source))
+    publisher.publish_frame(source.frame)
+    remote = RemoteSceneAdapter(port=publisher.port)
+    session = Session(remote)
+    try:
+        perturb = session.perturb
+        perturb.active = True
+        perturb.node_id = 3
+        message = "remote command timed out; completion unknown; inspect before retrying"
+        monkeypatch.setattr(remote, "_send", lambda *args, **kwargs: CommandResult.bad(message))
+        result = session.submit(cmd.ClearPerturb())
+        assert not result.ok and result.message == message
+        assert session.last_message == message
+        assert session.perturb is perturb
+        assert session.perturb.active and session.perturb.node_id == 3
+
+        monkeypatch.setattr(remote, "_send", lambda *args, **kwargs: CommandResult.good())
+        assert session.submit(cmd.ClearPerturb()).ok
+        assert not session.perturb.active
+    finally:
+        session.release()
+        publisher.close()
+        source.release()
 
 
 def test_failed_remote_reset_returns_a_failed_session_result(monkeypatch):
@@ -585,6 +613,10 @@ def test_keyframe_command_keeps_its_typed_remote_boundary():
 def test_scene_camera_command_keeps_its_typed_remote_boundary():
     class Sink:
         has_pending_model_edits = False
+        adapter = SceneAdapterBase()
+
+        def sync_structure(self):
+            return False
 
         def submit(self, command):
             return command
@@ -639,6 +671,10 @@ def test_qpos_batch_command_keeps_its_typed_remote_boundary():
 def test_scene_entity_commands_keep_their_typed_remote_boundary():
     class Sink:
         has_pending_model_edits = False
+        adapter = SceneAdapterBase()
+
+        def sync_structure(self):
+            return False
 
         def submit(self, command):
             return command
@@ -1120,3 +1156,231 @@ def test_partial_remote_manifest_retains_monitoring_but_withdraws_writeback():
         remote.release()
         publisher.close()
         source.release()
+
+
+@pytest.mark.parametrize("workspace", [False, True])
+@pytest.mark.parametrize("phase", ["install", "frame"])
+def test_session_read_pins_remote_structure_metadata_and_frame(monkeypatch, workspace, phase):
+    from mojive.adapters.workspace import WorkspaceAdapter
+    from mojive.remote import adapter as remote_module
+    from mojive.remote.protocol import RemoteStructure
+
+    scene = Scene()
+    scene.box(name="original")
+    source = Session(StaticSceneAdapter(scene))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source))
+    initial_frame = source.frame
+    publisher.publish_frame(initial_frame)
+    remote = RemoteSceneAdapter(port=publisher.port, timeout=1)
+    adapter = WorkspaceAdapter(remote) if workspace else remote
+    consumer = None
+    try:
+        if phase == "frame":
+            consumer = Session(adapter)
+        scene.sphere(name="new geometry")
+        source.sync_structure()
+        incoming = snapshot_structure(source)
+        decoded = threading.Event()
+        loads = remote_module.pickle.loads
+
+        def observe_packet(data):
+            packet = loads(data)
+            if (
+                isinstance(packet, RemoteStructure)
+                and packet.structure_revision == incoming.structure_revision
+            ):
+                decoded.set()
+            return packet
+
+        monkeypatch.setattr(remote_module.pickle, "loads", observe_packet)
+        # A receiver already blocked in recv_bytes may have resolved the old
+        # loads function; drain that call before the controlled delivery.
+        publisher.publish_frame(replace(initial_frame, step=91))
+        _eventually(lambda: remote.frame(FrameNeeds()).step == 91)
+        method_name = "scene_source" if phase == "install" else "frame"
+        read = getattr(remote, method_name)
+        armed = True
+
+        def deliver_during_read(*args):
+            nonlocal armed
+            result = read(*args)
+            if armed:
+                armed = False
+                publisher.publish_structure(incoming)
+                publisher.publish_frame(source.frame)
+                # The receiver decoded the next structure before attempting the
+                # consumer's read lock. It must not install it midway through.
+                assert decoded.wait(1)
+            return result
+
+        monkeypatch.setattr(remote, method_name, deliver_during_read)
+        if consumer is None:
+            consumer = Session(adapter)
+        else:
+            consumer.tick(FrameNeeds())
+        assert consumer.source.instance_count == 1
+        assert len(consumer.frame.geom_xpos) == 1
+        assert not any(node.name == "new geometry" for node in consumer.nodes)
+        _eventually(lambda: remote.structure_revision == incoming.structure_revision)
+        assert consumer.sync_structure()
+        assert consumer.source.instance_count == 2
+        assert len(consumer.frame.geom_xpos) == 2
+        assert any(node.name == "new geometry" for node in consumer.nodes)
+    finally:
+        if consumer is not None:
+            consumer.release()
+        else:
+            remote.release()
+        publisher.close()
+        source.release()
+
+
+@pytest.mark.parametrize("workspace", [False, True])
+def test_guarded_remote_write_is_checked_by_publisher_owner(workspace):
+    from mojive.adapters.workspace import WorkspaceAdapter
+
+    scene = Scene()
+    box = scene.box(name="original")
+    source = Session(StaticSceneAdapter(scene))
+    node_id = source.node_by_object_id(box.object_id).children[0]
+    publisher = SnapshotPublisher(port=_port_pair())
+    initial = snapshot_structure(source)
+    publisher.publish_structure(initial)
+    publisher.publish_frame(source.frame)
+    remote = RemoteSceneAdapter(port=publisher.port, timeout=1)
+    if workspace:
+        authored = Scene()
+        authored.box()
+        adapter = WorkspaceAdapter(remote, authored)
+    else:
+        adapter = remote
+    try:
+        with adapter.scene_read():
+            checked_revision = adapter.structure_revision
+        # The command is validated against the old local snapshot. The owner
+        # changes structure without publishing it before the request arrives.
+        scene.sphere(name="new geometry")
+        original_color = scene.source.geom_rgba[0].copy()
+        observed = []
+
+        def handler(message):
+            observed.append(message)
+            return handle_session_command(source, message)
+
+        def write():
+            with adapter.command_context(checked_revision):
+                return adapter.set_geometry_color(node_id, np.array([1, 0, 0, 1], np.float32))
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(write)
+            _eventually(lambda: not publisher._commands.empty())
+            assert publisher.pump_commands(handler) == 1
+            with pytest.raises(RuntimeError, match="structure changed"):
+                result.result(timeout=1)
+        assert observed[0]["expected_structure_revision"] == initial.structure_revision
+        np.testing.assert_array_equal(scene.source.geom_rgba[0], original_color)
+
+        # A rejection retains a usable command channel. Matching owner and
+        # checked versions perform the operation normally without a read lock.
+        publisher.publish_structure(snapshot_structure(source))
+        publisher.publish_frame(source.frame)
+        _eventually(lambda: remote.structure_revision == source.structure_generation)
+        with adapter.scene_read():
+            checked_revision = adapter.structure_revision
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(write)
+            _eventually(lambda: not publisher._commands.empty())
+            assert publisher.pump_commands(handler) == 1
+            assert result.result(timeout=1)
+        np.testing.assert_array_equal(scene.source.geom_rgba[0], [1, 0, 0, 1])
+    finally:
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+def test_legacy_publisher_rejects_conditional_writes_before_sending():
+    from mojive.remote.protocol import STRUCTURE_PRECONDITION
+
+    source = Session(StaticSceneAdapter(Scene()))
+    publisher = SnapshotPublisher(port=_port_pair())
+    structure = snapshot_structure(source)
+    publisher.publish_structure(
+        replace(
+            structure,
+            command_versions=tuple(
+                item for item in structure.command_versions if item[0] != STRUCTURE_PRECONDITION
+            ),
+        )
+    )
+    publisher.publish_frame(source.frame)
+    remote = RemoteSceneAdapter(port=publisher.port, timeout=1)
+    try:
+        with (
+            remote.command_context(remote.structure_revision),
+            pytest.raises(RuntimeError, match="does not support structure preconditions"),
+        ):
+            remote.clear_perturb()
+        assert publisher._commands.empty()
+    finally:
+        remote.release()
+        publisher.close()
+        source.release()
+
+
+@pytest.mark.parametrize("workspace", [False, True])
+def test_rpc_remote_stale_owner_reports_command_failure_without_mutation(workspace):
+    import tempfile
+    from pathlib import Path
+
+    from mojive.adapters.workspace import WorkspaceAdapter
+    from mojive.control.rpc import ControlServer, ControlService, RpcClient, RpcError
+
+    scene = Scene()
+    scene.box(name="original")
+    source = Session(StaticSceneAdapter(scene))
+    publisher = SnapshotPublisher(port=_port_pair())
+    publisher.publish_structure(snapshot_structure(source))
+    publisher.publish_frame(replace(source.frame, paused=True))
+    remote = RemoteSceneAdapter(port=publisher.port, timeout=1)
+    adapter = WorkspaceAdapter(remote) if workspace else remote
+    service = ControlService(adapter)
+    with tempfile.TemporaryDirectory(prefix="mv-guard-") as directory:
+        server = ControlServer(Path(directory) / "control.sock", service)
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        client = RpcClient(server.socket_path, timeout=2)
+        try:
+            before = client.call("get_scene")
+            geometry = next(node for node in before["objects"] if node["name"] == "original.geom")
+            scene.sphere(name="arrived at owner after validation")
+            rgba = scene.source.geom_rgba[0].copy()
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(
+                    client.call,
+                    "set_geometry_color",
+                    {
+                        "node_id": geometry["node_id"],
+                        "rgba": [1, 0, 0, 1],
+                        "expected_document": before["document"],
+                    },
+                )
+                _eventually(lambda: not publisher._commands.empty() or result.done())
+                if result.done():
+                    result.result()
+                publisher.pump_commands(lambda message: handle_session_command(source, message))
+                with pytest.raises(RpcError, match="structure changed") as failure:
+                    result.result(timeout=2)
+            assert failure.value.code == "command_failed"
+            np.testing.assert_array_equal(scene.source.geom_rgba[0], rgba)
+            assert not service.session.scene_overrides.geometry_colors
+            assert not source.can_undo
+        finally:
+            client.close()
+            server.shutdown()
+            server.server_close()
+            serving.join(timeout=2)
+            service.close()
+            publisher.close()
+            source.release()

@@ -12,6 +12,7 @@ import numpy as np
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
 from mojive.scene.geometry import scale_vector, scaled_geometry_size
+from mojive.session.command_support import resolve_command_type
 from mojive.session.edit_plan import EditVersion, ModelEditPlan
 from mojive.session.model_preview import GeometryPreview
 
@@ -186,10 +187,11 @@ class ModelEditDraft:
 
     @staticmethod
     def _key(command):
-        if not type(command).__name__.startswith(("Set", "Update", "Rename")):
+        command_type = resolve_command_type(type(command))
+        if not command_type.__name__.startswith(("Set", "Update", "Rename")):
             return None
         return (
-            type(command),
+            command_type,
             *(
                 getattr(command, name, None)
                 for name in (
@@ -229,6 +231,29 @@ class ModelEditDraft:
         if not key:
             return True
         return key not in self._creations
+
+    def stage_many(self, commands, *, label="Edit model"):
+        """Stage one rebuilding UI operation, retaining earlier drafts on failure."""
+        commands = tuple(commands)
+        if self.session.editing or self._checkpoint is not None:
+            return cmd.CommandResult.bad("An edit transaction is already active")
+        if any(
+            not isinstance(command, MODEL_REBUILD_COMMANDS) or self.applies_immediately(command)
+            for command in commands
+        ):
+            return cmd.CommandResult.bad("Only rebuilding model edits can be deferred together")
+        self.begin_transaction(label)
+        completed = False
+        result = cmd.CommandResult.good()
+        try:
+            for command in commands:
+                result = self.stage(command)
+                if not result.ok:
+                    break
+            completed = result.ok
+            return result
+        finally:
+            self.end_transaction(cancel=not completed)
 
     def stage(self, command):
         if self.applies_immediately(command):

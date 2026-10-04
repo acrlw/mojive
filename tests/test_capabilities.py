@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -9,6 +10,7 @@ from mojive import Scene
 from mojive import commands as cmd
 from mojive.adapters.base import AdapterCaps
 from mojive.adapters.static import StaticSceneAdapter
+from mojive.adapters.toy import ToyPhysicsAdapter
 from mojive.control.rpc import ControlService
 from mojive.control.schema import CAPABILITIES_RESULT, Validator
 from mojive.session import Session
@@ -56,6 +58,67 @@ def test_unsupported_command_does_not_fence_physics_or_capture_history(monkeypat
         session.release()
 
 
+def test_supported_control_subclass_keeps_its_writeback_without_borrowing_clock_requirements(
+    monkeypatch,
+):
+    class CustomControl(cmd.SetCtrlVector, cmd.SetSpeed):
+        pass
+
+    adapter = ToyPhysicsAdapter()
+    adapter.caps = replace(adapter.caps, write_ctrl=True, clock_control=False, external_clock=True)
+    write_ctrl = Mock(return_value=True)
+    monkeypatch.setattr(adapter, "set_ctrl_vector", write_ctrl)
+    session = Session(adapter)
+    try:
+        assert session.submit(CustomControl([0.5])).ok
+        write_ctrl.assert_called_once_with([0.5])
+        assert session.speed == 1
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize(
+    "base,arguments,feature",
+    [
+        (cmd.SetCtrlVector, ([0.5],), "write ctrl"),
+        (cmd.SetModelSource, (0, "<mujoco/>"), "topology editing"),
+        (cmd.AddModelComponent, (0, "tendon", "spatial", "tendon"), "topology editing"),
+    ],
+)
+def test_unsupported_command_subclasses_are_rejected_before_fences_and_history(
+    monkeypatch, base, arguments, feature
+):
+    class CustomCommand(base):
+        pass
+
+    class MultipleCommand(CustomCommand, cmd.SetSpeed):
+        pass
+
+    adapter = ToyPhysicsAdapter()
+    driver = Mock(suspend=Mock(return_value=0), poll=Mock(return_value=0))
+    monkeypatch.setattr(adapter, "create_simulation_driver", lambda: driver)
+    session = Session(adapter)
+    try:
+        assert session.set_threaded_physics(True)
+        monkeypatch.setattr(
+            session,
+            "_capture_document_state",
+            lambda: pytest.fail("captured unsupported edit history"),
+        )
+        monkeypatch.setattr(
+            session, "_dispatch", lambda command: pytest.fail("dispatched unsupported command")
+        )
+        for command_type in (base, CustomCommand, MultipleCommand):
+            result = session.submit(command_type(*arguments))
+            assert not result.ok
+            assert feature in result.message
+        driver.suspend.assert_not_called()
+        driver.poll.assert_not_called()
+        assert not session.can_undo
+    finally:
+        session.release()
+
+
 def test_generic_topology_does_not_imply_mjcf_or_component_editing():
     caps = AdapterCaps(name="other", topology_editing=True)
     assert unavailable_reason(caps, cmd.AddModelElement(0, "body", "body")) is None
@@ -90,12 +153,17 @@ def test_rpc_discovery_and_revision_rejection_precede_mutation():
         service.close()
 
 
-def test_unsupported_edit_invalidates_the_active_transaction():
+@pytest.mark.parametrize("subclass", [False, True])
+def test_unsupported_edit_invalidates_the_active_transaction(subclass):
+    class CustomSource(cmd.SetModelSource):
+        pass
+
+    source_command = CustomSource if subclass else cmd.SetModelSource
     session = Session(StaticSceneAdapter(Scene()))
     try:
         assert session.submit(cmd.BeginEditTransaction("Atomic edit"))
         assert session.submit(cmd.AddSceneObject("box"))
-        assert not session.submit(cmd.SetModelSource(0, "<mujoco/>"))
+        assert not session.submit(source_command(0, "<mujoco/>"))
         assert not session.submit(cmd.EndEditTransaction())
         assert session.source.instance_count == 0
     finally:
@@ -103,7 +171,6 @@ def test_unsupported_edit_invalidates_the_active_transaction():
 
 
 def test_control_writeback_is_independent_of_simulation():
-    from mojive.adapters.toy import ToyPhysicsAdapter
     from mojive.control.operations import OPERATIONS
 
     session = Session(ToyPhysicsAdapter())
@@ -123,8 +190,6 @@ def test_control_writeback_is_independent_of_simulation():
 
 
 def test_external_clock_commands_are_rejected_before_the_session_fence(monkeypatch):
-    from mojive.adapters.toy import ToyPhysicsAdapter
-
     session = Session(ToyPhysicsAdapter())
     try:
         monkeypatch.setattr(

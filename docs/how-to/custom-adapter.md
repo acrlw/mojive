@@ -65,6 +65,18 @@ A read-only consumer should accept `SceneProvider`. A model browser can accept
 Session and Workspace coordinate multiple responsibilities and still use `SceneAdapter`.
 An `isinstance(adapter, SceneAdapter)` check only establishes structural membership: inherited
 unsupported methods satisfy that check. Use `caps.supports(...)` to determine availability.
+
+Asynchronous adapters implement `scene_read()` to keep source, metadata, revision, and frame
+reads in one coherent version. Session uses this boundary when installing structure and reading
+frames; `Session.sync_structure()` installs external changes without stepping physics or playback.
+The base implementation is a no-op for adapters confined to their owner's thread. Do not issue
+writes or remote commands inside a read boundary: a command may need the receiver to publish its
+result. After reading and validating a revision, `command_context(expected_structure_revision)`
+guards the write separately. Remote adapters carry that condition to the publisher's execution
+thread, and reject guarded writes to older publishers that do not advertise this support.
+`AdapterCommandError` preserves an expected write failure across the control boundary. These
+contexts do not make arbitrary third-party adapters thread safe.
+
 Implementing keyframe playback does not require advertising `model.keyframe_edit`. The Session
 metadata index consumes `KeyframeCatalog`; loading and editing controls check their capabilities
 independently. Basic timeline selection and navigation remain available without either write capability.
@@ -91,6 +103,12 @@ Session-owned changes to adapter values are exposed as `session.scene_overrides`
 `mojive.session.SceneOverrides`. `authored_overlay` and `AuthoredSceneOverlay` remain compatible
 names. The legacy capability field `scene_authoring` means support for scene object creation,
 removal and editing; it does not imply simulation or model topology editing.
+
+Session keeps viewer material overrides separate from the adapter's material table. A successful
+local material write uses the adapter's result without retaining a second override. After a
+structure change, a viewer-only override survives only when its original material identity and
+geometry binding can be verified; otherwise Session clears it and reports the invalidation.
+Material names and equal values alone do not establish identity across a rebuild.
 
 Register an external adapter factory in the process that will use it:
 

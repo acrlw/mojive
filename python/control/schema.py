@@ -94,8 +94,11 @@ VECTOR2 = array(NUMBER, 2)
 VECTOR3 = array(NUMBER, 3)
 ROTATION = array(VECTOR3, 3)
 RGBA = array({"type": "number", "minimum": 0, "maximum": 1}, 4)
-DOCUMENT = obj({"id": NAME, "revision": ID}, required=("id", "revision"))
-PRECONDITION = obj({"id": NAME, "revision": ID}, required=("id",))
+DOCUMENT = obj(
+    {"id": NAME, "revision": ID, "structure_revision": ID},
+    required=("id", "revision", "structure_revision"),
+)
+PRECONDITION = obj({"id": NAME, "revision": ID, "structure_revision": ID}, required=("id",))
 COMMAND_RESULT = {
     "type": "object",
     "required": ["ok", "message", "entity_id"],
@@ -125,6 +128,9 @@ NODE = {
         },
         "body_index": INTEGER,
         "site_index": INTEGER,
+        "model_id": INTEGER,
+        "joint_index": INTEGER,
+        "source_name": STRING,
     },
 }
 CAMERA_FIELDS = {
@@ -214,6 +220,58 @@ LIGHT["properties"]["intensity"] = {"type": "number", "minimum": 0}
 def record(properties: dict[str, dict]) -> dict:
     """Describe a result record with required fields and room for future additions."""
     return obj(properties, properties, additionalProperties=True)
+
+
+MODEL_RESULT = record(
+    {
+        "model_id": ID,
+        "name": STRING,
+        "path": STRING,
+        "removable": BOOLEAN,
+        "position": VECTOR3,
+        "rotation": ROTATION,
+    }
+)
+JOINT_FIELDS = {
+    "joint_id": ID,
+    "name": STRING,
+    "type": STRING,
+    "limited": BOOLEAN,
+    "range": VECTOR2,
+    "qpos_adr": INTEGER,
+    "qvel_adr": INTEGER,
+    "dof": ID,
+    "body": INTEGER,
+    "axis": VECTOR3,
+    "damping": NUMBER,
+    "stiffness": NUMBER,
+}
+JOINT_RESULT = record({**JOINT_FIELDS, "node_id": INTEGER, "model_id": INTEGER})
+MODEL_ASSET_RESULT = record(
+    {
+        "model_id": ID,
+        "type": STRING,
+        "name": STRING,
+        "index": INTEGER,
+        "file": STRING,
+        "fields": array(record({"name": STRING, "value": STRING, "choices": array(STRING)})),
+        "references": array(STRING),
+        "data_shape": array(ID, 2),
+        "preview_shape": array(ID, 2),
+        "preview_values": VECTOR,
+        "preview_range": VECTOR2,
+        "runtime_index": INTEGER,
+        "texture_layers": array(array(STRING, 2)),
+    }
+)
+KEYFRAME_RESULT = record({"keyframe_id": ID, "model_id": INTEGER, "name": STRING, "time": NUMBER})
+KEYFRAME_FIELDS = {
+    "keyframe_id": ID,
+    "model_id": ID,
+    "name": NAME,
+    "time": NUMBER,
+    **dict.fromkeys(("qpos", "qvel", "act", "ctrl", "mocap_position", "mocap_quaternion"), VECTOR),
+}
 
 
 CAMERA_RESULT = record(

@@ -475,7 +475,9 @@ def test_transaction_is_one_undo_record_and_failure_restores_prior_state(service
     assert error.value.details == {"index": 1, "method": "remove_scene_entity"}
     current = invoke(service, "get_scene")
     assert current["objects"] == original["objects"]
-    assert current["document"] == original["document"]
+    assert current["document"]["id"] == original["document"]["id"]
+    assert current["document"]["revision"] == original["document"]["revision"]
+    assert current["document"]["structure_revision"] > original["document"]["structure_revision"]
     assert not service.session.editing
     invoke(service, "undo")
     assert not len(service.session.source.geom_mesh)
@@ -546,3 +548,165 @@ def test_unrepresentable_object_values_do_not_create_scene_or_history(service, f
     assert error.value.code == "invalid_params"
     assert invoke(service, "get_scene") == before
     assert not service.session.can_undo
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("query_before_edit", [False, True])
+def test_external_rebuild_rejects_old_node_identity_before_write(native, query_before_edit):
+    scene = Scene()
+    first = scene.box(name="first")
+    second = scene.box(name="second")
+    service = ControlService(StaticSceneAdapter(scene))
+    try:
+        observed = invoke(service, "inspect_object", object_id=first.object_id)
+        old_id = observed["geometries"][0]["node_id"]
+        scene.remove(first.object_id)
+        if query_before_edit:
+            invoke(service, "get_scene")
+        call = (
+            (lambda name, params: apply_session_operation(service.session, name, params))
+            if native
+            else service.dispatch
+        )
+        with pytest.raises(RpcError) as error:
+            call(
+                "set_geometry_color",
+                {
+                    "node_id": old_id,
+                    "rgba": [1, 0, 0, 1],
+                    "expected_document": observed["document"],
+                },
+            )
+        assert error.value.code == "stale_document"
+        current = invoke(service, "inspect_object", object_id=second.object_id)
+        assert current["geometries"][0]["rgba"] != [1, 0, 0, 1]
+        assert current["document"]["revision"] == observed["document"]["revision"]
+        assert (
+            current["document"]["structure_revision"] > observed["document"]["structure_revision"]
+        )
+    finally:
+        service.close()
+
+
+def test_precondition_sync_does_not_consume_queued_simulation_steps(monkeypatch):
+    from mojive.adapters.base import FrameNeeds
+    from mojive.adapters.toy import ToyPhysicsAdapter
+    from mojive.adapters.workspace import WorkspaceAdapter
+
+    adapter = ToyPhysicsAdapter()
+    scene = Scene()
+    box = scene.box()
+    service = ControlService(WorkspaceAdapter(adapter, scene))
+    try:
+        observed = invoke(service, "inspect_object", object_id=box.object_id)
+        assert service.session.submit(cmd.Step(3)).ok
+        scene.remove(box.object_id)
+        monkeypatch.setattr(
+            adapter, "step", lambda *args: pytest.fail("precondition advanced physics")
+        )
+        with pytest.raises(RpcError) as error:
+            service.dispatch(
+                "set_geometry_color",
+                {
+                    "node_id": observed["geometries"][0]["node_id"],
+                    "rgba": [1, 0, 0, 1],
+                    "expected_document": observed["document"],
+                },
+            )
+        assert error.value.code == "stale_document"
+        assert service.session.frame.step == 0
+        monkeypatch.undo()
+        service.session.tick(FrameNeeds.none(), wall_dt=0.0)
+        assert service.session.frame.step == 3
+    finally:
+        service.close()
+
+
+def test_mcp_bridge_import_remains_optional_and_does_not_initialize_graphics():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+import mojive.control.mcp
+for name in ('mcp', 'anyio', 'jsonschema', 'mojive.control.application', 'mojive.control.operations', 'mojive.ui.app', 'glfw', 'mujoco', 'moderngl'):
+    assert name not in sys.modules, name
+""",
+        ],
+        check=True,
+    )
+
+
+def test_native_scene_authoring_preserves_running_owner_policy():
+    from mojive.adapters.toy import ToyPhysicsAdapter
+    from mojive.adapters.workspace import WorkspaceAdapter
+    from mojive.session import Session
+
+    session = Session(WorkspaceAdapter(ToyPhysicsAdapter()))
+    service = ControlService(session=session)
+    try:
+        assert not session.paused
+        # The native publisher owns its clock and keeps runtime Scene authoring;
+        # RPC's edit workflow requires a paused owner. Model writes remain gated
+        # by their Session command handlers in both routes.
+        assert apply_session_operation(session, "add_scene_object", {"shape": "box"}).ok
+        with pytest.raises(RpcError, match="Pause"):
+            service.dispatch("add_scene_object", {"shape": "box"})
+        assert not session.paused
+    finally:
+        service.close()
+        session.release()
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_adapter_guard_failure_is_a_structured_operation_error(service, monkeypatch, native):
+    from contextlib import contextmanager
+
+    from mojive.adapters.base import AdapterCommandError
+
+    @contextmanager
+    def raced_revision(_revision):
+        raise AdapterCommandError("publisher rejected the inspected structure")
+        yield
+
+    monkeypatch.setattr(service.session.adapter, "command_context", raced_revision)
+    call = (
+        (lambda method, params: apply_session_operation(service.session, method, params))
+        if native
+        else service.dispatch
+    )
+    with pytest.raises(RpcError) as error:
+        call("add_scene_object", {"shape": "box"})
+    assert error.value.code == "command_failed"
+    assert str(error.value) == "publisher rejected the inspected structure"
+    assert isinstance(error.value.__cause__, AdapterCommandError)
+    assert len(service.session.source.geom_mesh) == 0 and not service.session.can_undo
+
+
+def test_control_keeps_owner_thread_structural_adapters_compatible():
+    owner = StaticSceneAdapter(Scene())
+
+    class LegacyAdapter:
+        def __getattr__(self, name):
+            if name in {"scene_read", "command_context"}:
+                raise AttributeError(name)
+            return getattr(owner, name)
+
+    service = ControlService(LegacyAdapter())
+    try:
+        created = invoke(service, "add_scene_object", shape="box", name="legacy")
+        assert apply_session_operation(
+            service.session,
+            "rename_scene_entity",
+            {
+                "object_id": created["object_id"],
+                "name": "updated",
+                "expected_document": created["document"],
+            },
+        ).ok
+        assert (
+            invoke(service, "inspect_object", object_id=created["object_id"])["name"] == "updated"
+        )
+    finally:
+        service.close()

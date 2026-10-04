@@ -29,6 +29,8 @@ from mojive.control.operations import (
     OPERATIONS,
     _check_document_precondition,
     _check_pending_edits,
+    _command_context,
+    _scene_read,
     document_state,
     find_operations,
     prepare_operation,
@@ -106,20 +108,29 @@ class ControlApplication:
         with self._lock:
             if self._closed:
                 raise ControlError("unavailable", "The application service is closed")
-            operation, values = prepare_operation(
-                self.session, method, params, viewer_attached=self.app is not None
-            )
+            adapter = self.session.adapter
+            with _scene_read(adapter):
+                operation, values = prepare_operation(
+                    self.session, method, params, viewer_attached=self.app is not None
+                )
+                revision = adapter.structure_revision
             # Service and viewport queries do not own the offscreen capture cache.
             if operation.scope in ("scene", "capture"):
                 self._sync_capture_document()
-            if self.app is not None and operation.viewer_document_action:
-                result = self._document_command(
-                    operation.command(values), operation.viewer_document_action
-                )
-            elif operation.handler:
-                result = getattr(self, operation.handler)(values)
-            else:
-                result = self._command(operation.command(values))
+            guard = (
+                _command_context(adapter, revision)
+                if operation.mutates and operation.scope == "scene"
+                else nullcontext()
+            )
+            with guard:
+                if self.app is not None and operation.viewer_document_action:
+                    result = self._document_command(
+                        operation.command(values), operation.viewer_document_action
+                    )
+                elif operation.handler:
+                    result = getattr(self, operation.handler)(values)
+                else:
+                    result = self._command(operation.command(values))
             if isinstance(result, dict) and "ok" in result and "entity_id" in result:
                 result["document"] = document_state(self.session)
             return json_value(result)
@@ -663,6 +674,69 @@ class ControlApplication:
             for node in islice(nodes, offset, None if limit is None else offset + limit)
         ]
 
+    def _models(self, _params):
+        return {"document": document_state(self.session), "models": self.session.scene_models}
+
+    def _require_model(self, model_id):
+        if not any(model.model_id == model_id for model in self.session.scene_models):
+            raise ControlError("not_found", f"Model {model_id} is unavailable")
+
+    def _model_source(self, params):
+        model_id = params["model_id"]
+        self._require_model(model_id)
+        source = self.session.adapter.scene_model_source(model_id)
+        if source is None:
+            raise ControlError("unsupported", f"Model {model_id} has no editable MJCF source")
+        return {"document": document_state(self.session), "model_id": model_id, "mjcf": source}
+
+    def _joints(self, params):
+        model_id = params.get("model_id")
+        if model_id is not None:
+            self._require_model(model_id)
+        nodes = {node.joint_index: node for node in self.session.nodes if node.joint_index >= 0}
+        joints = []
+        for joint in self.session.joints:
+            node = nodes.get(joint.joint_id)
+            if model_id is not None and (node is None or node.model_id != model_id):
+                continue
+            joints.append(
+                {
+                    **asdict(joint),
+                    "node_id": node.node_id if node else -1,
+                    "model_id": node.model_id if node else -1,
+                }
+            )
+        return {"document": document_state(self.session), "joints": joints}
+
+    def _joint_properties(self, params):
+        result = self._joints({})
+        joint = next(
+            (item for item in result["joints"] if item["joint_id"] == params["joint_id"]), None
+        )
+        if joint is None:
+            raise ControlError("not_found", f"Joint {params['joint_id']} is unavailable")
+        return {"document": result["document"], "joint": joint}
+
+    def _model_assets(self, params):
+        self._require_model(params["model_id"])
+        return {
+            "document": document_state(self.session),
+            "assets": self.session.model_assets(params["model_id"]),
+        }
+
+    def _model_keyframes(self, params):
+        self._require_model(params["model_id"])
+        return {
+            "document": document_state(self.session),
+            "keyframes": self.session.model_keyframes(params["model_id"]),
+        }
+
+    def _model_keyframe(self, params):
+        keyframe = self.session.keyframe_properties(params["keyframe_id"])
+        if keyframe is None:
+            raise ControlError("not_found", f"Keyframe {params['keyframe_id']} is unavailable")
+        return {"document": document_state(self.session), "keyframe": keyframe}
+
     def _scene(self, params=None) -> dict[str, Any]:
         self.session.tick(FrameNeeds.none(), wall_dt=0.0)
         include_objects = (params or {}).get("include_objects", True)
@@ -900,4 +974,7 @@ def _node_payload(node) -> dict[str, Any]:
         "source_editable": bool(node.source_editable),
         "body_index": int(node.body_index),
         "site_index": int(node.site_index),
+        "model_id": int(node.model_id),
+        "joint_index": int(node.joint_index),
+        "source_name": node.source_name,
     }

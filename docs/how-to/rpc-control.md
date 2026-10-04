@@ -235,7 +235,9 @@ Use `client.describe_operations(query="camera", include_schemas=False)` to searc
 The catalog in `control/operations.py` drives both discovery and dispatch. Result schemas describe
 scene inspection, physics array shapes/values, camera bookmarks, viewer settings, and discovery
 records. Native remote authoring commands consume and check `expected_document` before command
-construction, retaining their existing `CommandResult` error format.
+construction, retaining their existing `CommandResult` error format. Native publishers retain
+their clock-owner policy for runtime Scene authoring; RPC document edits require a paused owner.
+Both routes enforce backend model-write capability and pause checks at the Session command boundary.
 
 | Scope | Common operations |
 |---|---|
@@ -245,6 +247,8 @@ construction, retaining their existing `CommandResult` error format.
 | Simulation | `pause`, `resume`, `step`, `reset`, `set_speed`, `set_keyframe`, `set_qpos`, `set_qvel`, `set_ctrl`, `set_mocap`, `set_state` |
 | Documents | `load`, `reload`, `new_scene`, `open_scene`, `save_scene` |
 | Authoring | `add_scene_object`, `add_scene_camera`, `add_scene_light`, `set_pose`, `set_scale`, `set_scene_camera`, `set_geometry_color`, `set_geometry_size`, `rename_scene_entity`, `duplicate_scene_entity`, `remove_scene_entity` |
+| Model queries | `list_models`, `list_joints`, `get_joint_properties`, `mujoco.get_model_source`, `list_model_assets`, `list_model_keyframes`, `get_model_keyframe` |
+| Model authoring | `set_joint_properties`, `add_model_element`, `rename_model_element`, `duplicate_model_element`, `remove_model_element`, `import_model_asset`, `add_model_keyframe`, `set_model_keyframe`, `mujoco.set_model_source` |
 | History | `edit_scene`, `undo`, `redo` |
 | Capture | `get_capture_settings`, `set_capture_camera`, `capture`, `set_render_flag`, `set_visualization_flag`, `load_camera_bookmark` |
 | Viewport | `get_viewport_camera`, `set_viewport_camera`, `capture_viewport`, `get_viewer_settings`, `get_viewer_stats`, `set_viewport_geometry_view`, `get_panels`, `set_panel`, `set_interactions`, `set_selection_style`, `set_shadow_quality`, `reset_layout` |
@@ -253,20 +257,64 @@ construction, retaining their existing `CommandResult` error format.
 have explicit `remove_scene_camera`/`remove_scene_light` operations. Consult discovery for their
 parameter shapes rather than translating an object ID into a camera or light ID.
 
+## Edit model properties
+
+Model operations use existing Session commands, capability checks, transactions, and history.
+`list_models` reports file-backed model IDs and composition transforms. Hierarchy records also
+include `model_id`, `joint_index`, and `source_name`; do not infer one ID namespace from another.
+The source name identifies an editable source element, while node IDs are scoped to the current
+structure. `mujoco.get_model_source` returns the current editable MJCF used by
+`mujoco.set_model_source`.
+
+```python
+from mojive.control.rpc import RpcClient
+
+with RpcClient() as client:
+    client.call("pause")
+    model_id = client.call("list_models")["models"][0]["model_id"]
+    observed = client.call("list_joints", {"model_id": model_id})
+    joint = next(item for item in observed["joints"] if item["type"] == "hinge")
+    operation = client.describe_operations(name="set_joint_properties")["operations"][0]
+    params = {field: joint[field] for field in operation["input_schema"]["required"]}
+    params.update(damping=0.5, expected_document=observed["document"])
+    client.call("set_joint_properties", params)
+    updated = client.call("get_joint_properties", {"joint_id": joint["joint_id"]})
+    assert updated["joint"]["damping"] == 0.5
+    source = client.call("mujoco.get_model_source", {"model_id": model_id})
+    client.call("undo", {"expected_document": source["document"]})
+```
+
+`list_model_assets` returns source fields and references. Import, rename, duplicate, replace-file,
+remove, and material-binding operations use those model-local identities. `list_model_keyframes`
+and `get_model_keyframe` provide the complete vectors needed by `set_model_keyframe`; backend
+validation rejects vectors with incompatible lengths. Adding, duplicating, removing, and renaming
+model elements rebuilds the source through the adapter. Read the resulting hierarchy again before
+reusing node or joint IDs. All available schemas and capability requirements are discoverable;
+unsupported operations return structured errors without guessing a backend fallback.
+
+An [MCP stdio bridge](agent-workflows.md#connect-an-mcp-client) exposes this same catalog and
+existing RPC owner. It adds no separate model state or alternate edit implementation.
+
 ## Edit a document
 
 `get_scene`, `get_state`, `inspect_object`, and command results include a `document` token with
-an opaque `id` and authored-history `revision`. New, open, load, and reload establish a fresh
-identity. Save and Undo/Redo retain it. The revision identifies an authored history state; it is
-not a simulation frame counter or a revision of viewport/visibility settings.
+an opaque `id`, authored-history `revision`, and `structure_revision`. New, open, load, and reload
+establish a fresh identity. Save and Undo/Redo retain it. The history revision identifies an
+authored state; it is not a simulation frame counter or a revision of viewport/visibility settings.
+The structure revision is the Session's installed structure generation. It also changes when an
+external Scene owner rebuilds the hierarchy, even if no authored history entry was created.
 
-Pass the most recently observed token as `expected_document` on a scene mutation to reject
-stale references. A mismatch returns `stale_document`, including expected and actual tokens,
-before changing state. Omitting the revision checks only document identity. Legacy clients may
-omit the precondition entirely. `structure_generation` describes render structure and does not
-replace document identity.
+Pass the full, most recently observed token as `expected_document` on a scene mutation. The
+service synchronizes structure without advancing physics before comparing it, so an old node ID
+cannot silently address a different object after a rebuild. A mismatch returns `stale_document`,
+including expected and actual tokens, before changing state. Rediscover IDs and tokens after a
+structure change; rollback can install a fresh structure generation while restoring the same
+history revision. Tokens containing only `id` or `id` plus `revision` remain accepted for older
+clients, but do not protect against external structure changes. Legacy clients may omit the
+precondition entirely.
 
-Creation results retain legacy `entity_id` and add a named `object_id`, `camera_id`, or `light_id`.
+Creation results retain legacy `entity_id` and add the relevant `object_id`, `camera_id`,
+`light_id`, `model_id`, `node_id`, or `keyframe_id`.
 Scene, object-list, bounds, and inspection queries refresh the composed Session before reading,
 so they also observe updates made through a caller-owned scene provider.
 

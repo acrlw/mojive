@@ -161,7 +161,7 @@ class _Editing:
                     )
             elif not self._applying_model_edits:
                 self._advance_document_revision()
-        preview = getattr(self, "_model_edit_preview", None)
+        preview = self._model_edit_preview
         if (
             result.ok
             and preview is not None
@@ -206,6 +206,7 @@ class _Editing:
         if not self._adapter.restore_edit_state(state.adapter_state):
             return False
         self._scene_overrides = deepcopy(state.overrides)
+        self._rebind_material_overrides()
         self._selected = int(state.selected)
         self._selected_node_id = -1
         self._refresh_structure()

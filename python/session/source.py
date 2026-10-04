@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import cast
 
@@ -25,6 +26,7 @@ from mojive.adapters.base import (
     WorldSelectionInfo,
 )
 from mojive.commands import Query
+from mojive.log import get_logger
 from mojive.scene.bounds import SceneBounds
 from mojive.types import (
     Bounds,
@@ -33,7 +35,10 @@ from mojive.types import (
 
 from .state import (
     _apply_geometry_color_overrides,
+    _MaterialTarget,
 )
+
+log = get_logger("session")
 
 
 class _Source:
@@ -104,9 +109,82 @@ class _Source:
         caps = self._adapter.caps
         return not writeback or caps.external_clock or caps.model_composition
 
+    def _material_target(self, index: int, source=None, *, revision=None) -> _MaterialTarget:
+        source = self._source if source is None else source
+        return _MaterialTarget(
+            self._adapter_revision if revision is None else revision,
+            source.materials[index],
+            frozenset(
+                int(object_id)
+                for object_id, material_index in zip(
+                    source.geom_object_id, source.geom_material, strict=True
+                )
+                if material_index == index and object_id
+            ),
+        )
+
+    def _rebind_material_overrides(self) -> None:
+        """Rebind indices only after restoring their exact document checkpoint."""
+        source = self._adapter.scene_source()
+        self._scene_overrides.material_targets = {
+            index: self._material_target(index, source, revision=self._adapter.structure_revision)
+            for index in self._scene_overrides.materials
+            if 0 <= index < len(source.materials)
+        }
+
+    def _apply_material_overrides(self) -> None:
+        overrides = self._scene_overrides
+        revision = self._adapter.structure_revision
+        materials, targets = {}, {}
+        invalid = False
+        for index, material in overrides.materials.items():
+            target = overrides.material_targets.get(index)
+            if target is not None and target.revision != revision:
+                # Object identity is proof for retained in-process materials;
+                # equal values or names cannot identify a replaced resource.
+                candidates = [
+                    candidate
+                    for candidate, value in enumerate(self._source.materials)
+                    if value is target.material
+                    and self._material_target(candidate).object_ids & target.object_ids
+                ]
+                index = candidates[0] if len(candidates) == 1 else -1
+            if target is None or not 0 <= index < len(self._source.materials):
+                invalid = True
+                continue
+            targets[index] = self._material_target(index, revision=revision)
+            materials[index] = material
+        overrides.materials, overrides.material_targets = materials, targets
+        for index, material in materials.items():
+            self._source.materials[index] = material
+        if invalid:
+            message = (
+                "Cleared viewer material overrides after the scene structure changed; "
+                "their material identities could not be verified"
+            )
+            # A command success message may replace the transient UI warning;
+            # retain the invalidation evidence in the application's Output log.
+            log.warning(message)
+            self._publish_message(message, level="warning", duration=5.0)
+
     def visual_groups(self):
         """Return numbered visual group states exposed by the adapter."""
         return self._adapter.visual_groups() if self._adapter.caps.visual_groups else ()
+
+    def _scene_read(self):
+        # Preserve structural adapters published before the optional read boundary.
+        return getattr(self._adapter, "scene_read", nullcontext)()
+
+    def sync_structure(self) -> bool:
+        """Install external structure changes without advancing simulation or playback."""
+        with self._scene_read():
+            prepare = getattr(self._adapter, "prepare_frame", None)
+            if prepare is not None:
+                prepare(FrameNeeds.none())
+            if self._adapter.structure_revision == self._adapter_revision:
+                return False
+            self._refresh_structure()
+            return True
 
     def _refresh_structure(self, *, installed: bool = False) -> None:
         """Rebuild session structure from the adapter.
@@ -118,6 +196,11 @@ class _Source:
 
         if getattr(self, "_applying_model_edits", False) and not installed:
             return
+        with self._scene_read():
+            self._install_structure()
+
+    def _install_structure(self) -> None:
+        """Rebind local state before publishing; the caller holds ``scene_read``."""
         world_visibility = {
             (node.type, node.object_id): node.visible
             for node in self._nodes
@@ -125,16 +208,50 @@ class _Source:
             and (node.object_id or node.type is NodeType.WORLD)
         }
         selected_before = self._by_node_id.get(self._selected_node_id)
+
         self._mesh_bounds_cache.clear()
         self._scene_bounds = None
-        self._source = self._adapter.scene_source()
-        if self._scene_overrides.environment is not None:
-            self._source.lights = self._source.lights.with_environment(
-                self._scene_overrides.environment
-            )
-        for material_index, material in self._scene_overrides.materials.items():
-            if material_index < len(self._source.materials):
-                self._source.materials[material_index] = material
+        source = self._adapter.scene_source()
+        self._adapter_source = source
+        # Borrow the adapter-owned source unless a viewer material overlay needs
+        # a derived table. The owner's table identifies resources and checkpoints;
+        # ordinary borrowers retain live updates made through public scene handles.
+        self._source = (
+            replace(source, materials=list(source.materials))
+            if self._scene_overrides.materials
+            else source
+        )
+        self._apply_material_overrides()
+        self._rebind_geometry_color_overrides()
+
+        self._nodes = [
+            replace(node, children=list(node.children)) for node in self._adapter.nodes()
+        ]
+        self._source.lights = self._configured_lights()
+        self._ensure_environment_node()
+        for node in self._nodes:
+            if 0 <= node.light_index < len(self._source.lights.lights):
+                node.visible = self._source.lights.lights[node.light_index].active
+
+        self._refresh_structure_metadata()
+        self._by_node_id = {n.node_id: n for n in self._nodes}
+        self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
+        self._restore_structure_selection(selected_before)
+        self._invalidate_incompatible_recordings()
+
+        self._adapter_revision = self._adapter.structure_revision
+        for node in (*self._nodes, *self._source.nodes):
+            key = (node.type, node.object_id)
+            if key in world_visibility:
+                node.visible = world_visibility[key]
+        self._structure_generation += 1
+        self._frame = self._adapter.frame(FrameNeeds())
+        self._sync_equality_state()
+        self._compose_lights()
+        self._compose_cameras()
+
+    def _rebind_geometry_color_overrides(self) -> None:
+        """Resolve retained instance colors after hierarchy indices move."""
         if self._scene_overrides.geometry_colors:
             # Hierarchy indices can shift when model geometry is inserted before scene
             # objects. Resolve retained colors by object identity across rebuilds and Undo.
@@ -152,22 +269,9 @@ class _Source:
             self._scene_overrides.geometry_colors = colors
             self._scene_overrides.geometry_color_targets = targets
             _apply_geometry_color_overrides(self._source, colors)
-        self._nodes = [
-            replace(node, children=list(node.children)) for node in self._adapter.nodes()
-        ]
-        if self._scene_overrides.lights:
-            light_nodes = {
-                node.object_id: node
-                for node in self._nodes
-                if node.object_id > 0 and node.light_index >= 0
-            }
-            lights = list(self._source.lights.lights)
-            for override in self._scene_overrides.lights.values():
-                node = light_nodes.get(override.object_id) if override.object_id > 0 else None
-                index = node.light_index if node is not None else override.light_index
-                if 0 <= index < len(lights):
-                    lights[index] = override.light
-            self._source.lights = replace(self._source.lights, lights=tuple(lights))
+
+    def _ensure_environment_node(self) -> None:
+        """Give every Session an editable environment node, including render-only scenes."""
         if not any(node.type is NodeType.ENVIRONMENT for node in self._nodes):
             parent = next(
                 (node for node in self._nodes if node.type is NodeType.WORLD and node.parent < 0),
@@ -184,9 +288,9 @@ class _Source:
             self._nodes.append(environment)
             if parent is not None:
                 parent.children.append(node_id)
-        for node in self._nodes:
-            if 0 <= node.light_index < len(self._source.lights.lights):
-                node.visible = self._source.lights.lights[node.light_index].active
+
+    def _refresh_structure_metadata(self) -> None:
+        """Refresh capability-owned metadata and its joint/camera lookup tables."""
         self._refresh_joint_metadata()
         self._actuators = self._adapter.actuators()
         actuators_by_joint: dict[int, list[ActuatorInfo]] = {}
@@ -213,8 +317,9 @@ class _Source:
         )
         if self._active_keyframe != -1 and self._keyframe_slot(self._active_keyframe) < 0:
             self._active_keyframe = -1
-        self._by_node_id = {n.node_id: n for n in self._nodes}
-        self._by_object_id = {n.object_id: n for n in self._nodes if n.object_id}
+
+    def _restore_structure_selection(self, selected_before: SceneNode | None) -> None:
+        """Restore selection by authored identity or a surviving scene object ID."""
         self._unlocked_entity_gizmos.intersection_update(self._by_object_id)
         if selected_before is not None and selected_before.source_editable:
             self._restore_model_selection(
@@ -231,6 +336,9 @@ class _Source:
                 self._selected_node_id = selected.node_id
         elif (selected := self.node(self._selected_node_id)) is None or selected.object_id:
             self._selected_node_id = -1
+
+    def _invalidate_incompatible_recordings(self) -> None:
+        """Retain recordings only when their physics layout or structure still matches."""
         if (self._state_takes or self._frame_history) and self._adapter.caps.state_snapshots:
             state = self._adapter.capture_state()
             signature = None if state is None else self._physics_state_signature(state)
@@ -250,16 +358,6 @@ class _Source:
             for snapshot in self._scene_snapshots.values()
         ):
             self._clear_scene_snapshots()
-        self._adapter_revision = self._adapter.structure_revision
-        for node in (*self._nodes, *self._source.nodes):
-            key = (node.type, node.object_id)
-            if key in world_visibility:
-                node.visible = world_visibility[key]
-        self._structure_generation += 1
-        self._frame = self._adapter.frame(FrameNeeds())
-        self._sync_equality_state()
-        self._compose_lights()
-        self._compose_cameras()
 
     def _restore_model_selection(self, model_id: int, node_type: NodeType, name: str) -> None:
         """Rebind an editable model element without reusing compiled body/node indices."""
@@ -305,6 +403,27 @@ class _Source:
             joints_by_body.setdefault(int(joint.body), []).append(joint)
         self._joints_by_body = {body: tuple(joints) for body, joints in joints_by_body.items()}
 
+    def _configured_lights(self):
+        # Keep the adapter-owned source reference so public scene light handles
+        # remain live, while viewer overlays stay confined to the Session copy.
+        configured = self._adapter_source.lights
+        if self._scene_overrides.environment is not None:
+            configured = configured.with_environment(self._scene_overrides.environment)
+        if self._scene_overrides.lights:
+            light_nodes = {
+                node.object_id: node
+                for node in self._nodes
+                if node.object_id > 0 and node.light_index >= 0
+            }
+            lights = list(configured.lights)
+            for override in self._scene_overrides.lights.values():
+                node = light_nodes.get(override.object_id) if override.object_id > 0 else None
+                index = node.light_index if node is not None else override.light_index
+                if 0 <= index < len(lights):
+                    lights[index] = override.light
+            configured = replace(configured, lights=tuple(lights))
+        return configured
+
     def _compose_lights(self) -> None:
         """Combine scene light settings with backend-driven transforms.
 
@@ -314,7 +433,8 @@ class _Source:
         """
         if self._source is None:
             return
-        configured = self._source.lights
+        configured = self._configured_lights()
+        self._source.lights = configured
         driven = self._frame.lights
         if driven is None or driven is configured or len(driven.lights) != len(configured.lights):
             self._frame.lights = configured

@@ -11,7 +11,7 @@ from mojive.render.backend import DebugView, RenderFlag
 
 from .capture import cmd_capture, cmd_keyframes, cmd_probe, cmd_record
 from .common import DEFAULT_BACKEND, _positive_float, _positive_int, _setup_logging
-from .control import cmd_control, cmd_operations, cmd_rpc_serve
+from .control import cmd_control, cmd_mcp, cmd_operations, cmd_rpc_serve
 from .inspection import (
     cmd_assets,
     cmd_audit,
@@ -169,6 +169,11 @@ def build_parser(*, parser_class=argparse.ArgumentParser) -> argparse.ArgumentPa
     sp.add_argument("--speed", type=_positive_float, default=1.0)
     sp.add_argument("--loop", action="store_true")
     sp.set_defaults(func=cmd_replay, json=False)
+
+    sp = sub.add_parser("mcp", help="Expose an existing RPC service through MCP stdio")
+    sp.add_argument("--socket", default=str(DEFAULT_SOCKET))
+    sp.add_argument("--timeout", type=_positive_float, default=30.0)
+    sp.set_defaults(func=cmd_mcp, json=False)
 
     sp = with_asset(sub.add_parser("doctor", help="Run a 90-frame smoke test"))
     sp.add_argument("--json", action="store_true")

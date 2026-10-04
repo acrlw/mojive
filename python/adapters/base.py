@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -921,6 +921,10 @@ class SceneSource:
         return len(self.geom_mesh)
 
 
+class AdapterCommandError(RuntimeError):
+    """An adapter rejected a command or could not establish its completion."""
+
+
 class SceneAdapterBase:
     """Default implementation of the scene adapter contract.
 
@@ -1162,6 +1166,26 @@ class SceneAdapterBase:
     def prepare_frame(self, needs: FrameNeeds) -> bool:
         """Materialize optional stable data and report whether structure changed."""
         return False
+
+    def scene_read(self) -> AbstractContextManager[None]:
+        """Keep source, metadata, revision and frame reads in one coherent version.
+
+        Asynchronous adapters override this boundary. Do not issue adapter writes
+        or remote commands inside it; synchronous adapters need no read lock.
+        """
+        return nullcontext()
+
+    @contextmanager
+    def command_context(self, expected_structure_revision: int):
+        """Execute against a previously checked structure on the adapter's owner thread.
+
+        The default checks the local revision; it does not make third-party
+        adapters thread safe. Remote adapters carry this condition to their owner
+        instead of holding a scene read lock across a command round trip.
+        """
+        if self.structure_revision != expected_structure_revision:
+            raise AdapterCommandError("Scene structure changed after command validation")
+        yield
 
     def frame(self, needs: FrameNeeds) -> SceneFrame:
         """Return the latest dynamic frame containing the requested optional data."""
@@ -1582,6 +1606,8 @@ class SceneRuntime(SceneProvider, Protocol):
 
     caps: AdapterCaps
 
+    def scene_read(self) -> AbstractContextManager[None]: ...
+    def command_context(self, expected_structure_revision: int) -> AbstractContextManager[None]: ...
     def prepare_frame(self, needs: FrameNeeds) -> bool: ...
     def nodes(self) -> list[SceneNode]: ...
     def camera_hint(self) -> CameraView | None: ...

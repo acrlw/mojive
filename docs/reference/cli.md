@@ -310,6 +310,22 @@ On macOS, start the service with `MOJIVE_RENDERER=bgfx` when using `capture`; RP
 worker threads and the platform OpenGL context path is main-thread-only. Linux can use OpenGL.
 The bgfx selection requires the [native runtime and shaders](../how-to/native-viewer.md).
 
+### `mcp`
+
+Expose an existing local RPC service through MCP stdio. Install the optional `mojive[mcp]`
+dependency first. The standalone `mojive-mcp` entry point has the same arguments.
+
+```text
+mojive mcp [--socket PATH] [--timeout SECONDS]
+mojive-mcp [--socket PATH] [--timeout SECONDS]
+```
+
+The socket defaults to the same endpoint as `control`; the timeout defaults to 30 seconds.
+The bridge discovers tools and schemas from that owner and forwards calls through `RpcClient`.
+It creates no Session or viewer. stdout is reserved for MCP messages. See
+[agent workflows](../how-to/agent-workflows.md#connect-an-mcp-client) for client configuration,
+image results, and error recovery.
+
 ### `control`
 
 Send one typed RPC method. `--params` must be a JSON object.

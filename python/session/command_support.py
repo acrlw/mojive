@@ -6,6 +6,8 @@ source editing require explicit adapter contracts, independent of engine names.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from mojive import commands as cmd
 from mojive.adapters.base import AdapterCaps
 
@@ -115,14 +117,32 @@ _REQUIREMENTS = {
 }
 
 
+@lru_cache(maxsize=128)
+def resolve_command_type(command_type: type[cmd.Command]) -> type[cmd.Command]:
+    """Return the first public command declaration in Python's resolution order.
+
+    Dispatch, capability checks and pending edits share this policy so subclasses
+    retain the contracts and edit behavior of the same command they extend.
+    """
+    return next(
+        (
+            base
+            for base in command_type.__mro__
+            if issubclass(base, cmd.Command) and getattr(cmd, base.__name__, None) is base
+        ),
+        command_type,
+    )
+
+
 def requirements(command_type: type[cmd.Command]) -> tuple[str, ...]:
     """Return required revision-1 adapter contracts for a typed command."""
-    return _REQUIREMENTS.get(command_type, ())
+    return _REQUIREMENTS.get(resolve_command_type(command_type), ())
 
 
 def unavailable_reason(caps: AdapterCaps, command: cmd.Command) -> str | None:
     """Reject unsupported operations before history capture or physics fences."""
-    for feature in requirements(type(command)):
+    command_type = resolve_command_type(type(command))
+    for feature in requirements(command_type):
         if not caps.supports(feature):
             if feature == "simulation":
                 return f"{caps.name} has no simulation (revision 1)"
@@ -130,23 +150,21 @@ def unavailable_reason(caps: AdapterCaps, command: cmd.Command) -> str | None:
     if (
         caps.simulation
         and not caps.clock_control
-        and isinstance(command, (cmd.Pause, cmd.Play, cmd.Step, cmd.Reset, cmd.SetSpeed))
+        and command_type in (cmd.Pause, cmd.Play, cmd.Step, cmd.Reset, cmd.SetSpeed)
     ):
         return "Physics clock control belongs to the external caller"
-    if isinstance(command, cmd.SetSpeed) and caps.external_clock:
+    if command_type is cmd.SetSpeed and caps.external_clock:
         return "Simulation speed belongs to the external clock owner"
     if (
-        isinstance(command, cmd.Perturb)
+        command_type is cmd.Perturb
         and command.local_position is not None
         and not caps.supports("physics.perturb_point")
     ):
         return f"{caps.name} does not support physics.perturb_point (revision 1)"
-    if isinstance(command, (cmd.LoadAsset, cmd.AddSceneModel)) and not caps.accepts_model(
-        command.path
-    ):
+    if command_type in (cmd.LoadAsset, cmd.AddSceneModel) and not caps.accepts_model(command.path):
         return f"{caps.name} does not support the model format: {command.path}"
     if (
-        isinstance(command, cmd.Perturb)
+        command_type is cmd.Perturb
         and command.strength != 1.0
         and not caps.supports("physics.perturb_strength")
     ):

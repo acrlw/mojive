@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from mojive import commands as cmd
 from mojive.commands import Command, CommandResult
+from mojive.session.command_support import resolve_command_type
 
 from . import assets, documents, keyframes, physics, playback, properties, replay, scene, transforms
 
@@ -120,19 +119,8 @@ _HANDLERS = {
 }
 
 
-@lru_cache(maxsize=128)
-def _handler(command_type: type[Command]) -> Callable[[Session, Command], CommandResult] | None:
-    handler = _HANDLERS.get(command_type)
-    if handler is not None:
-        return handler
-    # Preserve isinstance dispatch for callers subclassing a public command.
-    return next(
-        (handler for base, handler in _HANDLERS.items() if issubclass(command_type, base)), None
-    )
-
-
 def dispatch(session: Session, command: Command) -> CommandResult:
-    handler = _handler(type(command))
+    handler = _HANDLERS.get(resolve_command_type(type(command)))
     if handler is None:
         return CommandResult.bad(f"Unknown command: {type(command).__name__}")
     return handler(session, command)

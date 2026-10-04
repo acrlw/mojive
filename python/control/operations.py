@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
@@ -12,7 +13,7 @@ import numpy as np
 
 from mojive import commands as cmd
 from mojive import math3d
-from mojive.adapters.base import NodeType
+from mojive.adapters.base import AdapterCommandError, NodeType
 from mojive.config import InteractionConfig, SelectionStyle
 from mojive.control.errors import ControlError
 from mojive.control.schema import (
@@ -26,11 +27,17 @@ from mojive.control.schema import (
     COMMAND_RESULT,
     COUNT,
     DESCRIPTION_RESULT,
+    DOCUMENT,
     ID,
     INSPECTED_NODE,
     INTEGER,
+    JOINT_RESULT,
+    KEYFRAME_FIELDS,
+    KEYFRAME_RESULT,
     LIGHT,
     MATERIAL,
+    MODEL_ASSET_RESULT,
+    MODEL_RESULT,
     NAME,
     NODE,
     NUMBER,
@@ -45,6 +52,7 @@ from mojive.control.schema import (
     STATE_RESULT,
     STRING,
     VECTOR,
+    VECTOR2,
     VECTOR3,
     VIEWER_SETTINGS_RESULT,
     Validator,
@@ -52,6 +60,7 @@ from mojive.control.schema import (
     camera_value,
     json_value,
     obj,
+    record,
     validate,
     value_schema,
 )
@@ -90,6 +99,10 @@ CAPTURE_VISUAL_FLAGS = (
 
 COMMAND_ID_FIELDS = {
     cmd.AddSceneObject: "object_id",
+    cmd.AddSceneModel: "model_id",
+    cmd.AddModelElement: "node_id",
+    cmd.DuplicateModelElement: "node_id",
+    cmd.AddModelKeyframe: "keyframe_id",
     cmd.RemoveSceneObject: "object_id",
     cmd.DuplicateSceneEntity: "object_id",
     cmd.RemoveSceneEntity: "object_id",
@@ -469,6 +482,234 @@ _CATALOG = [
         ),
         INSPECTED_NODE,
         handler="_inspect_object",
+    ),
+    _op(
+        "list_models",
+        "List file-backed scene models and their composition transforms.",
+        result=record({"document": DOCUMENT, "models": array(MODEL_RESULT)}),
+        handler="_models",
+    ),
+    _op(
+        "mujoco.get_model_source",
+        "Read the current editable MJCF source for one model.",
+        {"model_id": ID},
+        ("model_id",),
+        result=record({"document": DOCUMENT, "model_id": ID, "mjcf": STRING}),
+        handler="_model_source",
+        capabilities=("mujoco.mjcf",),
+    ),
+    _op(
+        "list_joints",
+        "List joint properties and the current model/node identities.",
+        {"model_id": ID},
+        result=record({"document": DOCUMENT, "joints": array(JOINT_RESULT)}),
+        handler="_joints",
+    ),
+    _op(
+        "get_joint_properties",
+        "Read one joint's axis, limits, damping and stiffness.",
+        {"joint_id": ID},
+        ("joint_id",),
+        result=record({"document": DOCUMENT, "joint": JOINT_RESULT}),
+        handler="_joint_properties",
+    ),
+    _cmd(
+        "set_joint_properties",
+        cmd.SetJointProperties,
+        {
+            "joint_id": ID,
+            "axis": VECTOR3,
+            "limited": BOOLEAN,
+            "range": VECTOR2,
+            "damping": {**NUMBER, "minimum": 0},
+            "stiffness": {**NUMBER, "minimum": 0},
+        },
+        capabilities=("model_properties",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "add_scene_model",
+        cmd.AddSceneModel,
+        {"path": NAME, "position": VECTOR3, "rotation": ROTATION},
+        capabilities=("model_composition",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "remove_scene_model",
+        cmd.RemoveSceneModel,
+        {"model_id": ID},
+        capabilities=("model_composition",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "set_scene_model_transform",
+        cmd.SetSceneModelTransform,
+        {"model_id": ID, "position": VECTOR3, "rotation": ROTATION},
+        capabilities=("model_composition",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "add_model_element",
+        cmd.AddModelElement,
+        {
+            "parent_node_id": ID,
+            "element_type": {
+                **NAME,
+                "description": "Adapter element type. MuJoCo supports body, geom[:box|sphere|capsule|cylinder|plane], joint[:hinge|slide|ball|free], site, camera, and light.",
+                "examples": ["body", "geom:box", "joint:hinge", "site"],
+            },
+            "name": NAME,
+        },
+        capabilities=("topology_editing",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "duplicate_model_element",
+        cmd.DuplicateModelElement,
+        {"node_id": ID},
+        capabilities=("topology_editing",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "remove_model_element",
+        cmd.RemoveModelElement,
+        {"node_id": ID},
+        capabilities=("topology_editing",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "rename_model_element",
+        cmd.RenameModelElement,
+        {"node_id": ID, "name": NAME},
+        capabilities=("topology_editing",),
+        paused=True,
+        transactional=True,
+    ),
+    _op(
+        "list_model_assets",
+        "List model assets, source fields, and their references.",
+        {"model_id": ID},
+        ("model_id",),
+        result=record({"document": DOCUMENT, "assets": array(MODEL_ASSET_RESULT)}),
+        handler="_model_assets",
+        capabilities=("model_assets",),
+    ),
+    _cmd(
+        "import_model_asset",
+        cmd.ImportModelAsset,
+        {
+            "model_id": ID,
+            "asset_type": {
+                **NAME,
+                "description": "File-backed asset type; MuJoCo accepts mesh or hfield.",
+            },
+            "path": NAME,
+            "name": NAME,
+            "fields": {
+                **array(array(STRING, 2)),
+                "description": "Additional source attribute name/value pairs, such as mesh scale or height-field size.",
+            },
+        },
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "rename_model_asset",
+        cmd.RenameModelAsset,
+        {"model_id": ID, "asset_type": NAME, "name": NAME, "new_name": NAME},
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "duplicate_model_asset",
+        cmd.DuplicateModelAsset,
+        {"model_id": ID, "asset_type": NAME, "name": NAME, "new_name": NAME},
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "replace_model_asset_file",
+        cmd.ReplaceModelAssetFile,
+        {"model_id": ID, "asset_type": NAME, "name": NAME, "path": NAME},
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "remove_model_asset",
+        cmd.RemoveModelAsset,
+        {"model_id": ID, "asset_type": NAME, "name": NAME},
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "create_model_material",
+        cmd.CreateModelMaterial,
+        {"model_id": ID, "name": NAME},
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "set_geometry_material",
+        cmd.SetGeometryMaterial,
+        {"node_id": ID, "material_index": {**INTEGER, "minimum": -1}},
+        capabilities=("model_assets",),
+        paused=True,
+        transactional=True,
+    ),
+    _op(
+        "list_model_keyframes",
+        "List the state presets owned by one model.",
+        {"model_id": ID},
+        ("model_id",),
+        result=record({"document": DOCUMENT, "keyframes": array(KEYFRAME_RESULT)}),
+        handler="_model_keyframes",
+        capabilities=("keyframes",),
+    ),
+    _op(
+        "get_model_keyframe",
+        "Read the full editable state of one model keyframe.",
+        {"keyframe_id": ID},
+        ("keyframe_id",),
+        result=record({"document": DOCUMENT, "keyframe": record(KEYFRAME_FIELDS)}),
+        handler="_model_keyframe",
+        capabilities=("keyframes", "model.keyframe_edit"),
+    ),
+    _cmd(
+        "add_model_keyframe",
+        cmd.AddModelKeyframe,
+        {"model_id": ID, "name": NAME},
+        capabilities=("keyframes", "topology_editing", "model.keyframe_edit"),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "set_model_keyframe",
+        cmd.SetModelKeyframe,
+        KEYFRAME_FIELDS,
+        capabilities=("keyframes", "topology_editing", "model.keyframe_edit"),
+        paused=True,
+        transactional=True,
+    ),
+    _cmd(
+        "remove_model_keyframe",
+        cmd.RemoveModelKeyframe,
+        {"keyframe_id": ID},
+        capabilities=("keyframes", "topology_editing", "model.keyframe_edit"),
+        paused=True,
+        transactional=True,
     ),
     _cmd("select_object", cmd.Select, {"object_id": ID}, handler="_select_object"),
     _cmd("select_node", cmd.SelectNode, {"node_id": ID}, handler="_select_node"),
@@ -959,9 +1200,35 @@ def find_operations(
     )
 
 
+def _scene_read(adapter):
+    # These boundaries are optional for older structural adapters. They are not
+    # synchronization promises for adapters that only support owner-thread use.
+    return getattr(adapter, "scene_read", nullcontext)()
+
+
+@contextmanager
+def _command_context(adapter, revision):
+    try:
+        guard = getattr(adapter, "command_context", None)
+        if guard is None:
+            if adapter.structure_revision != revision:
+                raise AdapterCommandError("Scene structure changed after command validation")
+            context = nullcontext()
+        else:
+            context = guard(revision)
+        with context:
+            yield
+    except AdapterCommandError as error:
+        raise ControlError("command_failed", str(error)) from error
+
+
 def document_state(session) -> dict:
-    """Return the document identity and authored history revision used by preconditions."""
-    return {"id": session.document_id, "revision": session.document_revision}
+    """Return history identity and the installed structure epoch used by preconditions."""
+    return {
+        "id": session.document_id,
+        "revision": session.document_revision,
+        "structure_revision": session.structure_generation,
+    }
 
 
 def prepare_operation(
@@ -972,6 +1239,8 @@ def prepare_operation(
     if operation is None:
         raise ControlError("unknown_method", f"Unknown control method: {name}")
     values = operation.validate(params)
+    if operation.scope == "scene":
+        session.sync_structure()
     expected = values.pop("expected_document", None)
     _check_document_precondition(session, expected)
     _check_pending_edits(session, operation)
@@ -986,7 +1255,11 @@ def _check_document_precondition(session, expected) -> None:
     if expected is not None:
         actual = document_state(session)
         if expected["id"] != actual["id"] or (
-            "revision" in expected and expected["revision"] != actual["revision"]
+            any(
+                expected[key] != actual[key]
+                for key in ("revision", "structure_revision")
+                if key in expected
+            )
         ):
             raise ControlError(
                 "stale_document",
@@ -1005,14 +1278,23 @@ def _check_pending_edits(session, operation) -> None:
 
 
 def apply_session_operation(session, name: str, params: dict) -> cmd.CommandResult:
-    """Apply a cataloged typed command, sharing semantics with native remote publishers."""
+    """Apply a typed native command with shared shape and document validation.
+
+    The native owner retains its runtime Scene authoring policy; RPC's additional
+    paused-workflow restriction does not apply here. Session enforces backend
+    write capabilities and model-edit pause requirements for both transports.
+    """
     operation = OPERATIONS.get(name)
     if operation is None:
         raise ControlError("unknown_method", f"Unknown control method: {name}")
-    values = operation.validate(params)
-    _check_document_precondition(session, values.pop("expected_document", None))
-    _check_pending_edits(session, operation)
+    with _scene_read(session.adapter):
+        values = operation.validate(params)
+        session.sync_structure()
+        _check_document_precondition(session, values.pop("expected_document", None))
+        _check_pending_edits(session, operation)
+        revision = session.adapter.structure_revision
     if operation.command is None:
         raise ControlError("unsupported", f"{name} requires an application service")
     # Preserve native CameraView/Material/mesh values after validating their JSON form.
-    return session.submit(operation.command({name: params[name] for name in values}))
+    with _command_context(session.adapter, revision):
+        return session.submit(operation.command({name: params[name] for name in values}))

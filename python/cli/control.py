@@ -117,3 +117,11 @@ def cmd_operations(args: argparse.Namespace) -> int:
             print(f"{item['name']:<28} {item['scope']:<8} {action:<5} {item['description']}")
         print("\nUse control describe_operations to check live availability and document identity.")
     return 0
+
+
+def cmd_mcp(args):
+    """Bridge an existing local control service to an MCP stdio client."""
+    from mojive.control.mcp import run_stdio
+
+    run_stdio(args.socket, timeout=args.timeout)
+    return 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -15,6 +16,7 @@ from .base import (
     CAMERA_OBJECT_BASE,
     LIGHT_OBJECT_BASE,
     AdapterCaps,
+    AdapterCommandError,
     BodyProperties,
     CameraInfo,
     DocumentCheckpoint,
@@ -90,6 +92,10 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._object_to_scene: dict[int, int] = {}
         self._light_to_scene: dict[int, int] = {}
         self._camera_to_scene: dict[int, int] = {}
+        self._geom_xpos: np.ndarray | None = None
+        self._geom_xmat: np.ndarray | None = None
+        self._body_xpos: np.ndarray | None = None
+        self._body_xmat: np.ndarray | None = None
         self.caps = _workspace_caps(primary)
 
     @property
@@ -412,6 +418,28 @@ class WorkspaceAdapter(SceneAdapterBase):
             self._invalidate()
         return changed
 
+    def scene_read(self):
+        # Structural third-party adapters can predate the optional read boundary.
+        return getattr(self.primary, "scene_read", nullcontext)()
+
+    @contextmanager
+    def command_context(self, expected_structure_revision: int):
+        # Capture the primary mapping while the checked composite revision is
+        # pinned. Reading a newer primary revision here would bless stale IDs.
+        with self.scene_read():
+            if self.structure_revision != expected_structure_revision:
+                raise AdapterCommandError("Scene structure changed after command validation")
+            primary_revision = self.primary.structure_revision
+        guard = getattr(self.primary, "command_context", None)
+        if guard is None:
+            if self.primary.structure_revision != primary_revision:
+                raise AdapterCommandError("Scene structure changed after command validation")
+            context = nullcontext()
+        else:
+            context = guard(primary_revision)
+        with context:
+            yield
+
     def frame(self, needs: FrameNeeds) -> SceneFrame:
         self.prepare_frame(needs)
         source = self.scene_source()
@@ -419,10 +447,18 @@ class WorkspaceAdapter(SceneAdapterBase):
         authored = self.scene.frame
         frame = replace(primary)
         if needs.poses:
-            frame.geom_xpos = _rows(primary.geom_xpos, authored.geom_xpos)
-            frame.geom_xmat = _rows(primary.geom_xmat, authored.geom_xmat)
-            frame.body_xpos = _body_rows(primary.body_xpos, authored.body_xpos)
-            frame.body_xmat = _body_rows(primary.body_xmat, authored.body_xmat)
+            self._geom_xpos, frame.geom_xpos = _frame_rows(
+                self._geom_xpos, primary.geom_xpos, authored.geom_xpos
+            )
+            self._geom_xmat, frame.geom_xmat = _frame_rows(
+                self._geom_xmat, primary.geom_xmat, authored.geom_xmat
+            )
+            self._body_xpos, frame.body_xpos = _frame_rows(
+                self._body_xpos, primary.body_xpos, authored.body_xpos, body=True
+            )
+            self._body_xmat, frame.body_xmat = _frame_rows(
+                self._body_xmat, primary.body_xmat, authored.body_xmat, body=True
+            )
         if primary.lights is not None:
             frame.lights = replace(
                 source.lights,
@@ -857,6 +893,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._object_to_scene.clear()
         self._light_to_scene.clear()
         self._camera_to_scene.clear()
+        self._geom_xpos = self._geom_xmat = self._body_xpos = self._body_xmat = None
 
     def _invalidate(self) -> None:
         self._source = None
@@ -1073,12 +1110,22 @@ def _rows(first, second):
     return np.concatenate((first, second), axis=0)
 
 
-def _body_rows(first, second):
-    if second is None or len(second) <= 1:
-        return first
-    if first is None:
-        return second
-    return np.concatenate((first, second[1:]), axis=0)
+def _frame_rows(buffer, first, second, *, body=False):
+    """Merge pose rows into owned storage; borrow the primary for an empty overlay."""
+    skip = int(body and first is not None)
+    if second is None or (body and len(second) <= 1) or (first is not None and len(second) == 0):
+        return buffer, first
+    if body and first is None:
+        return buffer, second
+    count = 0 if first is None else len(first)
+    shape = (count + len(second) - skip, *second.shape[1:])
+    dtype = second.dtype if first is None else np.result_type(first.dtype, second.dtype)
+    if buffer is None or buffer.shape != shape or buffer.dtype != dtype:
+        buffer = np.empty(shape, dtype=dtype)
+    if first is not None:
+        np.copyto(buffer[:count], first)
+    np.copyto(buffer[count:], second[skip:])
+    return buffer, buffer
 
 
 def _merge_scene_bounds(first: SceneSource, second: SceneSource) -> tuple[np.ndarray, float]:
