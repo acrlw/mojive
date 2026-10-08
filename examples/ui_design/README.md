@@ -58,3 +58,22 @@ The scene supports selection, visibility, camera navigation, transform gestures,
 Inspector editing, material changes, local JSON save/load and undo/redo. Joint
 motion and playback are previews. Physics execution, actuator write-back and
 simulation recording require a physics adapter and are unavailable here.
+
+## Browser reference
+
+```sh
+make ui-design
+make ui-design-check
+```
+
+Open `http://127.0.0.1:8768/examples/ui_design/web/`. Set `UI_DESIGN_PORT` to use
+another port. The server binds to localhost and serves the repository root so
+the import map can reach the tracked Three.js modules in `3rdparty/three.js/`.
+No npm install or CDN is required. A browser with WebGL is required for the
+viewport; Node.js is required only for `ui-design-check`.
+
+The web reference supports scene selection, Inspector edits, pose keys, material
+changes, undo/redo and local browser storage. Its panels are responsive browser
+layouts; the native reference exercises real ImGui docking. `ui-design-check`
+runs the native CPU checks and browser document-model tests. Browser source is
+under `web/`; historical variants and generated comparison images are excluded.

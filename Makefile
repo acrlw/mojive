@@ -111,6 +111,7 @@ help:
 		'  make ui-icon-references compare icon outline and filled references' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-design-native  standalone docking study (--interactive via ARGS)' \
+		'  make ui-design         serve the browser design reference locally' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
 		'  make tool-icons        transparent 1024px Tool Column icon sources' \
@@ -1245,3 +1246,13 @@ ui-design-native-check:
 ## Recompile tracked icon contours after editing the SVG masters.
 ui-design-icons:
 	$(PY) -m examples.ui_design.native.compile_icons
+
+UI_DESIGN_PORT ?= 8768
+.PHONY: ui-design ui-design-check
+## Open /examples/ui_design/web/ on the local server to review the web reference.
+ui-design:
+	@echo 'Open http://127.0.0.1:$(UI_DESIGN_PORT)/examples/ui_design/web/'
+	$(PY) -m http.server $(UI_DESIGN_PORT) --bind 127.0.0.1 --directory .
+
+ui-design-check: ui-design-native-check
+	node examples/ui_design/web/model.test.mjs

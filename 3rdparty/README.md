@@ -17,6 +17,7 @@ The C++ build never replaces an edited ImGui tree with a fetched copy.
 | `nanobind/`, `robin-map/` | Git submodules | Python binding support |
 | `libtess2/` | Git submodule | CPU-only contour triangulation for Canvas2D |
 | SDL, pybind11, separate shader tools | Optional locked downloads | Retained comparison experiments, disabled by default |
+| `three.js/` | Tracked, unmodified r180 browser modules; per-file digests in the lock | Standalone UI design web reference |
 
 After cloning, initialize only the top-level submodules:
 
