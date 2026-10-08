@@ -1,0 +1,235 @@
+{
+  "name": "Joint study",
+  "entities": [
+    {
+      "id": "free_body",
+      "name": "free_body",
+      "type": "link",
+      "shape": "box",
+      "position": [
+        -2.1,
+        0,
+        0.8
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#d89556",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "ball_body",
+      "name": "ball_body",
+      "type": "link",
+      "shape": "ball",
+      "position": [
+        -1.15,
+        0.25,
+        1.1
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#68b5b7",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "slide_body",
+      "name": "slide_body",
+      "type": "link",
+      "shape": "slide",
+      "position": [
+        -0.2,
+        0,
+        0.55
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#8dc785",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "hinge_body",
+      "name": "hinge_body",
+      "type": "link",
+      "shape": "hinge",
+      "position": [
+        0.9,
+        0,
+        0.9
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#e3ce62",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "hinge_unlimited",
+      "name": "hinge_unlimited",
+      "type": "link",
+      "shape": "hinge",
+      "position": [
+        0.9,
+        1,
+        0.9
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#d6b954",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "chain_root",
+      "name": "chain_root",
+      "type": "link",
+      "shape": "chain",
+      "position": [
+        2.1,
+        0.35,
+        0.35
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#b299d9",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "sun",
+      "name": "sun",
+      "type": "light",
+      "shape": "light",
+      "position": [
+        -3,
+        -4,
+        8
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#ffeedb",
+      "roughness": 0.5,
+      "hidden": false
+    },
+    {
+      "id": "inspection",
+      "name": "inspection",
+      "type": "camera",
+      "shape": "camera",
+      "position": [
+        2.5,
+        -1.7,
+        1.7
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#9eafc5",
+      "roughness": 0.5,
+      "hidden": false
+    }
+  ],
+  "pose": {
+    "hinge": -35,
+    "ball": 20,
+    "slide": 0.35
+  },
+  "keys": [
+    {
+      "id": "key-0",
+      "name": "Rest",
+      "time": 0,
+      "pose": {
+        "hinge": 0,
+        "ball": 0,
+        "slide": 0
+      }
+    },
+    {
+      "id": "key-1",
+      "name": "Reach",
+      "time": 4,
+      "pose": {
+        "hinge": -35,
+        "ball": 20,
+        "slide": 0.35
+      }
+    },
+    {
+      "id": "key-2",
+      "name": "Return",
+      "time": 8,
+      "pose": {
+        "hinge": 0,
+        "ball": 0,
+        "slide": 0
+      }
+    }
+  ],
+  "duration": 10
+}

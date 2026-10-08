@@ -24,6 +24,10 @@ not required.
 
 ## Example catalog
 
+The [UI design study](https://github.com/acrlw/mojive/tree/main/examples/ui_design)
+provides a standalone docking and scene-authoring reference through
+`make ui-design-native ARGS=--interactive`. Its captures are written under `output/ui_design/`.
+
 | Example | Result |
 |---|---|
 | `offscreen_scene.py` | authored RGB, depth, and object-ID output without MuJoCo |

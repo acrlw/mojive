@@ -28,6 +28,9 @@ Run these programs from the repository root after `make setup`. Commands use
 
 All generated files in these examples are placed under the ignored `output/` directory.
 
+The [UI design study](ui_design/README.md) is a standalone native docking and
+scene-authoring reference. Run `make ui-design-native ARGS=--interactive` after setup.
+
 Run `make passive-viewer` for a three-second 1000 Hz physics / 60 FPS display example.
 Use `ARGS='--physics-hz 500 --display-fps 30 --hidden'` for an automated run.
 The guarded script entry point is required by the passive viewer's spawned display process.

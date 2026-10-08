@@ -110,6 +110,7 @@ help:
 		'  make ui-svg-icons      compare production code and SVG files in ImGui' \
 		'  make ui-icon-references compare icon outline and filled references' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
+		'  make ui-design-native  standalone docking study (--interactive via ARGS)' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
 		'  make tool-icons        transparent 1024px Tool Column icon sources' \
@@ -1232,3 +1233,15 @@ canvas-2d-gallery:
 
 canvas-2d-test:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_canvas2d.py
+
+.PHONY: ui-design-native ui-design-native-check ui-design-icons
+## Open the tracked docking study with ARGS=--interactive; default captures validate docking.
+ui-design-native:
+	$(PY) -m examples.ui_design.native.docking_study --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
+
+ui-design-native-check:
+	$(PYTEST) -q tests/test_ui_design.py tests/test_ui_design_icons.py
+
+## Recompile tracked icon contours after editing the SVG masters.
+ui-design-icons:
+	$(PY) -m examples.ui_design.native.compile_icons
