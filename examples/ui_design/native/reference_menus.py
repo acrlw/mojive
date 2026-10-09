@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import copy
-import json
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 
 from imgui_bundle import imgui
 
+from mojive import commands as cmd
+
 from .widgets import DIM, MUTED, SAGE, TEXT, color
 
-ROOT = Path(__file__).parent
 MENU_BG = (39, 45, 53, 255)
 DISABLED = (126, 136, 149, 255)
 TOP_MENUS = ("File", "Edit", "Add", "View", "Simulate", "Window", "Help")
+SAVED_SCENE = "saved-scene.mojive.json"
+EXPORTED_SCENE = "exported-scene.mojive.json"
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,6 @@ class Menus:
         self.dialog = None
         self.dialog_pending = None
         self.color_before = None
-        self.color_entity = None
         self.color_visible = False
         self.shading = "Solid"
 
@@ -50,7 +49,7 @@ class Menus:
     def style(self, controls=False):
         s = self.s
         # ImGui snaps each cursor advance. Use an integral row height at fractional UI scales.
-        row_gap = (round(30 * s) - 12 * s) / s
+        row_gap = (round(30 * s) - 14 * s) / s
         values = [
             (imgui.StyleVar_.window_padding, ((16, 14) if controls else (12, 6 + row_gap / 2))),
             (imgui.StyleVar_.window_min_size, (0, 0)),
@@ -71,7 +70,7 @@ class Menus:
         ]
         for key, value in colors:
             imgui.push_style_color(key, imgui.ImVec4(*(v / 255 for v in value)))
-        imgui.push_font(self.ui.body, 12 * s)
+        imgui.push_font(self.ui.body, 14 * s)
         try:
             yield
         finally:
@@ -82,7 +81,6 @@ class Menus:
     def items(self, name):
         st = self.study
         e = st.preview.entity
-        ready = bool(e) and not st.playing
         if name == "File":
             return [
                 Item("Save locally", "file:save", "save", "⌘S"),
@@ -91,7 +89,7 @@ class Menus:
                     "file:load",
                     "assets",
                     "⌘O",
-                    (self.study.output_directory / "saved-scene.json").exists(),
+                    (self.study.output_directory / SAVED_SCENE).exists(),
                     reason="Save a local scene first.",
                 ),
                 None,
@@ -99,10 +97,23 @@ class Menus:
             ]
         if name == "Edit":
             return [
-                Item("Undo", "undo", "undo", "⌘Z", bool(st.history), reason="No changes to undo."),
-                Item("Redo", "redo", "redo", "⇧⌘Z", bool(st.redo), reason="No changes to redo."),
+                Item(
+                    "Undo",
+                    "undo",
+                    "undo",
+                    "⌘Z",
+                    st.preview.session.can_undo,
+                    reason="No changes to undo.",
+                ),
+                Item(
+                    "Redo",
+                    "redo",
+                    "redo",
+                    "⇧⌘Z",
+                    st.preview.session.can_redo,
+                    reason="No changes to redo.",
+                ),
                 None,
-                Item("Restore transform", "transform:reset", "reset", enabled=ready),
                 Item(
                     "Visible",
                     "visibility",
@@ -116,8 +127,7 @@ class Menus:
                 Item(
                     n,
                     icon="sphere" if n == "Sphere" else "geom",
-                    enabled=False,
-                    reason="Primitive creation is available in the web reference.",
+                    action="create:" + n,
                 )
                 for n in ("Box", "Sphere", "Cylinder", "Capsule")
             ]
@@ -171,7 +181,7 @@ class Menus:
         if name == "Simulate":
             return [
                 Item(
-                    "Pause preview" if st.playing else "Play pose preview",
+                    "Pause simulation" if st.playing else "Play simulation",
                     "play",
                     "pause" if st.playing else "play",
                     "Space",
@@ -180,10 +190,13 @@ class Menus:
                 Item("Playback speed", icon="play", submenu="Playback speed"),
                 None,
                 Item(
-                    "Record simulation",
+                    "Stop recording"
+                    if st.preview.session.state_take_recording
+                    else "Record simulation",
+                    "record",
                     icon="record",
-                    enabled=False,
-                    reason="Connect a simulation adapter to record.",
+                    enabled=st.preview.session.adapter.caps.simulation,
+                    checked=st.preview.session.state_take_recording,
                 ),
                 Item("Physics adapter", "panel:Control", "control"),
             ]
@@ -198,7 +211,14 @@ class Menus:
                 Item("Next frame", "step:1", "next", enabled=not st.playing),
                 None,
                 Item("Playback speed", icon="play", submenu="Playback speed"),
-                Item("Loop playback", "loop", "loop", checked=st.loop),
+                Item(
+                    "Loop playback",
+                    "loop",
+                    "loop",
+                    checked=st.loop,
+                    enabled=bool(st.preview.session.state_take_times),
+                    reason="Record a take first.",
+                ),
             ]
         if name == "Window":
             return [
@@ -217,6 +237,7 @@ class Menus:
                 Item("Reset layout", "layout:reset", "reset"),
                 None,
                 Item("Show Viewport tab", "viewport-tab", "inspect", checked=st.show_viewport_tab),
+                Item("Settings", "panel:Settings", "settings", "F9"),
             ]
         if name == "Workspace":
             return [
@@ -239,13 +260,6 @@ class Menus:
             return [
                 Item(n, "shading:" + n, "shading", checked=self.shading == n)
                 for n in ("Solid", "Wireframe")
-            ]
-        if name == "Display settings":
-            return [
-                Item("Transform handles", "gizmos", "move", checked=st.preview.gizmos),
-                Item("Cast shadows", "shadows", "shading", checked=st.preview.shadows),
-                None,
-                Item("Interaction guide", "dialog:Interaction guide", "help"),
             ]
         if name == "Help":
             return [
@@ -290,11 +304,10 @@ class Menus:
     def begin_frame(self):
         self.observed.clear()
         self.color_visible = False
-        # ImGui may dismiss a popup during NewFrame, before its body can handle Escape.
         if self.color_before is not None and imgui.is_key_pressed(imgui.Key.escape):
-            self.study.preview.entities[:] = self.color_before
+            self.study.preview.session.submit(cmd.CancelEditTransaction())
+            self.study.preview.refresh_document()
             self.color_before = None
-            self.color_entity = None
         if self.reset_pending:
             if imgui.is_popup_open(
                 "", imgui.PopupFlags_.any_popup_id | imgui.PopupFlags_.any_popup_level
@@ -310,7 +323,7 @@ class Menus:
             for name in TOP_MENUS:
                 self.reveal((name,))
                 self.constrain(name)
-                if imgui.begin_menu(name):
+                if imgui.begin_menu(self.ui.translate(name) + "###" + name):
                     self.content(name, (name,))
                     imgui.end_menu()
         imgui.end_menu_bar()
@@ -396,12 +409,12 @@ class Menus:
         tail_x = right - 12 * s
         if visible:
             if row.icon:
-                u.icon(row.icon, p.x, p.y - 2 * s, 16, MUTED if row.enabled else DISABLED, draw=dl)
+                u.icon(row.icon, p.x, p.y - s, 16, MUTED if row.enabled else DISABLED, draw=dl)
             u.text(text_x, p.y, row.label, c, draw=dl)
             if row.shortcut:
-                width = u.measure(row.shortcut, 11)
+                width = u.measure(row.shortcut, 13)
                 tail_x = right - 24 * s - width
-                u.text(tail_x, p.y + s, row.shortcut, DIM if row.enabled else DISABLED, 11, draw=dl)
+                u.text(tail_x, p.y + s, row.shortcut, DIM if row.enabled else DISABLED, 13, draw=dl)
             if row.submenu or row.checked:
                 u.icon(
                     "right" if row.submenu else "check",
@@ -417,7 +430,7 @@ class Menus:
                 "enabled": row.enabled,
                 "checked": row.checked,
                 "rect": [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y],
-                "label_rect": [text_x, p.y, u.measure(row.label), 12 * s],
+                "label_rect": [text_x, p.y, u.measure(row.label), 14 * s],
                 "tail_x": tail_x,
                 "visible": visible,
             }
@@ -438,6 +451,7 @@ class Menus:
 
     def dispatch(self, action):
         st = self.study
+        app, session = st.preview, st.preview.session
         prefix, _, value = action.partition(":")
         if prefix == "layout":
             st.pending = value
@@ -446,88 +460,70 @@ class Menus:
         elif prefix == "panel":
             st.activate(value)
         elif prefix == "toggle":
-            if value in ("Inspector", "Timeline"):
-                if value == "Timeline":
-                    st.toggle_timeline()
-                else:
-                    st.open[value] = not st.open[value]
+            if value == "Timeline":
+                st.toggle_timeline()
             elif st.open[value]:
                 st.open[value] = False
             else:
                 st.activate(value)
         elif prefix == "tool":
-            st.preview.tool = value
+            app.tool = value
         elif prefix == "space":
             st.space = value
         elif prefix == "projection":
-            st.preview.camera.set_orthographic(value == "orthographic")
+            app.camera.set_orthographic(value == "orthographic")
         elif prefix == "shading":
             from mojive.render.backend import DebugView
 
             self.shading = value
-            st.preview.backend.set_debug_view(
+            app.backend.set_debug_view(
                 DebugView.WIREFRAME if value == "Wireframe" else DebugView.SHADED
             )
         elif prefix == "speed":
             st.speed = float(value)
         elif prefix == "step":
             if not st.playing:
-                st.time = min(10, max(0, st.time + int(value) / 60))
-                st.sample_pose()
+                session.submit(cmd.Step() if int(value) > 0 else cmd.StepBack())
+        elif prefix == "create":
+            from mojive.types import MeshShape
+
+            app._add_scene_object(MeshShape(value.lower()), value.lower())
         elif prefix == "dialog":
             self.dialog_pending = value
         elif action == "play":
-            st.playing = not st.playing
+            app._toggle_playback()
+        elif action == "record":
+            app._toggle_state_take_recording()
         elif action == "start":
-            st.time = 0
-            st.sample_pose()
+            app._reset_playback()
         elif action == "loop":
             st.loop = not st.loop
         elif action == "frame":
-            st.preview.camera.adopt(st.initial_camera())
+            app._frame_scene(animate=True)
         elif action == "gizmos":
-            st.preview.gizmos = not st.preview.gizmos
+            app.gizmos = not app.gizmos
         elif action == "shadows":
-            st.preview.shadows = not st.preview.shadows
+            app.shadows = not app.shadows
         elif action == "viewport-tab":
             st.show_viewport_tab = not st.show_viewport_tab
         elif action == "timeline":
             st.toggle_timeline()
         elif action == "undo":
             st.undo()
-        elif action == "redo" and st.redo:
-            st.history.append(copy.deepcopy(st.preview.entities))
-            st.preview.entities[:] = st.redo.pop()
-        elif action in ("visibility", "transform:reset") and st.preview.entity:
-            before = copy.deepcopy(st.preview.entities)
-            e = st.preview.entity
-            if action == "visibility":
-                e["hidden"] = not e["hidden"]
-            else:
-                original = next(
-                    v
-                    for v in json.loads((ROOT / "document.json").read_text())["entities"]
-                    if v["id"] == e["id"]
-                )
-                for key in ("position", "rotation", "scale"):
-                    e[key] = original[key]
-            st.change(before)
+        elif action == "redo":
+            session.submit(cmd.Redo())
+        elif action == "visibility" and session.selected_node is not None:
+            node = session.selected_node
+            session.submit(cmd.SetVisible(node.node_id, not node.visible))
         elif prefix == "file":
-            if value in ("save", "export"):
-                destination = st.output_directory / (
-                    "saved-scene.json" if value == "save" else "exported-scene.json"
-                )
-                destination.write_text(json.dumps(st.preview.document, indent=2))
-                st.events.append("Scene saved: " + destination.name)
-            elif value == "load":
-                saved = json.loads((st.output_directory / "saved-scene.json").read_text())
-                if {e["id"] for e in saved["entities"]} != {e["id"] for e in st.preview.entities}:
-                    raise ValueError("Saved reference has incompatible entity identities")
-                before = copy.deepcopy(st.preview.entities)
-                st.preview.entities[:] = saved["entities"]
-                st.preview.document["pose"] = saved["pose"]
-                st.change(before)
-        elif action != "redo":
+            destination = st.output_directory / (
+                EXPORTED_SCENE if value == "export" else SAVED_SCENE
+            )
+            if value == "load":
+                app._request_document_action("open_scene", destination)
+            else:
+                app.save_scene(destination)
+        else:
             raise ValueError(action)
 
     def dialogs(self):
@@ -565,7 +561,7 @@ class Menus:
                 "close-guide", p.x + w - 26 * s, p.y, 26, 26, icon="close", tooltip="Close dialog"
             ) or imgui.is_key_pressed(imgui.Key.escape):
                 imgui.close_current_popup()
-            u.text(p.x, p.y + 32 * s, "MOJIVE / INSTRUMENT", DIM, 11)
+            u.text(p.x, p.y + 32 * s, "MOJIVE / INSTRUMENT", DIM, 13)
             imgui.set_cursor_screen_pos((p.x, p.y + 60 * s))
             imgui.push_style_color(imgui.Col_.child_bg, (0, 0, 0, 0))
             imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * s, 0))
@@ -578,27 +574,32 @@ class Menus:
                     ("Transform tools", "V / W / E / R"),
                     ("World / body frame", "B"),
                     ("Snap", "S"),
-                    ("Frame all", "F"),
+                    ("Frame all / focus", "F / double-click"),
+                    ("Settings", "F9 / ⌘,"),
+                    ("Precise gizmo input", "Double-click a handle"),
                     ("Undo / redo", "⌘Z / ⇧⌘Z"),
-                    ("Preview playback", "Space"),
+                    ("Simulation playback", "Space"),
                     ("Timeline", "T"),
                     ("Dock panels", "Drag a panel tab"),
                 ]:
                     q = imgui.get_cursor_screen_pos()
-                    u.text(q.x, q.y + 6 * s, title, MUTED, 11)
-                    u.text(q.x + w * 0.47, q.y + 6 * s, value, TEXT, 11)
-                    imgui.dummy((w, 24 * s))
+                    column = w * 0.47
+                    if u.measure(title, 13) + 12 * s > column or u.measure(value, 13) > w - column:
+                        imgui.push_font(u.body, 13 * s)
+                        imgui.push_text_wrap_pos(0)
+                        imgui.text_colored(tuple(v / 255 for v in MUTED), u.translate(title))
+                        imgui.text_wrapped(u.translate(value))
+                        imgui.pop_text_wrap_pos()
+                        imgui.pop_font()
+                        imgui.dummy((0, 8 * s))
+                    else:
+                        u.text(q.x, q.y + 6 * s, title, MUTED, 13)
+                        u.text(q.x + column, q.y + 6 * s, value, TEXT, 13)
+                        imgui.dummy((w, 28 * s))
             else:
-                imgui.text_wrapped(
-                    "Instrument 07 is a native UI reference for Mojive. It shares the browser design's icon masters, typography and layout proportions."
-                )
-                imgui.spacing()
-                imgui.text_wrapped(
-                    "Menus retain Dear ImGui's keyboard navigation, hover switching, submenu behavior and docking integration."
-                )
+                imgui.text_wrapped("Instrument is Mojive's native UI design reference.")
                 imgui.spacing()
                 imgui.text_disabled("Dear ImGui " + imgui.get_version())
-                imgui.text_disabled("Local scene preview · no simulation adapter")
             imgui.end_child()
             imgui.pop_style_var()
             imgui.pop_style_color()
@@ -612,7 +613,7 @@ class Menus:
         from .scene_preview import rgba
 
         u, s = self.ui, self.s
-        u.text(x, y, "Base color", MUTED, 11)
+        u.text(x, y, "Base color", MUTED, 13)
         clicked = u.button("material-color", x, y + 22 * s, width / s, 30, filled=True)
         u.rect(
             x + 7 * s,
@@ -622,11 +623,12 @@ class Menus:
             tuple(int(v * 255) for v in rgba(entity["color"])),
             3,
         )
-        u.text(x + 34 * s, y + 32 * s, entity["color"].upper(), TEXT, 11, mono=True)
+        u.text(x + 34 * s, y + 31 * s, entity["color"].upper(), TEXT, 13, mono=True)
         u.icon("down", x + width - 23 * s, y + 31 * s, 12, DIM)
         with self.style(controls=True):
             if (clicked or self.requested_path == ("Color",)) and not imgui.is_popup_open("Color"):
-                self.color_before = copy.deepcopy(self.study.preview.entities)
+                self.color_before = True
+                self.study.preview.session.submit(cmd.BeginEditTransaction("Edit color"))
                 self.color_entity = entity
                 imgui.open_popup("Color")
             if not imgui.is_popup_open("Color"):
@@ -674,7 +676,7 @@ class Menus:
             if updated != entity["color"].lower():
                 entity["color"] = updated
             p = imgui.get_cursor_screen_pos()
-            u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, 11)
+            u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, 13)
             if u.button(
                 "done-color", p.x + content_w - 64 * s, p.y, 64, 28, label="Done", active=True
             ):
@@ -684,6 +686,6 @@ class Menus:
 
     def finish_color_edit(self):
         if self.color_before is not None and not self.color_visible:
-            self.study.change(self.color_before)
+            self.study.preview.session.submit(cmd.EndEditTransaction())
             self.color_before = None
             self.color_entity = None

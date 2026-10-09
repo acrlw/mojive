@@ -5,8 +5,16 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 
 from imgui_bundle import imgui
+
+from mojive.ui.compound_fields import borderless_numeric_input, draw_focus_frame
+from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.panels.value_cards import value_rail
+from mojive.ui.text_layout import fit_text
+from mojive.ui.theme import THEME
 
 from .fonts import resolve_fonts
 
@@ -63,18 +71,26 @@ class UI:
     def __init__(self, window, *, portable_fonts=False):
         self.window = window
         self.s = window.style_scale
+        self.translate = lambda value: value
         io = imgui.get_io()
         io.fonts.clear()
         self.font_sources = resolve_fonts(portable=portable_fonts)
-        self.body, self.bold, self.mono = (
-            io.fonts.add_font_from_file_ttf(
-                source.path, size * self.s, font_config(em_ratio, source.index)
+        fonts = []
+        for (source, em_ratio), size in zip(self.font_sources, (14, 14, 13), strict=True):
+            fonts.append(
+                io.fonts.add_font_from_file_ttf(
+                    source.path, size * self.s, font_config(em_ratio, source.index)
+                )
             )
-            for (source, em_ratio), size in zip(self.font_sources, (12, 12, 11), strict=True)
-        )
+            cjk = window.font_report
+            if cjk.cjk_path:
+                merged = font_config(1.0, cjk.cjk_index)
+                merged.merge_mode = True
+                io.fonts.add_font_from_file_ttf(cjk.cjk_path, size * self.s, merged)
+        self.body, self.bold, self.mono = fonts
         io.font_default = self.body
         st = imgui.get_style()
-        st.font_size_base = 12 * self.s
+        st.font_size_base = 14 * self.s
         st.window_rounding = 8 * self.s
         st.frame_rounding = 4.8 * self.s
         st.tab_rounding = 4.8 * self.s
@@ -131,18 +147,26 @@ class UI:
             st.set_color_(getattr(imgui.Col_, key), imgui.ImVec4(*(v / 255 for v in c)))
         self.hits = {}
         self.number_drafts = {}
+        self.value_context = SimpleNamespace(
+            style_scale=self.s,
+            theme=THEME,
+            tr=lambda value: self.translate(value),
+            input_bindings=DEFAULT_INPUT_BINDINGS,
+        )
 
     @property
     def draw(self):
         return imgui.get_window_draw_list()
 
-    def text(self, x, y, text, c=TEXT, size=12, bold=False, mono=False, draw=None):
+    def text(self, x, y, text, c=TEXT, size=14, bold=False, mono=False, draw=None):
         font = self.mono if mono else self.bold if bold else self.body
-        (draw or self.draw).add_text(font, size * self.s, (x, y), color(c), str(text))
+        (draw or self.draw).add_text(
+            font, size * self.s, (x, y), color(c), self.translate(str(text))
+        )
 
-    def measure(self, text, size=12):
+    def measure(self, text, size=14):
         imgui.push_font(self.body, size * self.s)
-        width = imgui.calc_text_size(text).x
+        width = imgui.calc_text_size(self.translate(text)).x
         imgui.pop_font()
         return width
 
@@ -189,7 +213,7 @@ class UI:
         imgui.push_style_var(imgui.StyleVar_.popup_rounding, 4.8 * self.s)
         imgui.begin_tooltip()
         imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + 260 * self.s)
-        imgui.text_unformatted(text)
+        imgui.text_unformatted(self.translate(text))
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
         imgui.pop_style_var(3)
@@ -212,13 +236,17 @@ class UI:
         icon_color=None,
         solid=False,
         icon_size=16,
+        align="left",
     ):
         s = self.s
         w *= s
         h *= s
         imgui.set_cursor_screen_pos((x, y))
         imgui.begin_disabled(not enabled)
+        imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
         hit = imgui.invisible_button(key, (w, h), imgui.ButtonFlags_.enable_nav)
+        imgui.pop_style_color()
+        item_id = imgui.get_item_id()
         hovered = imgui.is_item_hovered()
         self.hits[key] = (x, y, w, h)
         if active:
@@ -230,39 +258,83 @@ class UI:
         c = text_color or (
             (30, 40, 27, 255) if active and solid else SAGE if active else TEXT if label else MUTED
         )
-        # BeginDisabled already applies the shared ImGui disabled alpha to every painter.
+        shown = ""
+        translated_label = self.translate(label)
+        label_width = 0
+        if label:
+            horizontal_padding = 37 if icon else 12 if align == "center" else 20
+            imgui.push_font(self.body, 14 * s)
+            shown = fit_text(
+                ImguiDraw2D(),
+                translated_label,
+                max(0, w - horizontal_padding * s),
+            )
+            label_width = imgui.calc_text_size(shown).x
+            imgui.pop_font()
+        content_width = label_width + ((icon_size + 5) * s if icon and shown else 0)
+        start = (
+            x + max((8 if icon else 6) * s, (w - content_width) * 0.5)
+            if align == "center"
+            else x + 8 * s
+        )
+        # The native hit region and clipping share the same control rectangle.
+        self.draw.push_clip_rect((x + s, y), (x + w - s, y + h), True)
         if icon:
             self.icon(
                 icon,
-                x + (8 * s if label else (w - icon_size * s) / 2),
+                start if shown else x + (w - icon_size * s) / 2,
                 y + (h - icon_size * s) / 2,
                 icon_size,
                 icon_color or c,
             )
-        if label:
-            pad = 29 * s if icon else 10 * s
-            self.text(x + pad, y + (h - 12 * s) / 2, label, c, 12)
-        if tooltip and imgui.is_item_hovered(
+        if shown:
+            text_x = (
+                start + (icon_size + 5) * s if icon else start + (0 if align == "center" else 2 * s)
+            )
+            self.text(text_x, y + (h - 14 * s) / 2, shown, c, 14)
+        self.draw.pop_clip_rect()
+        draw_focus_frame(
+            imgui.ImVec2(x, y),
+            imgui.ImVec2(x + w, y + h),
+            rounding=4.8 * s,
+            item_id=item_id,
+        )
+        hint = tooltip or (translated_label if shown != translated_label else "")
+        if hint and imgui.is_item_hovered(
             imgui.HoveredFlags_.delay_normal | imgui.HoveredFlags_.allow_when_disabled
         ):
-            self.tooltip(tooltip)
+            self.tooltip(hint)
         imgui.end_disabled()
         return hit
 
     def input(self, key, x, y, w, value, *, axis=None):
         s = self.s
+        height = 28 * s
+        badge = min(22 * s, max(0, w - s)) if axis else 0
+        active = imgui.internal.get_active_id() == imgui.get_id(key)
+        hovered = imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
+            (x, y), (x + w, y + height)
+        )
+        self.rect(x, y, w, height, (49, 54, 60, 255) if active or hovered else INPUT)
         if axis:
-            self.rect(x, y, w, 26 * s, INPUT)
-            c = {"X": (205, 140, 137, 150), "Y": (150, 194, 151, 150), "Z": (145, 172, 214, 150)}[
+            c = {"X": (205, 140, 137, 220), "Y": (150, 194, 151, 220), "Z": (145, 172, 214, 220)}[
                 axis
             ]
-            self.text(x + 7 * s, y + 7 * s, axis, c, 10)
-        imgui.set_cursor_screen_pos((x + (19 * s if axis else 0), y))
-        imgui.set_next_item_width(max(25 * s, w - (19 * s if axis else 0)))
-        imgui.push_font(self.mono, 11 * s)
+            self.draw.push_clip_rect((x, y), (x + badge, y + height), True)
+            self.rect(x + 3 * s, y + 7 * s, 2 * s, 14 * s, c, 1)
+            self.text(x + 8 * s, y + 8 * s, axis, c, 12)
+            self.draw.pop_clip_rect()
+        imgui.set_cursor_screen_pos((x + badge, y))
+        imgui.set_next_item_width(max(s, w - badge))
+        imgui.push_font(self.mono, 13 * s)
         imgui.push_style_var(imgui.StyleVar_.frame_padding, (5 * s, 7.5 * s))
+        for slot in (imgui.Col_.frame_bg, imgui.Col_.frame_bg_hovered, imgui.Col_.frame_bg_active):
+            imgui.push_style_color(slot, (0, 0, 0, 0))
         original, draft = self.number_drafts.get(key, (value, value))
-        changed, draft = imgui.input_float(key, float(draft), 0, 0, "%.3g")
+        with borderless_numeric_input():
+            changed, draft = imgui.input_float(key, float(draft), 0, 0, "%.3g")
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        item_id = imgui.get_item_id()
         active = imgui.is_item_active()
         finished = imgui.is_item_deactivated()
         if active:
@@ -272,21 +344,28 @@ class UI:
             self.number_drafts.pop(key)
             changed = draft != original and not imgui.is_key_pressed(imgui.Key.escape)
         value = draft if changed else value
+        imgui.pop_style_color(3)
         imgui.pop_style_var()
         imgui.pop_font()
-        self.hits[key] = (x, y, w, 26 * s)
+        draw_focus_frame(
+            imgui.ImVec2(x, y),
+            imgui.ImVec2(x + w, hi.y),
+            rounding=4.8 * s,
+            item_id=item_id,
+        )
+        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        self.hits[key + "-frame"] = (x, y, w, hi.y - y)
         return changed, value
 
     def vector(self, key, x, y, w, label, values, unit=""):
         s = self.s
-        self.text(x, y + 8 * s, label, MUTED, 11)
-        if unit:
-            self.text(x + 62 * s, y + 8 * s, unit, DIM, 10)
+        heading = self.translate(label) + (f" ({unit})" if unit else "")
+        self.text(x, y + 7.5 * s, heading, MUTED, 13)
         stacked = w < 272 * s
         start = x if stacked else x + 82 * s
         field = (w - (0 if stacked else 82 * s) - 8 * s) / 3
         if stacked:
-            y += 22 * s
+            y += 24 * s
         changed = False
         out = list(values)
         for n, a in enumerate("XYZ"):
@@ -299,23 +378,90 @@ class UI:
     def section(self, label, x, y, w, open=None):
         self.line(x, y, w)
         hit = False
+        s = self.s
+        item_id = None
         if open is not None:
-            imgui.set_cursor_screen_pos((x, y + 4 * self.s))
+            imgui.set_cursor_screen_pos((x, y + 4 * s))
+            imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
             hit = imgui.invisible_button(
-                "section-" + label, (w, 30 * self.s), imgui.ButtonFlags_.enable_nav
+                "section-" + label, (w, 30 * s), imgui.ButtonFlags_.enable_nav
             )
-            self.hits["section-" + label] = (x, y + 4 * self.s, w, 30 * self.s)
-            self.icon("down" if open else "right", x + w - 14 * self.s, y + 12 * self.s, 12, DIM)
-        self.text(x + 2 * self.s, y + 14 * self.s, label, MUTED, 10, bold=True)
+            imgui.pop_style_color()
+            item_id = imgui.get_item_id()
+            self.hits["section-" + label] = (x, y + 4 * s, w, 30 * s)
+            if imgui.is_item_hovered():
+                self.rect(x, y + 4 * s, w, 30 * s, (255, 255, 255, 7))
+            self.icon("down" if open else "right", x + w - 16 * s, y + 13 * s, 12, DIM)
+        self.draw.push_clip_rect((x, y + 4 * s), (x + max(0, w - 22 * s), y + 34 * s), True)
+        self.text(x + 2 * s, y + 12.5 * s, label, MUTED, 13, bold=True)
+        self.draw.pop_clip_rect()
+        if item_id is not None:
+            draw_focus_frame(
+                imgui.ImVec2(x, y + 4 * s),
+                imgui.ImVec2(x + w, y + 34 * s),
+                rounding=4.8 * s,
+                item_id=item_id,
+            )
         return hit
+
+    def slider(self, key, x, y, w, value, lo, hi, format="%.2f"):
+        """Reuse the production value rail and native numeric entry in one row."""
+        s = self.s
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.set_next_item_width(max(s, w))
+        imgui.push_font(self.mono, 13 * s)
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, (6 * s, 7.5 * s))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * s, 0))
+        if w >= 164 * s and lo < hi:
+            edit = value_rail(
+                self.value_context,
+                "##" + key,
+                value,
+                (lo, hi),
+                initial=None,
+                fmt=format,
+                show_reset=False,
+            )
+            changed, value = edit.changed, edit.value
+        else:
+            changed, value = imgui.drag_float(
+                "##" + key + "-value",
+                value,
+                (hi - lo) / 200 if lo < hi else 0.01,
+                lo,
+                hi,
+                format,
+                imgui.SliderFlags_.always_clamp,
+            )
+        a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.hits[key + "-value"] = (a.x, a.y, b.x - a.x, b.y - a.y)
+        self.hits[key] = (x, y, w, b.y - y)
+        if a.x > x:
+            self.hits[key + "-track"] = (x, y, a.x - x - 8 * s, b.y - y)
+        else:
+            self.hits.pop(key + "-track", None)
+        imgui.pop_style_var(2)
+        imgui.pop_font()
+        return changed, value
 
     def switch(self, key, x, y, on):
         s = self.s
         imgui.set_cursor_screen_pos((x, y))
+        imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
         hit = imgui.invisible_button(key, (30 * s, 22 * s), imgui.ButtonFlags_.enable_nav)
-        self.rect(x, y + 4 * s, 26 * s, 14 * s, (88, 108, 78, 255) if on else (55, 62, 68, 255), 7)
+        imgui.pop_style_color()
+        item_id = imgui.get_item_id()
+        self.rect(
+            x + 2 * s, y + 4 * s, 26 * s, 14 * s, (88, 108, 78, 255) if on else (55, 62, 68, 255), 7
+        )
         self.draw.add_circle_filled(
-            (x + (18 if on else 8) * s, y + 11 * s), 5 * s, color(SAGE if on else MUTED)
+            (x + (20 if on else 10) * s, y + 11 * s), 5 * s, color(SAGE if on else MUTED)
+        )
+        draw_focus_frame(
+            imgui.ImVec2(x, y),
+            imgui.ImVec2(x + 30 * s, y + 22 * s),
+            rounding=7 * s,
+            item_id=item_id,
         )
         self.hits[key] = (x, y, 30 * s, 22 * s)
         return not on if hit else on

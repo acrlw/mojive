@@ -1,9 +1,9 @@
 """CPU checks for the design study's output ownership and review lifecycle."""
 
 import json
-from copy import deepcopy
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from examples.ui_design.native import docking_study, fonts, reference_menus
 
@@ -31,48 +31,163 @@ def test_portable_fonts_can_be_selected_on_macos():
     assert resolved[0][0].label == "Roboto Regular"
 
 
-def test_document_actions_use_the_study_output_directory(tmp_path, monkeypatch):
-    document = {
-        "entities": [{"id": "body", "position": [0, 0, 0]}],
-        "pose": {"hinge": 0},
-    }
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "document.json").write_text(json.dumps(document))
-    monkeypatch.setattr(reference_menus, "ROOT", source)
+@pytest.fixture
+def document_menus(tmp_path):
+    from mojive import Scene
+    from mojive.adapters.static import StaticSceneAdapter
+    from mojive.session import Session
+    from mojive.session.model_edits import ModelEditDraft
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.theme import THEME
 
-    class Preview:
-        def __init__(self, *_args):
-            self.document = deepcopy(document)
-            self.entities = self.document["entities"]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(docking_study, "Preview", Preview)
-    monkeypatch.setattr(docking_study, "UI", lambda _window, **_kwargs: SimpleNamespace())
-    monkeypatch.setattr(docking_study.imgui, "get_style", SimpleNamespace)
-    restored = []
-    monkeypatch.setattr(docking_study.imgui, "load_ini_settings_from_memory", restored.append)
+    scene = Scene()
+    scene.box(name="body", position=(0, 0, 0))
+    session = Session(StaticSceneAdapter(scene))
+    node = next(n for n in session.nodes if n.name == "body")
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = session
+    app.model_edits = ModelEditDraft(session)
+    app.live_model_updates = False
+    app.localizer = SimpleNamespace(text=str)
+    app.window = SimpleNamespace(style_scale=1)
+    app.theme = THEME
+    app._pending_document_action = None
+    app._model_load_queue = []
     output = tmp_path / "chosen-output"
-    study = docking_study.Study(
-        SimpleNamespace(style_scale=1), restore="saved layout", output_directory=output
-    )
+    output.mkdir()
+    study = SimpleNamespace(s=1, ui=None, output_directory=output, preview=app)
+    menus = reference_menus.Menus(study, ())
     try:
-        assert restored == ["saved layout"]
-        study.preview.entities[0]["position"] = [1, 2, 3]
-        study.menus.dispatch("file:save")
-        study.menus.dispatch("file:export")
-        for name in ("saved-scene.json", "exported-scene.json"):
-            assert json.loads((output / name).read_text())["entities"][0]["position"] == [1, 2, 3]
-        study.preview.entities[0]["position"] = [9, 9, 9]
-        study.menus.dispatch("file:load")
-        assert study.preview.entities[0]["position"] == [1, 2, 3]
-        assert study.preview.entities is study.preview.document["entities"]
-        assert list(source.iterdir()) == [source / "document.json"]
-        assert json.loads((source / "document.json").read_text()) == document
+        yield menus, app, node, output
     finally:
-        study.close()
+        session.release()
+
+
+def _choose_unsaved_action(monkeypatch, decision):
+    from mojive.ui.app import menus as viewer_menus
+
+    monkeypatch.setattr(viewer_menus, "_prepare_modal", lambda *args: None)
+    monkeypatch.setattr(
+        viewer_menus,
+        "_equal_modal_buttons",
+        lambda *args, **kwargs: tuple(
+            decision == action for action in ("cancel", "discard", "save")
+        ),
+    )
+    monkeypatch.setattr(viewer_menus.imgui, "begin_popup_modal", lambda *args: (True, None))
+    monkeypatch.setattr(viewer_menus.imgui, "is_key_pressed", lambda *args: False)
+    for name in (
+        "open_popup",
+        "text",
+        "text_wrapped",
+        "spacing",
+        "close_current_popup",
+        "end_popup",
+    ):
+        monkeypatch.setattr(viewer_menus.imgui, name, lambda *args: None)
+
+
+def test_document_actions_use_the_study_output_directory(document_menus, tmp_path, monkeypatch):
+    from mojive import commands as cmd
+    from mojive.scene.queries import node_world_pose
+
+    menus, app, node, output = document_menus
+    session = app.session
+    session.submit(cmd.SetPose(node.node_id, np.array([1, 2, 3]), np.eye(3)))
+    menus.dispatch("file:save")
+    menus.dispatch("file:export")
+    assert all(
+        (output / name).is_file()
+        for name in (reference_menus.SAVED_SCENE, reference_menus.EXPORTED_SCENE)
+    )
+    assert session.last_message == f"Saved {reference_menus.EXPORTED_SCENE}"
+    assert app._model_drop_notice == session.last_message
+    session.submit(cmd.SetPose(node.node_id, np.array([9, 9, 9]), np.eye(3)))
+    menus.dispatch("file:load")
+    assert app._pending_document_action == ("open_scene", output / reference_menus.SAVED_SCENE)
+    assert not app._model_load_queue
+    _choose_unsaved_action(monkeypatch, "discard")
+    app._draw_unsaved_changes()
+    job = app._model_load_queue.pop()
+    assert job.action == "open" and isinstance(job.command, cmd.OpenScene)
+    assert app._load_model(job.command).ok
+    node = next(n for n in session.nodes if n.name == "body")
+    assert node_world_pose(session, node)[0].tolist() == [1, 2, 3]
+    assert list(tmp_path.iterdir()) == [output]
+
+
+@pytest.mark.parametrize("action", ("save", "export"))
+@pytest.mark.parametrize("in_frame", (False, True))
+def test_document_save_refuses_pending_dimensions(document_menus, action, in_frame):
+    from contextlib import nullcontext
+
+    from mojive import commands as cmd
+    from mojive.session.model_edits import model_edit_scope
+
+    menus, app, node, output = document_menus
+    before = app.session._source.geom_size.copy()
+    assert app.model_edits.stage(cmd.SetScale(node.node_id, np.array([2.0, 1.0, 1.0]))).ok
+    scope = model_edit_scope(app.session, app._intercept_model_edit) if in_frame else nullcontext()
+    with scope:
+        menus.dispatch("file:" + action)
+    assert not list(output.iterdir())
+    assert app.session.last_message == "Apply or discard pending model edits first"
+    assert app.model_edits.active and app.session.dirty
+    np.testing.assert_allclose(app.session._source.geom_size, before)
+
+
+@pytest.mark.parametrize("edit", ("pose", "dimensions"))
+def test_open_saved_scene_cancel_keeps_unsaved_work(document_menus, monkeypatch, edit):
+    from mojive import commands as cmd
+    from mojive.scene.queries import node_world_pose
+
+    menus, app, node, output = document_menus
+    menus.dispatch("file:save")
+    if edit == "pose":
+        assert app.session.submit(cmd.SetPose(node.node_id, np.array([9, 9, 9]), np.eye(3))).ok
+    else:
+        assert app.model_edits.stage(cmd.SetScale(node.node_id, np.array([2.0, 1.0, 1.0]))).ok
+    before = app.session.source.geom_size.copy()
+    document_id = app.session.document_id
+    menus.dispatch("file:load")
+    assert app._pending_document_action == ("open_scene", output / reference_menus.SAVED_SCENE)
+    assert not app._model_load_queue
+    _choose_unsaved_action(monkeypatch, "cancel")
+    app._draw_unsaved_changes()
+    assert app._pending_document_action is None and not app._model_load_queue
+    assert app.session.document_id == document_id and app.session.dirty
+    np.testing.assert_allclose(app.session.source.geom_size, before)
+    if edit == "pose":
+        np.testing.assert_allclose(node_world_pose(app.session, node)[0], [9, 9, 9])
+    else:
+        assert app.model_edits.active
+
+
+def test_clean_open_saved_scene_queues_document_loading(document_menus):
+    from mojive import commands as cmd
+
+    menus, app, _node, output = document_menus
+    menus.dispatch("file:save")
+    document_id = app.session.document_id
+    menus.dispatch("file:load")
+    assert app._pending_document_action is None
+    assert app.session.document_id == document_id
+    job = app._model_load_queue.pop()
+    assert job.action == "open" and isinstance(job.command, cmd.OpenScene)
+    assert job.path == (output / reference_menus.SAVED_SCENE).resolve()
+
+
+def test_document_save_reports_writer_failure(document_menus, monkeypatch):
+    menus, app, _node, output = document_menus
+
+    def fail_save(*args):
+        raise OSError("Disk full")
+
+    monkeypatch.setattr(app.session.adapter, "save_scene", fail_save)
+    menus.dispatch("file:save")
+    assert not list(output.iterdir())
+    assert app.session.last_message == "Disk full"
+    assert app._model_load_error == "Disk full" and app._show_model_load_error
 
 
 def _layout_snapshot():
@@ -96,6 +211,14 @@ def test_fresh_context_restore_keeps_custom_output_and_review_density(
     monkeypatch.setattr(docking_study.imgui, "get_io", lambda: io)
     monkeypatch.setattr(docking_study.imgui, "get_version", lambda: "review-test")
     monkeypatch.setattr(docking_study.imgui, "save_ini_settings_to_memory", lambda: "saved layout")
+    monkeypatch.setattr(
+        docking_study.imgui,
+        "get_main_viewport",
+        lambda: SimpleNamespace(
+            work_pos=SimpleNamespace(x=0, y=0),
+            work_size=SimpleNamespace(x=io.display_size[0], y=io.display_size[1]),
+        ),
+    )
 
     class Window:
         def __init__(self, config, backend):

@@ -264,60 +264,7 @@ class _Viewport:
         try:
             overlay = ImguiDraw2D()
             if not session_busy:
-                st = self.session.perturb
-                if (
-                    st.active
-                    and self.viewport_layers.perturbation
-                    and not self.backend.caps.debug_draw
-                ):
-                    node = self.session.node(st.node_id)
-                    center = self._node_pose(node)[0] if node is not None else st.target_pos
-                    if st.mode == "translate":
-                        pose = (
-                            self._node_pose(node)
-                            if node is not None
-                            else (st.target_pos, st.target_mat)
-                        )
-                        draw_translation_link(
-                            self._camera_view(),
-                            st,
-                            self._viewport_rect,
-                            pose,
-                            overlay,
-                            self.window.style_scale,
-                        )
-                    else:
-                        draw_fallback(
-                            self._camera_view(),
-                            st,
-                            self._viewport_rect,
-                            (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
-                            center,
-                            overlay,
-                            self.window.style_scale,
-                        )
-                if st.active and self.viewport_layers.perturbation and st.mode == "rotate":
-                    node = self.session.node(st.node_id)
-                    center = self._node_pose(node)[0] if node is not None else st.target_pos
-                    draw_perturb_axes(
-                        overlay,
-                        self._camera_view(),
-                        self._viewport_rect,
-                        center,
-                        st.target_mat,
-                        self.window.style_scale,
-                    )
-                if self.viewport_layers.gizmos:
-                    self.gizmo.draw_overlay(
-                        self._camera_view(),
-                        self._viewport_rect,
-                        overlay,
-                        style_scale=self.window.style_scale,
-                    )
-                if self.viewport_layers.viewport_ui:
-                    self.view_cube.draw(overlay, self.window.style_scale)
-                self._draw_model_drop_overlay(overlay)
-                self._draw_viewport_status(overlay)
+                self._draw_scene_overlays(overlay)
         finally:
             imgui.pop_clip_rect()
         if not session_busy and self.viewport_layers.viewport_ui:
@@ -331,6 +278,56 @@ class _Viewport:
         if not session_busy and self.viewport_layers.gizmos:
             self._draw_joint_limit_controls()
             self._draw_joint_gizmo_picker()
+
+    def _draw_scene_overlays(self, overlay: ImguiDraw2D) -> None:
+        """Draw scene interactions independently of the hosting viewport chrome."""
+
+        st = self.session.perturb
+        if st.active and self.viewport_layers.perturbation and not self.backend.caps.debug_draw:
+            node = self.session.node(st.node_id)
+            center = self._node_pose(node)[0] if node is not None else st.target_pos
+            if st.mode == "translate":
+                pose = self._node_pose(node) if node is not None else (st.target_pos, st.target_mat)
+                draw_translation_link(
+                    self._camera_view(),
+                    st,
+                    self._viewport_rect,
+                    pose,
+                    overlay,
+                    self.window.style_scale,
+                )
+            else:
+                draw_fallback(
+                    self._camera_view(),
+                    st,
+                    self._viewport_rect,
+                    (imgui.get_io().mouse_pos.x, imgui.get_io().mouse_pos.y),
+                    center,
+                    overlay,
+                    self.window.style_scale,
+                )
+        if st.active and self.viewport_layers.perturbation and st.mode == "rotate":
+            node = self.session.node(st.node_id)
+            center = self._node_pose(node)[0] if node is not None else st.target_pos
+            draw_perturb_axes(
+                overlay,
+                self._camera_view(),
+                self._viewport_rect,
+                center,
+                st.target_mat,
+                self.window.style_scale,
+            )
+        if self.viewport_layers.gizmos:
+            self.gizmo.draw_overlay(
+                self._camera_view(),
+                self._viewport_rect,
+                overlay,
+                style_scale=self.window.style_scale,
+            )
+        if self.viewport_layers.viewport_ui:
+            self.view_cube.draw(overlay, self.window.style_scale)
+        self._draw_model_drop_overlay(overlay)
+        self._draw_viewport_status(overlay)
 
     def _viewport_overlay_rect(
         self,

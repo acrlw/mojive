@@ -1235,13 +1235,21 @@ canvas-2d-gallery:
 canvas-2d-test:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_canvas2d.py
 
-.PHONY: ui-design-native ui-design-native-check ui-design-icons
+.PHONY: ui-design-native ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime
 ## Open the tracked docking study with ARGS=--interactive; default captures validate docking.
 ui-design-native:
 	$(PY) -m examples.ui_design.native.docking_study --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
 
 ui-design-native-check:
-	$(PYTEST) -q tests/test_ui_design.py tests/test_ui_design_icons.py
+	$(PYTEST) -q -m 'not gpu' tests/test_ui_design.py tests/test_ui_design_icons.py tests/test_ui_design_controls.py tests/test_ui_design_runtime.py
+
+## Verify native scene interactions, flat gizmos and settings; capture representative states.
+ui-design-gizmos:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_design_gizmos.py
+
+## Click timeline, workspace and file actions at 2x scale in the default window.
+ui-design-runtime:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_design_runtime.py
 
 ## Recompile tracked icon contours after editing the SVG masters.
 ui-design-icons:

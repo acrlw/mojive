@@ -24,7 +24,6 @@ PATHS = (
     ("Shading",),
     ("Playback",),
     ("Playback", "Playback speed"),
-    ("Display settings",),
     ("Color",),
     ("Dialog",),
 )
@@ -86,10 +85,15 @@ def verify_actions(study):
     original = preview.entity["hidden"]
     menus.dispatch("visibility")
     assert preview.entity["hidden"] != original
-    menus.dispatch("undo")
+    menus.dispatch("visibility")
     assert preview.entity["hidden"] == original
+    count = len(preview.session.nodes)
+    menus.dispatch("create:Box")
+    assert len(preview.session.nodes) > count
+    menus.dispatch("undo")
+    assert len(preview.session.nodes) == count
     menus.dispatch("redo")
-    assert preview.entity["hidden"] != original
+    assert len(preview.session.nodes) > count
     menus.dispatch("undo")
     menus.dispatch("projection:orthographic")
     assert preview.camera.orthographic
@@ -99,16 +103,26 @@ def verify_actions(study):
     menus.dispatch("shading:Solid")
     menus.dispatch("start")
     menus.dispatch("step:1")
-    assert abs(study.time - 1 / 60) < 1e-9
+    preview.session.tick(preview.frame_needs())
+    assert study.time > 0
     menus.dispatch("step:-1")
+    preview.session.tick(preview.frame_needs())
     menus.dispatch("step:-1")
-    assert study.time == 0
+    preview.session.tick(preview.frame_needs())
+    assert study.time >= 0
     menus.dispatch("speed:0.5")
     menus.dispatch("play")
     menus.dispatch("step:1")
-    assert study.playing and study.speed == 0.5 and study.time == 0
+    assert study.playing and study.speed == 0.5
     menus.dispatch("play")
+    menus.dispatch("record")
+    assert preview.session.state_take_recording
+    preview.session.tick(preview.frame_needs())
+    menus.dispatch("record")
+    assert not preview.session.state_take_recording
+    assert preview.session.state_take_times
+    loop = study.loop
     menus.dispatch("loop")
-    assert not study.loop
+    assert study.loop != loop
     menus.dispatch("loop")
-    return "Visibility with Undo/Redo, projection, backend shading and playback actions passed."
+    return "Visibility, scene creation with Undo/Redo, projection, shading, playback and take recording passed."

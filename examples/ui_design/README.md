@@ -1,8 +1,9 @@
 # UI design study
 
 This standalone reference explores native docking, typography, menus and scene
-authoring with Mojive's OpenGL and bgfx renderers. It has its own document and
-layout; it does not replace the production editor or its Session.
+authoring with Mojive's OpenGL and bgfx renderers. It keeps its own panel layout,
+controls and visual style while using the production ViewerApp, Session and input
+pipeline for scene operations.
 
 Run from the repository root after `make setup`:
 
@@ -29,9 +30,17 @@ make ui-design-native ARGS=--menus
 # Render icons at their actual target sizes and typography specimens.
 make ui-design-native ARGS=--icons
 make ui-design-native ARGS=--typography
+# Capture editor panels and every settings page in English, Chinese and a narrow window.
+make ui-design-native ARGS=--appearance
 # Exercise the portable font configuration on macOS too.
 make ui-design-native ARGS='--portable-fonts --capture-only'
 make ui-design-native-check
+# Verify scene interactions, 2D handles and settings; capture representative states.
+make ui-design-gizmos
+make ui-design-gizmos BACKEND=bgfx
+# Verify timeline, workspace and document actions at 2x scale in a 1440x900 window.
+make ui-design-runtime
+make ui-design-runtime BACKEND=bgfx
 ```
 
 Screenshots, reports, saved scenes and layout files go to
@@ -39,6 +48,11 @@ Screenshots, reports, saved scenes and layout files go to
 `output/ui_design/native/`. `ARGS='--output output/my_review'` selects another
 output directory. Sources and runtime data remain under `examples/ui_design/`;
 no file in `output/` is required at startup.
+
+The appearance review uses 28-point controls, aligned transform fields and value
+rails with separate numeric entries. Settings uses a category sidebar at standard
+widths and switches to top navigation in narrow windows. The review captures both
+languages and checks category and editable-field bounds under `appearance/`.
 
 The macOS reference uses installed SF Regular, SF Semibold and SF Mono Regular
 named instances. Other platforms use Roboto from ImGui Bundle and Mojive's shared
@@ -54,10 +68,28 @@ master, run `make ui-design-icons` and the geometry checks. The small malformed
 rotation fixture in `tests/fixtures/ui_design/` preserves the previous compiler
 failure without retaining historical prototype directories.
 
-The scene supports selection, visibility, camera navigation, transform gestures,
-Inspector editing, material changes, local JSON save/load and undo/redo. Joint
-motion and playback are previews. Physics execution, actuator write-back and
-simulation recording require a physics adapter and are unavailable here.
+The native reference uses the `joint_types` MuJoCo workspace with an additional
+authored camera. Its flat 2D handles include translation arrows, rotation rings,
+dimension handles, joint ranges, endpoint controls and numeric drag feedback.
+Selection, double-click focus, navigation, camera/light helpers, Inspector fields,
+materials and undo/redo use the same scene state. Select a geometry through the
+Scene list's Geom filter to edit dimensions. Joint-driven bodies use the Joint tab
+or viewport handles for motion. Pending dimension edits have Apply and Discard
+buttons in the viewport.
+
+The native transport operates real simulation playback, stepping and take
+recording; the Control panel writes actuator values. The reference Timeline keeps
+its pose-preset design and applies those values to the workspace's joints. Its
+preset keys come from `native/document.json`; entity fields are projected from
+Session. File menu save/load uses the workspace scene format.
+
+Open Settings with the header gear, Window menu, F9 or Ctrl+Comma. Its General page
+switches between English and Simplified Chinese. Camera, Interaction, Rendering,
+Recording and MuJoCo Visuals pages use shared settings actions within the new
+design's navigation. The reference shortcuts are V for selection, W/E/R for
+translation/rotation/dimensions, B for body/world frame, S for snapping and T for
+Timeline. Fly navigation uses I/K/J/L/U/O. Interaction captures go to
+`output/ui_design/native/<backend>/interactions/`.
 
 ## Browser reference
 
