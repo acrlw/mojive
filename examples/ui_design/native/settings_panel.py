@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from imgui_bundle import imgui
 
+from mojive.ui.panels import padded_selectable, themed_checkbox
 from mojive.ui.panels.settings import (
     SettingsPanel,
     render_flag_label,
@@ -127,31 +128,93 @@ class ReferenceSettings(SettingsPanel):
         super()._visual_groups(ctx)
         self._control_padding()
 
-    def _interaction(self, ctx):
-        self._interaction_policy(ctx)
-        self._selection_presentation(ctx)
-        self._gizmo_settings(ctx)
-        self._precise_input_settings(ctx)
-        self._snap_settings(ctx)
-        self._view_settings(ctx)
-        self._perturb_settings(ctx)
-        self._helper_settings(ctx)
-        self._shortcut_settings(ctx)
-
     def _general(self, ctx):
-        super()._general(replace(ctx, font_report=None))
+        super()._general(replace(ctx, font_report=None, panels=None))
+        if ctx.panels is None:
+            return
+        from .docking_study import BOTTOM_PANELS, LEFT_PANELS
+
+        study = self.study
+        self._group_heading(ctx.tr("Panels"))
+        if not self._begin_properties("reference_settings_panels"):
+            return
+        self._property(ctx.tr("Sidebar"))
+        sidebar = study.left_active if study.open[study.left_active] else None
+        names = tuple(name for name in LEFT_PANELS if ctx.panels.get(name).enabled)
+        changed, chosen = self._panel_choice(ctx, "settings-sidebar", names, sidebar)
+        if changed:
+            if chosen is None:
+                for name in LEFT_PANELS:
+                    ctx.panels.set_open(name, False)
+            else:
+                study.activate(chosen)
+        self._property(ctx.tr("Bottom panel"))
+        bottom = study.bottom_active if study.bottom_open else None
+        names = tuple(name for name in BOTTOM_PANELS if ctx.panels.get(name).enabled)
+        changed, chosen = self._panel_choice(ctx, "settings-bottom", names, bottom)
+        if changed:
+            if chosen is None:
+                study.collapse_bottom()
+            else:
+                study.activate(chosen)
+        self._property(ctx.tr("Inspector"))
+        self._control_padding(checkbox=True)
+        changed, opened = themed_checkbox(
+            "##settings_inspector", study.open["Inspector"], ctx.theme
+        )
+        self._record_control("settings-inspector")
+        if changed:
+            ctx.panels.set_open("Inspector", opened)
+        imgui.end_table()
+
+    def _record_control(self, key):
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.study.ui.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+
+    def _panel_choice(self, ctx, key, names, current):
+        opened = imgui.begin_combo("##" + key, ctx.tr(current or "none"))
+        self._record_control(key)
+        chosen = current
+        changed = False
+        if opened:
+            for name in (None, *names):
+                clicked, _ = padded_selectable(ctx.tr(name or "none"), name == current)
+                self._record_control(key + "-option-" + (name or "none"))
+                if clicked:
+                    chosen, changed = name, True
+            imgui.end_combo()
+        return changed, chosen
+
+    def _header(self, x, y, width):
+        u, s = self.study.ui, self.study.s
+        u.role_icon("settings", x, y + 2 * s, 20 * s, 28 * s, role="title", c=SAGE)
+        u.text(x + 28 * s, y + 8.5 * s, "Settings", TEXT, 15, bold=True)
+        u.hits["settings-title"] = (
+            x + 28 * s,
+            y + 8.5 * s,
+            u.measure("Settings", 15),
+            15 * s,
+        )
+        closed = u.button(
+            "settings-close", x + width - 28 * s, y + 2 * s, 28, 28, icon="close", tooltip="Close"
+        )
+        u.line(x, y + 32 * s, width)
+        if closed:
+            self.study.open["Settings"] = self.open = False
+        return closed
 
     def draw(self, ctx):
         u, s = self.study.ui, self.study.s
         p = imgui.get_cursor_screen_pos()
         available = imgui.get_content_region_avail()
         width = available.x
-        u.icon("settings", p.x, p.y + 1 * s, 20, SAGE)
-        u.text(p.x + 30 * s, p.y, "Settings", TEXT, 18, bold=True)
-        y = p.y + 48 * s
+        if self._header(p.x, p.y, width):
+            return
+        y = p.y + 44 * s
         narrow = width < 560 * s
         if narrow:
-            columns = 3 if width >= 360 * s else 2
+            minimum = max(u.measure(ctx.tr(category)) for category in CATEGORIES) + 16 * s
+            columns = max(1, min(3, int(width / minimum)))
             cell_width = width / columns
             for n, category in enumerate(CATEGORIES):
                 if u.button(
@@ -168,33 +231,38 @@ class ReferenceSettings(SettingsPanel):
             y += (len(CATEGORIES) // columns * 34 + 18) * s
             x, page_width = p.x, width
         else:
+            button_width = max(
+                128 * s, max(u.measure(ctx.tr(category)) for category in CATEGORIES) + 39 * s
+            )
+            nav_width = button_width + 16 * s
             imgui.set_cursor_screen_pos((p.x, y))
             imgui.push_style_color(imgui.Col_.child_bg, (26 / 255, 29 / 255, 32 / 255, 1))
             imgui.push_style_var(imgui.StyleVar_.child_rounding, 6 * s)
-            imgui.begin_child("Reference settings navigation", (144 * s, 0))
+            imgui.begin_child("Reference settings navigation", (nav_width, 0))
             nav = imgui.get_cursor_screen_pos()
             for n, (category, icon) in enumerate(zip(CATEGORIES, CATEGORY_ICONS, strict=True)):
                 if u.button(
                     "settings-" + category,
                     nav.x + 8 * s,
                     nav.y + (8 + n * 38) * s,
-                    128,
+                    button_width / s,
                     32,
                     icon=icon,
                     label=category,
+                    align="left",
                     active=self._category == category,
                 ):
                     self._category = category
             imgui.end_child()
             imgui.pop_style_var()
             imgui.pop_style_color()
-            x, page_width = p.x + 164 * s, width - 164 * s
+            x, page_width = p.x + nav_width + 16 * s, width - nav_width - 16 * s
         imgui.set_cursor_screen_pos((x, y))
         imgui.begin_child("Reference settings content", (page_width, max(s, available.y - y + p.y)))
         page = imgui.get_cursor_screen_pos()
-        u.text(page.x, page.y, self._category, TEXT, 18, bold=True)
+        u.text(page.x, page.y, self._category, TEXT, 15, bold=True)
         u.line(page.x, page.y + 32 * s, page_width)
-        imgui.set_cursor_screen_pos((page.x, page.y + 44 * s))
+        imgui.dummy((0, 44 * s - imgui.get_style().item_spacing.y))
         self._checkbox_labels = frozenset(ctx.tr(label) for label in _CHECKBOX_PROPERTIES)
         imgui.push_style_var(imgui.StyleVar_.frame_padding, (8 * s, 7 * s))
         imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * s, 4 * s))

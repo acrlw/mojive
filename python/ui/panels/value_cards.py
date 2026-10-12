@@ -122,6 +122,9 @@ def value_rail(
     angular_degrees=False,
     toggle_unit=None,
     logarithmic=False,
+    show_unit=True,
+    hit_bounds=None,
+    unit_font=None,
 ):
     """Thin bounded rail plus numeric entry; unbounded values use only numeric entry.
 
@@ -132,7 +135,11 @@ def value_rail(
     value *= factor
     initial = None if initial is None else initial * factor
     bounds = None if bounds is None else (bounds[0] * factor, bounds[1] * factor)
-    shown_unit = "deg" if unit == "rad" and angular_degrees else unit
+    shown_unit = (
+        (ctx.rail_style.degree_unit if unit == "rad" and angular_degrees else unit)
+        if show_unit
+        else ""
+    )
     width = max(1.0, imgui.calc_item_width())
     scale = ctx.style_scale
     style = imgui.get_style()
@@ -143,9 +150,14 @@ def value_rail(
     gap = style.item_spacing.x
     reset_width = imgui.get_frame_height() if show_reset else 0.0
     reset_space = reset_width + gap if show_reset else 0.0
-    stacked = _stacked(width, scale)
-    unit_width = 34.0 * scale if unit else 0.0
-    number_width = min(68.0 * scale + unit_width, max(1.0, width - reset_space))
+    unit_width = ctx.rail_style.unit_width * scale if shown_unit else 0.0
+    number_width = min(
+        ctx.rail_style.entry_width * scale + unit_width, max(1.0, width - reset_space)
+    )
+    stacked = _stacked(width, scale) or (
+        ctx.rail_style.minimum_track_width > 0
+        and width < number_width + reset_space + gap + ctx.rail_style.minimum_track_width * scale
+    )
     result = None
     imgui.push_id(label)
     if bounds is not None:
@@ -159,7 +171,7 @@ def value_rail(
             imgui.Col_.slider_grab_active,
         ):
             imgui.push_style_color(slot, imgui.ImVec4(0, 0, 0, 0))
-        imgui.push_style_var(imgui.StyleVar_.grab_min_size, 10 * scale)
+        imgui.push_style_var(imgui.StyleVar_.grab_min_size, ctx.rail_style.thumb_size * scale)
         imgui.set_next_item_width(rail_width)
         flags = imgui.SliderFlags_.no_input
         if logarithmic:
@@ -169,6 +181,8 @@ def value_rail(
         changed, current = imgui.slider_float(label, value, lo, hi, "", flags)
         disabled = bool(imgui.get_item_flags() & imgui.ItemFlags_.disabled)
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        if hit_bounds is not None:
+            hit_bounds[label + "-track"] = (a.x, a.y, b.x - a.x, b.y - a.y)
         imgui.pop_style_var()
         imgui.pop_style_color(5)
         result = value_edit(
@@ -177,7 +191,7 @@ def value_rail(
         value = result.value
         draw = ImguiDraw2D()
         # Match SliderBehavior's two-point padding and half-grab endpoints.
-        radius = min(5 * scale, max(0, (b.x - a.x - 4) * 0.5))
+        radius = min(ctx.rail_style.thumb_size * scale / 2, max(0, (b.x - a.x - 4) * 0.5))
         left, right, cy = a.x + 2 + radius, b.x - 2 - radius, (a.y + b.y) * 0.5
         fraction = (
             math.log(max(lo, value) / lo) / math.log(hi / lo)
@@ -199,6 +213,7 @@ def value_rail(
             pressed=pressed,
             alpha=style.alpha,
             disabled=disabled,
+            track_size=ctx.rail_style.track_size,
         )
         if not stacked:
             imgui.same_line()
@@ -212,7 +227,9 @@ def value_rail(
         fmt,
         entry_width,
         shown_unit,
-        toggle_unit if unit == "rad" else None,
+        toggle_unit if unit == "rad" and show_unit else None,
+        hit_bounds,
+        unit_font,
     )
     activated = numeric.activated or (result is not None and result.activated)
     if result is None or numeric.changed:
@@ -237,10 +254,22 @@ def value_rail(
     return result
 
 
-def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_unit):
+def _value_entry(
+    ctx,
+    label,
+    value,
+    bounds,
+    initial,
+    fmt,
+    width,
+    unit,
+    toggle_unit,
+    hit_bounds=None,
+    unit_font=None,
+):
     """Join a native numeric editor to a trailing unit badge without a seam."""
     style = imgui.get_style()
-    unit_width = min(34.0 * ctx.style_scale, width * 0.45) if unit else 0
+    unit_width = min(ctx.rail_style.unit_width * ctx.style_scale, width * 0.45) if unit else 0
     draw_list = imgui.get_window_draw_list()
     splitter = imgui.ImDrawListSplitter()
     if unit:
@@ -262,6 +291,13 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
         )
     field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
     field_id = imgui.get_item_id()
+    if hit_bounds is not None:
+        hit_bounds[label + "-value"] = (
+            field_lo.x,
+            field_lo.y,
+            field_hi.x - field_lo.x,
+            field_hi.y - field_lo.y,
+        )
     hovered, active = imgui.is_item_hovered(), imgui.is_item_active()
     edit = value_edit(
         label, value, changed, current, initial=initial, fmt=fmt, bindings=ctx.input_bindings
@@ -274,9 +310,16 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
         imgui.push_style_var(imgui.StyleVar_.button_text_align, (0.5, 0.5))
         imgui.push_style_var(imgui.StyleVar_.frame_padding, (0, style.frame_padding.y))
         imgui.push_style_color(
-            imgui.Col_.text, ctx.theme.bg_popup if toggle_unit else ctx.theme.text
+            imgui.Col_.text,
+            (ctx.theme.bg_popup if ctx.rail_style.unit_accent else ctx.theme.primary)
+            if toggle_unit
+            else (ctx.theme.text if ctx.rail_style.unit_accent else ctx.theme.text_disabled),
         )
         imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
+        if unit_font is not None:
+            imgui.push_font(unit_font, imgui.get_font_size())
+            # Static unit captions use the label tint without extra disabled dimming.
+            imgui.push_style_var(imgui.StyleVar_.disabled_alpha, 1)
         imgui.begin_disabled(toggle_unit is None)
         if (
             imgui.button(f"{unit}##{label}-unit", (unit_width, imgui.get_frame_height()))
@@ -285,7 +328,17 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
             toggle_unit()
         imgui.end_disabled()
         badge_lo, badge_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        if hit_bounds is not None:
+            hit_bounds[label + "-unit"] = (
+                badge_lo.x,
+                badge_lo.y,
+                badge_hi.x - badge_lo.x,
+                badge_hi.y - badge_lo.y,
+            )
         badge_hover, badge_active = imgui.is_item_hovered(), imgui.is_item_active()
+        if unit_font is not None:
+            imgui.pop_style_var()
+            imgui.pop_font()
         imgui.pop_style_color(5)
         imgui.pop_style_var(2)
         if toggle_unit:
@@ -306,6 +359,14 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
                 if badge_hover
                 else ctx.theme.primary
             )
+            if toggle_unit and ctx.rail_style.unit_accent
+            else (
+                ctx.theme.bg_frame_active
+                if badge_active
+                else ctx.theme.bg_frame_hovered
+                if badge_hover
+                else ctx.theme.bg_frame
+            )
             if toggle_unit
             else ctx.theme.bg_child,
             field_color=ctx.theme.bg_frame_active
@@ -323,7 +384,7 @@ def _value_entry(ctx, label, value, bounds, initial, fmt, width, unit, toggle_un
             badge_hi,
             rounding=style.frame_rounding,
             corners=imgui.ImDrawFlags_.round_corners_right,
-            color=ctx.theme.bg_popup if toggle_unit else None,
+            color=ctx.theme.bg_popup if toggle_unit and ctx.rail_style.unit_accent else None,
         )
         draw_focus_frame(
             field_lo,
@@ -351,6 +412,7 @@ def draw_value_rail(
     pressed=False,
     alpha=1.0,
     disabled=False,
+    track_size=3,
 ):
     """Paint a subdued rail and separate round handle, with opaque disabled colors."""
 
@@ -370,7 +432,7 @@ def draw_value_rail(
     track = (
         theme.bg_frame_active if pressed else theme.bg_frame_hovered if hovered else theme.bg_frame
     )
-    draw.line(left, right, color(track), 3 * scale, cap="round")
+    draw.line(left, right, color(track), track_size * scale, cap="round")
     if position > left[0]:
-        draw.line(left, (position, left[1]), color(fill), 3 * scale, cap="round")
+        draw.line(left, (position, left[1]), color(fill), track_size * scale, cap="round")
     draw.circle_filled((position, left[1]), radius, color(knob), segments=24)

@@ -14,6 +14,7 @@ from . import native_drop
 from . import theme as theme_mod
 from . import window as _window_module
 from .window import GlfwInputAdapter, ResizeLatch, Window, WindowConfig
+from .window_identity import window_identity
 
 glfw: Any = None
 imgui: Any = None
@@ -75,9 +76,10 @@ class NativeWindow(Window):
         glfw.window_hint(glfw.FOCUS_ON_SHOW, glfw.FALSE)
 
         try:
-            handle = glfw.create_window(
-                self.config.width, self.config.height, self.config.title, None, None
-            )
+            with window_identity(glfw):
+                handle = glfw.create_window(
+                    self.config.width, self.config.height, self.config.title, None, None
+                )
         finally:
             # Window hints are process-global: leave CLIENT_API at its default
             # so a later GL window (opengl backend) still gets a context.

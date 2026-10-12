@@ -293,9 +293,12 @@ class Window:
             glfw.CONTEXT_CREATION_API,
             glfw.EGL_CONTEXT_API if self._context_api == "egl" else glfw.NATIVE_CONTEXT_API,
         )
-        handle = glfw.create_window(
-            self.config.width, self.config.height, self.config.title, None, None
-        )
+        from .window_identity import window_identity
+
+        with window_identity(glfw):
+            handle = glfw.create_window(
+                self.config.width, self.config.height, self.config.title, None, None
+            )
         if not handle:
             _live_windows = max(0, _live_windows - 1)
             glfw.terminate()

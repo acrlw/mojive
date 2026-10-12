@@ -57,9 +57,11 @@ class OutputPanel(Panel):
     closable = False
     dock_with = "Stats"
 
-    def __init__(self, *, search_icon_drawer=None) -> None:
+    def __init__(self, *, search_icon_drawer=None, multiline=False, auto_scroll=True) -> None:
         super().__init__()
         self.search_icon_drawer = search_icon_drawer
+        self.multiline = bool(multiline)
+        self.auto_scroll = bool(auto_scroll)
         self.collapsed = False
         self._last_sequence = 0
         self._filter_text = ""
@@ -70,6 +72,8 @@ class OutputPanel(Panel):
         self._selection_anchor = 0
         self._count_key = None
         self._level_counts = {"info": 0, "warning": 0, "error": 0}
+        self._row_layout_key = None
+        self._wrapped_rows = ()
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -163,6 +167,19 @@ class OutputPanel(Panel):
             self.draw_collapsed(ctx)
             return
         all_entries, newest_sequence = self._counts(ctx)
+        all_entries, newest_sequence = self._draw_toolbar(ctx, all_entries, newest_sequence)
+        entries = self._filter_entries(all_entries, newest_sequence)
+        filtering = bool(self._filter_text.strip()) or len(self._levels) < 3
+        self._draw_entries(ctx, entries, filtering)
+
+    def _clear_output(self, output) -> None:
+        output.clear()
+        self._selected_sequences.clear()
+        self._selection_anchor = 0
+        self._last_sequence = 0
+
+    def _draw_toolbar(self, ctx, all_entries, newest_sequence):
+        output = ctx.output
         available = imgui.get_content_region_avail().x
         spacing = imgui.get_style().item_spacing.x
         clear_label = ctx.tr("Clear")
@@ -197,11 +214,9 @@ class OutputPanel(Panel):
         if inline:
             imgui.same_line()
         if imgui.button(clear_label):
-            output.clear()
+            self._clear_output(output)
             all_entries = ()
             newest_sequence = 0
-            self._selected_sequences.clear()
-            self._selection_anchor = 0
         if clicked is not None:
             self._levels.symmetric_difference_update({clicked})
             self._last_sequence = 0
@@ -216,6 +231,11 @@ class OutputPanel(Panel):
             ImguiDraw2D(), ((a.x + b.x) / 2, (a.y + b.y) / 2), ctx.theme.text, ctx.style_scale
         )
         imgui.set_item_tooltip(ctx.tr("Collapse Output"))
+        return all_entries, newest_sequence
+
+    def _filter_entries(self, all_entries, newest_sequence=None):
+        if newest_sequence is None:
+            newest_sequence = all_entries[-1].sequence if all_entries else 0
         cache_key = (
             len(all_entries),
             newest_sequence,
@@ -228,113 +248,69 @@ class OutputPanel(Panel):
             )
             self._filter_cache_key = cache_key
             self._selected_sequences.intersection_update(entry.sequence for entry in all_entries)
-        entries = self._filtered_entries
-        filtering = bool(self._filter_text.strip()) or len(self._levels) < 3
+        return self._filtered_entries
 
+    def _draw_entries(self, ctx, entries, filtering):
+        output = ctx.output
         imgui.separator()
         imgui.begin_child("output_messages", imgui.ImVec2(0.0, 0.0), 0)
         row_height = imgui.get_font_size() + 2.0 * ROW_PADDING_Y * ctx.style_scale
         text_offset = text_line_y(ImguiDraw2D(), row_height * 0.5)
         padding_x = ROW_PADDING_X * ctx.style_scale
-        clipper = imgui.ListClipper()
-        clipper.begin(len(entries))
-        while clipper.step():
-            for index in range(clipper.display_start, clipper.display_end):
-                entry = entries[index]
-                row = f"{entry.timestamp}  {entry.text.replace(chr(10), '  ↵  ')}"
-                start = imgui.get_cursor_screen_pos()
-                imgui.invisible_button(
-                    f"##output-row-{entry.sequence}",
-                    imgui.ImVec2(imgui.get_content_region_avail().x, row_height),
-                )
-                hovered = imgui.is_item_hovered()
-                row_lo, row_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-                select = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_SELECT)
-                extend = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_RANGE)
-                add = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_ADD)
-                path = message_path(entry.text, entry.copy_text) if hovered else None
-                if path is not None:
-                    imgui.set_item_tooltip(ctx.tr("Ctrl+click to reveal file") + "\n" + str(path))
-                if add and path is not None:
-                    reveal_path(path)
-                elif select or extend or add:
-                    if extend and self._selection_anchor:
-                        by_sequence = {item.sequence: offset for offset, item in enumerate(entries)}
-                        anchor = by_sequence.get(self._selection_anchor, index)
-                        lo, hi = sorted((anchor, index))
-                        self._selected_sequences.update(
-                            item.sequence for item in entries[lo : hi + 1]
-                        )
-                    elif add:
-                        if entry.sequence in self._selected_sequences:
-                            self._selected_sequences.remove(entry.sequence)
-                        else:
-                            self._selected_sequences.add(entry.sequence)
-                        self._selection_anchor = entry.sequence
-                    else:
-                        self._selected_sequences = {entry.sequence}
-                        self._selection_anchor = entry.sequence
-                if hovered and pointer_pressed(ctx, PointerAction.OUTPUT_CONTEXT):
-                    imgui.open_popup(f"##output-context-{entry.sequence}")
-                if imgui.begin_popup(f"##output-context-{entry.sequence}"):
-                    if entry.sequence not in self._selected_sequences:
-                        self._selected_sequences = {entry.sequence}
-                        self._selection_anchor = entry.sequence
-                    selected = tuple(
-                        item for item in entries if item.sequence in self._selected_sequences
+        if self.multiline:
+            width = imgui.get_content_region_avail().x
+            wrap_width = max(
+                1.0, width - 2 * padding_x - imgui.get_font_size() - 6 * ctx.style_scale
+            )
+            key = (entries, wrap_width, imgui.get_font_size(), ctx.style_scale)
+            if key != self._row_layout_key:
+                self._wrapped_rows = tuple(
+                    (
+                        row := f"{entry.timestamp}  {entry.text}",
+                        max(
+                            row_height,
+                            imgui.calc_text_size(row, wrap_width=wrap_width).y
+                            + 2 * ROW_PADDING_Y * ctx.style_scale,
+                        ),
                     )
-                    copy_message, _ = imgui.menu_item(ctx.tr("Copy message"), "Ctrl+C", False)
-                    copy_full, _ = imgui.menu_item(ctx.tr("Copy full entry"), "Ctrl+Shift+C", False)
-                    if entry.copy_text is not None:
-                        copy_path, _ = imgui.menu_item(ctx.tr("Copy path"), "", False)
-                        if copy_path:
-                            imgui.set_clipboard_text(entry.copy_text)
-                    imgui.separator()
-                    copy_scope = "Copy shown" if filtering else "Copy all"
-                    copy_scope, _ = imgui.menu_item(ctx.tr(copy_scope), "", False)
-                    if copy_message:
-                        imgui.set_clipboard_text(output.copy_message_text(selected))
-                    if copy_full:
-                        imgui.set_clipboard_text(output.copy_text(selected))
-                    if copy_scope:
-                        imgui.set_clipboard_text(output.copy_text(entries))
-                    imgui.end_popup()
-                if hovered or entry.sequence in self._selected_sequences:
-                    color = (
-                        ctx.theme.bg_header
-                        if entry.sequence in self._selected_sequences
-                        else ctx.theme.bg_frame_hovered
+                    for entry in entries
+                )
+                self._row_layout_key = key
+            for index, (row, height) in enumerate(self._wrapped_rows):
+                if imgui.is_rect_visible(imgui.ImVec2(width, height)):
+                    self._draw_entry(
+                        ctx,
+                        entries,
+                        index,
+                        row,
+                        height,
+                        row_height,
+                        text_offset,
+                        padding_x,
+                        filtering,
+                        wrap_width,
                     )
-                    imgui.get_window_draw_list().add_rect_filled(
-                        row_lo,
-                        row_hi,
-                        imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
-                        imgui.get_style().frame_rounding,
+                else:
+                    imgui.dummy(imgui.ImVec2(width, height))
+        else:
+            clipper = imgui.ListClipper()
+            clipper.begin(len(entries))
+            while clipper.step():
+                for index in range(clipper.display_start, clipper.display_end):
+                    entry = entries[index]
+                    row = f"{entry.timestamp}  {entry.text.replace(chr(10), '  ↵  ')}"
+                    self._draw_entry(
+                        ctx,
+                        entries,
+                        index,
+                        row,
+                        row_height,
+                        row_height,
+                        text_offset,
+                        padding_x,
+                        filtering,
                     )
-                color = ctx.theme.text
-                icon_size = imgui.get_font_size()
-                severity_icon(
-                    ImguiDraw2D(),
-                    (start.x + padding_x + icon_size * 0.5, start.y + row_height * 0.5),
-                    icon_size,
-                    severity_group(entry.level),
-                    severity_color(ctx.theme, entry.level),
-                )
-                imgui.push_clip_rect(
-                    (row_lo.x + padding_x, row_lo.y),
-                    (max(row_lo.x + padding_x, row_hi.x - padding_x), row_hi.y),
-                    True,
-                )
-                imgui.get_window_draw_list().add_text(
-                    imgui.ImVec2(
-                        start.x + padding_x + icon_size + 6.0 * ctx.style_scale,
-                        round(start.y + text_offset),
-                    ),
-                    imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
-                    row,
-                )
-                imgui.pop_clip_rect()
-        clipper.end()
+            clipper.end()
         io = imgui.get_io()
         if (
             imgui.is_window_focused(imgui.FocusedFlags_.root_and_child_windows)
@@ -351,7 +327,123 @@ class OutputPanel(Panel):
             else:
                 imgui.set_clipboard_text(output.copy_message_text(selected))
         newest_visible = entries[-1].sequence if entries else 0
-        if newest_visible > self._last_sequence:
+        if self.auto_scroll and newest_visible > self._last_sequence:
             imgui.set_scroll_here_y(1.0)
         self._last_sequence = newest_visible
         imgui.end_child()
+
+    def _draw_file_actions(self, ctx, entry) -> None:
+        """Allow a host to add file actions to the shared row context menu."""
+
+    def _draw_entry(
+        self,
+        ctx,
+        entries,
+        index,
+        row,
+        row_height,
+        first_line_height,
+        text_offset,
+        padding_x,
+        filtering,
+        wrap_width=0,
+    ):
+        output = ctx.output
+        entry = entries[index]
+        start = imgui.get_cursor_screen_pos()
+        imgui.invisible_button(
+            f"##output-row-{entry.sequence}",
+            imgui.ImVec2(imgui.get_content_region_avail().x, row_height),
+        )
+        hovered = imgui.is_item_hovered()
+        row_lo, row_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        select = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_SELECT)
+        extend = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_RANGE)
+        add = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_ADD)
+        path = message_path(entry.text, entry.copy_text) if hovered else None
+        if path is not None:
+            imgui.set_item_tooltip(ctx.tr("Ctrl+click to reveal file") + "\n" + str(path))
+        if add and path is not None:
+            reveal_path(path)
+        elif select or extend or add:
+            if extend and self._selection_anchor:
+                by_sequence = {item.sequence: offset for offset, item in enumerate(entries)}
+                anchor = by_sequence.get(self._selection_anchor, index)
+                lo, hi = sorted((anchor, index))
+                self._selected_sequences.update(item.sequence for item in entries[lo : hi + 1])
+            elif add:
+                if entry.sequence in self._selected_sequences:
+                    self._selected_sequences.remove(entry.sequence)
+                else:
+                    self._selected_sequences.add(entry.sequence)
+                self._selection_anchor = entry.sequence
+            else:
+                self._selected_sequences = {entry.sequence}
+                self._selection_anchor = entry.sequence
+        if hovered and pointer_pressed(ctx, PointerAction.OUTPUT_CONTEXT):
+            imgui.open_popup(f"##output-context-{entry.sequence}")
+        if imgui.begin_popup(f"##output-context-{entry.sequence}"):
+            if entry.sequence not in self._selected_sequences:
+                self._selected_sequences = {entry.sequence}
+                self._selection_anchor = entry.sequence
+            selected = tuple(item for item in entries if item.sequence in self._selected_sequences)
+            copy_message, _ = imgui.menu_item(ctx.tr("Copy message"), "Ctrl+C", False)
+            copy_full, _ = imgui.menu_item(ctx.tr("Copy full entry"), "Ctrl+Shift+C", False)
+            if entry.copy_text is not None:
+                copy_path, _ = imgui.menu_item(ctx.tr("Copy path"), "", False)
+                if copy_path:
+                    imgui.set_clipboard_text(entry.copy_text)
+            self._draw_file_actions(ctx, entry)
+            imgui.separator()
+            copy_scope = "Copy shown" if filtering else "Copy all"
+            copy_scope, _ = imgui.menu_item(ctx.tr(copy_scope), "", False)
+            if copy_message:
+                imgui.set_clipboard_text(output.copy_message_text(selected))
+            if copy_full:
+                imgui.set_clipboard_text(output.copy_text(selected))
+            if copy_scope:
+                imgui.set_clipboard_text(output.copy_text(entries))
+            imgui.end_popup()
+        if hovered or entry.sequence in self._selected_sequences:
+            color = (
+                ctx.theme.bg_header
+                if entry.sequence in self._selected_sequences
+                else ctx.theme.bg_frame_hovered
+            )
+            imgui.get_window_draw_list().add_rect_filled(
+                row_lo,
+                row_hi,
+                imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
+                imgui.get_style().frame_rounding,
+            )
+        color = ctx.theme.text
+        icon_size = imgui.get_font_size()
+        severity_icon(
+            ImguiDraw2D(),
+            (start.x + padding_x + icon_size * 0.5, start.y + first_line_height * 0.5),
+            icon_size,
+            severity_group(entry.level),
+            severity_color(ctx.theme, entry.level),
+        )
+        imgui.push_clip_rect(
+            (row_lo.x + padding_x, row_lo.y),
+            (max(row_lo.x + padding_x, row_hi.x - padding_x), row_hi.y),
+            True,
+        )
+        text_position = imgui.ImVec2(
+            start.x + padding_x + icon_size + 6.0 * ctx.style_scale,
+            round(start.y + text_offset),
+        )
+        text_color = imgui.color_convert_float4_to_u32(imgui.ImVec4(*color))
+        if wrap_width:
+            imgui.get_window_draw_list().add_text(
+                imgui.get_font(),
+                imgui.get_font_size(),
+                text_position,
+                text_color,
+                row,
+                wrap_width=wrap_width,
+            )
+        else:
+            imgui.get_window_draw_list().add_text(text_position, text_color, row)
+        imgui.pop_clip_rect()

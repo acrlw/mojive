@@ -74,6 +74,8 @@ class _StateTake:
     info: StateTakeInfo = field(default_factory=lambda: StateTakeInfo(-1, ""))
     frames: list[_StateTakeFrame] = field(default_factory=list)
     times: list[float] = field(default_factory=list)
+    cells: list[tuple[float, float]] = field(default_factory=list)
+    segments: list[tuple[int, int]] = field(default_factory=list)
     offsets: list[float] = field(default_factory=list)
     play_range: tuple[int, int] | None = None
     loop_enabled: bool = False
@@ -175,6 +177,8 @@ _SCENE_EDIT_COMMANDS = (
     cmd.AddResourceRoot,
     cmd.RemoveResourceRoot,
     cmd.SetPose,
+    cmd.SetQpos,
+    cmd.SetQposBatch,
     cmd.SetScale,
     cmd.SetJointProperties,
     cmd.SetJointAdvancedProperties,

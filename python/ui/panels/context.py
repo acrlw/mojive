@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar
 
+from mojive.ui.control_style import RailStyle
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.paint_protocol import Draw2D
 from mojive.ui.theme import THEME, Theme
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from mojive.ui.input_bindings import InputAction, InputBindings
     from mojive.ui.messages import OutputBuffer
     from mojive.ui.panels import PanelManager
+    from mojive.ui.panels.inspector.presentation import InspectorPresentation
     from mojive.ui.perturb import PerturbController
     from mojive.ui.pointer_bindings import PointerAction
     from mojive.ui.scene_entities import SceneEntityHelpers
@@ -126,6 +128,8 @@ class PanelContext:
     camera_preview: CameraPreview | None = None
 
     style_scale: float = 1.0
+    rail_style: RailStyle = field(default=RailStyle(), kw_only=True)
+    inspector_presentation: InspectorPresentation | None = field(default=None, kw_only=True)
 
     viewport_rect: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
 

@@ -28,6 +28,7 @@ from ..controls import begin_property_table, clearable_combo, property_row
 from . import (
     Panel,
     PanelContext,
+    ValueEdit,
     button_width,
     search_input,
     segmented_control,
@@ -77,6 +78,16 @@ class CameraLike(Protocol):
     def view(self) -> CameraView: ...
 
 
+class CameraPresentation(Protocol):
+    """Optional camera control presentation; CameraPanel retains actions and state."""
+
+    def section(self, label: str, flags: int = 0) -> bool: ...
+    def begin_table(self, table_id: str) -> bool: ...
+    def row(self, label: str, *, rail: bool = False) -> None: ...
+    def value_rail(self, item_id: str, value: float, bounds, **options) -> ValueEdit: ...
+    def segmented(self, item_id: str, labels, selected: int, *, icons=None) -> int: ...
+
+
 def _get(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
@@ -96,6 +107,7 @@ class CameraPanel(Panel):
         self._tracking_filter = ""
         self._angular_degrees = True
         self._initial_distance = None
+        self.presentation: CameraPresentation | None = None
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds.none()
@@ -119,7 +131,7 @@ class CameraPanel(Panel):
             return
 
         self._params(ctx, camera)
-        if imgui.collapsing_header(ctx.tr("Presets"), imgui.TreeNodeFlags_.default_open):
+        if self._section(ctx.tr("Presets"), imgui.TreeNodeFlags_.default_open):
             self._presets(ctx, camera)
         self._stored_states(ctx, camera)
         self._tracking(ctx)
@@ -127,7 +139,7 @@ class CameraPanel(Panel):
     def _tracking(self, ctx: PanelContext) -> None:
         if ctx.tracking is None or ctx.track_node is None:
             return
-        if not imgui.collapsing_header(
+        if not self._section(
             f"{ctx.tr('Tracking')}###camera_tracking", imgui.TreeNodeFlags_.default_open
         ):
             return
@@ -181,7 +193,7 @@ class CameraPanel(Panel):
                         )[0]:
                             ctx.track_node(candidate.node_id)
             self._property_label(ctx.tr("Axes"))
-            axes = segmented_control(
+            axes = self._segmented(
                 "tracking-axes",
                 ("X-Y", "X-Y-Z"),
                 int(ctx.tracking.axes == "xyz"),
@@ -190,9 +202,9 @@ class CameraPanel(Panel):
             imgui.set_item_tooltip(ctx.tr("X-Y keeps camera height. X-Y-Z also follows height."))
             if axes != int(ctx.tracking.axes == "xyz"):
                 ctx.set_camera_tracking(replace(ctx.tracking, axes="xyz" if axes else "xy"))
-            self._property_label(ctx.tr("Smoothing"))
+            self._property_label(ctx.tr("Smoothing"), rail=True)
             imgui.set_next_item_width(-1)
-            edit = value_rail(
+            edit = self._rail(
                 ctx,
                 "##tracking-smoothing",
                 ctx.tracking.smoothing,
@@ -208,10 +220,11 @@ class CameraPanel(Panel):
             if edit.changed:
                 ctx.set_camera_tracking(replace(ctx.tracking, smoothing=max(0.0, edit.value)))
             imgui.end_table()
-        imgui.separator()
+        if self.presentation is None:
+            imgui.separator()
 
     def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
-        opened = imgui.collapsing_header(f"{ctx.tr('camera bookmarks')}###camera_states")
+        opened = self._section(f"{ctx.tr('camera bookmarks')}###camera_states")
         camera_dir = Path("output/snapshots/cameras")
         imgui.set_item_tooltip(f"{ctx.tr('Stored in')}: {camera_dir.resolve()}")
         if not opened:
@@ -300,7 +313,8 @@ class CameraPanel(Panel):
             if selected and ctx.select_model_camera is not None:
                 ctx.select_model_camera(info.camera_id)
         imgui.end_combo()
-        imgui.separator()
+        if self.presentation is None:
+            imgui.separator()
 
     def _presets(self, ctx: PanelContext, camera: Any) -> None:
         has_setter = hasattr(camera, "set_preset") or (
@@ -349,7 +363,7 @@ class CameraPanel(Panel):
         if self._initial_distance is None:
             self._initial_distance = _get(camera, "distance")
         for title, parameters in (("View", PARAM_SLIDERS[:3]), ("Lens", PARAM_SLIDERS[3:])):
-            if not imgui.collapsing_header(ctx.tr(title), imgui.TreeNodeFlags_.default_open):
+            if not self._section(ctx.tr(title), imgui.TreeNodeFlags_.default_open):
                 continue
             if not self._begin_properties(ctx, f"camera_{title.lower()}"):
                 continue
@@ -363,8 +377,8 @@ class CameraPanel(Panel):
                 editor_distance = attr == "distance" and camera is ctx.camera
                 if editor_distance:
                     lo, hi = camera.navigation.min_distance, camera.navigation.max_distance
-                self._property_label(ctx.tr(attr))
-                edit = value_rail(
+                self._property_label(ctx.tr(attr), rail=True)
+                edit = self._rail(
                     ctx,
                     f"##camera-{attr}",
                     float(current) * factor,
@@ -390,7 +404,7 @@ class CameraPanel(Panel):
             imgui.set_next_item_width(-1.0)
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
-            selected = segmented_control(
+            selected = self._segmented(
                 "camera-projection",
                 (ctx.tr("persp"), ctx.tr("ortho")),
                 1 if bool(ortho) else 0,
@@ -411,8 +425,30 @@ class CameraPanel(Panel):
                     else:
                         camera.orthographic = target
 
-    @staticmethod
-    def _begin_properties(ctx, str_id):
+    def _section(self, label, flags=0):
+        return (
+            self.presentation.section(label, flags)
+            if self.presentation
+            else imgui.collapsing_header(label, flags)
+        )
+
+    def _rail(self, ctx, item_id, value, bounds, **options):
+        return (
+            self.presentation.value_rail(item_id, value, bounds, **options)
+            if self.presentation
+            else value_rail(ctx, item_id, value, bounds, **options)
+        )
+
+    def _segmented(self, item_id, labels, selected, *, theme, icons=None):
+        return (
+            self.presentation.segmented(item_id, labels, selected, icons=icons)
+            if self.presentation
+            else segmented_control(item_id, labels, selected, theme=theme, icons=icons)
+        )
+
+    def _begin_properties(self, ctx, str_id):
+        if self.presentation:
+            return self.presentation.begin_table(str_id)
         labels = tuple(
             ctx.tr(name)
             for name in (
@@ -429,6 +465,8 @@ class CameraPanel(Panel):
         )
         return begin_property_table(str_id, labels=labels)
 
-    @staticmethod
-    def _property_label(label: str) -> None:
-        property_row(label, wrap=True)
+    def _property_label(self, label: str, *, rail=False) -> None:
+        if self.presentation:
+            self.presentation.row(label, rail=rail)
+        else:
+            property_row(label, wrap=True)

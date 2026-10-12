@@ -110,7 +110,34 @@ def nearest_take_frame(times: Sequence[float], time: float) -> int:
     return slot - 1 if abs(times[slot - 1] - time) <= abs(times[slot] - time) else slot
 
 
-def recorded_take_spans(times: Sequence[float], start: float, end: float, lo: float, hi: float):
+def take_frame_bounds(
+    times: Sequence[float], first: int, last: int, *, cells: Sequence[tuple[float, float]] = ()
+) -> tuple[float, float]:
+    """Return sample coverage; retained cells preserve deleted time intervals."""
+    if cells:
+        return cells[first][0], cells[last][1]
+    if len(times) == 1:
+        return times[0], times[0]
+    left = (
+        (times[first - 1] + times[first]) / 2 if first > 0 else times[0] - (times[1] - times[0]) / 2
+    )
+    right = (
+        (times[last] + times[last + 1]) / 2
+        if last + 1 < len(times)
+        else times[-1] + (times[-1] - times[-2]) / 2
+    )
+    return left, right
+
+
+def recorded_take_spans(
+    times: Sequence[float],
+    start: float,
+    end: float,
+    lo: float,
+    hi: float,
+    *,
+    sample_radius: float = 1.0,
+):
     """Merge overlapping sample marks with work bounded by visible pixel columns."""
     first = bisect.bisect_left(times, start)
     last = bisect.bisect_right(times, end)
@@ -128,7 +155,7 @@ def recorded_take_spans(times: Sequence[float], start: float, end: float, lo: fl
         boundary = start + (math.floor(x - lo) + 1) / factor
         following = bisect.bisect_left(times, boundary, lo=index + 1, hi=last)
         last_x = lo + (times[following - 1] - start) * factor
-        mark_left, mark_right = max(lo, x - 1.0), min(hi, last_x + 1.0)
+        mark_left, mark_right = max(lo, x - sample_radius), min(hi, last_x + sample_radius)
         if right is not None and mark_left > right:
             yield left, right
             left = None

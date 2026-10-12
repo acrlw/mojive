@@ -21,6 +21,7 @@ from mojive.ui.panels import (
     pointer_hint,
     pointer_pressed,
 )
+from mojive.ui.panels.value_cards import value_rail
 from mojive.ui.pointer_bindings import PointerAction
 
 
@@ -28,17 +29,26 @@ def _compact_transform(width: float, style_scale: float) -> bool:
     return float(width) < 210.0 * float(style_scale)
 
 
-def _begin_property_table(table_id: str) -> bool:
-    return begin_property_table(table_id)
+def _begin_property_table(
+    table_id: str, ctx: PanelContext | None = None, *, labels: tuple[str, ...] = ()
+) -> bool:
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.begin_table(table_id)
+    return (
+        begin_property_table(table_id, labels=labels) if labels else begin_property_table(table_id)
+    )
 
 
-def _property_section(ctx: PanelContext, label: str) -> bool:
+def _property_section(
+    ctx: PanelContext, label: str, flags: int = imgui.TreeNodeFlags_.default_open
+) -> bool:
     """Draw one translated, initially open Inspector property group."""
 
-    return imgui.collapsing_header(
-        ctx.tr(label),
-        imgui.TreeNodeFlags_.default_open,
-    )
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.section(label, flags)
+    return imgui.collapsing_header(ctx.tr(label), flags)
 
 
 def _property_control_row(
@@ -46,10 +56,74 @@ def _property_control_row(
     label: str,
     *,
     tooltip: str = "",
+    unit: str = "",
+    toggle_unit=None,
+    toggle: bool = False,
+    components: int = 1,
 ) -> None:
     """Advance a property table to one left-label/right-control row."""
 
-    property_row(ctx.tr(label), tooltip=ctx.tr(tooltip) if tooltip else "")
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        presentation.row(
+            label,
+            tooltip,
+            unit=unit,
+            toggle_unit=toggle_unit,
+            toggle=toggle,
+            components=components,
+        )
+    else:
+        property_row(ctx.tr(label), tooltip=ctx.tr(tooltip) if tooltip else "")
+
+
+def _property_numeric(ctx, item_id, value, speed=1.0, lo=0.0, hi=0.0, fmt="%.3f", flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.numeric(item_id, value, speed, lo, hi, fmt, flags)
+    args = (item_id, value, speed, lo, hi, fmt)
+    return imgui.drag_float(*args, flags) if flags else imgui.drag_float(*args)
+
+
+def _property_integer(ctx, item_id, value, speed=1.0, lo=0, hi=0, fmt="%d", flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        changed, value = presentation.numeric(
+            item_id, value, speed, lo, hi, fmt, flags, integer=True
+        )
+        return changed, int(value)
+    args = (item_id, value, speed, lo, hi, fmt)
+    return imgui.drag_int(*args, flags) if flags else imgui.drag_int(*args)
+
+
+def _property_numbers(ctx, item_id, values, speed=1.0, lo=0.0, hi=0.0, fmt="%.3f", flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.numbers(item_id, values, speed, lo, hi, fmt, flags)
+    draw = imgui.drag_float2 if len(values) == 2 else imgui.drag_float3
+    args = (item_id, values, speed, lo, hi, fmt)
+    return draw(*args, flags) if flags else draw(*args)
+
+
+def _property_toggle(ctx, item_id, value):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.toggle(item_id, value)
+    return imgui.checkbox(item_id, value)
+
+
+def _property_value_rail(ctx, item_id, value, bounds, **options):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.value_rail(item_id, value, bounds, **options)
+    return value_rail(ctx, item_id, value, bounds, **options)
+
+
+def _property_text(ctx, item_id, value, flags):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.text(item_id, value, flags)
+    return imgui.input_text(item_id, value, flags)
 
 
 def _property_button_row(
@@ -85,6 +159,9 @@ def _property_button_row(
 def _property_color_edit3(ctx: PanelContext, item_id: str, value):
     """Keep RGB editors usable when a scaled control column becomes narrow."""
 
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.color(item_id, value)
     flags = imgui.ColorEditFlags_.none
     if imgui.get_content_region_avail().x < 150.0 * ctx.style_scale:
         flags |= imgui.ColorEditFlags_.no_inputs
@@ -94,6 +171,9 @@ def _property_color_edit3(ctx: PanelContext, item_id: str, value):
 def _property_color_edit4(ctx: PanelContext, item_id: str, value):
     """Keep RGBA editors usable when a scaled control column becomes narrow."""
 
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.color(item_id, value)
     flags = imgui.ColorEditFlags_.none
     if imgui.get_content_region_avail().x < 190.0 * ctx.style_scale:
         flags |= imgui.ColorEditFlags_.no_inputs
@@ -118,19 +198,19 @@ def _property_solver_rows(
     reference_tooltip: str = "",
 ) -> tuple[bool, tuple[float, float], tuple[float, float, float, float, float]]:
     """Edit the shared solver rows, preserving untouched rows and vector components."""
-    _property_control_row(ctx, f"{label_prefix}solver reference")
-    reference_changed, reference_values = imgui.drag_float2(
-        f"##{name}_solver_reference", reference, 0.001, -1000000.0, 1000000.0, "%.5g"
+    _property_control_row(ctx, f"{label_prefix}solver reference", components=2)
+    reference_changed, reference_values = _property_numbers(
+        ctx, f"##{name}_solver_reference", reference, 0.001, -1000000.0, 1000000.0, "%.5g"
     )
     if reference_tooltip:
         imgui.set_item_tooltip(ctx.tr(reference_tooltip))
-    _property_control_row(ctx, f"{label_prefix}impedance min / max / width")
-    first_changed, first = imgui.drag_float3(
-        f"##{name}_impedance_first", impedance[:3], 0.001, 0.0, 1.0, "%.5g"
+    _property_control_row(ctx, f"{label_prefix}impedance min / max / width", components=3)
+    first_changed, first = _property_numbers(
+        ctx, f"##{name}_impedance_first", impedance[:3], 0.001, 0.0, 1.0, "%.5g"
     )
-    _property_control_row(ctx, f"{label_prefix}impedance midpoint / power")
-    shape_changed, shape = imgui.drag_float2(
-        f"##{name}_impedance_shape", impedance[3:], 0.01, 0.0, 1000.0, "%.4g"
+    _property_control_row(ctx, f"{label_prefix}impedance midpoint / power", components=2)
+    shape_changed, shape = _property_numbers(
+        ctx, f"##{name}_impedance_shape", impedance[3:], 0.01, 0.0, 1000.0, "%.4g"
     )
     updated_reference = (
         _edited_float_components(reference, reference_values) if reference_changed else reference
@@ -157,9 +237,26 @@ def _property_vector_row(
     fmt: str,
     reset_values=None,
     label_tooltip: str = "",
+    unit: str = "",
 ) -> tuple[bool, np.ndarray]:
     """Draw one XYZ triplet as a property-table control with joined axis fields."""
 
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.vector_row(
+            node,
+            label,
+            name,
+            values,
+            editable=editable,
+            speed=speed,
+            lo=lo,
+            hi=hi,
+            fmt=fmt,
+            reset_values=reset_values,
+            tooltip=label_tooltip,
+            unit=unit,
+        )
     out = np.asarray(values, np.float64).copy()
     resets = (
         np.zeros(3, np.float64)
@@ -229,7 +326,11 @@ def _vector_fields(
     *,
     editable: bool | tuple[bool, ...] = True,
     label_width: float = 0.0,
+    units: tuple[str, ...] = (),
 ) -> tuple[tuple[bool, np.ndarray], ...]:
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.vectors(node, table_id, rows, editable, units=units)
     label_width = max(
         label_width,
         max(imgui.calc_text_size(row[0]).x for row in rows) + 10.0 * ctx.style_scale,

@@ -6,9 +6,22 @@ from mojive.interaction.timeline import (
     TimelineMarkerIndex,
     decimated_marker_ids,
     follow_timeline_range,
+    nearest_take_frame,
     recorded_take_spans,
+    take_frame_bounds,
     timeline_time_to_x,
 )
+
+
+def test_frame_cells_share_boundaries_and_match_nearest_frame_with_uneven_sampling():
+    times = (0.0, 0.02, 0.055, 0.07, 0.12)
+    cells = [take_frame_bounds(times, index, index) for index in range(len(times))]
+    for index, (left, right) in enumerate(cells):
+        assert nearest_take_frame(times, (left + right) / 2) == index
+        if index:
+            assert cells[index - 1][1] == left
+    assert take_frame_bounds(times, 1, 3) == (cells[1][0], cells[3][1])
+    assert take_frame_bounds(times, 0, 4) == (cells[0][0], cells[-1][1])
 
 
 def test_page_follow_leaves_visible_playhead_alone_and_places_overflow_near_start():
@@ -48,6 +61,16 @@ def test_dense_take_marks_merge_but_leave_visible_gaps_between_samples():
     spans = list(recorded_take_spans(take, 0, 100_000 / 30, 0, 1000))
     assert spans == [(0, 1000)]
     assert take.reads < 18000
+
+
+def test_take_clip_sample_coverage_separates_gaps_and_resolves_frames_when_zoomed():
+    times = (0.0, 0.1, 0.2, 0.8, 0.9, 1.0)
+    assert list(recorded_take_spans(times, 0, 1, 0, 100, sample_radius=8)) == [(0, 28), (72, 100)]
+    assert list(recorded_take_spans(times, 0, 0.2, 0, 100, sample_radius=8)) == [
+        (0, 8),
+        (42, 58),
+        (92, 100),
+    ]
 
 
 def test_marker_projection_only_retains_visible_markers_and_edge_hit_margin():

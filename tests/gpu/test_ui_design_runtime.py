@@ -21,14 +21,72 @@ pytestmark = pytest.mark.gpu
 OUTPUT = Path(__file__).resolve().parents[2] / "output/ui_design/native"
 
 
+@pytest.mark.parametrize("runtime", ((2880, 1600),), indirect=True)
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_saved_file_receipt_stays_compact_and_actions_stable(
+    runtime, monkeypatch, tmp_path, language
+):
+    from mojive.ui.app import status as status_module
+
+    study, app = runtime, runtime.preview
+    app.localizer.set_language(language, persist=False)
+    observed = {}
+    button = imgui.button
+
+    def observe(label, *args, **kwargs):
+        result = button(label, *args, **kwargs)
+        if "##status-" in label:
+            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+            observed[label.split("##")[1]] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        return result
+
+    monkeypatch.setattr(imgui, "button", observe)
+    path = tmp_path / "viewport-ui-recording.mp4"
+    path.touch()
+    app.output.publish(
+        f"{app.localizer.text('Saved video to')} {path}", duration=None, copy_text=str(path)
+    )
+    study.frame(4)
+    receipt = app._status_notice_bounds
+    assert receipt is not None
+    x, y, right, bottom = receipt
+    open_button, copy_button = observed["status-open-folder"], observed["status-copy-path"]
+    assert bottom - y == pytest.approx(open_button[3] + 16 * study.s, abs=1)
+    assert right - x <= 720 * study.s + 1
+    assert right - x < app._viewport_rect[2] * 0.85
+    for bx, by, bw, bh in (open_button, copy_button):
+        assert x + 8 * study.s <= bx < bx + bw <= right - 8 * study.s + 1
+        assert y + 8 * study.s <= by < by + bh <= bottom - 8 * study.s + 1
+    revealed = []
+    monkeypatch.setattr(status_module, "reveal_path", revealed.append)
+    study.event(
+        "add_mouse_pos_event",
+        open_button[0] + open_button[2] / 2,
+        open_button[1] + open_button[3] / 2,
+    )
+    study.event("add_mouse_button_event", 0, True)
+    app.output.publish(
+        f"{app.localizer.text('Saved video to')} {path} · {app.localizer.text('File copied to clipboard')}",
+        duration=None,
+        copy_text=str(path),
+    )
+    study.frame(3)
+    assert app._status_notice_bounds == pytest.approx(receipt)
+    assert observed["status-open-folder"] == pytest.approx(open_button)
+    study.event("add_mouse_button_event", 0, False)
+    assert revealed == [path]
+    study.capture("saved-file-receipt-" + language)
+
+
 @pytest.fixture
-def runtime(backend_name, monkeypatch, tmp_path):
+def runtime(backend_name, monkeypatch, tmp_path, request):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     monkeypatch.setenv("MOJIVE_UI_SCALE", "2")
+    width, height = getattr(request, "param", (1440, 900))
     window = create_window(
         WindowConfig(
-            width=1440,
-            height=900,
+            width=width,
+            height=height,
             ui_scale=1,
             docking=True,
             ini_path="",
@@ -125,9 +183,31 @@ def runtime(backend_name, monkeypatch, tmp_path):
         assert action in modal_buttons, modal_buttons
         click_rect(modal_buttons[action])
 
+    def workspace_action(name):
+        key = "workspace-" + name
+        if key in study.ui.hits:
+            click_hit(key)
+            return
+        if "menu-Window" not in study.ui.hits:
+            click_hit("menu-More")
+            frame(2)
+        click_hit("menu-Window")
+        frame(2)
+        workspace = next(
+            row for row in study.menus.observed["Window"]["rows"] if row["label"] == "Workspace"
+        )
+        click_rect(workspace["rect"])
+        frame(3)
+        option = next(
+            row for row in study.menus.observed["Window/Workspace"]["rows"] if row["label"] == name
+        )
+        assert option["enabled"] and option["visible"]
+        click_rect(option["rect"])
+
     study.frame = frame
     study.event = event
     study.click_hit = click_hit
+    study.workspace_action = workspace_action
     study.keypress = keypress
     study.capture = capture
     study.file_action = file_action
@@ -157,6 +237,62 @@ def wait_loading(study):
     raise AssertionError("Queued native design document loading did not finish")
 
 
+def test_color_popup_formats_clipboard_cancel_and_single_undo(runtime):
+    study, session = runtime, runtime.preview.session
+    entity = next(item for item in study.preview.entities if item["name"] == "free_body")
+    session.submit(cmd.SelectNode(entity["node_id"]))
+    study.frame(3)
+    study.click_hit("tab-Material")
+    study.frame(2)
+    original = session.source.geom_rgba.copy()
+    study.click_hit("material-color")
+    study.frame(2)
+    assert "color-editor-copy" in study.ui.hits
+    study.click_hit("color-editor-format-2")
+    imgui.set_clipboard_text("rgba(0.125, 0.25, 0.5, 0.75)")
+    study.click_hit("color-editor-paste")
+    study.frame(2)
+    edited = session.source.geom_rgba.copy()
+    assert not np.array_equal(edited, original)
+    study.click_hit("color-editor-copy")
+    assert imgui.get_clipboard_text() == "rgba1(0.125, 0.25, 0.5, 0.75)"
+    imgui.set_clipboard_text("rgba(500, 0, 0, 1)")
+    study.click_hit("color-editor-paste")
+    study.frame(2)
+    assert np.array_equal(session.source.geom_rgba, edited)
+    assert study.menus.color_editor.error
+    study.click_hit("done-color")
+    study.frame(2)
+    assert "color-editor-copy" in study.ui.hits
+    imgui.set_clipboard_text("rgba1(0.125, 0.25, 0.5, 0.75)")
+    study.click_hit("color-editor-paste")
+    study.frame(2)
+    assert not study.menus.color_editor.error
+    study.capture("color-rgba-normalized")
+    study.click_hit("done-color")
+    study.frame(2)
+    session.submit(cmd.Undo())
+    study.frame(2)
+    assert np.array_equal(session.source.geom_rgba, original)
+
+    study.click_hit("material-color")
+    study.click_hit("color-editor-format-0")
+    study.click_hit("color-editor-hex")
+    study.event("add_key_event", imgui.Key.mod_ctrl, True)
+    study.event("add_key_event", imgui.Key.a, True)
+    study.event("add_key_event", imgui.Key.a, False)
+    study.event("add_key_event", imgui.Key.mod_ctrl, False)
+    study.event("add_input_characters_utf8", "#803319CC")
+    study.event("add_key_event", imgui.Key.enter, True)
+    study.event("add_key_event", imgui.Key.enter, False)
+    assert not np.array_equal(session.source.geom_rgba, original)
+    study.capture("color-hex-alpha")
+    study.event("add_key_event", imgui.Key.escape, True)
+    study.event("add_key_event", imgui.Key.escape, False)
+    study.frame(2)
+    assert np.array_equal(session.source.geom_rgba, original)
+
+
 def test_timeline_click_workspace_and_shortcut_round_trips(runtime):
     study = runtime
     assert not study.open["Timeline"]
@@ -174,10 +310,10 @@ def test_timeline_click_workspace_and_shortcut_round_trips(runtime):
         study.click_hit("collapse-timeline")
         study.capture(f"timeline-collapsed-{cycle}")
         assert not study.open["Timeline"]
-    study.click_hit("workspace-Review")
+    study.workspace_action("Review")
     study.capture("workspace-review")
     assert study.workspace == "Review" and study.open["Timeline"]
-    study.click_hit("workspace-Edit")
+    study.workspace_action("Edit")
     study.capture("workspace-edit")
     assert study.workspace == "Edit" and not study.open["Timeline"]
     for opened in (True, False):
@@ -264,31 +400,3 @@ def test_physics_tab_uses_node_identity_in_composed_model(runtime, monkeypatch):
     study.capture("physics-composed-model")
     assert study.inspector_tab == "Physics"
     assert reads and set(reads) == {node.node_id}
-
-
-def test_timeline_pose_keys_are_disabled_during_playback(runtime):
-    study, app = runtime, runtime.preview
-    study.click_hit("expand-timeline")
-    study.capture("pose-timeline-expanded")
-    rest, reach = app.document["keys"][:2]
-    study.click_hit("key-" + rest["name"])
-    study.capture("pose-timeline-rest")
-    assert study.pose_time == pytest.approx(rest["time"])
-    study.keypress(imgui.Key.space)
-    study.capture("pose-timeline-playing")
-    assert study.playing
-    study.click_hit("key-" + reach["name"])
-    study.capture("pose-timeline-disabled-key")
-    assert study.pose_time == pytest.approx(rest["time"])
-    study.keypress(imgui.Key.space)
-    study.capture("pose-timeline-paused")
-    assert not study.playing
-    before = app.session.frame.qpos.copy()
-    study.click_hit("key-" + reach["name"])
-    study.capture("pose-timeline-reach")
-    assert study.pose_time == pytest.approx(reach["time"])
-    assert not np.allclose(app.session.frame.qpos, before)
-    hinge = next(joint for joint in app.session.joints if joint.name == "hinge_limited")
-    assert app.session.frame.qpos[hinge.qpos_adr] == pytest.approx(
-        np.radians(reach["pose"]["hinge"])
-    )

@@ -272,7 +272,9 @@ class _Status:
             text,
         )
 
-    def _draw_file_status(self, overlay: ImguiDraw2D, message: OutputMessage, path: Path) -> None:
+    def _draw_file_status(
+        self, overlay: ImguiDraw2D, message: OutputMessage, path: Path, *, padding_pt: float = 8
+    ) -> None:
         """Keep saved filenames and path actions visible without opening Output."""
         t = self.localizer.text
         text = t(message.text)
@@ -282,7 +284,7 @@ class _Status:
                 break
         scale = self.window.style_scale
         x, y, width, height = self._viewport_rect
-        padding = 8.0 * scale
+        padding = padding_pt * scale
         margin = 14.0 * scale
         style = imgui.get_style()
         gap = style.item_spacing.x
@@ -291,7 +293,14 @@ class _Status:
             imgui.calc_text_size(label).x + 2 * style.frame_padding.x for label in labels
         )
         actions_width = sum(button_widths) + gap
-        available = max(1.0, width - 2 * (margin + padding))
+        available = max(
+            1.0,
+            min(
+                width - 2 * (margin + padding),
+                720 * scale - 2 * padding,
+                imgui.calc_text_size(path.name).x + actions_width + 2 * gap + 160 * scale,
+            ),
+        )
         # Clipboard completion can extend the receipt while a button is held.
         # Anchor actions to the viewport and choose rows from the stable filename,
         # so asynchronous status text cannot move their hit targets mid-click.
@@ -308,10 +317,13 @@ class _Status:
             | imgui.WindowFlags_.no_saved_settings
             | imgui.WindowFlags_.no_focus_on_appearing
             | imgui.WindowFlags_.no_move
+            | imgui.WindowFlags_.no_scrollbar
+            | imgui.WindowFlags_.no_scroll_with_mouse
         )
         imgui.set_next_window_pos((x + margin, y + height - margin), pivot=(0, 1))
         imgui.set_next_window_size((available + 2 * padding, rows_height + 2 * padding))
         imgui.push_style_var(imgui.StyleVar_.window_padding, (padding, padding))
+        imgui.push_style_var(imgui.StyleVar_.window_min_size, (0, 0))
         imgui.push_style_color(imgui.Col_.window_bg, self.theme.bg_child)
         visible, _ = imgui.begin("##viewport-file-status", None, flags)
         if visible:
@@ -338,7 +350,7 @@ class _Status:
                 imgui.set_clipboard_text(str(path))
         imgui.end()
         imgui.pop_style_color()
-        imgui.pop_style_var()
+        imgui.pop_style_var(2)
 
     def _viewport_hint_bottom(self) -> float:
         """Stack editor hints above the current frame's interactive file receipt."""

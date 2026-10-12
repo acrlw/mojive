@@ -1140,8 +1140,12 @@ def test_take_selection_delete_preserves_sample_times_and_replays_across_gap():
     assert session.submit(cmd.SeekStateTake(8))
     assert session.submit(cmd.SetStateTakeLoop(2, 7))
     original = tuple(session.state_take_times)
+    cells = tuple(session.state_take_cells)
     assert session.submit(cmd.DeleteStateTakeFrames(3, 5))
     assert session.state_take_times == list(original[:3] + original[6:])
+    assert session.state_take_cells == list(cells[:3] + cells[6:])
+    assert session.state_take_segments == [(0, 2), (3, len(original) - 4)]
+    assert session.state_take_cells[2][1] < session.state_take_cells[3][0]
     assert session.state_take_cursor == 5 and adapter.steps == 8
     assert session.state_take_loop is None
     assert session.submit(cmd.SeekStateTake(2))
@@ -1152,11 +1156,31 @@ def test_take_selection_delete_preserves_sample_times_and_replays_across_gap():
     assert adapter.steps == 6
     assert session.submit(cmd.DeleteStateTakeFrames(0, len(session.state_take_times) - 1))
     assert not session.state_take_times and not session.state_take_playing
+    assert not session.state_take_cells and not session.state_take_segments
     assert len(session.state_takes) == 1
     assert session.submit(cmd.StartStateTakeRecording(new_take=False))
     session.tick(FrameNeeds(), wall_dt=0.01)
     assert session.submit(cmd.StopStateTakeRecording())
     assert len(session.state_take_times) == 2
+
+
+def test_take_deletion_preserves_multiple_holes_and_single_survivor_coverage():
+    session, _adapter = _recorded_take()
+    original = tuple(session.state_take_cells)
+    assert session.submit(cmd.DeleteStateTakeFrames(3, 5))
+    assert session.submit(cmd.DeleteStateTakeFrames(1, 1))
+    assert session.state_take_segments == [(0, 0), (1, 1), (2, len(original) - 5)]
+    assert session.state_take_cells[1] == original[2]
+    assert session.submit(cmd.DeleteStateTakeFrames(2, len(session.state_take_times) - 1))
+    assert session.submit(cmd.DeleteStateTakeFrames(0, 0))
+    assert session.state_take_cells == [original[2]]
+    assert session.state_take_segments == [(0, 0)]
+    assert session.submit(cmd.StartStateTakeRecording(new_take=False, frame_index=0))
+    session.tick(FrameNeeds(), wall_dt=0.01)
+    assert session.submit(cmd.StopStateTakeRecording())
+    assert session.state_take_cells[0][0] == original[2][0]
+    assert session.state_take_cells[0][1] == session.state_take_cells[1][0]
+    assert session.state_take_segments == [(0, 1)]
 
 
 def test_take_mutation_failures_preserve_recordings_and_selection(monkeypatch):

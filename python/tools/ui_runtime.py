@@ -737,6 +737,34 @@ def _item_rect(
     *,
     reveal: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
+    workspace = getattr(viewer.app, "workspace", None)
+    if (
+        workspace is not None
+        and function_name == "invisible_button"
+        and label.startswith("##hierarchy-node-")
+    ):
+        viewer.sync()
+        rect = workspace.ui.hits.get("entity-" + label.removeprefix("##hierarchy-node-"))
+        if rect is not None:
+            x, y, w, h = rect
+            return (x, y), (x + w, y + h)
+    if workspace is not None and function_name in ("begin_menu", "menu_item"):
+        viewer.sync()
+        rect = workspace.ui.hits.get("menu-" + label)
+        if rect is None:
+            rect = next(
+                (
+                    row["rect"]
+                    for menu in workspace.menus.observed.values()
+                    for row in menu.get("rows", ())
+                    if row["visible"]
+                    and label in (row["label"], viewer.app.localizer.text(row["label"]))
+                ),
+                None,
+            )
+        if rect is not None:
+            x, y, w, h = rect
+            return (x, y), (x + w, y + h)
     original = getattr(imgui, function_name)
     found: list[tuple[tuple[float, float], tuple[float, float]]] = []
     scroll_to_item = reveal

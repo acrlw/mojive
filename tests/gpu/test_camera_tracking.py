@@ -155,7 +155,9 @@ def test_double_click_focuses_from_the_current_side_and_above(
         initial_target = (
             initial_eye + np.array((2, 0, 3)) if pose in ("away", "below") else np.zeros(3)
         )
-        viewer.set_camera(CameraView(eye=initial_eye, target=initial_target))
+        # Keep the offset target initially visible in both tall and wide docks;
+        # the focus animation must preserve this starting visibility.
+        viewer.set_camera(CameraView(eye=initial_eye, target=initial_target, fov_y=np.deg2rad(65)))
         viewer.sync()
         # Drive only the animation clock deterministically; picking, layout and
         # presentation still run through the production native input/frame path.

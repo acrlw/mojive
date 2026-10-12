@@ -53,10 +53,13 @@ path = "python/tools/build_hook.py"
 
 [tool.hatch.build.targets.wheel.force-include]
 "assets" = "mojive/data/assets"
+"examples/ui_design/native/svg/lucide/LICENSE" = "mojive/ui/workspace/licenses/lucide.txt"
+"examples/ui_design/native/svg/tabler/LICENSE" = "mojive/ui/workspace/licenses/tabler.txt"
 
 [tool.hatch.build]
 artifacts = [
     "python/ui/icon_presets.json",
+    "python/ui/workspace/icons.json",
     "python/render/opengl/shaders/*.glsl",
 ]
 

@@ -15,6 +15,7 @@ from . import (
     copy_state_vector,
     labeled,
 )
+from .presentation import PropertyPresentation
 
 
 def sensor_value_preview(values, *, max_items: int = 24) -> str:
@@ -44,6 +45,7 @@ class SensorsPanel(Panel):
     def __init__(self) -> None:
         super().__init__()
         self.sensor_index = 0
+        self.presentation: PropertyPresentation | None = None
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, sensors=True)
@@ -66,15 +68,22 @@ class SensorsPanel(Panel):
             else np.asarray(values[sensor.data_adr : sensor.data_adr + sensor.dim])
         )
 
-        if begin_kv_table("sensor_kv"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            labeled(ctx.tr("type"), sensor.type.removeprefix("mjSENS_").lower())
-            labeled(ctx.tr("dimension"), str(sensor.dim))
+        opened = (
+            self.presentation.begin_table("sensor_kv")
+            if self.presentation
+            else begin_kv_table("sensor_kv")
+        )
+        if opened:
+            if self.presentation is None:
+                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
+                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            display = self.presentation.labeled if self.presentation else labeled
+            display(ctx.tr("type"), sensor.type.removeprefix("mjSENS_").lower())
+            display(ctx.tr("dimension"), str(sensor.dim))
             if value is None:
-                labeled(ctx.tr("value"), ctx.tr("not produced this frame"))
+                display(ctx.tr("value"), ctx.tr("not produced this frame"))
             elif sensor.dim <= 6:
-                labeled(ctx.tr("value"), np.array2string(value, precision=6, separator=", "))
+                display(ctx.tr("value"), np.array2string(value, precision=6, separator=", "))
             imgui.end_table()
         if value is not None and sensor.dim > 6:
             imgui.separator()
@@ -86,17 +95,19 @@ class SensorsPanel(Panel):
                 imgui.get_content_region_avail().x,
                 imgui.get_style().item_spacing.x,
             )
-            if imgui.small_button(labels[0]):
+            if imgui.button(labels[0]):
                 copy_state_vector(value)
             if inline[1]:
                 imgui.same_line()
-            if imgui.small_button(labels[1]) and ctx.panels is not None:
+            if imgui.button(labels[1]) and ctx.panels is not None:
                 panel = ctx.panels.load("Plot")
                 focus = getattr(panel, "focus_sensor", None)
                 if callable(focus):
                     focus(self.sensor_index)
                 ctx.panels.open_panel("Plot")
             height = min(150.0, 38.0 + 18.0 * max(1, preview.count("\n") + 1))
-            if imgui.begin_child("sensor_value_block", imgui.ImVec2(0.0, height), 1):
+            if imgui.begin_child(
+                "sensor_value_block", imgui.ImVec2(0.0, height * ctx.style_scale), 1
+            ):
                 imgui.text_wrapped(preview)
             imgui.end_child()

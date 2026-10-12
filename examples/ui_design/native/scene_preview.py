@@ -18,6 +18,7 @@ from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
 from mojive.config import ViewerConfig
 from mojive.render.backend import RenderFlag
+from mojive.render.geometry import GeometryView, set_geometry_view
 from mojive.scene.assets import resolve
 from mojive.scene.queries import node_geometry_indices, node_world_pose
 from mojive.session import Session
@@ -72,8 +73,15 @@ class ReferencePanels(PanelManager):
         ctx.status_hints_by_panel.clear()
         for panel in self.panels:
             panel.open = self.study.open[panel.name]
-            self.study.panel(panel.name, ctx)
+            ctx.status_hints = ()
+            if panel.open:
+                ctx.status_hints_by_panel[panel.name] = ()
+            if self.study.panel(panel.name, ctx):
+                ctx.status_hints_by_panel[panel.name] = tuple(ctx.status_hints)
+            if not self.study.open[panel.name]:
+                ctx.status_hints_by_panel.pop(panel.name, None)
         self.study.menus.finish_color_edit()
+        self.study.finish_numeric_frame(ctx)
 
 
 class ReferenceViewCube(ViewCube):
@@ -82,15 +90,34 @@ class ReferenceViewCube(ViewCube):
     def __init__(self, selection_padding):
         super().__init__(selection_padding)
         self.reference_scale = 1.0
+        self.preview_active = False
 
-    @staticmethod
-    def scale_for(rect, style_scale):
-        return style_scale * (
+    def scale_for(self, rect, style_scale):
+        from mojive.ui import viewcube
+
+        if self.preview_active and rect[2] < 180 * style_scale and rect[3] < 300 * style_scale:
+            return 0.0
+        base = style_scale * (
             0.7 if rect[2] < 260 * style_scale or rect[3] < 233 * style_scale else 1
+        )
+        # The right/top anchor includes the margin, spoke radius and full backdrop.
+        extent = (
+            viewcube.MARGIN_PT + viewcube.RADIUS_PT + viewcube.BALL_PT + viewcube.BACKDROP_RADIUS_PT
+        )
+        return min(
+            base,
+            # Reserve the compact controls' 10 pt margin, 36 pt shell and 8 pt gap.
+            max(0, rect[2] - 54 * style_scale) / extent,
+            max(0, rect[3] - 8 * style_scale) / extent,
         )
 
     def update(self, cam, rect, cursor, style_scale, *, enabled=True):
         self.reference_scale = self.scale_for(rect, style_scale)
+        if self.reference_scale <= 0:
+            self._balls = []
+            self._hover = None
+            self._origin_hovered = False
+            return None
         return super().update(cam, rect, cursor, self.reference_scale, enabled=enabled)
 
     def draw(self, overlay, style_scale=1.0, **kwargs):
@@ -127,20 +154,9 @@ class Preview(ViewerApp):
             window,
             config=ViewerConfig(debug_server=False, live_model_updates=True),
         )
+        set_geometry_view(backend, GeometryView.VISUAL)
         self.panels = ReferencePanels()
-        for action, key in (
-            (InputAction.FLY_FORWARD, "i"),
-            (InputAction.FLY_BACK, "k"),
-            (InputAction.FLY_LEFT, "j"),
-            (InputAction.FLY_RIGHT, "l"),
-            (InputAction.FLY_UP, "u"),
-            (InputAction.FLY_DOWN, "o"),
-            (InputAction.GIZMO_TRANSLATE, "w"),
-            (InputAction.GIZMO_ROTATE, "e"),
-            (InputAction.GIZMO_DIMENSIONS, "r"),
-            (InputAction.GIZMO_SPACE, "b"),
-        ):
-            self.set_input_binding(action, key, persist=False)
+        self.set_input_binding(InputAction.GIZMO_SPACE, "b", persist=False)
         self.study = None
         self.view_cube = ReferenceViewCube(self.view_cube.selection_padding)
         self.readback = False
@@ -163,7 +179,6 @@ class Preview(ViewerApp):
         self.entities = []
         self._entity_cache = {}
         self.refresh_document()
-        self.initial_entities = copy.deepcopy(self.entities)
 
     @property
     def selected(self):
@@ -192,13 +207,14 @@ class Preview(ViewerApp):
 
     def refresh_document(self):
         """Project Session state into the reference controls; Session owns all edits."""
-        kinds = {
-            NodeType.LINK: "link",
-            NodeType.ROBOT: "link",
-            NodeType.GEOM: "geom",
-            NodeType.LIGHT: "light",
-            NodeType.CAMERA: "camera",
-        }
+        from .navigation import node_accent, node_icon
+
+        new_document = getattr(self, "_reference_document_id", None) != self.session.document_id
+        if new_document:
+            self._entity_cache.clear()
+            if getattr(self, "study", None) is not None:
+                self.study.pinned = None
+        kinds = {kind: kind.value for kind in NodeType}
         source = self.session.source
         entities = []
         for node in self.session.nodes:
@@ -215,10 +231,18 @@ class Preview(ViewerApp):
                 parent=node.parent,
                 name=node.name,
                 type=kinds[node.type],
+                identity=(node.model_id, node.type.value, node.source_name or node.name)
+                if node.source_editable
+                else ("object", node.object_id)
+                if node.object_id
+                else ("node", node.node_id, node.type.value, node.model_id),
+                icon=node_icon(node, self.session),
+                icon_color=node_accent(self.theme, node.type.value),
                 position=position.tolist(),
                 rotation=np.degrees(math3d.mat3_to_euler_xyz(rotation)).tolist(),
                 scale=list(self.session.scale_factors(node.node_id)),
                 color="#" + "".join(f"{round(np.clip(v, 0, 1) * 255):02x}" for v in rgba[:3]),
+                rgba=[float(v) for v in rgba],
                 hidden=not node.visible,
                 roughness=0.5,
                 posable=node.posable,
@@ -230,6 +254,9 @@ class Preview(ViewerApp):
         self.entities[:] = entities
         self.document["entities"] = self.entities
         self._projected_entities = copy.deepcopy(self.entities)
+        if new_document:
+            self.initial_entities = copy.deepcopy(self.entities)
+            self._reference_document_id = self.session.document_id
         for key, joint_name in (("hinge", "hinge_limited"), ("slide", "slide"), ("ball", "ball")):
             joint = next((j for j in self.session.joints if j.name == joint_name), None)
             if joint is not None and self.session.frame.qpos is not None:
@@ -263,7 +290,7 @@ class Preview(ViewerApp):
                 edits.append(cmd.SetScale(nid, np.array(entry["scale"])))
             if entry["hidden"] != old["hidden"]:
                 edits.append(cmd.SetVisible(nid, not entry["hidden"]))
-            if entry["color"] != old["color"]:
+            if entry["color"] != old["color"] or entry["rgba"] != old["rgba"]:
                 node = self.session.node(nid)
                 geometry = (
                     [node]
@@ -274,9 +301,11 @@ class Preview(ViewerApp):
                         if self.session.node(c).type is NodeType.GEOM
                     ]
                 )
-                rgba = np.array(
-                    (*[int(entry["color"][i : i + 2], 16) / 255 for i in (1, 3, 5)], 1.0)
-                )
+                if entry["rgba"] == old["rgba"]:
+                    entry["rgba"][:3] = [
+                        int(entry["color"][i : i + 2], 16) / 255 for i in (1, 3, 5)
+                    ]
+                rgba = np.array(entry["rgba"])
                 edits.extend(cmd.SetGeometryColor(g.node_id, rgba) for g in geometry)
             if edits:
                 # Single fields retain the UI draft interceptor; color gestures
@@ -348,8 +377,27 @@ class Preview(ViewerApp):
 
     def bind(self, study):
         self.study = self.panels.study = study
+        self._numeric_cancel_frame = -1
+        from .output_panel import ReferenceOutput
+        from .widgets import DIM, INPUT, LINE, PANEL, SAGE, TEXT
+
+        def normalized(value):
+            return tuple(channel / 255 for channel in value)
+
+        self.theme = replace(
+            self.theme,
+            text=normalized(TEXT),
+            text_disabled=normalized(DIM),
+            bg_window=normalized(PANEL),
+            bg_child=normalized(PANEL),
+            bg_frame=normalized(INPUT),
+            border=normalized(LINE),
+            primary=normalized(SAGE),
+        )
         settings = self.panels.get("settings")
         self.panels.panels[self.panels.panels.index(settings)] = study.settings
+        output = self.panels.get("output")
+        self.panels.panels[self.panels.panels.index(output)] = ReferenceOutput(study)
         for panel in self.panels.panels:
             panel.open = study.open[panel.name]
 
@@ -370,6 +418,18 @@ class Preview(ViewerApp):
         self.study.begin_frame()
 
     def _poll_application_shortcuts(self):
+        # A numeric gesture owns Escape before application selection shortcuts.
+        inspector = self.panels.get("inspector")
+        numeric_edit = self.study._numeric_edit is not None or inspector._edit_transaction
+        if numeric_edit and imgui.is_key_pressed(imgui.Key.escape, False):
+            result = self.session.submit(cmd.CancelEditTransaction())
+            if result.ok:
+                self.study._numeric_edit = None
+                inspector._edit_transaction = False
+                self._numeric_cancel_frame = imgui.get_frame_count()
+                imgui.internal.clear_active_id()
+                self.refresh_document()
+            return
         super()._poll_application_shortcuts()
         io = imgui.get_io()
         if self._scene_input_blocked() or imgui.is_any_item_active() or io.key_ctrl or io.key_super:
@@ -378,11 +438,9 @@ class Preview(ViewerApp):
             self.tool = "select"
         if imgui.is_key_pressed(imgui.Key.t, False):
             self.study.toggle_timeline()
-        if imgui.is_key_pressed(imgui.Key.s, False):
-            self.study.snap = not self.study.snap
 
     def _draw_application_status_bar(self, *, loading=False):
-        pass
+        super()._draw_application_status_bar(loading=loading)
 
     def _draw_collapsed_output(self):
         pass
@@ -417,11 +475,13 @@ class Preview(ViewerApp):
         )
         imgui.set_next_window_class(wc)
         self.viewport_surface.begin("Viewport")
-        if not study.open["Timeline"]:
+        if not study.bottom_open:
             width, height = self.viewport_surface.size
             self.viewport_surface.size = (width, max(20 * study.s, height - 38 * study.s))
 
     def _scene_input_blocked(self):
+        if self._numeric_cancel_frame == imgui.get_frame_count():
+            return True
         if super()._scene_input_blocked():
             return True
         # A captured scene gesture retains ownership while crossing reference controls.
@@ -433,6 +493,11 @@ class Preview(ViewerApp):
             for x, y, w, h in self.study.input_overlays
         )
 
+    def _input_state(self):
+        # A compact preview and the view cube must share drawing and hit geometry.
+        self.view_cube.preview_active = bool(self.camera_preview.selected_camera(self.session)[1])
+        return super()._input_state()
+
     def _draw_viewport_contents(self, preview_name="", *, session_busy=False):
         if session_busy:
             # The worker owns Session during a rebuild. Present its last image
@@ -443,10 +508,17 @@ class Preview(ViewerApp):
             imgui.end()
             return
         self.refresh_document()
-        self.study.viewport()
+        self.study.viewport(preview_name)
         if self.viewport_layers.gizmos:
             self._draw_joint_limit_controls()
             self._draw_joint_gizmo_picker()
+
+    def _draw_reference_camera_preview(self, preview_name):
+        from .camera_preview import ReferenceCameraPreview
+
+        if not hasattr(self, "_reference_camera_preview"):
+            self._reference_camera_preview = ReferenceCameraPreview(self.study)
+        self._reference_camera_preview.draw(preview_name)
 
     def reset_layout(self, *, persist=True):
         self.study.pending = "reset"

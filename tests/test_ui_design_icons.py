@@ -4,9 +4,10 @@ import json
 import math
 from itertools import pairwise
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
-from examples.ui_design.native.compile_icons import ROOT, compile_svg
+from examples.ui_design.native.compile_icons import ROOT, compile_svg, library_masters
 
 
 def test_previous_rotate_arc_exceeds_declared_canvas():
@@ -32,6 +33,8 @@ def test_rectangular_canvas_keeps_proportions_and_center(canvas):
 def test_all_masters_compile_inside_their_canvas():
     sources = json.loads((ROOT / "icons-source.json").read_text())
     compiled = json.loads((ROOT / "icons.json").read_text())
+    production = ROOT.parents[2] / "python/ui/workspace/icons.json"
+    assert json.loads(production.read_text()) == compiled
     assert compiled == json.loads(
         json.dumps({name: compile_svg(svg) for name, svg in sources.items()})
     )
@@ -51,6 +54,25 @@ def test_all_masters_compile_inside_their_canvas():
     assert compiled["rotate"]["bounds"] == pytest.approx([3.125, 3.125, 20.875, 20.875])
 
 
+def test_joint_projection_and_sort_masters_share_the_grid_and_have_distinct_silhouettes():
+    sources = json.loads((ROOT / "icons-source.json").read_text())
+    names = (
+        "joint-hinge",
+        "joint-slide",
+        "joint-ball",
+        "joint-free",
+        "perspective",
+        "orthographic",
+        "sort",
+    )
+    assert len({sources[name] for name in names}) == len(names)
+    for name in names:
+        glyph = compile_svg(sources[name])
+        assert glyph["viewBox"] == [0, 0, 24, 24]
+        assert all(contour["width"] == 1.75 for contour in glyph["contours"])
+        assert sources[name] not in (sources["eye"], sources["sliders"], sources["pose"])
+
+
 def test_dash_and_alpha_survive_compilation():
     sources = json.loads((ROOT / "icons-source.json").read_text())
     perturb = compile_svg(sources["perturb"])["contours"][-1]
@@ -59,3 +81,47 @@ def test_dash_and_alpha_survive_compilation():
     shading = compile_svg(sources["shading"])["contours"][-1]
     assert shading["opacity"] == 0.5
     assert shading["stroke"] == "none"
+
+
+def test_sidebar_masters_share_the_grid_weight_and_compact_envelopes():
+    sources = json.loads((ROOT / "icons-source.json").read_text())
+    names = (
+        "scene",
+        "control",
+        "assets",
+        "camera",
+        "chart",
+        "layers",
+        "terminal",
+        "settings",
+    )
+    for name in names:
+        source = ET.fromstring(sources[name])
+        glyph = compile_svg(sources[name])
+        assert glyph["viewBox"] == [0, 0, 24, 24]
+        assert source.attrib["stroke-linecap"] == source.attrib["stroke-linejoin"] == "round"
+        assert all(
+            contour["width"] == 1.75 and contour["fill"] == "none" for contour in glyph["contours"]
+        )
+        left, top, right, bottom = glyph["bounds"]
+        assert max(right - left, bottom - top) <= 18.75, name
+
+
+def test_imported_masters_preserve_library_geometry_and_aliases():
+    sources = json.loads((ROOT / "icons-source.json").read_text())
+    imported = library_masters()
+    assert all(sources[name] == svg for name, svg in imported.items())
+    for library in ("lucide", "tabler"):
+        assert "Copyright" in (ROOT / "svg" / library / "LICENSE").read_text()
+    for first, second in (("pose", "joint"), ("assets", "folder"), ("settings", "gear")):
+        assert sources[first] == sources[second]
+
+
+def test_geometry_modes_have_distinct_library_silhouettes_from_visibility_and_layers():
+    sources = json.loads((ROOT / "icons-source.json").read_text())
+    names = ("visual", "collision", "both", "eye", "layers")
+    assert len({sources[name] for name in names}) == len(names)
+    for name in names[:3]:
+        glyph = compile_svg(sources[name])
+        assert glyph["viewBox"] == [0, 0, 24, 24]
+        assert all(contour["width"] == 1.75 for contour in glyph["contours"])

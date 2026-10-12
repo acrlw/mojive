@@ -62,6 +62,12 @@ def _hits(imports: set[str], prefix: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def test_production_workspace_does_not_import_design_examples_or_output():
+    for path in _files("ui/workspace"):
+        assert not _hits(_imports(path), "examples"), path
+        assert not _hits(_imports(path), "output"), path
+
+
 def test_shared_icons_do_not_depend_on_viewport_widgets():
     for path in [*_files("ui/icons"), SRC / "ui/overlay_geometry.py"]:
         assert not _hits(_imports(path), "mojive.ui.viewport_widgets"), path

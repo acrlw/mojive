@@ -384,7 +384,8 @@ class _PreciseInput:
             return CommandResult.good("No change")
         values[mapping.parameter] = requested
         self._active = edit.handle
-        self._start_edit(session)
+        if not self._start_edit(session):
+            return CommandResult.bad(session.last_message)
         result = session.submit(
             SetGeometrySize(
                 target.node_id,

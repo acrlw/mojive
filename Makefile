@@ -110,7 +110,7 @@ help:
 		'  make ui-svg-icons      compare production code and SVG files in ImGui' \
 		'  make ui-icon-references compare icon outline and filled references' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
-		'  make ui-design-native  standalone docking study (--interactive via ARGS)' \
+		'  make ui-design-native  production native workspace (--interactive via ARGS)' \
 		'  make ui-design         serve the browser design reference locally' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
@@ -1235,21 +1235,28 @@ canvas-2d-gallery:
 canvas-2d-test:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_canvas2d.py
 
-.PHONY: ui-design-native ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime
-## Open the tracked docking study with ARGS=--interactive; default captures validate docking.
+.PHONY: ui-design-native ui-native-design ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime ui-design-reference
+
+## Open the production UI with ARGS=--interactive; default captures cover its panels and menus.
 ui-design-native:
-	$(PY) -m examples.ui_design.native.docking_study --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
+	$(PY) -m mojive.tools.native_workspace --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
+
+ui-native-design: ui-design-native
+
+## Retain the standalone design study for typography/icon galleries and the prototype workbench.
+ui-design-reference:
+	$(PY) -m examples.ui_design.native.docking_study --backend $(BACKEND) --output output/ui_design/reference/$(BACKEND) $(ARGS)
 
 ui-design-native-check:
-	$(PYTEST) -q -m 'not gpu' tests/test_ui_design.py tests/test_ui_design_icons.py tests/test_ui_design_controls.py tests/test_ui_design_runtime.py
+	$(PYTEST) -q -m 'not gpu' tests/test_ui_design.py tests/test_ui_design_fonts.py tests/test_ui_design_icons.py tests/test_ui_design_icon_roles.py tests/test_ui_design_controls.py tests/test_ui_design_runtime.py tests/test_ui_design_numeric.py tests/test_ui_design_output.py tests/test_ui_design_navigation.py tests/test_ui_design_pose.py tests/test_ui_design_settings.py tests/test_ui_design_components.py tests/test_ui_design_menus.py tests/test_ui_design_timeline.py tests/test_ui_design_timeline_details.py tests/test_ui_design_camera.py tests/test_ui_design_color.py
 
 ## Verify native scene interactions, flat gizmos and settings; capture representative states.
 ui-design-gizmos:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_design_gizmos.py
 
-## Click timeline, workspace and file actions at 2x scale in the default window.
+## Verify scaled panels, scene selection, numeric edits, timeline and file actions.
 ui-design-runtime:
-	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_design_runtime.py
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py
 
 ## Recompile tracked icon contours after editing the SVG masters.
 ui-design-icons:

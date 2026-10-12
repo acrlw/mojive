@@ -31,6 +31,41 @@ def test_portable_fonts_can_be_selected_on_macos():
     assert resolved[0][0].label == "Roboto Regular"
 
 
+def test_native_cjk_family_matches_latin_and_heading_weight(tmp_path, monkeypatch):
+    is_file = fonts.Path.is_file
+    monkeypatch.setattr(
+        fonts.Path,
+        "is_file",
+        lambda path: False if str(path).startswith("/System/Library/Fonts/") else is_file(path),
+    )
+    regular = tmp_path / "NotoSansCJK-Regular.ttc"
+    bold = tmp_path / "NotoSansCJK-Bold.ttc"
+    regular.touch()
+    bold.touch()
+    source = fonts.FontSource(str(regular), 0, "Noto Sans CJK")
+    body, heading, _numeric = fonts.resolve_fonts(cjk=source)
+    assert body[0].path == str(regular) and heading[0].path == str(bold)
+    assert body[0].index == heading[0].index == 2
+    assert not body[0].embolden and not heading[0].embolden
+    assert body[0].label == "Noto Sans CJK SC Regular"
+    assert heading[0].label == "Noto Sans CJK SC Bold"
+    portable = fonts.resolve_fonts(cjk=source, portable=True)
+    assert portable[0][0].label == "Roboto Regular"
+
+
+def test_cjk_heading_retains_weight_when_only_regular_face_exists(tmp_path):
+    regular = tmp_path / "NotoSansSC-Regular.otf"
+    regular.touch()
+    body, heading = fonts.resolve_cjk_faces(fonts.FontSource(str(regular), 0, "Noto Sans SC"))
+    assert body.path == heading.path == str(regular)
+    assert not body.embolden and heading.embolden
+
+
+def test_missing_cjk_does_not_change_bundled_font_resolution():
+    assert fonts.resolve_cjk_faces(None) == (None, None)
+    assert fonts.resolve_fonts(cjk=None, portable=True)[0][0].label == "Roboto Regular"
+
+
 @pytest.fixture
 def document_menus(tmp_path):
     from mojive import Scene
@@ -188,6 +223,50 @@ def test_document_save_reports_writer_failure(document_menus, monkeypatch):
     assert not list(output.iterdir())
     assert app.session.last_message == "Disk full"
     assert app._model_load_error == "Disk full" and app._show_model_load_error
+
+
+def test_open_scene_refreshes_transform_baseline_and_clears_pinned_identity(document_menus):
+    from examples.ui_design.native.scene_preview import Preview
+
+    from mojive import Scene
+    from mojive import commands as cmd
+    from mojive.adapters.base import FrameNeeds
+    from mojive.adapters.static import StaticSceneAdapter
+    from mojive.session import Session
+
+    _menus, app, node, output = document_menus
+    preview = Preview.__new__(Preview)
+    preview.session, preview.theme = app.session, app.theme
+    preview.entities, preview._entity_cache = [], {}
+    preview.document = {"pose": {}}
+    preview.study = SimpleNamespace(pinned=None)
+    preview.refresh_document()
+    original_document = app.session.document_id
+    app.session.submit(cmd.SetPose(node.node_id, np.array([2, 0, 0]), np.eye(3)))
+    preview.refresh_document()
+    baseline = next(entry for entry in preview.initial_entities if entry["name"] == "body")
+    assert baseline["position"] == [0, 0, 0]
+    preview.study.pinned = str(node.node_id)
+
+    replacement = Scene()
+    replacement.box(name="body", position=(5, 0, 0))
+    other = Session(StaticSceneAdapter(replacement))
+    destination = output / "replacement.mojive.json"
+    try:
+        assert other.submit(cmd.SaveScene(destination)).ok
+    finally:
+        other.release()
+    assert app.session.submit(cmd.OpenScene(destination)).ok
+    app.session.tick(FrameNeeds(poses=True), wall_dt=0)
+    preview.refresh_document()
+    assert app.session.document_id != original_document
+    assert preview.study.pinned is None
+    baseline = next(entry for entry in preview.initial_entities if entry["name"] == "body")
+    assert baseline["node_id"] == node.node_id
+    assert baseline["position"] == [5, 0, 0]
+    app.session.submit(cmd.SetPose(node.node_id, np.array([8, 0, 0]), np.eye(3)))
+    preview.refresh_document()
+    assert baseline["position"] == [5, 0, 0]
 
 
 def _layout_snapshot():

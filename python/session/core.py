@@ -333,6 +333,16 @@ class Session(_Editing, _Playback, _Source):
         return self._take.times
 
     @property
+    def state_take_cells(self) -> list[tuple[float, float]]:
+        """Return recorded frame coverage, preserving holes left by frame deletion."""
+        return self._take.cells
+
+    @property
+    def state_take_segments(self) -> list[tuple[int, int]]:
+        """Return inclusive frame ranges connected by original recording coverage."""
+        return self._take.segments
+
+    @property
     def state_take_loop(self) -> tuple[int, int] | None:
         """Return the selected playback range (the historical range-only accessor)."""
         return self.state_take_range

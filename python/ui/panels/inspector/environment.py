@@ -15,19 +15,21 @@ from mojive.adapters.base import (
 from mojive.render.backend import RenderFlag
 from mojive.scene.state import apply_camera_bookmark
 from mojive.types import DEFAULT_HEADLIGHT, Environment, LightType, TextureType
-from mojive.ui.controls import begin_property_table, property_row
 from mojive.ui.panels import (
     PanelContext,
     button_width,
     segmented_control,
 )
-from mojive.ui.panels.value_cards import value_rail
 
 from .fields import (
     _begin_property_table,
     _property_color_edit3,
     _property_control_row,
+    _property_integer,
+    _property_numeric,
     _property_section,
+    _property_toggle,
+    _property_value_rail,
     _property_vector_row,
     _vector_fields,
 )
@@ -57,10 +59,10 @@ class _Environment:
         cast_shadow = light.cast_shadow
 
         if _property_section(ctx, "light properties") and _begin_property_table(
-            "insp_light_properties"
+            "insp_light_properties", ctx=ctx
         ):
-            _property_control_row(ctx, "enabled")
-            active_changed, active = imgui.checkbox("##light_enabled", light.active)
+            _property_control_row(ctx, "enabled", toggle=True)
+            active_changed, active = _property_toggle(ctx, "##light_enabled", light.active)
             _property_control_row(ctx, "type")
             kind_changed, kind_index = imgui.combo(
                 "##light_type",
@@ -72,8 +74,8 @@ class _Environment:
 
             if light_type is LightType.IMAGE:
                 _property_control_row(ctx, "intensity")
-                intensity_changed, image_intensity = imgui.drag_float(
-                    "##light_intensity", light.intensity, 50.0, 0.0, 100000.0, "%.0f"
+                intensity_changed, image_intensity = _property_numeric(
+                    ctx, "##light_intensity", light.intensity, 50.0, 0.0, 100000.0, "%.0f"
                 )
                 textures = [
                     name
@@ -97,8 +99,8 @@ class _Environment:
                 _property_control_row(ctx, "color")
                 color_changed, color = _property_color_edit3(ctx, "##light_color", color)
                 _property_control_row(ctx, "intensity")
-                intensity_changed, intensity = imgui.drag_float(
-                    "##light_intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
+                intensity_changed, intensity = _property_numeric(
+                    ctx, "##light_intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
                 )
                 diffuse = np.asarray(color, np.float32) * intensity
                 _property_control_row(ctx, "specular")
@@ -109,9 +111,9 @@ class _Environment:
                 ambient_changed, ambient = _property_color_edit3(
                     ctx, "##light_ambient", light.ambient
                 )
-                _property_control_row(ctx, "cast shadow")
-                shadow_changed, cast_shadow = imgui.checkbox(
-                    "##light_cast_shadow", light.cast_shadow
+                _property_control_row(ctx, "cast shadow", toggle=True)
+                shadow_changed, cast_shadow = _property_toggle(
+                    ctx, "##light_cast_shadow", light.cast_shadow
                 )
                 changed |= (
                     color_changed
@@ -123,7 +125,7 @@ class _Environment:
             imgui.end_table()
 
         if _property_section(ctx, "light transform") and _begin_property_table(
-            "insp_light_transform"
+            "insp_light_transform", ctx=ctx
         ):
             pos_changed, position = _property_vector_row(
                 ctx,
@@ -136,6 +138,7 @@ class _Environment:
                 lo=0.0,
                 hi=0.0,
                 fmt="%.3f",
+                unit="m",
             )
             dir_changed, direction = _property_vector_row(
                 ctx,
@@ -162,11 +165,11 @@ class _Environment:
         if (
             local_light
             and _property_section(ctx, "light attenuation")
-            and _begin_property_table("insp_light_attenuation")
+            and _begin_property_table("insp_light_attenuation", ctx=ctx)
         ):
-            _property_control_row(ctx, "range")
-            range_changed, light_range = imgui.drag_float(
-                "##light_range", light.range, 0.05, 0.0, 10000.0, "%.2f"
+            _property_control_row(ctx, "range", unit="m")
+            range_changed, light_range = _property_numeric(
+                ctx, "##light_range", light.range, 0.05, 0.0, 10000.0, "%.2f"
             )
             imgui.set_item_tooltip(ctx.tr("0 means unlimited"))
             attenuation_changed, attenuation = _property_vector_row(
@@ -183,29 +186,29 @@ class _Environment:
                 reset_values=np.array((1.0, 0.0, 0.0)),
             )
             if light_type is LightType.SPOT:
-                _property_control_row(ctx, "cutoff")
-                cutoff_changed, cutoff = imgui.drag_float(
-                    "##light_cutoff", light.cutoff, 0.25, 0.1, 89.9, "%.1f deg"
+                _property_control_row(ctx, "cutoff", unit="°")
+                cutoff_changed, cutoff = _property_numeric(
+                    ctx, "##light_cutoff", light.cutoff, 0.25, 0.1, 89.9, "%.1f deg"
                 )
                 _property_control_row(ctx, "falloff exponent")
-                exponent_changed, exponent = imgui.drag_float(
-                    "##light_exponent", light.exponent, 0.1, 0.0, 100.0, "%.1f"
+                exponent_changed, exponent = _property_numeric(
+                    ctx, "##light_exponent", light.exponent, 0.1, 0.0, 100.0, "%.1f"
                 )
             if light_type is LightType.AREA:
-                _property_control_row(ctx, "source radius")
-                area_changed, area_radius = imgui.drag_float(
-                    "##light_area_radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
+                _property_control_row(ctx, "source radius", unit="m")
+                area_changed, area_radius = _property_numeric(
+                    ctx, "##light_area_radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
                 )
             imgui.end_table()
 
         if (
             ctx.session.adapter.caps.simulation
             and _property_section(ctx, "light behavior")
-            and _begin_property_table("insp_light_behavior")
+            and _begin_property_table("insp_light_behavior", ctx=ctx)
         ):
-            _property_control_row(ctx, "gizmo lock")
-            lock_changed, locked = imgui.checkbox(
-                "##light_gizmo_lock", ctx.session.entity_gizmo_lock_enabled(node)
+            _property_control_row(ctx, "gizmo lock", toggle=True)
+            lock_changed, locked = _property_toggle(
+                ctx, "##light_gizmo_lock", ctx.session.entity_gizmo_lock_enabled(node)
             )
             if lock_changed:
                 ctx.session.set_entity_gizmo_lock(node, locked)
@@ -272,8 +275,10 @@ class _Environment:
         ]
         skyboxes = [None, *cube_textures]
         skybox_index = skyboxes.index(source.skybox) if source.skybox in skyboxes else 0
-        if _property_section(ctx, "skybox") and _begin_property_table("environment_skybox"):
-            _property_control_row(ctx, "enabled")
+        if _property_section(ctx, "skybox") and _begin_property_table(
+            "environment_skybox", ctx=ctx
+        ):
+            _property_control_row(ctx, "enabled", toggle=True)
             self._render_flag(ctx, RenderFlag.SKYBOX, "##environment-skybox-enabled")
             _property_control_row(ctx, "texture")
             skybox_changed, skybox_index = imgui.combo(
@@ -286,7 +291,9 @@ class _Environment:
                 self._submit_edit(ctx, cmd.SetSkybox(skyboxes[skybox_index]))
 
         ambient = environment.ambient
-        if _property_section(ctx, "ambient light") and _begin_property_table("environment_ambient"):
+        if _property_section(ctx, "ambient light") and _begin_property_table(
+            "environment_ambient", ctx=ctx
+        ):
             _property_control_row(ctx, "color")
             ambient_changed, ambient = _property_color_edit3(
                 ctx, "##environment-ambient-color", ambient
@@ -300,18 +307,20 @@ class _Environment:
         color = headlight.diffuse / intensity if intensity > 0.0 else np.ones(3, np.float32)
         specular = headlight.specular
         headlight_ambient = headlight.ambient
-        if _property_section(ctx, "headlight") and _begin_property_table("environment_headlight"):
-            _property_control_row(ctx, "enabled")
-            enabled_changed, headlight_enabled = imgui.checkbox(
-                "##environment-headlight-enabled", headlight_enabled
+        if _property_section(ctx, "headlight") and _begin_property_table(
+            "environment_headlight", ctx=ctx
+        ):
+            _property_control_row(ctx, "enabled", toggle=True)
+            enabled_changed, headlight_enabled = _property_toggle(
+                ctx, "##environment-headlight-enabled", headlight_enabled
             )
             _property_control_row(ctx, "color")
             color_changed, color = _property_color_edit3(
                 ctx, "##environment-headlight-color", color
             )
             _property_control_row(ctx, "intensity")
-            intensity_changed, intensity = imgui.drag_float(
-                "##environment-headlight-intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
+            intensity_changed, intensity = _property_numeric(
+                ctx, "##environment-headlight-intensity", intensity, 0.01, 0.0, 10.0, "%.2f"
             )
             _property_control_row(ctx, "specular")
             specular_changed, specular = _property_color_edit3(
@@ -333,20 +342,20 @@ class _Environment:
         fog_color = environment.fog_color
         fog_start = environment.fog_start
         fog_end = environment.fog_end
-        if _property_section(ctx, "fog") and _begin_property_table("environment_fog"):
-            _property_control_row(ctx, "enabled")
+        if _property_section(ctx, "fog") and _begin_property_table("environment_fog", ctx=ctx):
+            _property_control_row(ctx, "enabled", toggle=True)
             self._render_flag(ctx, RenderFlag.FOG, "##environment-fog-enabled")
             _property_control_row(ctx, "color")
             fog_color_changed, fog_color = _property_color_edit3(
                 ctx, "##environment-fog-color", fog_color
             )
-            _property_control_row(ctx, "start")
-            fog_start_changed, fog_start = imgui.drag_float(
-                "##environment-fog-start", fog_start, 0.05, 0.0, 1e6, "%.2f m"
+            _property_control_row(ctx, "start", unit="m")
+            fog_start_changed, fog_start = _property_numeric(
+                ctx, "##environment-fog-start", fog_start, 0.05, 0.0, 1e6, "%.2f m"
             )
-            _property_control_row(ctx, "end")
-            fog_end_changed, fog_end = imgui.drag_float(
-                "##environment-fog-end", fog_end, 0.05, 0.0, 1e6, "%.2f m"
+            _property_control_row(ctx, "end", unit="m")
+            fog_end_changed, fog_end = _property_numeric(
+                ctx, "##environment-fog-end", fog_end, 0.05, 0.0, 1e6, "%.2f m"
             )
             imgui.end_table()
             changed |= fog_color_changed or fog_start_changed or fog_end_changed
@@ -355,8 +364,8 @@ class _Environment:
         haze_color = environment.haze_color
         haze_density = environment.haze_density
         haze_slices = environment.horizon_haze_slices
-        if _property_section(ctx, "haze") and _begin_property_table("environment_haze"):
-            _property_control_row(ctx, "enabled")
+        if _property_section(ctx, "haze") and _begin_property_table("environment_haze", ctx=ctx):
+            _property_control_row(ctx, "enabled", toggle=True)
             self._render_flag(ctx, RenderFlag.HAZE, "##environment-haze-enabled")
             _property_control_row(ctx, "Mode")
             mode_changed, haze_mode = imgui.combo(
@@ -369,9 +378,12 @@ class _Environment:
             haze_color_changed, haze_color = _property_color_edit3(
                 ctx, "##environment-haze-color", haze_color
             )
-            _property_control_row(ctx, "radius" if horizon_haze else "density")
+            _property_control_row(
+                ctx, "radius" if horizon_haze else "density", unit="" if horizon_haze else "1/m"
+            )
             haze_format = "%.4f" if horizon_haze else "%.4f / m"
-            haze_density_changed, haze_density = imgui.drag_float(
+            haze_density_changed, haze_density = _property_numeric(
+                ctx,
                 "##environment-haze-density",
                 haze_density,
                 0.001,
@@ -382,8 +394,8 @@ class _Environment:
             slices_changed = False
             if horizon_haze:
                 _property_control_row(ctx, "slices")
-                slices_changed, haze_slices = imgui.drag_int(
-                    "##environment-haze-slices", haze_slices, 1.0, 3, 512, "%d"
+                slices_changed, haze_slices = _property_integer(
+                    ctx, "##environment-haze-slices", haze_slices, 1.0, 3, 512, "%d"
                 )
             imgui.end_table()
             changed |= haze_color_changed or haze_density_changed or mode_changed or slices_changed
@@ -422,7 +434,7 @@ class _Environment:
     def _render_flag(ctx: PanelContext, flag: RenderFlag, label: str) -> None:
         supported = ctx.backend.caps.supports(flag)
         imgui.begin_disabled(not supported)
-        changed, value = imgui.checkbox(label, ctx.backend.get_flag(flag))
+        changed, value = _property_toggle(ctx, label, ctx.backend.get_flag(flag))
         imgui.end_disabled()
         if changed:
             ctx.backend.set_flag(flag, value)
@@ -466,10 +478,11 @@ class _Environment:
                     (ctx.tr("target"), target, 0.01, "%.4f", initial.target),
                     (ctx.tr("up"), up, 0.01, "%.4f", initial.up),
                 ),
+                units=("m", "m", ""),
             )
 
-        if _property_section(ctx, "camera projection") and begin_property_table(
-            "inspector_camera_projection"
+        if _property_section(ctx, "camera projection") and _begin_property_table(
+            "inspector_camera_projection", ctx=ctx
         ):
             fields = []
             for label, value, bounds, default, unit, fmt in (
@@ -484,9 +497,14 @@ class _Environment:
                 ("near", near, (1e-5, far - 1e-5), initial.near, "m", "%.5f"),
                 ("far", far, (near + 1e-5, 1e7), initial.far, "m", "%.3f"),
             ):
-                property_row(ctx.tr(label))
+                _property_control_row(
+                    ctx,
+                    ctx.tr(label),
+                    unit="°" if unit == "rad" and self._camera_angular_degrees else unit,
+                    toggle_unit=self._toggle_camera_angle_unit if unit == "rad" else None,
+                )
                 fields.append(
-                    value_rail(
+                    _property_value_rail(
                         ctx,
                         f"##inspector-camera-{label}",
                         value,
@@ -502,7 +520,7 @@ class _Environment:
             fov_changed, fov = fields[0].changed, fields[0].value
             near_changed, near = fields[1].changed, fields[1].value
             far_changed, far = fields[2].changed, fields[2].value
-            property_row(ctx.tr("projection"))
+            _property_control_row(ctx, ctx.tr("projection"))
             imgui.set_next_item_width(-1)
             projection = 1 if orthographic else 0
             supported = ctx.backend.caps.orthographic
@@ -523,8 +541,8 @@ class _Environment:
                 orthographic = selected_projection == 1
                 ortho_changed = True
             if orthographic:
-                property_row(ctx.tr("ortho height"))
-                height_edit = value_rail(
+                _property_control_row(ctx, ctx.tr("ortho height"), unit="m")
+                height_edit = _property_value_rail(
                     ctx,
                     "##camera_ortho_height",
                     float(view.ortho_height),
@@ -538,7 +556,7 @@ class _Environment:
             imgui.end_table()
 
         if _property_section(ctx, "camera behavior") and _begin_property_table(
-            "insp_camera_behavior"
+            "insp_camera_behavior", ctx=ctx
         ):
             if ctx.select_model_camera is not None:
                 active = ctx.model_camera_id == info.camera_id
@@ -551,8 +569,9 @@ class _Environment:
                 )
 
             if ctx.session.adapter.caps.simulation:
-                _property_control_row(ctx, "gizmo lock")
-                changed, locked = imgui.checkbox(
+                _property_control_row(ctx, "gizmo lock", toggle=True)
+                changed, locked = _property_toggle(
+                    ctx,
                     "##camera-gizmo-lock",
                     ctx.session.entity_gizmo_lock_enabled(node),
                 )
@@ -561,8 +580,9 @@ class _Environment:
                     ctx.session.set_entity_gizmo_lock(node, locked)
 
             if ctx.camera_preview is not None:
-                _property_control_row(ctx, "preview")
-                changed, enabled = imgui.checkbox(
+                _property_control_row(ctx, "preview", toggle=True)
+                changed, enabled = _property_toggle(
+                    ctx,
                     "##camera_preview_enabled",
                     bool(ctx.camera_preview.enabled),
                 )
@@ -605,6 +625,8 @@ class _Environment:
         self._camera_angular_degrees = not self._camera_angular_degrees
 
     def _camera_transfer(self, ctx, camera_info):
+        if ctx.inspector_presentation is not None and not _property_section(ctx, "camera view"):
+            return
         sources = [(-1, ctx.tr("Editor Camera"))] + [
             (camera.camera_id, camera.name)
             for camera in ctx.session.cameras
@@ -660,13 +682,15 @@ class _Environment:
                 self._submit_edit(ctx, cmd.SetSceneCamera(camera_info.camera_id, source))
             except (KeyError, TypeError, ValueError, ZeroDivisionError) as error:
                 ctx.report(str(error), level="error")
-        imgui.separator()
+        if ctx.inspector_presentation is None:
+            imgui.separator()
 
     @staticmethod
     def _entity_gizmo_lock(ctx: PanelContext, node: SceneNode) -> None:
         if not ctx.session.adapter.caps.simulation:
             return
-        changed, locked = imgui.checkbox(
+        changed, locked = _property_toggle(
+            ctx,
             ctx.tr("Lock gizmo while simulation runs"),
             ctx.session.entity_gizmo_lock_enabled(node),
         )

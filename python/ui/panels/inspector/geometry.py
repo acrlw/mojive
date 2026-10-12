@@ -27,8 +27,12 @@ from .fields import (
     _property_button_row,
     _property_color_edit4,
     _property_control_row,
+    _property_integer,
+    _property_numbers,
+    _property_numeric,
     _property_section,
     _property_solver_rows,
+    _property_toggle,
     _property_vector_row,
 )
 from .materials import _material_asset_rows, _material_surface_rows, _material_texture_rows
@@ -73,9 +77,9 @@ def _contact_collision_rows(
     ctx: PanelContext, properties: GeometryProperties
 ) -> GeometryProperties:
     edited = properties
-    _property_control_row(ctx, "friction (slide spin roll)")
-    changed, friction = imgui.drag_float3(
-        "##contact_friction", properties.friction, 0.005, 0.0, 1000000.0, "%.5f"
+    _property_control_row(ctx, "friction (slide spin roll)", components=3)
+    changed, friction = _property_numbers(
+        ctx, "##contact_friction", properties.friction, 0.005, 0.0, 1000000.0, "%.5f"
     )
     if changed:
         edited = replace(edited, friction=_edited_float_components(properties.friction, friction))
@@ -112,8 +116,8 @@ def _contact_collision_rows(
     if changed:
         edited = replace(edited, collision_affinity_mask=int(affinity_mask))
     _property_control_row(ctx, "contact priority")
-    changed, priority = imgui.drag_int(
-        "##contact_priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
+    changed, priority = _property_integer(
+        ctx, "##contact_priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
     )
     if changed:
         edited = replace(edited, contact_priority=int(priority))
@@ -122,21 +126,21 @@ def _contact_collision_rows(
 
 def _contact_solver_rows(ctx: PanelContext, properties: GeometryProperties) -> GeometryProperties:
     edited = properties
-    _property_control_row(ctx, "contact margin")
-    changed, margin = imgui.drag_float(
-        "##contact_margin", properties.margin, 0.001, 0.0, 1000000.0, "%.5f m"
+    _property_control_row(ctx, "contact margin", unit="m")
+    changed, margin = _property_numeric(
+        ctx, "##contact_margin", properties.margin, 0.001, 0.0, 1000000.0, "%.5f m"
     )
     if changed:
         edited = replace(edited, margin=float(margin))
-    _property_control_row(ctx, "contact gap")
-    changed, gap = imgui.drag_float(
-        "##contact_gap", properties.gap, 0.001, 0.0, 1000000.0, "%.5f m"
+    _property_control_row(ctx, "contact gap", unit="m")
+    changed, gap = _property_numeric(
+        ctx, "##contact_gap", properties.gap, 0.001, 0.0, 1000000.0, "%.5f m"
     )
     if changed:
         edited = replace(edited, gap=float(gap))
     _property_control_row(ctx, "solver mix")
-    changed, solver_mix = imgui.drag_float(
-        "##contact_solver_mix", properties.solver_mix, 0.01, 0.0, 1.0, "%.3f"
+    changed, solver_mix = _property_numeric(
+        ctx, "##contact_solver_mix", properties.solver_mix, 0.01, 0.0, 1.0, "%.3f"
     )
     if changed:
         edited = replace(edited, solver_mix=float(solver_mix))
@@ -159,9 +163,9 @@ def _contact_surface_rows(
     ctx: PanelContext, node: SceneNode | None, properties: GeometryProperties, *, editable: bool
 ) -> GeometryProperties:
     edited = properties
-    _property_control_row(ctx, "adhesion")
-    changed, adhesion = imgui.drag_float(
-        "##contact_adhesion", properties.adhesion, 0.01, 0.0, 1000000000.0, "%.5g"
+    _property_control_row(ctx, "adhesion", unit="N")
+    changed, adhesion = _property_numeric(
+        ctx, "##contact_adhesion", properties.adhesion, 0.01, 0.0, 1000000000.0, "%.5g"
     )
     if changed:
         edited = replace(edited, adhesion=float(adhesion))
@@ -178,6 +182,7 @@ def _contact_surface_rows(
         lo=0.0,
         hi=0.0,
         fmt="%.4g",
+        unit="m/s",
         reset_values=properties.surface_velocity[:3],
     )
     angular_changed, angular = _property_vector_row(
@@ -191,6 +196,7 @@ def _contact_surface_rows(
         lo=0.0,
         hi=0.0,
         fmt="%.4g",
+        unit="rad/s",
         reset_values=properties.surface_velocity[3:],
     )
     if linear_changed or angular_changed:
@@ -233,16 +239,24 @@ def _geometry_mass_rows(
     if changed:
         edited = replace(edited, mass_mode=mass_modes[mode])
     if edited.mass_mode == "density":
-        _property_control_row(ctx, "density")
-        changed, density = imgui.drag_float(
-            "##geometry_density", properties.density, 1.0, 0.000001, 1000000000000.0, "%.6g kg/m³"
+        _property_control_row(
+            ctx, "density", unit="kg/m²" if edited.inertia_mode == "shell" else "kg/m³"
+        )
+        changed, density = _property_numeric(
+            ctx,
+            "##geometry_density",
+            properties.density,
+            1.0,
+            0.000001,
+            1000000000000.0,
+            "%.6g kg/m³",
         )
         if changed:
             edited = replace(edited, density=float(density))
     else:
-        _property_control_row(ctx, "mass")
-        changed, mass = imgui.drag_float(
-            "##geometry_mass", properties.mass, 0.01, 0.000001, 1000000000000.0, "%.6g kg"
+        _property_control_row(ctx, "mass", unit="kg")
+        changed, mass = _property_numeric(
+            ctx, "##geometry_mass", properties.mass, 0.01, 0.000001, 1000000000000.0, "%.6g kg"
         )
         if changed:
             edited = replace(edited, mass=float(mass))
@@ -262,18 +276,20 @@ def _geometry_fluid_rows(
     ctx: PanelContext, properties: GeometryAdvancedProperties
 ) -> GeometryAdvancedProperties:
     edited = properties
-    _property_control_row(ctx, "ellipsoid fluid interaction")
-    changed, ellipsoid = imgui.checkbox("##geometry_fluid_ellipsoid", properties.fluid_ellipsoid)
+    _property_control_row(ctx, "ellipsoid fluid interaction", toggle=True)
+    changed, ellipsoid = _property_toggle(
+        ctx, "##geometry_fluid_ellipsoid", properties.fluid_ellipsoid
+    )
     if changed:
         edited = replace(edited, fluid_ellipsoid=bool(ellipsoid))
     coefficients = properties.fluid_coefficients
-    _property_control_row(ctx, "fluid blunt / slender / angular")
-    first_changed, first = imgui.drag_float3(
-        "##geometry_fluid_first", coefficients[:3], 0.01, 0.0, 1000000.0, "%.4g"
+    _property_control_row(ctx, "fluid blunt / slender / angular", components=3)
+    first_changed, first = _property_numbers(
+        ctx, "##geometry_fluid_first", coefficients[:3], 0.01, 0.0, 1000000.0, "%.4g"
     )
-    _property_control_row(ctx, "fluid Kutta / Magnus")
-    last_changed, last = imgui.drag_float2(
-        "##geometry_fluid_last", coefficients[3:], 0.01, 0.0, 1000000.0, "%.4g"
+    _property_control_row(ctx, "fluid Kutta / Magnus", components=2)
+    last_changed, last = _property_numbers(
+        ctx, "##geometry_fluid_last", coefficients[3:], 0.01, 0.0, 1000000.0, "%.4g"
     )
     if first_changed or last_changed:
         edited = replace(
@@ -298,7 +314,7 @@ class _Geometry:
     """Private geometry methods of InspectorPanel; state belongs to its owner."""
 
     def _material(self, ctx: PanelContext, node: SceneNode) -> None:
-        if not imgui.collapsing_header(ctx.tr("material")):
+        if not _property_section(ctx, "material", 0):
             return
         src = ctx.session.source
         if src is None or node.body_index < 0 or len(src.geom_body) == 0:
@@ -332,7 +348,8 @@ class _Geometry:
         label = scene_node.name if scene_node is not None else f"geometry {node_id}"
         imgui.push_id(node_id)
         try:
-            if not imgui.collapsing_header(
+            if not _property_section(
+                ctx,
                 f"{label}##component",
                 imgui.TreeNodeFlags_.default_open if len(instances) == 1 else 0,
             ):
@@ -372,10 +389,11 @@ class _Geometry:
                 imgui.begin_disabled()
             dimension_label, dimensions = size_editor.label, size_editor.array()
             size_changed = False
-            if _begin_property_table("insp_geometry_dimensions"):
+            if _begin_property_table("insp_geometry_dimensions", ctx=ctx):
                 if len(dimensions) == 1:
-                    _property_control_row(ctx, dimension_label)
-                    size_changed, scalar = imgui.drag_float(
+                    _property_control_row(ctx, dimension_label, unit="m")
+                    size_changed, scalar = _property_numeric(
+                        ctx,
                         "##geometry_dimension",
                         float(dimensions[0]),
                         0.05,
@@ -385,8 +403,11 @@ class _Geometry:
                     )
                     dimensions = np.array((scalar,), np.float32)
                 elif len(dimensions) == 2:
-                    _property_control_row(ctx, dimension_label)
-                    size_changed, dimensions = imgui.drag_float2(
+                    _property_control_row(
+                        ctx, dimension_label, unit="m", components=len(dimensions)
+                    )
+                    size_changed, dimensions = _property_numbers(
+                        ctx,
                         "##geometry_dimensions_2d",
                         dimensions,
                         0.05,
@@ -406,11 +427,15 @@ class _Geometry:
                         lo=0.002,
                         hi=1000000.0,
                         fmt="%.3f",
+                        unit="m",
                         reset_values=np.ones(3, np.float64),
                     )
                 else:
-                    _property_control_row(ctx, dimension_label)
-                    size_changed, dimensions = imgui.drag_float3(
+                    _property_control_row(
+                        ctx, dimension_label, unit="m", components=len(dimensions)
+                    )
+                    size_changed, dimensions = _property_numbers(
+                        ctx,
                         "##geometry_dimensions_3d",
                         dimensions,
                         0.05,
@@ -446,7 +471,7 @@ class _Geometry:
         material_index: int,
     ) -> None:
         if not _property_section(ctx, "appearance") or not _begin_property_table(
-            "insp_geometry_appearance"
+            "insp_geometry_appearance", ctx=ctx
         ):
             return
         material = src.materials[material_index]
@@ -526,7 +551,7 @@ class _Geometry:
             self._geometry_shape_edit = current
             self._geometry_shape_error = ""
         properties = self._geometry_shape_edit
-        if properties is None or not imgui.collapsing_header(ctx.tr("geometry shape and resource")):
+        if properties is None or not _property_section(ctx, "geometry shape and resource", 0):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -536,7 +561,7 @@ class _Geometry:
         )
         if not editable:
             imgui.begin_disabled()
-        if _begin_property_table("insp_geometry_shape"):
+        if _begin_property_table("insp_geometry_shape", ctx=ctx):
             self._geometry_shape_edit = _geometry_shape_rows(ctx, properties)
             imgui.end_table()
         if not editable:
@@ -562,7 +587,7 @@ class _Geometry:
             and ctx.request_geometry_resource_import is not None
         )
         open_assets = apply = revert = import_mesh = import_hfield = False
-        if _begin_property_table("insp_geometry_shape_actions"):
+        if _begin_property_table("insp_geometry_shape_actions", ctx=ctx):
             if (
                 edited.type in ("mesh", "hfield")
                 and edited.resource_name
@@ -612,7 +637,7 @@ class _Geometry:
 
     def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
         properties = ctx.session.geometry_properties(node_id)
-        if properties is None or not imgui.collapsing_header(ctx.tr("contact properties")):
+        if properties is None or not _property_section(ctx, "contact properties", 0):
             return
         node = ctx.session.node(node_id)
         editable = bool(
@@ -624,7 +649,7 @@ class _Geometry:
         edited = properties
         if not editable:
             imgui.begin_disabled()
-        if _begin_property_table("insp_geometry_contact"):
+        if _begin_property_table("insp_geometry_contact", ctx=ctx):
             edited = _contact_collision_rows(ctx, edited)
             edited = _contact_solver_rows(ctx, edited)
             edited = _contact_surface_rows(ctx, node, edited, editable=editable)
@@ -672,7 +697,7 @@ class _Geometry:
             self._geometry_advanced_edit = current
             self._geometry_advanced_error = ""
         properties = self._geometry_advanced_edit
-        if properties is None or not imgui.collapsing_header(ctx.tr("mass, group, and fluid")):
+        if properties is None or not _property_section(ctx, "mass, group, and fluid", 0):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -680,7 +705,7 @@ class _Geometry:
         )
         if not editable:
             imgui.begin_disabled()
-        if _begin_property_table("insp_geometry_advanced"):
+        if _begin_property_table("insp_geometry_advanced", ctx=ctx):
             edited = _geometry_mass_rows(ctx, properties)
             self._geometry_advanced_edit = _geometry_fluid_rows(ctx, edited)
             imgui.end_table()
@@ -701,7 +726,7 @@ class _Geometry:
     ) -> None:
         dirty = edited != current
         apply = revert = False
-        if _begin_property_table("insp_geometry_advanced_actions"):
+        if _begin_property_table("insp_geometry_advanced_actions", ctx=ctx):
             apply, revert = _property_button_row(
                 ctx, "changes", ("Apply", "Revert"), enabled=(editable and dirty, dirty)
             )

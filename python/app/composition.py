@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import operator
+import os
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -57,7 +58,10 @@ def _viewer_layout_path(config: ViewerConfig | None, *, vsync: bool) -> str:
         return str(Path(layout.path).expanduser())
     from mojive.ui.window import layout_settings_path
 
-    return str(layout_settings_path())
+    path = layout_settings_path()
+    if not os.environ.get("MOJIVE_IMGUI_INI") and (config is None or config.ui == "native"):
+        path = path.with_name("native_" + path.name)
+    return str(path)
 
 
 @dataclass
@@ -733,6 +737,15 @@ def _compose(
     from mojive.ui.window import WindowConfig
 
     renderer = render_backend_name(renderer)
+    interface = viewer_config.ui if viewer_config is not None else "native"
+    if interface not in ("native", "classic"):
+        raise ValueError("ViewerConfig.ui requires 'native' or 'classic'")
+    if interface == "native":
+        from mojive.ui.workspace.app import WorkspaceApp
+
+        app_class = WorkspaceApp
+    else:
+        app_class = ViewerApp
     ini = _viewer_layout_path(viewer_config, vsync=vsync)
     if ini:
         Path(ini).parent.mkdir(parents=True, exist_ok=True)
@@ -772,7 +785,7 @@ def _compose(
         if paused and not session.paused:
             session.submit(cmd.Pause())
 
-        app = ViewerApp(
+        app = app_class(
             session,
             backend,
             window,

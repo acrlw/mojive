@@ -20,6 +20,25 @@ def _settle(viewer):
 
 
 def _assert_default_layout(viewer):
+    if hasattr(viewer.app, "workspace"):
+        windows = {
+            name: imgui.internal.find_window_by_name(name)
+            for name in ("Scene", "Viewport", "Inspector")
+        }
+        assert all(
+            window is not None and window.dock_node is not None for window in windows.values()
+        )
+        scene, viewport, inspector = (windows[name].dock_node for name in windows)
+        root = imgui.internal.dock_builder_get_node(viewer.window.dockspace_id)
+        scale = viewer.window.style_scale
+        assert scene.size.x == pytest.approx(min(252 * scale, root.size.x * 0.26), abs=3)
+        assert inspector.size.x == pytest.approx(min(320 * scale, root.size.x * 0.30), abs=3)
+        assert scene.pos.y == viewport.pos.y == inspector.pos.y
+        assert scene.size.y == viewport.size.y == inspector.size.y
+        assert viewport.pos.x >= scene.pos.x + scene.size.x
+        assert inspector.pos.x >= viewport.pos.x + viewport.size.x
+        assert not viewer.app.workspace.bottom_open
+        return
     windows = {
         name: imgui.internal.find_window_by_name(name)
         for name in (
@@ -59,8 +78,9 @@ def _assert_default_layout(viewer):
 @pytest.mark.parametrize(
     "width,height,scale", ((1600, 1000, 1.0), (2400, 1500, 1.5), (3840, 1978, 2.5))
 )
+@pytest.mark.parametrize("interface", ("native", "classic"))
 def test_default_layout_and_reset_match_the_reviewed_dock_arrangement(
-    backend_name, monkeypatch, tmp_path, width, height, scale
+    backend_name, monkeypatch, tmp_path, width, height, scale, interface
 ):
     monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
@@ -71,6 +91,7 @@ def test_default_layout_and_reset_match_the_reviewed_dock_arrangement(
         width=width,
         height=height,
         show_window=False,
+        config=ViewerConfig(ui=interface),
     )
     try:
         _settle(viewer)
@@ -78,9 +99,9 @@ def test_default_layout_and_reset_match_the_reviewed_dock_arrangement(
         output = Path("output/default-layout")
         output.mkdir(parents=True, exist_ok=True)
         Image.fromarray(viewer.window.read_frame()[::-1, :, :3]).save(
-            output / f"default-{backend_name}-{scale}.png"
+            output / f"default-{interface}-{backend_name}-{scale}.png"
         )
-        hierarchy = imgui.internal.find_window_by_name("Hierarchy")
+        hierarchy = imgui.internal.find_window_by_name(viewer.panels.get("hierarchy").name)
         imgui.internal.dock_context_process_undock_window(
             imgui.get_current_context(), hierarchy, True
         )
@@ -94,11 +115,12 @@ def test_default_layout_and_reset_match_the_reviewed_dock_arrangement(
         viewer.release()
 
 
-def test_saved_personal_layout_takes_precedence(backend_name, monkeypatch, tmp_path):
+@pytest.mark.parametrize("interface", ("native", "classic"))
+def test_saved_personal_layout_takes_precedence(backend_name, monkeypatch, tmp_path, interface):
     monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     path = tmp_path / "personal.ini"
-    config = ViewerConfig(layout=LayoutConfig(path=path))
+    config = ViewerConfig(ui=interface, layout=LayoutConfig(path=path))
     for first in (True, False):
         viewer = build(
             resolve("joint_gizmo"),
@@ -110,7 +132,7 @@ def test_saved_personal_layout_takes_precedence(backend_name, monkeypatch, tmp_p
         )
         try:
             _settle(viewer)
-            hierarchy = imgui.internal.find_window_by_name("Hierarchy")
+            hierarchy = imgui.internal.find_window_by_name(viewer.panels.get("hierarchy").name)
             if first:
                 imgui.internal.dock_context_process_undock_window(
                     imgui.get_current_context(), hierarchy, True

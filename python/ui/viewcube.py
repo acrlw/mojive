@@ -164,6 +164,10 @@ class ViewCube:
     def balls(self) -> list[Ball]:
         return self._balls
 
+    def widget_center(self, rect, style_scale):
+        """Share the same anchor between painting and picking."""
+        return widget_center(rect, style_scale)
+
     def update(
         self,
         cam: CameraView,
@@ -173,7 +177,7 @@ class ViewCube:
         *,
         enabled: bool = True,
     ) -> Ball | None:
-        self._center = widget_center(rect, style_scale)
+        self._center = self.widget_center(rect, style_scale)
         self._balls = layout(cam, self._center, RADIUS_PT * style_scale, BALL_PT * style_scale)
         self._hover = hit_test(self._balls, cursor) if enabled else None
         dx, dy = cursor[0] - self._center[0], cursor[1] - self._center[1]

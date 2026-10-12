@@ -32,12 +32,13 @@ Application preferences default to these locations:
 
 | Platform | Settings file | Layout file |
 |---|---|---|
-| macOS | `~/Library/Application Support/mojive/settings.json` | `~/Library/Application Support/mojive/imgui.ini` |
-| Linux | `${XDG_CONFIG_HOME:-~/.config}/mojive/settings.json` | `${XDG_CONFIG_HOME:-~/.config}/mojive/imgui.ini` |
-| Windows | `%APPDATA%/mojive/settings.json` | `%APPDATA%/mojive/imgui.ini` |
+| macOS | `~/Library/Application Support/mojive/settings.json` | `~/Library/Application Support/mojive/native_imgui.ini` |
+| Linux | `${XDG_CONFIG_HOME:-~/.config}/mojive/settings.json` | `${XDG_CONFIG_HOME:-~/.config}/mojive/native_imgui.ini` |
+| Windows | `%APPDATA%/mojive/settings.json` | `%APPDATA%/mojive/native_imgui.ini` |
 
 `MOJIVE_SETTINGS` replaces the settings-file path. `MOJIVE_IMGUI_INI` replaces the layout-file
 path. `MOJIVE_CONFIG_DIR` affects the layout file only.
+The classic presentation retains `imgui.ini` in the same directory.
 
 The Settings panel writes user choices to the JSON settings file and restores them at the next
 launch. The file is intentionally backend-neutral, so switching between OpenGL and bgfx keeps
@@ -61,6 +62,23 @@ and enables every built-in panel, with the standard docking layout and interacti
 Inspector, Control, Joints, Camera and Keyframes are available from the start. Users can close
 panels, disable tools, or explicitly choose a reduced configuration after deciding what they need.
 `ViewerConfig.minimal()` is an opt-in embedding preset, never the default viewer experience.
+
+The default `ViewerConfig.ui="native"` uses the production workspace adopted from the native
+design reference: an activity bar, Scene sidebar, tabbed Inspector, bottom Timeline/Output/Statistics,
+and viewport tools. Clicking the active activity item hides its panel; clicking it again reopens it.
+Scene selection supports Ctrl/Cmd toggle and Shift ranges in the visible hierarchy order.
+`ViewerConfig(ui="classic")` selects the previous presentation for existing embeddings. Both
+presentations use the same Session commands, editor transactions and renderer contracts. Their
+default docking files are separate; an explicit `LayoutConfig.path` still chooses an exact file.
+
+Native workspace dimensions are defined in `mojive.ui.workspace.design`. They use logical points:
+14-point body and numeric text, 16-point titles, 28-point controls, 6-point control corners,
+12/10-point panel padding, 4-point numeric field gaps and 8-point row spacing. The application bar
+is 46 points tall; timeline lanes are 36 points tall. Drawing and input geometry use the same
+dimensions and receive the platform UI scale once.
+
+Run `make ui-design-native ARGS=--interactive` to review the production workspace. Without
+`--interactive`, it captures the production panels and menus under `output/ui_design/native/`.
 
 | Use case | Entry point | What is constructed |
 |---|---|---|

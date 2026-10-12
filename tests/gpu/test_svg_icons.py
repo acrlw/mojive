@@ -81,6 +81,16 @@ def test_svg_and_production_silhouettes_at_actual_sizes(backend_name, tmp_path, 
             union = np.count_nonzero(masks[0] | masks[1])
             intersection = np.count_nonzero(masks[0] & masks[1])
             overlap = intersection / max(1, union)
+            comparison = "opaque"
+            if not union:
+                # Subpixel strokes can retain visible AA coverage without opaque pixels.
+                coverage = [
+                    np.maximum(crop[..., :3].astype(float).mean(axis=2) - crop[0, 0, :3].mean(), 0)
+                    for crop in crops
+                ]
+                assert all(np.sum(value) > 0 for value in coverage), (name, size, "Empty glyph")
+                overlap = np.minimum(*coverage).sum() / np.maximum(*coverage).sum()
+                comparison = "aa_coverage"
             # Rasterizers may cover border pixels differently; a translated,
             # stretched, filled-in or substituted silhouette must still fail.
             assert overlap > 0.75, (name, size, overlap)
@@ -90,7 +100,9 @@ def test_svg_and_production_silhouettes_at_actual_sizes(backend_name, tmp_path, 
                     "size": size,
                     "scale": scale,
                     "framebuffer_scale": [sx, sy],
-                    "opaque_overlap": overlap,
+                    "opaque_overlap": overlap if union else None,
+                    "silhouette_overlap": overlap,
+                    "comparison": comparison,
                 }
             )
         (OUTPUT / f"{backend_name}-{size}-{scale}.json").write_text(json.dumps(report, indent=2))

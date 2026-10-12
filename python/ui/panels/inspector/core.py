@@ -123,7 +123,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
             qvel=(self.show_transform and self._transform_velocity) or self.show_velocity,
         )
 
-    def finish_frame(self, ctx: PanelContext) -> None:
+    def finish_frame(self, ctx: PanelContext, *, keep_edit_transaction=False) -> None:
         if self._renaming and (
             not self.open or not self.enabled or self._name_draw_frame != imgui.get_frame_count()
         ):
@@ -141,7 +141,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
             )
             if invalid_placement and gizmo.cancel_model_placement(ctx.session).ok:
                 self._model_transform_model = -1
-        if self._edit_transaction and not imgui.is_any_item_active():
+        if self._edit_transaction and not keep_edit_transaction and not imgui.is_any_item_active():
             ctx.submit(cmd.EndEditTransaction())
             self._edit_transaction = False
 

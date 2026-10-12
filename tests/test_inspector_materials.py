@@ -56,14 +56,14 @@ class _MaterialInputs:
 def inputs(monkeypatch):
     values = _MaterialInputs()
     for module in (geometry, materials):
-        monkeypatch.setattr(module, "_property_control_row", lambda *_args: None)
+        monkeypatch.setattr(module, "_property_control_row", lambda *_args, **_kw: None)
         monkeypatch.setattr(module, "_property_color_edit4", lambda _ctx, *args: values.edit(*args))
         monkeypatch.setattr(module, "_property_button_row", values.button_row)
-    monkeypatch.setattr(geometry, "_begin_property_table", lambda *_args: True)
+    monkeypatch.setattr(geometry, "_begin_property_table", lambda *_args, **_kw: True)
     monkeypatch.setattr(
         geometry,
         "_property_section",
-        lambda _ctx, label: label != "geometry dimensions" or values.dimensions,
+        lambda _ctx, label, _flags=0: label != "geometry dimensions" or values.dimensions,
     )
     for name in (
         "push_id",

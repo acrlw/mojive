@@ -29,6 +29,9 @@ from mojive.interaction.timeline import (
     recorded_take_spans as recorded_take_spans,
 )
 from mojive.interaction.timeline import (
+    take_frame_bounds as take_frame_bounds,
+)
+from mojive.interaction.timeline import (
     timeline_channel_width as timeline_channel_width,
 )
 from mojive.interaction.timeline import (

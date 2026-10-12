@@ -20,6 +20,7 @@ from mojive.ui.panels import (
 )
 
 from .fields import (
+    _property_section,
     _vector_fields,
 )
 from .support import (
@@ -56,8 +57,12 @@ class _Model:
                 self._model_transform_position = np.asarray(transform[0], np.float32).copy()
                 self._model_transform_euler = self._continuous_euler(node.node_id, transform[1])
 
-        imgui.separator()
-        imgui.text(ctx.tr("Model placement"))
+        if ctx.inspector_presentation is not None:
+            if not _property_section(ctx, "Model placement"):
+                return
+        else:
+            imgui.separator()
+            imgui.text(ctx.tr("Model placement"))
         can_edit = ctx.session.paused and info.removable and gizmo is not None
         if not placement_active:
             if not can_edit:
@@ -83,6 +88,7 @@ class _Model:
                 ("rotation", self._model_transform_euler, 0.5, "%.1f°", None),
             ),
             editable=placement_active,
+            units=("m", "°"),
         )
         if placement_active and (pos_changed or rot_changed) and gizmo is not None:
             next_position = np.asarray(position, np.float32).copy()
@@ -158,7 +164,7 @@ class _Model:
         if not any(self._component_counts.values()):
             imgui.text_disabled(ctx.tr("no model components"))
         for category, count in self._component_counts.items():
-            if not count or not imgui.collapsing_header(f"{category.capitalize()} ({count})"):
+            if not count or not _property_section(ctx, f"{category.capitalize()} ({count})", 0):
                 continue
             if category not in self._component_cache:
                 self._component_cache[category] = ctx.session.model_components(model_id, category)

@@ -68,11 +68,22 @@ class _Playback:
 
     def _delete_state_take_frames(self, first: int, last: int) -> None:
         take = self._take
+        if first > last:
+            return
+        removed = last - first + 1
+        segments = []
+        for start, end in take.segments:
+            if start < first:
+                segments.append((start, min(end, first - 1)))
+            if end > last:
+                segments.append((max(start, last + 1) - removed, end - removed))
+        take.segments[:] = segments
         take.size_bytes -= sum(
             self._physics_state_bytes(frame.state) for frame in take.frames[first : last + 1]
         )
         del take.frames[first : last + 1]
         del take.times[first : last + 1]
+        del take.cells[first : last + 1]
         del take.offsets[first : last + 1]
         if take.offsets:
             origin = take.offsets[0]
@@ -175,6 +186,8 @@ class _Playback:
     def _clear_state_take(self) -> None:
         self._take.frames.clear()
         self._take.times.clear()
+        self._take.cells.clear()
+        self._take.segments.clear()
         self._take.offsets.clear()
         self._take.play_range = None
         self._take.loop_enabled = False
@@ -318,6 +331,21 @@ class _Playback:
         self._take.signature = signature
         self._take.frames.append(_StateTakeFrame(self._step_counter, deepcopy(state)))
         self._take.times.append(float(state.time))
+        index = len(self._take.times) - 1
+        time = self._take.times[-1]
+        if index:
+            previous = self._take.times[-2]
+            boundary = (previous + time) / 2
+            left = self._take.cells[-1][0]
+            if index == 1 and left == previous:
+                left = previous - (time - previous) / 2
+            self._take.cells[-1] = (left, boundary)
+            self._take.cells.append((boundary, time + (time - previous) / 2))
+            start, _ = self._take.segments[-1]
+            self._take.segments[-1] = (start, index)
+        else:
+            self._take.cells.append((time, time))
+            self._take.segments.append((0, 0))
         offset = 0.0
         if self._take.offsets:
             duration = self._take.times[-1] - self._take.times[-2]

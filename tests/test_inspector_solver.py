@@ -64,7 +64,7 @@ def inputs(monkeypatch):
             module, "_property_control_row", lambda _ctx, label, **_kw: values.rows.append(label)
         )
     for module in (physics, geometry):
-        monkeypatch.setattr(module, "_begin_property_table", lambda _name: True)
+        monkeypatch.setattr(module, "_begin_property_table", lambda _name, **_kw: True)
     monkeypatch.setattr(fields, "button_width", lambda label: len(label) * 8.0)
     monkeypatch.setattr(imgui, "get_content_region_avail", lambda: SimpleNamespace(x=300))
     monkeypatch.setattr(

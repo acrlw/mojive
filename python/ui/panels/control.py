@@ -17,6 +17,7 @@ from . import (
     searchable_ordered_list_header,
     themed_checkbox,
 )
+from .presentation import PropertyPresentation
 from .value_cards import value_card, value_rail
 
 
@@ -30,6 +31,7 @@ class ControlPanel(Panel):
     def __init__(self) -> None:
         super().__init__()
         self._angular_degrees = False
+        self.presentation: PropertyPresentation | None = None
         self._initial_ctrl = np.zeros(0, np.float64)
         self._snapshot_generation = -1
         self._search = ""
@@ -189,7 +191,15 @@ class ControlPanel(Panel):
         self._angular_degrees = not self._angular_degrees
 
     @staticmethod
-    def _equality(ctx: PanelContext) -> None:
+    def _equality(ctx: PanelContext, presentation=None) -> None:
+        if presentation is not None:
+            for constraint in ctx.session.equality_constraints:
+                enabled = presentation.toggle(
+                    f"equality-{constraint.constraint_id}", constraint.name, constraint.enabled
+                )
+                if enabled != constraint.enabled:
+                    ctx.submit(cmd.SetEqualityEnabled(constraint.constraint_id, enabled))
+            return
         flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
         if not imgui.begin_table("control_equality", 2, flags):
             return

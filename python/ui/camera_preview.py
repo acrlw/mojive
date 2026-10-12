@@ -69,6 +69,11 @@ class CameraPreview:
         viewport: tuple[float, float, float, float],
         camera_name: str,
         translate: Any = None,
+        *,
+        draw_header: Any = None,
+        margin_pt: float = 12.0,
+        header_height_pt: float = 25.0,
+        image_padding_pt: float = 0.0,
     ) -> None:
         if not self._enabled:
             self._bounds = None
@@ -80,16 +85,25 @@ class CameraPreview:
         t = translate or str
         x, y, width, height = viewport
         scale = window.style_scale
-        header_height = 25.0 * scale
-        margin = 12.0 * scale
+        header_height = header_height_pt * scale
+        image_padding = image_padding_pt * scale
+        margin = margin_pt * scale
+        if (
+            width <= 2 * (margin + image_padding)
+            or height <= header_height + image_padding + 2 * margin
+        ):
+            self._bounds = None
+            return
         panel_width = min(
             340.0 * scale,
-            max(180.0 * scale, width * 0.48),
+            max(180.0 * scale, width * 0.48) if draw_header is None else width,
             max(1.0, width - 2.0 * margin),
-            max(1.0, height - header_height - 2.0 * margin) * 16.0 / 9.0,
+            max(1.0, height - header_height - image_padding - 2.0 * margin) * 16.0 / 9.0
+            + 2 * image_padding,
         )
-        image_height = panel_width * 9.0 / 16.0
-        panel_height = header_height + image_height
+        image_width = panel_width - 2 * image_padding
+        image_height = image_width * 9.0 / 16.0
+        panel_height = header_height + image_height + image_padding
         if self._position is None:
             self._position = (x + width - panel_width - margin, y + height - panel_height - margin)
         px = min(max(self._position[0], x + margin), x + width - panel_width - margin)
@@ -102,11 +116,36 @@ class CameraPreview:
         window_flags = (
             imgui.WindowFlags_.no_scrollbar.value | imgui.WindowFlags_.no_scroll_with_mouse.value
         )
+        if draw_header is not None:
+            imgui.push_style_var(imgui.StyleVar_.window_padding, (0.0, 0.0))
+            imgui.push_style_var(imgui.StyleVar_.item_spacing, (0.0, 0.0))
         if not imgui.begin_child(
             "##camera_preview", imgui.ImVec2(panel_width, panel_height), child_flags, window_flags
         ):
             imgui.end_child()
+            if draw_header is not None:
+                imgui.pop_style_var(2)
             return
+        if draw_header is not None:
+            dragging = draw_header(camera_name, header_height)
+            if dragging and not (self._pinned or self._locked):
+                delta = imgui.get_io().mouse_delta
+                self._position = (px + float(delta.x), py + float(delta.y))
+        else:
+            self._draw_header(camera_name, t, header_height, scale, px, py)
+        if image_padding:
+            imgui.set_cursor_screen_pos((px + image_padding, py + header_height))
+            available = imgui.ImVec2(image_width, image_height)
+        else:
+            available = imgui.get_content_region_avail()
+        uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
+        uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
+        imgui.image(window.viewport_texture_ref(image), available, uv0, uv1)
+        imgui.end_child()
+        if draw_header is not None:
+            imgui.pop_style_var(2)
+
+    def _draw_header(self, camera_name, t, header_height, scale, px, py):
         pin_label = t("Pinned" if self._pinned else "Pin")
         lock_label = t("Locked" if self._locked else "Lock")
         pin_width = imgui.calc_text_size(pin_label).x + 18.0 * scale
@@ -137,11 +176,6 @@ class CameraPreview:
         imgui.set_item_tooltip(
             t("Follow this camera even when selection changes. The camera can still move.")
         )
-        available = imgui.get_content_region_avail()
-        uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
-        uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
-        imgui.image(window.viewport_texture_ref(image), available, uv0, uv1)
-        imgui.end_child()
 
     @property
     def enabled(self) -> bool:

@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import lru_cache
+from typing import Literal
 
 from imgui_bundle import imgui
 
@@ -385,9 +386,9 @@ def themed_checkbox(
 
 
 @lru_cache(maxsize=256)
-def _segment_width(font, font_size, labels, icons, padding, glyph_scale, icon_only_width):
+def _segment_widths(font, font_size, labels, icons, padding, glyph_scale, icon_only_width):
     """Measure stable labels once per font, language and UI scale."""
-    return max(
+    return tuple(
         icon_only_width
         if icon and icon_only_width
         else imgui.calc_text_size(label).x + padding + (20.0 * glyph_scale if icon else 0.0)
@@ -396,13 +397,19 @@ def _segment_width(font, font_size, labels, icons, padding, glyph_scale, icon_on
 
 
 def segmented_control_width(
-    labels: tuple[str, ...], *, icons: tuple[str, ...] | None = None, show_labels: bool = True
+    labels: tuple[str, ...],
+    *,
+    icons: tuple[str, ...] | None = None,
+    show_labels: bool = True,
+    layout: Literal["equal", "content"] = "equal",
 ) -> float:
     """Return the horizontal width using the control's actual font and padding."""
     if not labels:
         return 0.0
+    if layout not in ("equal", "content"):
+        raise ValueError("Segment layout must be 'equal' or 'content'")
     icons = tuple(icons[i] if icons and i < len(icons) else "" for i in range(len(labels)))
-    return len(labels) * _segment_width(
+    widths = _segment_widths(
         imgui.get_font(),
         imgui.get_font_size(),
         labels,
@@ -411,6 +418,7 @@ def segmented_control_width(
         max(0.65, imgui.get_frame_height() / 24.0),
         0.0 if show_labels else imgui.get_frame_height(),
     )
+    return sum(widths) if layout == "content" else len(labels) * max(widths)
 
 
 def segmented_control(
@@ -424,13 +432,18 @@ def segmented_control(
     icon_label_drawer: IconLabelDrawer | None = None,
     show_labels: bool = True,
     draw: Draw2D | None = None,
+    on_item: Callable[[int], None] | None = None,
+    layout: Literal["equal", "content"] = "equal",
 ) -> int:
-    """Choose one of N equal segments in one rounded frame.
+    """Choose one of N segments in one rounded frame.
 
     Only outer corners are rounded. Options form a contiguous vertical group
     when their labels cannot fit horizontally. Stable native button IDs retain
     keyboard navigation; measurement is cached independently of hover/selection.
     Hidden icon captions become per-item tooltips and use square segments.
+    A selected index of -1 leaves every segment inactive until a choice is made.
+    The optional callback receives each index with its native item still current.
+    Content layout keeps each label's minimum width and shares the remaining space.
     """
     if not labels:
         return 0
@@ -438,8 +451,26 @@ def segmented_control(
     available = max(1.0, float(width if width > 0 else imgui.get_content_region_avail().x))
     glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
     icons = tuple(icons[i] if icons and i < len(icons) else "" for i in range(len(labels)))
-    inline = segmented_control_width(labels, icons=icons, show_labels=show_labels) <= available
-    selected = min(max(0, int(selected)), len(labels) - 1)
+    minimum_width = segmented_control_width(
+        labels, icons=icons, show_labels=show_labels, layout=layout
+    )
+    inline = minimum_width <= available
+    minimum_widths = (
+        _segment_widths(
+            imgui.get_font(),
+            imgui.get_font_size(),
+            labels,
+            icons,
+            2 * style.frame_padding.x,
+            glyph_scale,
+            0.0 if show_labels else imgui.get_frame_height(),
+        )
+        if inline and layout == "content"
+        else ()
+    )
+    extra = (available - minimum_width) / len(labels)
+    offset = 0.0
+    selected = min(max(-1, int(selected)), len(labels) - 1)
     result = selected
     draw = ImguiDraw2D() if draw is None else draw
     dl = imgui.get_window_draw_list()
@@ -461,12 +492,17 @@ def segmented_control(
         imgui.push_style_color(slot, (0, 0, 0, 0))
     for index, (label, icon) in enumerate(zip(labels, icons, strict=True)):
         # Derive each edge from the group origin so rounding cannot accumulate.
-        start = round(available * index / len(labels)) if inline else 0
-        end = (
-            round(available * (index + 1) / len(labels))
-            if inline and index < len(labels) - 1
-            else available
-        )
+        if minimum_widths:
+            start = round(offset)
+            offset += minimum_widths[index] + extra
+            end = round(offset) if index < len(labels) - 1 else available
+        else:
+            start = round(available * index / len(labels)) if inline else 0
+            end = (
+                round(available * (index + 1) / len(labels))
+                if inline and index < len(labels) - 1
+                else available
+            )
         imgui.set_cursor_screen_pos(
             (origin.x + start, origin.y + (0 if inline else index * height))
         )
@@ -478,6 +514,8 @@ def segmented_control(
         button_label = f"##{str_id}-{index}" if icon else f"{label}##{str_id}-{index}"
         imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
         clicked = imgui.button(button_label, (item_width, 0))
+        if on_item is not None:
+            on_item(index)
         imgui.pop_style_color(2)
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         fill = (

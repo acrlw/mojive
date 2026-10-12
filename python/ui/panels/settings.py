@@ -352,7 +352,7 @@ class SettingsPanel(Panel):
                 high = config.max_distance
             elif name == "max_distance":
                 low = config.min_distance
-            changed, value = imgui.drag_float(
+            changed, value = self._drag_float(
                 f"##camera_{name}",
                 getattr(config, name),
                 speed,
@@ -380,9 +380,9 @@ class SettingsPanel(Panel):
             nonlocal config
             self._property(t(label))
             current = getattr(config, name)
-            if imgui.begin_combo(f"##camera_{name}", dict(choices)[current]):
+            if imgui.begin_combo(f"##camera_{name}", t(dict(choices)[current])):
                 for value, text in choices:
-                    if imgui.selectable(text, current == value)[0]:
+                    if imgui.selectable(t(text), current == value)[0]:
                         config = replace(config, **{name: value})
                         ctx.apply_setting(ctx.set_camera_navigation, config)
                 imgui.end_combo()
@@ -458,7 +458,7 @@ class SettingsPanel(Panel):
         def number(identifier, label, attribute, step, fast_step, tooltip=""):
             nonlocal config
             self._property(ctx.tr(label))
-            changed, value = imgui.input_float(
+            changed, value = self._input_float(
                 f"##{identifier}", getattr(config, attribute), step, fast_step, "%.1f"
             )
             committed = imgui.is_item_deactivated_after_edit()
@@ -536,7 +536,7 @@ class SettingsPanel(Panel):
             imgui.set_item_tooltip(ctx.tr("Encoding settings apply to the next recording."))
             if config.rate_control == "quality":
                 self._property(ctx.tr("Quality (CRF)"))
-                changed, value = imgui.slider_int("##recording_crf", config.crf, 0, 51)
+                changed, value = self._slider_int("##recording_crf", config.crf, 0, 51)
                 committed = imgui.is_item_deactivated_after_edit()
                 imgui.set_item_tooltip(ctx.tr("Lower CRF gives higher quality and larger files."))
                 if changed:
@@ -617,7 +617,7 @@ class SettingsPanel(Panel):
             self._flag_table(ctx, "renderer_flags", renderer_flags, groups=3)
 
         flags = imgui.TreeNodeFlags_.default_open if self._search else 0
-        if imgui.collapsing_header(
+        if self._collapsing_header(
             f"{t('Debug')}###render_debug", flags
         ) and self._begin_properties("settings_render_debug"):
             self._property(t("Debug view"))
@@ -677,7 +677,7 @@ class SettingsPanel(Panel):
     ) -> tuple[bool, float, bool]:
         """Return preview and commit phases without owning or saving the setting."""
         self._property(ctx.tr(label))
-        changed, edited = imgui.drag_float(
+        changed, edited = self._drag_float(
             identifier,
             float(value),
             speed,
@@ -753,7 +753,7 @@ class SettingsPanel(Panel):
             ctx.apply_setting(ctx.set_viewport_capsule_scale, "playback", value, persist=committed)
             overlays = replace(overlays, playback_scale=value, tool_scale=value)
         self._property(ctx.tr("Status duration"))
-        changed, duration = imgui.slider_float(
+        changed, duration = self._slider_float(
             "##viewport_status_duration", overlays.status_duration, 3.0, 5.0, "%.1f s"
         )
         committed = imgui.is_item_deactivated_after_edit()
@@ -1140,7 +1140,7 @@ class SettingsPanel(Panel):
         for title, flags in flag_groups()[:2]:
             if not flags:
                 continue
-            if not imgui.collapsing_header(title, imgui.TreeNodeFlags_.default_open):
+            if not self._collapsing_header(ctx.tr(title), imgui.TreeNodeFlags_.default_open):
                 continue
             self._flag_table(ctx, f"settings_{title}", flags, translate_labels=False)
 
@@ -1150,7 +1150,7 @@ class SettingsPanel(Panel):
 
     def _contact_style(self, ctx: PanelContext) -> None:
         t = ctx.tr
-        if not imgui.collapsing_header(
+        if not self._collapsing_header(
             f"{t('Contact points')}###contact_style", imgui.TreeNodeFlags_.default_open
         ):
             return
@@ -1164,9 +1164,9 @@ class SettingsPanel(Panel):
             if changed:
                 ctx.backend.set_flag(RenderFlag.CONTACTPOINT, enabled)
             self._property(t("Shape"))
-            if imgui.begin_combo("##contact_shape", style.shape.title()):
+            if imgui.begin_combo("##contact_shape", t(style.shape.title())):
                 for shape in ("cylinder", "sphere", "point"):
-                    if imgui.selectable(shape.title(), style.shape == shape)[0]:
+                    if imgui.selectable(t(shape.title()), style.shape == shape)[0]:
                         style = replace(style, shape=shape)
                         committed = True
                 imgui.end_combo()
@@ -1179,14 +1179,14 @@ class SettingsPanel(Panel):
                 committed = True
             self._property(t("Color"))
             imgui.begin_disabled(style.use_model_color)
-            changed, color = imgui.color_edit4("##contact_color", style.color)
-            committed |= imgui.is_item_deactivated_after_edit()
+            changed, color = self._color_edit4("##contact_color", style.color)
+            committed |= self._color_committed()
             imgui.end_disabled()
             if changed:
                 style = replace(style, color=tuple(color))
             imgui.set_item_tooltip(t("Island visualization overrides contact colors."))
             self._property(t("Size"))
-            changed, scale = imgui.slider_float(
+            changed, scale = self._slider_float(
                 "##contact_scale", style.scale, 0.1, 10, "%.2fx", imgui.SliderFlags_.always_clamp
             )
             committed |= imgui.is_item_deactivated_after_edit()
@@ -1206,7 +1206,7 @@ class SettingsPanel(Panel):
                 ctx.backend.set_contact_style(style)
 
     def _geometry_style(self, ctx: PanelContext) -> None:
-        if not imgui.collapsing_header(
+        if not self._collapsing_header(
             f"{ctx.tr('Both appearance')}###geometry_style", imgui.TreeNodeFlags_.default_open
         ):
             return
@@ -1214,8 +1214,8 @@ class SettingsPanel(Panel):
         committed = False
         if self._begin_properties("geometry_style_properties"):
             self._property(ctx.tr("Collision color"))
-            changed, color = imgui.color_edit3("##collision_color", style.collision_color)
-            committed |= imgui.is_item_deactivated_after_edit()
+            changed, color = self._color_edit3("##collision_color", style.collision_color)
+            committed |= self._color_committed()
             if changed:
                 style = replace(style, collision_color=tuple(color))
             for name, label in (
@@ -1223,7 +1223,7 @@ class SettingsPanel(Panel):
                 ("collision_opacity", "Collision opacity"),
             ):
                 self._property(ctx.tr(label))
-                changed, opacity = imgui.slider_float(
+                changed, opacity = self._slider_float(
                     f"##{name}", getattr(style, name), 0.0, 1.0, "%.2f"
                 )
                 committed |= imgui.is_item_deactivated_after_edit()
@@ -1282,7 +1282,7 @@ class SettingsPanel(Panel):
         groups = ctx.session.visual_groups()
         if not groups:
             return
-        if imgui.collapsing_header(
+        if self._collapsing_header(
             f"{ctx.tr('visual groups')}###visual_groups", imgui.TreeNodeFlags_.default_open
         ):
             flags = imgui.TableFlags_.sizing_stretch_same
@@ -1475,3 +1475,35 @@ class SettingsPanel(Panel):
                 if selected and supported:
                     backend.set_frame_mode(mode)
             imgui.end_combo()
+
+    @staticmethod
+    def _collapsing_header(*args, **kwargs):
+        return imgui.collapsing_header(*args, **kwargs)
+
+    @staticmethod
+    def _drag_float(*args, **kwargs):
+        return imgui.drag_float(*args, **kwargs)
+
+    @staticmethod
+    def _input_float(*args, **kwargs):
+        return imgui.input_float(*args, **kwargs)
+
+    @staticmethod
+    def _slider_float(*args, **kwargs):
+        return imgui.slider_float(*args, **kwargs)
+
+    @staticmethod
+    def _slider_int(*args, **kwargs):
+        return imgui.slider_int(*args, **kwargs)
+
+    @staticmethod
+    def _color_edit3(*args, **kwargs):
+        return imgui.color_edit3(*args, **kwargs)
+
+    @staticmethod
+    def _color_edit4(*args, **kwargs):
+        return imgui.color_edit4(*args, **kwargs)
+
+    @staticmethod
+    def _color_committed():
+        return imgui.is_item_deactivated_after_edit()

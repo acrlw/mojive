@@ -1,0 +1,27 @@
+{
+  "libraries": {
+    "lucide": {
+      "repository": "https://github.com/lucide-icons/lucide",
+      "version": "1.55.0",
+      "license": "ISC"
+    },
+    "tabler": {
+      "repository": "https://github.com/tabler/tabler-icons",
+      "version": "v3.49.0",
+      "license": "MIT"
+    }
+  },
+  "icons": {
+    "visual": "lucide/palette.svg",
+    "collision": "lucide/box.svg",
+    "both": "lucide/blend.svg",
+    "pose": "lucide/waypoints.svg",
+    "joint": "lucide/waypoints.svg",
+    "joint-hinge": "lucide/rotate-cw.svg",
+    "joint-slide": "lucide/move-horizontal.svg",
+    "joint-ball": "lucide/rotate-3d.svg",
+    "joint-free": "lucide/move-3d.svg",
+    "perspective": "tabler/perspective.svg",
+    "orthographic": "tabler/rectangle.svg"
+  }
+}

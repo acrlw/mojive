@@ -7,6 +7,7 @@ from imgui_bundle import imgui
 
 from ...adapters.base import FrameNeeds
 from . import Panel, PanelContext, segmented_control
+from .presentation import PropertyPresentation
 
 CAPACITY = 512
 
@@ -59,6 +60,7 @@ class PlotPanel(Panel):
     def __init__(self) -> None:
         super().__init__()
         self.source = "joint"
+        self.presentation: PropertyPresentation | None = None
         self.show_angle = True
         self.show_velocity = True
         self.show_contact = False
@@ -97,14 +99,16 @@ class PlotPanel(Panel):
             self._structure_generation = ctx.session.structure_generation
             for ring in (self._angle, self._velocity, self._contact, self._sensor):
                 ring.clear()
-        source_index = segmented_control(
-            "plot-source",
-            (ctx.tr("Joints"), ctx.tr("Sensors")),
-            0 if self.source == "joint" else 1,
-            theme=ctx.theme,
-        )
+        labels = (ctx.tr("Joints"), ctx.tr("Sensors"))
+        selected = int(self.source != "joint")
+        if self.presentation:
+            imgui.set_next_item_width(-1)
+            source_index = self.presentation.segmented("plot-source", labels, selected)
+        else:
+            source_index = segmented_control("plot-source", labels, selected, theme=ctx.theme)
         self.source = "joint" if source_index == 0 else "sensor"
-        imgui.spacing()
+        if self.presentation is None:
+            imgui.spacing()
         if self.source == "sensor":
             self._draw_sensor(ctx)
             return
@@ -126,15 +130,30 @@ class PlotPanel(Panel):
             self._velocity.clear()
             self._tracked = self.joint_index
 
-        _c, self.show_angle = imgui.checkbox(ctx.tr("angle"), self.show_angle)
-        imgui.same_line()
-        _c, self.show_velocity = imgui.checkbox(ctx.tr("velocity"), self.show_velocity)
-        imgui.same_line()
-        _c, self.show_contact = imgui.checkbox(ctx.tr("contact force"), self.show_contact)
+        if self.presentation:
+            items = (
+                ("show_angle", "angle"),
+                ("show_velocity", "velocity"),
+                ("show_contact", "contact force"),
+            )
+            edited = self.presentation.toggles(
+                tuple(("plot-" + name, ctx.tr(label), getattr(self, name)) for name, label in items)
+            )
+            for (name, _label), value in zip(items, edited, strict=True):
+                setattr(self, name, value)
+        else:
+            _c, self.show_angle = imgui.checkbox(ctx.tr("angle"), self.show_angle)
+            imgui.same_line()
+            _c, self.show_velocity = imgui.checkbox(ctx.tr("velocity"), self.show_velocity)
+            imgui.same_line()
+            _c, self.show_contact = imgui.checkbox(ctx.tr("contact force"), self.show_contact)
 
         self._sample(ctx)
 
-        height = 90.0 * ctx.style_scale
+        count = self.show_angle + self.show_velocity + self.show_contact
+        height = (
+            self.presentation.plot_height(count) if self.presentation else 90.0 * ctx.style_scale
+        )
         j = joints[self.joint_index]
         if self.show_angle:
             self._curve("qpos", self._angle, height, f"{names[self.joint_index]} [{j.qpos_adr}]")

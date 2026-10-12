@@ -43,6 +43,15 @@ class JointsPanel(Panel):
         self._browse_cache: tuple[JointInfo, ...] = ()
         self._joint_nodes_generation = -1
         self._joint_nodes: dict[int, object] = {}
+        self._edit_transaction = False
+        self._failed_qpos: int | None = None
+
+    def finish_frame(self, ctx: PanelContext) -> None:
+        if not self.enabled or not self.open or not imgui.is_any_item_active():
+            if self._edit_transaction:
+                ctx.submit(cmd.EndEditTransaction())
+                self._edit_transaction = False
+            self._failed_qpos = None
 
     def frame_needs(self) -> FrameNeeds:
         return FrameNeeds(poses=False, qpos=True)
@@ -159,8 +168,26 @@ class JointsPanel(Panel):
             imgui.end_disabled()
             if value_clicked and joint_node is not None and ctx.session.paused:
                 ctx.submit(cmd.SelectNode(joint_node.node_id))
-            if edit.changed:
+            if (
+                value_clicked
+                and ctx.session.adapter.caps.edit_history
+                and not self._edit_transaction
+            ):
+                self._failed_qpos = None
+                try:
+                    self._edit_transaction = ctx.submit(
+                        cmd.BeginEditTransaction("Joint pose edit")
+                    ).ok
+                except RuntimeError as error:
+                    ctx.report(str(error), level="error")
+                if not self._edit_transaction:
+                    self._failed_qpos = j.qpos_adr
+            canceled = self._edit_transaction and imgui.is_key_pressed(imgui.Key.escape, False)
+            if edit.changed and not canceled and self._failed_qpos != j.qpos_adr:
                 ctx.submit(cmd.SetQpos(j.qpos_adr, edit.value))
+            if canceled:
+                ctx.submit(cmd.CancelEditTransaction())
+                self._edit_transaction = False
 
     def _toggle_angle_unit(self):
         self._angular_degrees = not self._angular_degrees

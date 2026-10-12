@@ -129,6 +129,7 @@ def test_minimal_composition_does_not_start_debug_socket(tmp_path, monkeypatch):
     from mojive.app.ui import window as window_factory
     from mojive.remote.bridge import DebugBridge
     from mojive.render.opengl import backend as backend_module
+    from mojive.ui.workspace import app as workspace_module
 
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     window = SimpleNamespace(
@@ -139,6 +140,8 @@ def test_minimal_composition_does_not_start_debug_socket(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(window_factory, "create_window", lambda *args: window)
     monkeypatch.setattr(backend_module, "OpenGLBackend", lambda *args: NullBackend())
+    # Isolate resource composition from the GPU-backed native presentation.
+    monkeypatch.setattr(workspace_module, "WorkspaceApp", ViewerApp)
 
     def unexpected(*args):
         raise AssertionError("Minimal composition must not open a debug socket")

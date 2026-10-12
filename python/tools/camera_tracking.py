@@ -40,11 +40,22 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     viewer.session.submit(cmd.SelectNode(node_id))
     for _ in range(5):
         viewer.sync()
-    window = imgui.internal.find_window_by_name("Camera")
+    camera_name = viewer.panels.get("camera").name
+    window = imgui.internal.find_window_by_name(camera_name)
     imgui.internal.focus_window(window)
     # Tracking is below the view/lens groups; exercise it at the same scroll
     # position a user reaches in a short dock or a larger UI scale.
-    imgui.internal.set_scroll_y(window, window.scroll_max.y)
+    content = next(
+        (
+            child
+            for child in imgui.get_current_context().windows
+            if child.parent_window is not None
+            and child.parent_window.id_ == window.id_
+            and "Panel content" in child.name
+        ),
+        window,
+    )
+    imgui.internal.set_scroll_y(content, content.scroll_max.y)
     viewer.sync()
     viewer.sync()
     click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
@@ -54,11 +65,11 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     assert viewer.tracking_node_id == node_id
     assert viewer.app.camera_tracker.config.axes == "xy"
     if output is not None:
-        _save_window_crop(viewer, "Camera", output / "camera-tracking-xy.png", padding=0)
+        _save_window_crop(viewer, camera_name, output / "camera-tracking-xy.png", padding=0)
     click(viewer, _item_center(viewer, "button", "X-Y-Z##tracking-axes-1"))
     assert viewer.app.camera_tracker.config.axes == "xyz"
     if output is not None:
-        _save_window_crop(viewer, "Camera", output / "camera-tracking-xyz.png", padding=0)
+        _save_window_crop(viewer, camera_name, output / "camera-tracking-xyz.png", padding=0)
     click(viewer, _item_center(viewer, "button", "X-Y##tracking-axes-0"))
     assert viewer.app.camera_tracker.config.axes == "xy"
     lo, hi = _item_rect(viewer, "slider_float", "##tracking-smoothing")

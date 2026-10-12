@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -12,17 +12,33 @@ from imgui_bundle import imgui
 from PIL import Image
 
 from mojive import commands as cmd
-from mojive import math3d
 from mojive.app.ui.window import create_window
-from mojive.ui.controls import search_input
+from mojive.ui.input_bindings import InputAction
+from mojive.ui.layers import LAYER_LABELS, debug_layer_group
+from mojive.ui.panels import activate_edit_gizmo, pointer_pressed, publish_focus_item_hint
+from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.viewcube import BACKDROP_RADIUS_PT, widget_center
 from mojive.ui.window import WindowConfig
 
+from .inspector_components import draw_component
 from .localization import reference_text
 from .reference_menus import Menus
 from .scene_preview import Preview
 from .settings_panel import ReferenceSettings
-from .widgets import AMBER, DIM, GLYPHS, LINE, MUTED, PANEL, SAGE, TEXT, UI, color
+from .widgets import (
+    AMBER,
+    DIM,
+    GLYPHS,
+    ICON_ROLES,
+    LINE,
+    MUTED,
+    PANEL,
+    SAGE,
+    SWITCH_WIDTH,
+    TEXT,
+    UI,
+    color,
+)
 
 ROOT = Path(__file__).parent
 OUTPUT = Path("output/ui_design/native")
@@ -50,6 +66,15 @@ ICONS = (
     "chart",
     "settings",
 )
+LEFT_PANELS = PANELS[:7]
+BOTTOM_PANELS = ("Timeline", "Output", "Statistics")
+BOTTOM_HEIGHT_PT = 268
+VIEWPORT_TOOLS = (
+    ("select", None),
+    ("move", InputAction.GIZMO_TRANSLATE),
+    ("rotate", InputAction.GIZMO_ROTATE),
+    ("scale", InputAction.GIZMO_DIMENSIONS),
+)
 
 
 class Study:
@@ -71,11 +96,24 @@ class Study:
         self.ui.translate = lambda value: reference_text(self.preview.localizer, value)
         self.cube = self.preview.view_cube
         self.open = dict.fromkeys(PANELS, False)
-        self.open.update(Scene=True, Control=True, Assets=True, Inspector=True, Timeline=False)
+        self.open.update(Scene=True, Inspector=True, Timeline=False)
         self.needs_layout = restore is None
         self.timeline_layout_pending = False
         self.active = "Scene"
+        self.left_active = "Scene"
+        self.bottom_active = "Timeline"
+        self.bottom_focus = None
+        self.header_actions = {name: set() for name in LEFT_PANELS}
+        self.header_actions["Scene"] = {"search", "frame", "add"}
+        self.header_actions["Control"] = {"reset"}
+        self.header_actions["Pose"] = {"search", "sort", "copy"}
+        self.header_actions["Cameras"] = {"frame"}
+        self.header_actions["Layers"] = {"gizmos"}
+        self.search_visible = False
+        self.header_add_pending = False
+        self._numeric_edit = None
         self.pending = None
+        self.restore_next = False
         self.float_next = False
         self.focus_next = None
         self.saved = restore
@@ -87,7 +125,7 @@ class Study:
         self.inspector_tab = "Properties"
         self.pinned = None
         self.material = 0
-        self.pose_time = 4.0
+        self.timeline_panel = None
         self.expanded = {"TRANSFORM": True, "DISPLAY": True, "IDENTITY": False}
         self.events = []
         self.settings = ReferenceSettings(self)
@@ -152,10 +190,19 @@ class Study:
     def begin_frame(self):
         self.menus.begin_frame()
         self.ui.hits.clear()
+        self.ui.numeric_edits.clear()
         self.chrome()
-        self.active = None
+
+    @property
+    def bottom_open(self):
+        return any(self.open[name] for name in BOTTOM_PANELS)
 
     def draw(self, *, readback=False):
+        if self.restore_next:
+            # Reload before NewFrame so the restored DockSpace is submitted this frame.
+            imgui.set_current_context(self.window._imgui_context)
+            imgui.load_ini_settings_from_memory(self.saved)
+            self.restore_next = False
         self.preview.readback = readback
         self.preview.sync()
         return self.preview.pixels
@@ -182,31 +229,38 @@ class Study:
     def chrome(self):
         u = self.ui
         s = self.s
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, (8 * s, 11 * s))
         if self.sidebar("Application", imgui.Dir.up, 36):
             p = imgui.get_window_pos()
             w = imgui.get_window_width()
             x = p.x
             y = p.y
             imgui.push_clip_rect((x, y), (x + w, y + 36 * s), False)
-            u.rect(x + 10 * s, y + 6 * s, 24 * s, 24 * s, SAGE, 6)
-            u.text(x + 16 * s, y + 10 * s, "M", PANEL, 15, bold=True)
             self.menus.bar()
+            center_y = self.menus.menu_center_y
+            brand_width = u.measure("M", 18)
+            u.text(x + (44 * s - brand_width) / 2, center_y - 9 * s, "M", SAGE, 18, bold=True)
+            self.rects["application-logo"] = [x + 8 * s, center_y - 9 * s, 28 * s, 18 * s]
             if w > 950 * s:
                 tx = x + w * 0.49
-                u.icon("file", tx, y + 11 * s, 14, DIM)
-                u.text(tx + 22 * s, y + 11 * s, "Joint study", MUTED, 13)
-            for n, name in enumerate(["Edit", "Author", "Review"]):
-                if u.button(
-                    "workspace-" + name,
-                    x + w - (228 - n * 55) * s,
-                    y + 5 * s,
-                    53,
-                    26,
-                    label=name,
-                    align="center",
-                    active=self.workspace == name,
-                ):
-                    self.preset(name)
+                u.role_icon("file", tx, y + 4 * s, 14 * s, 28 * s, role="inline", c=DIM)
+                u.text(tx + 22 * s, y + 11.5 * s, "Joint study", MUTED, 13)
+            if w >= 760 * s:
+                workspaces = ("Edit", "Author", "Review")
+                group_width = 3 * (
+                    max(u.measure(u.translate(name)) for name in workspaces) / s + 16
+                )
+                chosen = u.segmented(
+                    "workspace",
+                    x + w - (group_width + 65) * s,
+                    y + 4 * s,
+                    group_width,
+                    workspaces,
+                    workspaces.index(self.workspace),
+                    keys=tuple("workspace-" + name for name in workspaces),
+                )
+                if workspaces[chosen] != self.workspace:
+                    self.preset(workspaces[chosen])
             if u.button(
                 "toggle-inspector",
                 x + w - 57 * s,
@@ -233,23 +287,7 @@ class Study:
             self.menus.dialogs()
             imgui.pop_clip_rect()
         self.end_sidebar()
-        if self.sidebar("Status", imgui.Dir.down, 26):
-            p = imgui.get_window_pos()
-            w = imgui.get_window_width()
-            y = p.y
-            u.draw.add_circle_filled(
-                (p.x + 13 * s, y + 13 * s), 2 * s, color(SAGE if self.playing else DIM)
-            )
-            u.text(p.x + 23 * s, y + 6 * s, "Playing" if self.playing else "Paused", MUTED, 13)
-            if w > 680 * s:
-                u.text(
-                    p.x + w - 155 * s,
-                    y + 6 * s,
-                    f"{len(self.preview.session.nodes)} nodes · Z up",
-                    DIM,
-                    13,
-                )
-        self.end_sidebar()
+        imgui.pop_style_var()
         if self.sidebar("Navigation", imgui.Dir.left, 48):
             p = imgui.get_window_pos()
             h = imgui.get_window_height()
@@ -267,7 +305,13 @@ class Study:
                     36,
                     36,
                     icon=icon,
-                    active=self.active == name and self.open[name],
+                    icon_role="activity",
+                    active=(
+                        self.left_active == name
+                        if name in LEFT_PANELS
+                        else self.bottom_active == name
+                    )
+                    and self.open[name],
                     tooltip=name,
                 ):
                     self.activate(name)
@@ -277,6 +321,16 @@ class Study:
         self.end_sidebar()
 
     def activate(self, name):
+        if name in LEFT_PANELS:
+            for other in LEFT_PANELS:
+                self.open[other] = other == name
+            self.left_active = self.active = name
+        elif name in BOTTOM_PANELS:
+            for other in BOTTOM_PANELS:
+                self.open[other] = True
+            self.bottom_active = name
+            self.bottom_focus = name
+            self.timeline_layout_pending = True
         if not self.open[name]:
             self.open[name] = True
             self.new_panel = name
@@ -290,20 +344,21 @@ class Study:
         work = imgui.get_current_context().viewports[0].get_build_work_rect()
         size = work.get_size()
         ii.dock_builder_set_node_size(self.window.dockspace_id, size)
-        left_width = min(272 * self.s, size.x * 0.3)
-        right_width = min(320 * self.s, size.x * 0.28)
+        left_width = min(252 * self.s, size.x * 0.26)
+        right_width = min(320 * self.s, size.x * 0.3)
         _, self.left, rest = ii.dock_builder_split_node_py(
             self.window.dockspace_id, imgui.Dir.left, left_width / size.x
         )
         _, self.right, self.center = ii.dock_builder_split_node_py(
             rest, imgui.Dir.right, right_width / (size.x - left_width)
         )
-        if self.open["Timeline"]:
+        if self.bottom_open:
             _, self.bottom, self.center = ii.dock_builder_split_node_py(
-                self.center, imgui.Dir.down, min(0.45, 196 * self.s / size.y)
+                self.center, imgui.Dir.down, min(0.68, BOTTOM_HEIGHT_PT * self.s / size.y)
             )
-            ii.dock_builder_dock_window("Timeline", self.bottom)
-        for name in PANELS:
+            for name in BOTTOM_PANELS:
+                ii.dock_builder_dock_window(name, self.bottom)
+        for name in LEFT_PANELS:
             ii.dock_builder_dock_window(name, self.left)
         ii.dock_builder_dock_window("Inspector", self.right)
         ii.dock_builder_dock_window("Viewport", self.center)
@@ -312,24 +367,38 @@ class Study:
         self.timeline_layout_pending = False
 
     def toggle_timeline(self):
-        self.open["Timeline"] = not self.open["Timeline"]
+        if self.bottom_open and self.bottom_active == "Timeline":
+            self.collapse_bottom()
+        else:
+            self.activate("Timeline")
+
+    def collapse_bottom(self):
+        for name in BOTTOM_PANELS:
+            self.open[name] = False
+        self.bottom_focus = None
         self.timeline_layout_pending = True
 
     def apply_timeline_layout(self):
         if not self.timeline_layout_pending:
             return
         self.timeline_layout_pending = False
-        if self.open["Timeline"]:
-            timeline = imgui.internal.find_window_by_name("Timeline")
-            if timeline is not None and imgui.internal.dock_builder_get_node(timeline.dock_id):
-                return
+        if self.bottom_open:
+            for name in BOTTOM_PANELS:
+                window = imgui.internal.find_window_by_name(name)
+                if window is not None and imgui.internal.dock_builder_get_node(window.dock_id):
+                    self.bottom = window.dock_id
+                    break
+            else:
+                self.bottom = None
             window = imgui.internal.find_window_by_name("Viewport")
             node = window.dock_node if window is not None else None
-            if node is not None:
+            if self.bottom is None and node is not None:
                 _, self.bottom, self.center = imgui.internal.dock_builder_split_node_py(
-                    node.id_, imgui.Dir.down, min(0.45, 196 * self.s / node.size.y)
+                    node.id_, imgui.Dir.down, min(0.68, BOTTOM_HEIGHT_PT * self.s / node.size.y)
                 )
-                imgui.internal.dock_builder_dock_window("Timeline", self.bottom)
+            if self.bottom is not None:
+                for name in BOTTOM_PANELS:
+                    imgui.internal.dock_builder_dock_window(name, self.bottom)
                 imgui.internal.dock_builder_finish(self.window.dockspace_id)
 
     def preset(self, name):
@@ -338,19 +407,22 @@ class Study:
         if name == "Review":
             for n in PANELS:
                 self.open[n] = False
-            if not self.open["Timeline"]:
-                self.toggle_timeline()
+            self.activate("Timeline")
         else:
-            if self.open["Timeline"]:
-                self.toggle_timeline()
+            self.collapse_bottom()
             self.activate("Assets" if name == "Author" else "Scene")
 
     def command(self, action):
         ii = imgui.internal
         if action == "reset":
             for n in PANELS:
-                self.open[n] = n in ("Scene", "Control", "Assets")
+                self.open[n] = n == "Scene"
             self.open.update(Inspector=True, Timeline=False)
+            self.left_active = self.active = "Scene"
+            self.float_next = False
+            self.focus_next = "Scene"
+            self.bottom_focus = None
+            self.restore_next = False
             self.workspace = "Edit"
             self.build()
         elif action == "float":
@@ -379,15 +451,23 @@ class Study:
         elif action == "save":
             self.saved = imgui.save_ini_settings_to_memory()
         elif action == "restore" and self.saved:
-            imgui.load_ini_settings_from_memory(self.saved)
+            self.restore_next = True
         else:
             raise ValueError(action)
 
     def panel(self, name, ctx):
         panel = self.preview.panels.get(name)
         if not self.open[name]:
+            if name == "Inspector":
+                presentation = getattr(self, "inspector_presentation", None)
+                if presentation is not None and presentation.color_edit_open:
+                    if panel._edit_transaction:
+                        ctx.submit(cmd.CancelEditTransaction())
+                        panel._edit_transaction = False
+                    presentation.color_edit_open = False
+                    presentation.color_edit_owner = None
             panel.finish_frame(ctx)
-            return
+            return False
         if getattr(self, "new_panel", None) == name:
             if name == "Settings":
                 viewport = imgui.get_main_viewport()
@@ -404,7 +484,7 @@ class Study:
                     imgui.Cond_.appearing,
                 )
                 imgui.set_next_window_size(size, imgui.Cond_.appearing)
-            else:
+            elif name in LEFT_PANELS:
                 imgui.set_next_window_dock_id(self.left, imgui.Cond_.first_use_ever)
             self.new_panel = None
         if name == "Inspector" and self.float_next:
@@ -423,26 +503,67 @@ class Study:
             )
             imgui.set_next_window_size(size, imgui.Cond_.always)
             self.float_next = False
-        if self.focus_next == name:
+        if self.focus_next == name or self.bottom_focus == name:
             imgui.set_next_window_focus()
             self.focus_next = None
+            window = imgui.internal.find_window_by_name(name)
+            if (
+                window is not None
+                and window.dock_node is not None
+                and window.dock_node.tab_bar is not None
+            ):
+                window.dock_node.tab_bar.next_selected_tab_id = window.tab_id
         wc = imgui.WindowClass()
         wc.dock_node_flags_override_set = (
             imgui.internal.DockNodeFlagsPrivate_.no_window_menu_button
             | imgui.internal.DockNodeFlagsPrivate_.no_close_button
         )
+        window = imgui.internal.find_window_by_name(name)
+        solo_inspector = name == "Inspector" and (
+            window is None or window.dock_node is None or len(window.dock_node.windows) <= 1
+        )
+        if (name in LEFT_PANELS and not self.inspector_grouped_with(name)) or solo_inspector:
+            wc.dock_node_flags_override_set |= imgui.internal.DockNodeFlagsPrivate_.no_tab_bar
         imgui.set_next_window_class(wc)
         title = ctx.tr(name) + "###" + name if ctx.tr(name) != name else name
-        visible, self.open[name] = imgui.begin(title, True)
+        flags = (
+            imgui.WindowFlags_.no_title_bar
+            if name in (*LEFT_PANELS, "Inspector", "Settings")
+            else 0
+        )
+        if name == "Settings":
+            imgui.set_next_window_dock_id(0, imgui.Cond_.always)
+            flags |= imgui.WindowFlags_.no_docking
+        if name in LEFT_PANELS:
+            flags |= imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
+        visible, self.open[name] = imgui.begin(title, True, flags)
         if visible:
-            if name in PANELS:
-                self.active = name
+            if name in BOTTOM_PANELS:
+                window = imgui.internal.get_current_window()
+                if (
+                    window.dock_node is not None
+                    and window.dock_node.selected_tab_id == window.tab_id
+                ):
+                    self.bottom_active = name
+                    if self.bottom_focus == name:
+                        self.bottom_focus = None
             self.widths[name] = imgui.get_content_region_avail().x
             self._panel_context = ctx
             self.ui.value_context = ctx
             p = imgui.get_cursor_screen_pos()
             size = imgui.get_content_region_avail()
             x, y, w, h = p.x, p.y, size.x, size.y
+            if name in LEFT_PANELS:
+                self.panel_header(name, x, y, w)
+                y += 38 * self.s
+                h -= 38 * self.s
+                imgui.set_cursor_screen_pos((x, y))
+                imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
+                imgui.begin_child("Panel content", (w, max(self.s, h)))
+                imgui.pop_style_var()
+                p = imgui.get_cursor_screen_pos()
+                size = imgui.get_content_region_avail()
+                x, y, w, h = p.x, p.y, size.x, size.y
             draw = {
                 "Scene": self.scene_panel,
                 "Inspector": self.inspector,
@@ -459,161 +580,232 @@ class Study:
                 draw(x, y, w, h)
             elif draw is not None:
                 draw(x, y, w)
-            elif name == "Sensors":
-                self.ui.text(x, y + 8 * self.s, "JOINT VALUES", MUTED, 13, bold=True)
-                for n, (label, value) in enumerate(self.preview.document["pose"].items()):
-                    self.ui.text(x, y + (44 + n * 34) * self.s, label, MUTED, 13)
-                    self.ui.text(
-                        x + w - 70 * self.s,
-                        y + (44 + n * 34) * self.s,
-                        f"{value:.2f}",
-                        TEXT,
-                        13,
-                        mono=True,
-                    )
-            elif name == "Output":
-                for entry in self.preview.output.entries():
-                    imgui.text_wrapped(entry.text)
-            elif name == "Statistics":
-                for n, (label, value) in enumerate(
-                    (
-                        ("Draw calls", self.preview.backend.stats.draw_calls),
-                        ("Triangles", self.preview.backend.stats.triangles),
-                        ("Scene entities", len(self.preview.entities)),
-                    )
-                ):
-                    self.ui.text(x, y + (40 + n * 34) * self.s, label, MUTED, 13)
-                    self.ui.text(
-                        x + w - 70 * self.s,
-                        y + (40 + n * 34) * self.s,
-                        str(value),
-                        TEXT,
-                        13,
-                        mono=True,
-                    )
+            elif name in ("Sensors", "Output", "Statistics"):
+                panel.draw(ctx)
+            if name in LEFT_PANELS:
+                imgui.end_child()
             self.preview.apply_document_edits()
-        panel.finish_frame(ctx)
+        if name == "Inspector":
+            panel.finish_frame(
+                ctx,
+                keep_edit_transaction=bool(
+                    getattr(getattr(self, "inspector_presentation", None), "color_edit_open", False)
+                ),
+            )
+        else:
+            panel.finish_frame(ctx)
         panel.open = self.open[name]
         imgui.end()
+        return visible and self.open[name]
+
+    def panel_header(self, name, x, y, w):
+        u, s = self.ui, self.s
+        actions = {
+            "Scene": (
+                ("search", "search", "Search scene"),
+                ("frame", "frame", "Frame all"),
+                ("add", "plus", "Add"),
+            ),
+            "Control": (("reset", "reset", "Reset controls"),),
+            "Pose": (
+                ("search", "search", "Search joints"),
+                ("sort", "sort", "Sort by name"),
+                ("copy", "copy", "Copy state"),
+            ),
+            "Cameras": (("frame", "frame", "Frame all"),),
+            "Layers": (("gizmos", "move", "Transform handles"),),
+        }.get(name, ())
+        if name == "Pose" and not hasattr(self, "navigation"):
+            from .navigation import Navigation
+
+            self.navigation = Navigation(self)
+        enabled = [item for item in actions if item[0] in self.header_actions[name]]
+        # Keep the title readable as dock panels narrow; remaining actions stay in More.
+        slots = max(0, int((w / s - 74) / 28) - 1)
+        visible = enabled[:slots]
+        right = x + w - 28 * s
+        imgui.push_clip_rect((x, y), (right - len(visible) * 28 * s - 4 * s, y + 30 * s), True)
+        u.text(x, y + 7.5 * s, name, TEXT, 13, bold=True)
+        imgui.pop_clip_rect()
+        for index, (key, icon, label) in enumerate(visible):
+            xx = right - (len(visible) - index) * 28 * s
+            active = (
+                self.navigation.pose_action_active(key)
+                if name == "Pose"
+                else (key == "search" and self.search_visible)
+                or (key == "gizmos" and self.preview.gizmos)
+            )
+            if u.button(
+                "header-" + name + "-" + key, xx, y, 26, 28, icon=icon, tooltip=label, active=active
+            ):
+                self.header_action(name, key)
+        popup = "Panel actions###" + name
+        filtered = name == "Scene" and self.filter != "All"
+        hint = u.translate("Filter") + ": " + u.translate(self.filter) if filtered else "More"
+        if u.button(
+            "header-" + name + "-more", right, y, 26, 28, icon="more", tooltip=hint, active=filtered
+        ):
+            imgui.open_popup(popup)
+        with self.menus.style():
+            if imgui.begin_popup(popup):
+                for key, _icon, label in actions:
+                    clicked, _ = imgui.menu_item(u.translate(label), "", False)
+                    if clicked:
+                        self.header_action(name, key)
+                if name == "Scene":
+                    imgui.separator()
+                    if imgui.begin_menu(u.translate("Filter")):
+                        from .navigation import Navigation
+
+                        if not hasattr(self, "navigation"):
+                            self.navigation = Navigation(self)
+                        for kind, count in self.navigation.scene_filters(self._panel_context):
+                            label = f"{u.translate(kind.title())} {count}"
+                            clicked, _ = imgui.menu_item(label, "", self.filter.casefold() == kind)
+                            if clicked:
+                                self.filter = kind.title()
+                        imgui.end_menu()
+                if actions:
+                    imgui.separator()
+                    if imgui.begin_menu(u.translate("Header actions")):
+                        for key, _icon, label in actions:
+                            changed, checked = imgui.checkbox(
+                                u.translate(label), key in self.header_actions[name]
+                            )
+                            if changed:
+                                if checked:
+                                    self.header_actions[name].add(key)
+                                else:
+                                    self.header_actions[name].discard(key)
+                        imgui.end_menu()
+                imgui.separator()
+                clicked, _ = imgui.menu_item(u.translate("Hide panel"), "", False)
+                if clicked:
+                    self.open[name] = False
+                imgui.end_popup()
+        if name == "Scene":
+            if self.header_add_pending or imgui.is_popup_open("Add"):
+                self.menus.popup("Add", (right, y, 26 * s, 28 * s), self.header_add_pending)
+            self.header_add_pending = False
+        u.line(x - 12 * s, y + 32 * s, w + 24 * s)
+
+    def header_action(self, name, key):
+        if name == "Pose":
+            self.navigation.pose_action(key)
+        elif key == "search":
+            self.search_visible = not self.search_visible
+            if not self.search_visible:
+                self.query = ""
+        elif key == "frame":
+            self.preview._frame_scene(animate=True)
+        elif key == "add":
+            self.header_add_pending = True
+        elif name == "Control" and key == "reset":
+            session = self.preview.session
+            if session.adapter.caps.write_ctrl and session.frame.ctrl is not None:
+                session.submit(cmd.SetCtrlVector(np.zeros_like(session.frame.ctrl)))
+        elif key == "gizmos":
+            self.preview.gizmos = not self.preview.gizmos
+
+    def begin_numeric_edit(self, key, *, deferred=False, label="Inspector edit"):
+        state = self.ui.numeric_edits[key]
+        if state.activated and self._numeric_edit is None and not self.preview.session.editing:
+            draft = self.preview.model_edits
+            if draft._checkpoint is None:
+                if deferred:
+                    draft.begin_transaction(label)
+                    self._numeric_edit = key
+                elif self._panel_context.submit(cmd.BeginEditTransaction(label)).ok:
+                    self._numeric_edit = key
+        return state
+
+    def finish_numeric_edit(self, key, state):
+        if self._numeric_edit != key:
+            return
+        if state.canceled or (state.deactivated and not state.active):
+            command = cmd.CancelEditTransaction() if state.canceled else cmd.EndEditTransaction()
+            self._panel_context.submit(command)
+            self._numeric_edit = None
+            if state.canceled:
+                self.preview.refresh_document()
+
+    def finish_numeric_frame(self, ctx):
+        if self._numeric_edit is not None and not imgui.is_any_item_active():
+            ctx.submit(cmd.EndEditTransaction())
+            self._numeric_edit = None
+
+    def inspector_grouped_with(self, name):
+        window = imgui.internal.find_window_by_name(name)
+        inspector = imgui.internal.find_window_by_name("Inspector")
+        return bool(
+            self.open["Inspector"]
+            and window is not None
+            and inspector is not None
+            and window.dock_id
+            and window.dock_id == inspector.dock_id
+        )
 
     def scene_panel(self, x, y, w, h):
-        u = self.ui
-        s = self.s
-        imgui.set_cursor_screen_pos((x, y))
-        imgui.set_next_item_width(w)
-        _, self.query = search_input("##search", self.query, hint=u.translate("Search scene"))
-        kinds = ("All", "Link", "Geom", "Light", "Camera")
-        compact_filters = w < 240 * s
-        filter_icons = {
-            "All": "scene",
-            "Link": "body",
-            "Geom": "geom",
-            "Light": "light",
-            "Camera": "camera",
-        }
-        widths = [max(40, u.measure(kind, 14) / s + 12) for kind in kinds]
-        spare = (w / s - sum(widths) - 3 * (len(kinds) - 1)) / len(kinds)
-        filter_x = x
-        for kind, width in zip(kinds, widths, strict=True):
-            width += spare
-            if u.button(
-                "filter-" + kind,
-                filter_x,
-                y + 38 * s,
-                width,
-                28,
-                label="" if compact_filters else kind,
-                icon=filter_icons[kind] if compact_filters else None,
-                tooltip=kind if compact_filters else None,
-                align="center",
-                active=self.filter == kind,
-            ):
-                self.filter = kind
-            filter_x += (width + 3) * s
-        u.line(x, y + 76 * s, w)
-        u.icon("down", x + 2 * s, y + 90 * s, 12, DIM)
-        u.icon("world", x + 22 * s, y + 88 * s, 16, MUTED)
-        u.text(x + 46 * s, y + 88 * s, "world", MUTED, 13)
-        count = str(len(self.preview.entities))
-        u.text(x + w - u.measure(count, 13) - 6 * s, y + 88 * s, count, DIM, 13)
-        imgui.set_cursor_screen_pos((x, y + 116 * s))
-        imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-        imgui.begin_child("Scene entities", (w, max(s, h - 156 * s)))
-        imgui.pop_style_var()
-        origin = imgui.get_cursor_screen_pos()
-        list_width = imgui.get_content_region_avail().x
-        row = 0
-        for e in self.preview.entities:
-            if self.filter == "All" and e["type"] == "geom":
-                continue
-            if self.query.lower() not in e["name"].lower() or (
-                self.filter != "All" and e["type"] != self.filter.lower()
-            ):
-                continue
-            yy = origin.y + row * 30 * s
-            row += 1
-            node = self.preview.session.selected_node
-            selected = node is not None and node.node_id == e["node_id"]
-            if selected:
-                u.rect(origin.x, yy, list_width, 28 * s, (232, 176, 79, 20), 4)
-                u.rect(origin.x, yy + 6 * s, 2 * s, 16 * s, AMBER, 1)
-            if u.button(
-                "entity-" + str(e["node_id"]),
-                origin.x + 10 * s,
-                yy,
-                list_width / s - 40,
-                28,
-                icon=e["type"],
-                label=e["name"],
-                text_color=(227, 201, 145, 255) if selected else TEXT,
-                icon_color=(227, 201, 145, 255) if selected else (166, 159, 190, 255),
-            ):
-                self.preview.session.submit(cmd.SelectNode(e["node_id"]))
-            if u.button(
-                "visible-" + str(e["node_id"]),
-                origin.x + list_width - 26 * s,
-                yy + s,
-                24,
-                26,
-                icon="eyeoff" if e["hidden"] else "eye",
-                tooltip="Toggle visibility",
-            ):
-                e["hidden"] = not e["hidden"]
-        imgui.set_cursor_screen_pos((origin.x, origin.y + row * 30 * s))
-        imgui.dummy((1, 1))
-        imgui.end_child()
-        foot = y + h - 28 * s
-        u.line(x, foot - 8 * s, w)
-        u.text(x, foot + 7 * s, "1 selected" if self.preview.selected else "No selection", DIM, 13)
-        action_width = max(82, u.measure("Frame all", 14) / s + 20)
-        if u.button(
-            "frame-all",
-            x + w - action_width * s,
-            foot,
-            action_width,
-            28,
-            label="Frame all",
-            align="center",
-        ):
-            self.preview._frame_scene(animate=True)
-        imgui.set_cursor_screen_pos((x, foot + 20 * s))
-        imgui.dummy((1, 1))
+        from .navigation import Navigation
+
+        if not hasattr(self, "navigation"):
+            self.navigation = Navigation(self)
+        self.navigation.draw_scene(self._panel_context, x, y, w, h)
 
     def control_panel(self, x, y, w):
         u, s = self.ui, self.s
         session = self.preview.session
+        ctx = self._panel_context
+        panel = self.preview.panels.get("control")
+        if panel._selection_revision != session.selection_revision:
+            panel._selected_address = -1
+            panel._selection_revision = session.selection_revision
+        joint_nodes = {node.joint_index: node for node in session.nodes if node.joint_index >= 0}
         values = session.frame.ctrl
         enabled = session.adapter.caps.write_ctrl and values is not None
-        u.icon("control", x, y + 4 * s, 20, SAGE)
-        u.text(x + 30 * s, y + 3 * s, "Actuators", TEXT, 17, bold=True)
         row = 0
         for actuator in session.actuators:
             lo, hi = actuator.ctrl_range if actuator.ctrl_limited else (-1.0, 1.0)
             for component in range(actuator.ctrl_count):
                 address = actuator.ctrl_address + component
-                yy = y + (52 + row * 64) * s
+                yy = y + (8 + row * 64) * s
                 suffix = f"[{component}]" if actuator.ctrl_count > 1 else ""
-                u.text(x, yy, actuator.name + suffix, MUTED, 13)
+                target = session.node(actuator.target_node_id) or joint_nodes.get(actuator.joint)
+                pressed = u.button(
+                    "control-target-" + str(address),
+                    x,
+                    yy,
+                    w / s,
+                    22,
+                    label=actuator.name + suffix,
+                    text_color=SAGE if panel._selected_address == address else MUTED,
+                    active=panel._selected_address == address,
+                    translate=False,
+                    align="left",
+                )
+                hovered = imgui.is_item_hovered()
+                focused = hovered and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
+                if hovered and target is not None:
+                    publish_focus_item_hint(ctx)
+                if target is not None and (pressed or focused):
+                    ctx.submit(cmd.SelectNode(target.node_id))
+                    if focused:
+                        joint = next(
+                            (
+                                item
+                                for item in session.joints
+                                if item.joint_id == target.joint_index
+                            ),
+                            None,
+                        )
+                        activate_edit_gizmo(ctx, target, joint)
+                        if joint is not None and ctx.focus_joint is not None:
+                            ctx.focus_joint(joint.joint_id)
+                        elif ctx.focus_node is not None:
+                            ctx.focus_node(target.node_id)
+                if pressed or focused:
+                    panel._selection_revision = session.selection_revision
+                    panel._selected_address = address
                 current = 0.0 if values is None else float(values[address])
                 imgui.begin_disabled(not enabled)
                 changed, value = u.slider(
@@ -623,16 +815,16 @@ class Study:
                 if changed and enabled:
                     session.submit(cmd.SetCtrl(address, value))
                 row += 1
-        yy = y + (68 + row * 64) * s
+        yy = y + (24 + row * 64) * s
         if not session.actuators:
-            u.text(x, y + 50 * s, "No actuators in this scene", MUTED, 13)
+            u.text(x, y + 8 * s, "No actuators in this scene", MUTED, 13)
             yy += 22 * s
         if (
             u.button(
                 "reset-actuators",
                 x,
                 yy,
-                140,
+                w / s,
                 28,
                 icon="reset",
                 label="Reset controls",
@@ -660,34 +852,82 @@ class Study:
         u = self.ui
         s = self.s
         e = (
-            next((e for e in self.preview.entities if e["id"] == self.pinned), None)
+            next((e for e in self.preview.entities if e["identity"] == self.pinned), None)
             if self.pinned
             else self.preview.entity
         )
-        if not e:
-            u.text(x, y + 45 * s, "Select an entity to inspect.", MUTED)
-            return
-        u.icon(e["type"], x, y + 6 * s, 20, (166, 159, 190, 255))
-        imgui.push_clip_rect((x, y), (x + w - 32 * s, y + 30 * s), True)
-        u.text(x + 30 * s, y + 5 * s, e["name"], TEXT, 16, bold=True)
+        if self.pinned and e is None:
+            self.pinned = None
+            e = self.preview.entity
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.invisible_button("inspector-header", (max(s, w - 60 * s), 30 * s))
+        u.hits["inspector-header"] = (x, y, max(s, w - 60 * s), 30 * s)
+        if imgui.is_item_active() and imgui.is_mouse_dragging(0):
+            window = imgui.internal.get_current_window()
+            if window.dock_node is not None:
+                imgui.internal.dock_context_queue_undock_window(imgui.get_current_context(), window)
+            else:
+                imgui.internal.start_mouse_moving_window(window)
+        u.role_icon(
+            e["icon"] if e else "inspect",
+            x,
+            y,
+            20 * s,
+            30 * s,
+            role="title",
+            c=e["icon_color"] if e else MUTED,
+        )
+        imgui.push_clip_rect((x, y), (x + w - 64 * s, y + 30 * s), True)
+        u.text(
+            x + 28 * s,
+            y + 7.5 * s,
+            e["name"] if e else "Inspector",
+            TEXT,
+            15,
+            bold=True,
+            max_width=max(0, w - 92 * s),
+            translate=e is None,
+        )
         imgui.pop_clip_rect()
+        if e and imgui.is_item_hovered():
+            u.tooltip(e["name"], translate=False)
         if u.button(
             "pin",
-            x + w - 27 * s,
-            y,
+            x + w - 56 * s,
+            y + s,
             26,
-            26,
+            28,
             icon="pin",
+            icon_role="subtle",
             active=bool(self.pinned),
+            enabled=e is not None,
             tooltip="Pin Inspector",
         ):
-            self.pinned = None if self.pinned else e["id"]
+            self.pinned = None if self.pinned else e["identity"]
+        if u.button(
+            "inspector-close",
+            x + w - 26 * s,
+            y + s,
+            26,
+            28,
+            icon="close",
+            icon_role="subtle",
+            tooltip="Close",
+        ):
+            self.open["Inspector"] = False
+        if not e:
+            u.text(x, y + 44 * s, "Select an entity to inspect.", MUTED)
+            imgui.set_cursor_screen_pos((x, y + 44 * s))
+            imgui.dummy((0, 28 * s))
+            return
         tabs = ["Properties", "Physics", "Material", "Joint"]
         tab_icons = ("inspect", "body", "shading", "pose")
-        compact_tabs = w < 260 * s
-        tw = w / 4
+        tab_minimums = [u.measure(u.translate(tab)) + 12 * s for tab in tabs]
+        compact_tabs = w < sum(tab_minimums)
+        tab_x = x
         for n, t in enumerate(tabs):
-            tx = x + n * tw
+            tw = w / 4 if compact_tabs else tab_minimums[n] + (w - sum(tab_minimums)) / 4
+            tx = tab_x
             if u.button(
                 "tab-" + t,
                 tx,
@@ -698,74 +938,89 @@ class Study:
                 icon=tab_icons[n] if compact_tabs else None,
                 tooltip=t if compact_tabs else None,
                 align="center",
-                active=self.inspector_tab == t,
+                text_color=SAGE if self.inspector_tab == t else MUTED,
+                icon_color=SAGE if self.inspector_tab == t else MUTED,
             ):
                 self.inspector_tab = t
             if self.inspector_tab == t:
                 u.draw.add_line(
                     (tx + 8 * s, y + 70 * s), (tx + tw - 8 * s, y + 70 * s), color(SAGE), 2 * s
                 )
-        body_y = y + 71 * s
+            tab_x += tw
+        body_y = y + 82 * s
         imgui.set_cursor_screen_pos((x, body_y))
         imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-        imgui.begin_child("Inspector content", (w, max(s, h - 112 * s)))
+        imgui.begin_child("Inspector content", (w, max(s, h - 82 * s)))
         imgui.pop_style_var()
         p = imgui.get_cursor_screen_pos()
         bx, yy = p.x, p.y
         bw = imgui.get_content_region_avail().x
-        if self.inspector_tab == "Properties":
-            if u.section("TRANSFORM", bx, yy, bw, self.expanded["TRANSFORM"]):
+        original = next(
+            (
+                value
+                for value in self.preview.initial_entities
+                if value["identity"] == e["identity"]
+            ),
+            None,
+        )
+        if draw_component(self, self._panel_context, e, self.inspector_tab):
+            yy = max(yy, imgui.get_cursor_screen_pos().y)
+        elif self.inspector_tab == "Properties":
+            if u.section("TRANSFORM", bx, yy, bw - 32 * s, self.expanded["TRANSFORM"]):
                 self.expanded["TRANSFORM"] = not self.expanded["TRANSFORM"]
+            if u.button(
+                "restore-transform",
+                bx + bw - 28 * s,
+                yy + 6 * s,
+                26,
+                26,
+                icon="reset",
+                tooltip="Restore transform",
+                enabled=not self.playing and e["posable"] and original is not None,
+            ):
+                for key in ("position", "rotation", "scale"):
+                    e[key] = original[key]
+                self.preview.apply_document_edits()
             if self.expanded["TRANSFORM"]:
-                row_h = 60 if bw < 272 * s else 36
-                for n, (key, label, unit) in enumerate(
-                    [
-                        ("position", "Position", "m"),
-                        ("rotation", "Rotation", "°"),
-                        ("scale", "Scale", ""),
-                    ]
+                layout = u.vector_layout(bw)
+                row_y = yy + 42 * s
+                for key, label, unit in (
+                    ("position", "Position", "m"),
+                    ("rotation", "Rotation", "°"),
+                    ("scale", "Scale", ""),
                 ):
                     imgui.begin_disabled(
                         self.playing or not e["scalable" if key == "scale" else "posable"]
                     )
                     changed, val = u.vector(
-                        "##" + e["id"] + key, bx, yy + (42 + n * row_h) * s, bw, label, e[key], unit
+                        "##" + e["id"] + key,
+                        bx,
+                        row_y,
+                        bw,
+                        label,
+                        e[key],
+                        unit,
+                        speed=0.5 if key == "rotation" else 0.01,
+                        lo=0.01 if key == "scale" else 0,
+                        hi=100 if key == "scale" else 0,
+                        format="%.3g",
+                        reset_values=(1.0, 1.0, 1.0) if key == "scale" else (0.0, 0.0, 0.0),
+                        layout=layout,
                     )
                     imgui.end_disabled()
+                    edit_key = "##" + e["id"] + key
+                    state = self.begin_numeric_edit(edit_key, deferred=key == "scale")
                     if (
                         changed
+                        and not state.canceled
                         and all(np.isfinite(val))
                         and (key != "scale" or (min(val) >= 0.01 and max(val) <= 100))
                     ):
                         e[key] = val
-                self.preview.apply_document_edits()
-                restore_y = yy + (42 + 2 * row_h + (52 if row_h == 60 else 28) + 12) * s
-                original = next(
-                    (
-                        v
-                        for v in self.preview.initial_entities
-                        if (v["node_id"], v["name"], v["type"])
-                        == (e["node_id"], e["name"], e["type"])
-                    ),
-                    None,
-                )
-                if u.button(
-                    "restore-transform",
-                    bx,
-                    restore_y,
-                    150,
-                    28,
-                    icon="reset",
-                    label="Restore transform",
-                    enabled=not self.playing and e["posable"] and original is not None,
-                    tooltip="Joint-driven transform; use the Joint tab or the viewport handle."
-                    if not e["posable"]
-                    else "",
-                ):
-                    for key in ("position", "rotation", "scale"):
-                        e[key] = original[key]
                     self.preview.apply_document_edits()
-                yy = restore_y + 42 * s
+                    self.finish_numeric_edit(edit_key, state)
+                    row_y += layout.height + 8 * s
+                yy = row_y + 16 * s
             else:
                 yy += 40 * s
             if u.section("DISPLAY", bx, yy, bw, self.expanded["DISPLAY"]):
@@ -773,11 +1028,11 @@ class Study:
             if self.expanded["DISPLAY"]:
                 u.text(bx, yy + 44 * s, "Visible", MUTED, 13)
                 e["hidden"] = not u.switch(
-                    "entity-visible", bx + bw - 28 * s, yy + 39 * s, not e["hidden"]
+                    "entity-visible", bx + bw - SWITCH_WIDTH * s, yy + 36.5 * s, not e["hidden"]
                 )
                 u.text(bx, yy + 78 * s, "Transform handles", MUTED, 13)
                 self.preview.gizmos = u.switch(
-                    "gizmos", bx + bw - 28 * s, yy + 73 * s, self.preview.gizmos
+                    "gizmos", bx + bw - SWITCH_WIDTH * s, yy + 70.5 * s, self.preview.gizmos
                 )
                 yy += 113 * s
             else:
@@ -787,43 +1042,42 @@ class Study:
             yy += 42 * s
             if self.expanded["IDENTITY"]:
                 u.text(bx, yy, "Object ID", MUTED, 13)
-                u.text(bx + 83 * s, yy, str(e["object_id"]), TEXT, 13)
+                u.text(bx + 100 * s, yy, str(e["object_id"]), TEXT, 13)
                 u.text(bx, yy + 30 * s, "Type", MUTED, 13)
-                u.text(bx + 83 * s, yy + 30 * s, e["type"], TEXT, 13)
+                u.text(bx + 100 * s, yy + 30 * s, e["type"], TEXT, 13)
                 yy += 64 * s
-        elif self.inspector_tab == "Physics":
-            u.icon("info", bx, yy + 14 * s, 18, DIM)
-            imgui.set_cursor_screen_pos((bx + 28 * s, yy + 13 * s))
-            node = self.preview.session.node(e["node_id"])
-            properties = (
-                self.preview.session.body_properties(node.node_id) if node.body_index >= 0 else None
-            )
-            imgui.text_wrapped(
-                f"Mass: {properties.mass:.3f} kg"
-                if properties is not None
-                else "No body properties for this entity."
-            )
-            yy += 130 * s
         elif self.inspector_tab == "Material":
             u.section("SURFACE", bx, yy, bw)
             imgui.begin_disabled(not e["colorable"])
             self.menus.color_control(e, bx, yy + 48 * s, bw)
+            layout = u.numeric_layout(bw, 4, column_options=(4, 2, 1))
+            for n, axis in enumerate("RGBA"):
+                dx, dy, field_w, _ = layout.fields[n]
+                key = "##" + e["id"] + "color" + axis
+                changed, value = u.input(
+                    key,
+                    bx + dx,
+                    yy + 112 * s + dy,
+                    field_w,
+                    e["rgba"][n],
+                    axis=axis,
+                    speed=0.005,
+                    lo=0,
+                    hi=1,
+                    format="%.3g",
+                    reset_value=original["rgba"][n] if original else (1.0 if axis == "A" else 0.0),
+                )
+                state = self.begin_numeric_edit(key)
+                if changed and not state.canceled:
+                    e["rgba"][n] = value
+                    e["color"] = "#" + "".join(f"{round(v * 255):02x}" for v in e["rgba"][:3])
+                self.preview.apply_document_edits()
+                self.finish_numeric_edit(key, state)
             imgui.end_disabled()
-            yy += 150 * s
-        else:
-            self.pose_panel(bx, yy, bw)
-            yy += 315 * s
+            yy += 136 * s + layout.height
         imgui.set_cursor_screen_pos((bx, yy))
         imgui.dummy((1, 1))
         imgui.end_child()
-        footer = y + h - 28 * s
-        u.line(x - 12 * s, footer - 7 * s, w + 24 * s)
-        if u.button(
-            "undo-footer", x, footer, 86, 28, icon="undo", label="Undo", enabled=bool(self.history)
-        ):
-            self.undo()
-        imgui.set_cursor_screen_pos((x, footer + 20 * s))
-        imgui.dummy((1, 1))
 
     def assets_panel(self, x, y, w):
         u = self.ui
@@ -852,9 +1106,17 @@ class Study:
                 16 * s,
                 color((*[int(hexcolor[i : i + 2], 16) for i in (1, 3, 5)], 255)),
             )
-            u.text(x + 56 * s, yy + 17 * s, name, TEXT, 14)
+            u.text(x + 56 * s, yy + 17 * s, name, TEXT, 13)
             if self.material == n:
-                u.icon("check", x + w - 26 * s, yy + 16 * s, 16, SAGE)
+                u.role_icon(
+                    "check",
+                    x + w - 26 * s,
+                    yy + 10 * s,
+                    16 * s,
+                    28 * s,
+                    role="inline",
+                    c=SAGE,
+                )
         if u.button(
             "apply-material",
             x,
@@ -873,39 +1135,12 @@ class Study:
         imgui.set_cursor_screen_pos((x, y + 320 * s))
         imgui.dummy((1, 1))
 
-    def pose_panel(self, x, y, w):
-        u = self.ui
-        s = self.s
-        u.text(x, y + 8 * s, "JOINT POSE", MUTED, 13, bold=True)
-        for n, (name, label, lo, hi) in enumerate(
-            [
-                ("hinge", "Hinge angle", -60, 60),
-                ("ball", "Ball angle", -90, 90),
-                ("slide", "Slide position", -0.35, 0.35),
-            ]
-        ):
-            yy = y + (42 + n * 76) * s
-            u.text(x, yy, label, MUTED, 13)
-            joint_name = {"hinge": "hinge_limited", "ball": "ball", "slide": "slide"}[name]
-            available = any(j.name == joint_name for j in self.preview.session.joints)
-            imgui.begin_disabled(
-                self.playing or not self.preview.session.adapter.caps.write_qpos or not available
-            )
-            changed, value = u.slider(
-                "##pose-" + name,
-                x,
-                yy + 24 * s,
-                w,
-                self.preview.document["pose"][name],
-                lo,
-                hi,
-                "%.2f m" if name == "slide" else "%.1f°",
-            )
-            imgui.end_disabled()
-            if changed:
-                self.preview.set_pose_value(name, value)
-        imgui.set_cursor_screen_pos((x, y + 298 * s))
-        imgui.dummy((1, 1))
+    def pose_panel(self, x, y, w, *, node_id=None):
+        from .navigation import Navigation
+
+        if not hasattr(self, "navigation"):
+            self.navigation = Navigation(self)
+        self.navigation.draw_pose(self._panel_context, x, y, w, node_id=node_id)
 
     def camera_panel(self, x, y, w):
         u = self.ui
@@ -924,134 +1159,105 @@ class Study:
                 filled=True,
             ):
                 self.preview.camera.set_preset(name.lower())
-        if u.button(
+        projection = u.segmented(
             "projection",
             x,
             y + 176 * s,
             w / s,
-            28,
-            label="Orthographic" if self.preview.camera.orthographic else "Perspective",
-            filled=True,
-        ):
-            self.preview.camera.set_orthographic(not self.preview.camera.orthographic)
+            ("Perspective", "Orthographic"),
+            int(self.preview.camera.orthographic),
+            icons=("perspective", "orthographic"),
+            layout="content",
+        )
+        if bool(projection) != self.preview.camera.orthographic:
+            self.preview.camera.set_orthographic(bool(projection))
+        projection_rect = u.hits["projection"]
+        frame_y = projection_rect[1] + projection_rect[3] + 12 * s
         if u.button(
-            "camera-frame", x, y + 216 * s, w / s, 28, icon="frame", label="Frame all", filled=True
+            "camera-frame", x, frame_y, w / s, 28, icon="frame", label="Frame all", filled=True
         ):
             self.preview._frame_scene(animate=True)
-        imgui.set_cursor_screen_pos((x, y + 270 * s))
+        imgui.set_cursor_screen_pos((x, frame_y + 54 * s))
         imgui.dummy((1, 1))
 
     def layers_panel(self, x, y, w):
-        u = self.ui
-        s = self.s
-        u.text(x, y + 8 * s, "VIEWPORT LAYERS", MUTED, 13, bold=True)
-        for n, (attr, label) in enumerate(
-            [("gizmos", "Transform handles"), ("shadows", "Cast shadows")]
-        ):
-            yy = y + (46 + n * 38) * s
-            u.text(x, yy + 4 * s, label, MUTED, 13)
-            setattr(
-                self.preview,
-                attr,
-                u.switch("layer-" + attr, x + w - 29 * s, yy, getattr(self.preview, attr)),
+        u, s, ctx = self.ui, self.s, self._panel_context
+        yy = y
+
+        def visibility_row(key, label, visible, tooltip=""):
+            toggled = u.button(
+                key + "-label",
+                x,
+                yy,
+                max(1, w / s - SWITCH_WIDTH - 8),
+                28,
+                label=label,
+                text_color=MUTED,
+                tooltip=tooltip,
+                align="left",
             )
-        u.section("SCENE OBJECTS", x, y + 138 * s, w)
-        for n, e in enumerate(self.preview.entities[:6]):
-            yy = y + (176 + n * 34) * s
-            u.text(x, yy + 4 * s, e["name"], MUTED, 13)
-            e["hidden"] = not u.switch("layer-" + e["id"], x + w - 29 * s, yy, not e["hidden"])
-        imgui.set_cursor_screen_pos((x, y + 401 * s))
+            value = u.switch(key, x + w - SWITCH_WIDTH * s, yy, visible)
+            return not visible if toggled else value
+
+        labels = (
+            "Viewport UI",
+            "Gizmos",
+            "Selection",
+            "Helpers",
+            "Perturbation",
+            "3D drawings",
+            "2D drawings",
+        )
+        for (name, description), label in zip(LAYER_LABELS, labels, strict=True):
+            layers = self.preview.viewport_layers
+            value = visibility_row(
+                "layer-" + name, ctx.tr(label), getattr(layers, name), ctx.tr(description)
+            )
+            if value != getattr(layers, name):
+                ctx.set_viewport_layers(replace(layers, **{name: value}))
+            yy += 34 * s
+        draw = ctx.backend.debug
+        named = (
+            tuple(
+                layer
+                for layer in draw.layers()
+                if debug_layer_group(layer.name) in ("debug_3d", "debug_2d")
+                and (
+                    layer.primitives
+                    or layer.name in self.preview.viewport_layers.hidden_debug_layers
+                )
+            )
+            if draw is not None
+            else ()
+        )
+        if named:
+            u.section(ctx.tr("Named drawing layers"), x, yy + 8 * s, w)
+            yy += 50 * s
+        for layer in named:
+            layers = self.preview.viewport_layers
+            visible = layer.name not in layers.hidden_debug_layers
+            imgui.begin_disabled(not getattr(layers, debug_layer_group(layer.name)))
+            value = visibility_row(
+                "drawing-layer-" + layer.name, layer.name.removeprefix("canvas2d:"), visible
+            )
+            imgui.end_disabled()
+            if value != visible:
+                hidden = tuple(name for name in layers.hidden_debug_layers if name != layer.name)
+                if not value:
+                    hidden += (layer.name,)
+                ctx.set_viewport_layers(replace(layers, hidden_debug_layers=hidden))
+            yy += 34 * s
+        imgui.set_cursor_screen_pos((x, yy))
         imgui.dummy((1, 1))
 
     def timeline(self, x, y, w, h):
-        u = self.ui
-        s = self.s
-        if u.button("collapse-timeline", x, y, 25, 25, icon="down", tooltip="Collapse Timeline"):
-            self.toggle_timeline()
-        u.text(x + 34 * s, y + 6 * s, "Joint poses", MUTED, 14)
-        u.text(x + w - 72 * s, y + 6 * s, "0 – 10 s", MUTED, 13)
-        u.line(x, y + 34 * s, w)
-        for n in range(11):
-            xx = x + 16 * s + n * (w - 32 * s) / 10
-            u.text(xx, y + 46 * s, str(n), MUTED, 13)
-            u.draw.add_line((xx, y + 63 * s), (xx, y + 103 * s), color(LINE))
-        ty = y + 87 * s
-        u.draw.add_line((x + 16 * s, ty), (x + w - 16 * s, ty), color((106, 118, 98, 120)), 2 * s)
-        editable = (
-            not self.playing
-            and self.preview.session.adapter.caps.write_qpos
-            and any(
-                joint.name in ("hinge_limited", "slide", "ball")
-                for joint in self.preview.session.joints
-            )
-        )
-        imgui.begin_disabled(not editable)
-        for key in self.preview.document["keys"]:
-            xx = x + 16 * s + key["time"] / 10 * (w - 32 * s)
-            if u.button(
-                "key-" + key["name"],
-                xx - 12 * s,
-                ty - 13 * s,
-                25,
-                26,
-                icon="key",
-                active=abs(self.pose_time - key["time"]) < 0.02,
-                tooltip=key["name"],
-            ):
-                self.sample_pose(key["time"])
-        px = x + 16 * s + self.pose_time / 10 * (w - 32 * s)
-        u.draw.add_line((px, y + 62 * s), (px, y + 110 * s), color(SAGE), 1.5 * s)
-        imgui.set_cursor_screen_pos((x, y + 126 * s))
-        imgui.set_next_item_width(w)
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, (5 * s, 3 * s))
-        changed, value = imgui.slider_float("##time", self.pose_time, 0, 10, "%.3f s")
-        imgui.pop_style_var()
-        if changed:
-            self.sample_pose(value)
-        imgui.end_disabled()
+        from .timeline_panel import ReferenceTimeline
 
-    def sample_pose(self, pose_time):
-        session = self.preview.session
-        if self.playing or not session.adapter.caps.write_qpos:
-            return False
-        keys = self.preview.document["keys"]
-        left = keys[0]
-        right = keys[-1]
-        for k in keys:
-            if k["time"] <= pose_time:
-                left = k
-            if k["time"] >= pose_time:
-                right = k
-                break
-        t = (
-            0
-            if left["time"] == right["time"]
-            else (pose_time - left["time"]) / (right["time"] - left["time"])
-        )
-        pose = {k: left["pose"][k] * (1 - t) + right["pose"][k] * t for k in left["pose"]}
+        if self.timeline_panel is None:
+            self.timeline_panel = ReferenceTimeline(self)
+        self.timeline_panel.draw(self._panel_context, x, y, w, h)
 
-        indices, values = [], []
-        for name, value in pose.items():
-            joint_name = {"hinge": "hinge_limited", "slide": "slide", "ball": "ball"}[name]
-            joint = next((joint for joint in session.joints if joint.name == joint_name), None)
-            if joint is None:
-                continue
-            if name == "ball":
-                indices.extend(range(joint.qpos_adr, joint.qpos_adr + 4))
-                values.extend(
-                    math3d.mat3_to_quat(math3d.euler_xyz_to_mat3((0, np.radians(value), 0)))
-                )
-            else:
-                indices.append(joint.qpos_adr)
-                values.append(value if name == "slide" else np.radians(value))
-        if not indices:
-            return False
-        result = session.submit(cmd.SetQposBatch(np.asarray(indices), np.asarray(values)))
-        if result.ok:
-            self.pose_time = pose_time
-        return result.ok
-
-    def viewport(self):
+    def viewport(self, preview_name=""):
         u = self.ui
         s = self.s
         app = self.preview
@@ -1077,17 +1283,52 @@ class Study:
             if horizontal
             else y + max(148, (h / s - 248) / 2) * s
         )
+        compact_camera = w < 240 * s
+        stacked_camera = w < 160 * s
+        camera_height = 68 if stacked_camera else 36
+        transport_visible = h >= (248 if w < 260 * s else 220) * s
+        transport_width = 168 if w < 340 * s else 282
+        rail_width = step * (3 if wrapped else 6) + 8 if horizontal else 44
+        collapsed_controls = (
+            w < (rail_width + 20) * s
+            or (horizontal and tools_y < y + (camera_height + 18) * s)
+            or (transport_visible and w < (transport_width + 20) * s)
+            or (app.camera_preview.enabled and bool(preview_name) and h < 300 * s)
+        )
+        if app.model_edits.active and horizontal:
+            pending_height = 70 if w < 412 * s and h >= 300 * s else 40
+            collapsed_controls |= tools_y - (pending_height + 8) * s < y + (camera_height + 18) * s
+        cube_scale = self.cube.scale_for((x, y, w, h), s)
+        cube_rect = None
+        if cube_scale > 0:
+            center = widget_center((x, y, w, h), cube_scale)
+            radius = BACKDROP_RADIUS_PT * cube_scale
+            cube_rect = (center[0] - radius, center[1] - radius, radius * 2, radius * 2)
+            cx, cy, cw, ch = cube_rect
+            if horizontal:
+                collapsed_controls |= (
+                    x + 10 * s < cx + cw
+                    and cx < x + (10 + rail_width) * s
+                    and tools_y < cy + ch
+                    and cy < tools_y + tools_height * s
+                )
         imgui.push_clip_rect((x, y), (x + w, y + h), True)
         app._draw_scene_overlays(self.window.painter())
         overlay = []
         if app.model_edits.active:
             self.pending_model_edits(
-                x, y, w, h, overlay, bottom_limit=tools_y if horizontal else None
+                x,
+                y,
+                w,
+                h,
+                overlay,
+                bottom_limit=tools_y if horizontal and not collapsed_controls else None,
             )
         if not app.viewport_layers.viewport_ui:
             self.rects["overlays"] = overlay
             self.input_overlays = list(overlay)
             imgui.pop_clip_rect()
+            app._draw_reference_camera_preview(preview_name)
             imgui.end()
             return
 
@@ -1095,114 +1336,204 @@ class Study:
             u.rect(rx, ry, rw * s, rh * s, (22, 25, 28, 230), 8)
             overlay.append((rx, ry, rw * s, rh * s))
 
-        compact_camera = w < 240 * s
-        stacked_camera = w < 160 * s
-        camera_width = (
-            44 if stacked_camera else 72 if compact_camera else 124 if w < 300 * s else 156
-        )
-        shell(x + 10 * s, y + 10 * s, camera_width, 68 if stacked_camera else 36)
-        camera_clicked = u.button(
-            "projection-button",
-            x + 13 * s,
-            y + 14 * s,
-            28 if compact_camera else 84,
-            28,
-            icon="camera",
-            label=""
-            if compact_camera
-            else "Ortho"
-            if self.preview.camera.orthographic
-            else "Persp",
-            tooltip="Camera" if compact_camera else None,
-            active=imgui.is_popup_open("Camera"),
-        )
-        if not compact_camera:
-            u.icon("down", x + 82 * s, y + 23 * s, 11, DIM)
-        self.menus.popup("Camera", u.hits["projection-button"], camera_clicked)
-        shading_clicked = u.button(
-            "shading",
-            x + (13 if stacked_camera else 47 if compact_camera else 104) * s,
-            y + (46 if stacked_camera else 14) * s,
-            28,
-            28,
-            icon="shading",
-            tooltip="Shading",
-            active=imgui.is_popup_open("Shading"),
-        )
-        self.menus.popup("Shading", u.hits["shading"], shading_clicked)
-        if camera_width == 156 and u.button(
-            "viewport-layers",
-            x + 134 * s,
-            y + 14 * s,
-            28,
-            28,
-            icon="layers",
-            tooltip="Viewport layers",
-        ):
-            self.activate("Layers")
-        if h >= (248 if w < 260 * s else 220) * s:
-            self.transport(x, y, w, shell)
-        shell(
-            x + 10 * s,
-            tools_y,
-            step * (3 if wrapped else 6) + 8 if horizontal else 44,
-            tools_height if horizontal else 248,
-        )
+        if collapsed_controls:
+            shell(x + 10 * s, y + 10 * s, 36, 36)
+            popup = "Viewport controls###viewport-more"
+            if u.button(
+                "viewport-more",
+                x + 14 * s,
+                y + 14 * s,
+                28,
+                28,
+                icon="more",
+                tooltip="Viewport controls",
+                active=imgui.is_popup_open(popup),
+            ):
+                imgui.open_popup(popup)
+            if (
+                self.menus.requested_path
+                and self.menus.requested_path[0]
+                in (
+                    "Camera",
+                    "Shading",
+                    "Playback",
+                )
+                and not imgui.is_popup_open(popup)
+            ):
+                imgui.open_popup(popup)
+            with self.menus.style():
+                if imgui.begin_popup(popup):
 
-        def tool_pos(n):
-            if wrapped:
-                return x + (14 + n % 3 * step) * s, tools_y + (4 + n // 3 * 36) * s
-            return (
-                x + (14 + n * step if horizontal else 14) * s,
-                tools_y + (4 if horizontal else (176, 211)[n - 4] if n >= 4 else 4 + n * 40) * s,
+                    def menu_action(key, label, shortcut="", checked=False, enabled=True):
+                        clicked, _ = imgui.menu_item(u.translate(label), shortcut, checked, enabled)
+                        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+                        u.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+                        return clicked
+
+                    for name in ("Camera", "Shading"):
+                        self.menus.reveal((name,))
+                        self.menus.constrain(name)
+                        if imgui.begin_menu(u.translate(name) + "###" + name):
+                            self.menus.content(name, (name,))
+                            imgui.end_menu()
+                    if (
+                        cube_scale <= 0
+                        and self.cube.preview_active
+                        and imgui.begin_menu(u.translate("View direction"))
+                    ):
+                        for name in ("Front", "Back", "Left", "Right", "Top", "Bottom"):
+                            if menu_action("camera-preview-view-" + name, name):
+                                app._leave_model_camera()
+                                app.camera.set_preset(name.lower())
+                        imgui.end_menu()
+                    imgui.separator()
+                    for name, action in VIEWPORT_TOOLS:
+                        shortcut = "V" if action is None else app.input_bindings.label(action)
+                        if shortcut == "Unbound":
+                            shortcut = ""
+                        if menu_action("tool-" + name, name.title(), shortcut, app.tool == name):
+                            app.tool = name
+                    if menu_action(
+                        "frame",
+                        "Body frame",
+                        app.input_bindings.label(InputAction.GIZMO_SPACE),
+                        self.space == "Body",
+                    ):
+                        self.space = "World" if self.space == "Body" else "Body"
+                    if menu_action(
+                        "snap", "Snap", app.input_bindings.label(InputAction.SNAP), self.snap
+                    ):
+                        self.snap = not self.snap
+                    if menu_action("viewport-layers", "Viewport layers"):
+                        self.activate("Layers")
+                    imgui.separator()
+                    self.menus.reveal(("Playback",))
+                    self.menus.constrain("Playback")
+                    if imgui.begin_menu(u.translate("Playback options") + "###Playback"):
+                        session = app.session
+                        if menu_action(
+                            "play", "Pause simulation" if self.playing else "Play simulation"
+                        ):
+                            app._toggle_playback()
+                        if menu_action("go-start", "Go to start"):
+                            app._reset_playback()
+                        if menu_action(
+                            "record",
+                            "Record simulation",
+                            checked=session.state_take_recording,
+                            enabled=session.adapter.caps.simulation,
+                        ):
+                            app._toggle_state_take_recording()
+                        imgui.separator()
+                        self.menus.content("Playback", ("Playback",))
+                        imgui.end_menu()
+                    imgui.end_popup()
+        else:
+            camera_width = (
+                44 if stacked_camera else 72 if compact_camera else 144 if w < 300 * s else 176
+            )
+            shell(x + 10 * s, y + 10 * s, camera_width, 68 if stacked_camera else 36)
+            camera_clicked = u.button(
+                "projection-button",
+                x + 13 * s,
+                y + 14 * s,
+                28 if compact_camera else 98,
+                28,
+                icon="camera",
+                label=""
+                if compact_camera
+                else "Ortho"
+                if self.preview.camera.orthographic
+                else "Persp",
+                tooltip="Camera" if compact_camera else None,
+                active=imgui.is_popup_open("Camera"),
+                align="left",
+            )
+            if not compact_camera:
+                u.role_icon("down", x + 92 * s, y + 14 * s, 12 * s, 28 * s, role="inline", c=DIM)
+            self.menus.popup("Camera", u.hits["projection-button"], camera_clicked)
+            shading_clicked = u.button(
+                "shading",
+                x + (13 if stacked_camera else 47 if compact_camera else 116) * s,
+                y + (46 if stacked_camera else 14) * s,
+                28,
+                28,
+                icon="shading",
+                tooltip="Shading",
+                active=imgui.is_popup_open("Shading"),
+            )
+            self.menus.popup("Shading", u.hits["shading"], shading_clicked)
+            if camera_width == 176 and u.button(
+                "viewport-layers",
+                x + 148 * s,
+                y + 14 * s,
+                28,
+                28,
+                icon="layers",
+                tooltip="Viewport layers",
+            ):
+                self.activate("Layers")
+            if transport_visible:
+                self.transport(x, y, w, shell)
+            shell(
+                x + 10 * s,
+                tools_y,
+                step * (3 if wrapped else 6) + 8 if horizontal else 44,
+                tools_height if horizontal else 248,
             )
 
-        for n, (name, shortcut) in enumerate(
-            [("select", "V"), ("move", "W"), ("rotate", "E"), ("scale", "R")]
-        ):
-            xx, yy = tool_pos(n)
-            button_size = step - 4 if horizontal else 36
+            def tool_pos(n):
+                if wrapped:
+                    return x + (14 + n % 3 * step) * s, tools_y + (4 + n // 3 * 36) * s
+                return (
+                    x + (14 + n * step if horizontal else 14) * s,
+                    tools_y
+                    + (4 if horizontal else (176, 211)[n - 4] if n >= 4 else 4 + n * 40) * s,
+                )
+
+            for n, (name, action) in enumerate(VIEWPORT_TOOLS):
+                xx, yy = tool_pos(n)
+                button_size = step - 4 if horizontal else 36
+                shortcut = "V" if action is None else app.input_bindings.label(action)
+                tip = "Dimensions: select a geometry" if name == "scale" else name.title()
+                if shortcut != "Unbound":
+                    tip += " · " + shortcut
+                if u.button(
+                    "tool-" + name,
+                    xx,
+                    yy,
+                    button_size,
+                    32 if horizontal else 36,
+                    icon=name,
+                    active=self.preview.tool == name,
+                    solid=True,
+                    tooltip=tip,
+                ):
+                    self.preview.tool = name
+            if not horizontal:
+                u.line(x + 18 * s, tools_y + 168 * s, 28 * s)
             if u.button(
-                "tool-" + name,
-                xx,
-                yy,
-                button_size,
-                32 if horizontal else 36,
-                icon=name,
-                icon_size=18,
-                active=self.preview.tool == name,
-                solid=True,
-                tooltip=("Dimensions: select a geometry" if name == "scale" else name.title())
-                + " · "
-                + shortcut,
+                "frame",
+                *tool_pos(4),
+                step - 4 if horizontal else 36,
+                32,
+                icon="body" if self.space == "Body" else "world",
+                tooltip="World / body frame · " + app.input_bindings.label(InputAction.GIZMO_SPACE),
             ):
-                self.preview.tool = name
-        if not horizontal:
-            u.line(x + 18 * s, tools_y + 168 * s, 28 * s)
-        if u.button(
-            "frame",
-            *tool_pos(4),
-            step - 4 if horizontal else 36,
-            32,
-            icon="body" if self.space == "Body" else "world",
-            tooltip="World / body frame · B",
-        ):
-            self.space = "Body" if self.space == "World" else "World"
-        if u.button(
-            "snap",
-            *tool_pos(5),
-            step - 4 if horizontal else 36,
-            32,
-            icon="snap",
-            active=self.snap,
-            tooltip="Snap · S",
-        ):
-            self.snap = not self.snap
+                self.space = "Body" if self.space == "World" else "World"
+            if u.button(
+                "snap",
+                *tool_pos(5),
+                step - 4 if horizontal else 36,
+                32,
+                icon="snap",
+                active=self.snap,
+                tooltip="Snap · " + app.input_bindings.label(InputAction.SNAP),
+            ):
+                self.snap = not self.snap
         self.input_overlays = list(overlay)
-        cube_scale = self.cube.scale_for((x, y, w, h), s)
-        center = widget_center((x, y, w, h), cube_scale)
-        radius = BACKDROP_RADIUS_PT * cube_scale
-        overlay.append((center[0] - radius, center[1] - radius, radius * 2, radius * 2))
+        if cube_rect is not None:
+            overlay.append(cube_rect)
         if (
             h >= 210 * s
             and not self.open["Inspector"]
@@ -1210,18 +1541,19 @@ class Study:
         ):
             footer_w = min(w - 20 * s, 248 * s)
             u.rect(x + 10 * s, y + h - 38 * s, footer_w, 28 * s, (22, 25, 28, 230), 4.8)
-            u.icon("link", x + 18 * s, y + h - 32 * s, 16, AMBER)
+            u.role_icon("link", x + 18 * s, y + h - 38 * s, 16 * s, 28 * s, role="inline", c=AMBER)
             u.text(
                 x + 42 * s,
                 y + h - 31 * s,
                 self.preview.selected or "No selection",
                 MUTED,
-                14,
+                13,
+                translate=not bool(self.preview.selected),
             )
             overlay.append((x + 10 * s, y + h - 38 * s, footer_w, 28 * s))
         self.rects["overlays"] = overlay
         imgui.pop_clip_rect()
-        if not self.open["Timeline"]:
+        if not self.bottom_open:
             yy = y + h
             u.rect(x, yy, w, 38 * s, PANEL, 0)
             u.line(x, yy, w)
@@ -1235,13 +1567,29 @@ class Study:
                 tooltip="Expand Timeline",
             ):
                 self.toggle_timeline()
+            timeline_width = max(95, u.measure(u.translate("Timeline")) / s + 39)
+            output_width = max(85, u.measure(u.translate("Output")) / s + 39)
             if u.button(
-                "timeline-tab", x + 38 * s, yy + 5 * s, 95, 28, icon="key", label="Timeline"
+                "timeline-tab",
+                x + 38 * s,
+                yy + 5 * s,
+                timeline_width,
+                28,
+                icon="key",
+                label="Timeline",
             ):
-                self.toggle_timeline()
-            u.draw.add_line(
-                (x + 42 * s, yy + 36 * s), (x + 126 * s, yy + 36 * s), color(SAGE), 2 * s
-            )
+                self.activate("Timeline")
+            if w > (timeline_width + output_width + 53) * s and u.button(
+                "output-tab",
+                x + (45 + timeline_width) * s,
+                yy + 5 * s,
+                output_width,
+                28,
+                icon="terminal",
+                label="Output",
+            ):
+                self.activate("Output")
+        app._draw_reference_camera_preview(preview_name)
         imgui.end()
 
     def pending_model_edits(self, x, y, w, h, overlay, *, bottom_limit=None):
@@ -1254,7 +1602,7 @@ class Study:
         py = (
             bottom_limit - (height + 8) * s
             if bottom_limit is not None
-            else y + max(10, h / s - 96) * s
+            else y + max(10, h / s - height - 10) * s
         )
         u.rect(px, py, width * s, height * s, (22, 25, 28, 245), 8)
         overlay.append((px, py, width * s, height * s))
@@ -1308,7 +1656,9 @@ class Study:
         u, s = self.ui, self.s
         session = self.preview.session
         compact = w < 340 * s
-        width = 160 if compact else 282
+        width = 168 if compact else 282
+        if w < (width + 20) * s:
+            return
         tx = x + (w - width * s) / 2
         ty = y + (104 if w < 500 * s else 52 if w < 700 * s else 10) * s
         shell(tx, ty, width, 36)
@@ -1319,6 +1669,7 @@ class Study:
             26,
             28,
             icon="previous",
+            icon_role="subtle",
             tooltip="Previous frame",
             enabled=session.can_step_back,
         ):
@@ -1330,6 +1681,7 @@ class Study:
             32,
             28,
             icon="pause" if self.playing else "play",
+            icon_role="subtle",
             active=True,
             tooltip="Play / pause",
         ):
@@ -1341,19 +1693,32 @@ class Study:
             26,
             28,
             icon="next",
+            icon_role="subtle",
             tooltip="Next frame",
             enabled=not self.playing and session.adapter.caps.simulation,
         ):
             session.submit(cmd.Step())
         if not compact:
-            u.text(tx + 110 * s, ty + 11 * s, f"{self.time:.3f} s", TEXT, 13, mono=True)
+            caption = f"{self.time:.3f} s"
+            imgui.push_font(u.mono, 13 * s)
+            caption_width = imgui.calc_text_size(caption).x
+            imgui.pop_font()
+            u.text(tx + 142 * s - caption_width / 2, ty + 11 * s, caption, TEXT, 13, mono=True)
+        for offset in (100,) if compact else (102, 182):
+            u.draw.add_line(
+                (tx + offset * s, ty + 9 * s),
+                (tx + offset * s, ty + 27 * s),
+                color((255, 255, 255, 32)),
+                s,
+            )
         if u.button(
             "go-start",
-            tx + (99 if compact else 189) * s,
+            tx + (107 if compact else 189) * s,
             ty + 4 * s,
             27,
             28,
             icon="reset",
+            icon_role="subtle",
             tooltip="Go to start",
         ):
             self.preview._reset_playback()
@@ -1364,6 +1729,7 @@ class Study:
             26,
             28,
             icon="record",
+            icon_role="subtle",
             active=self.preview.session.state_take_recording,
             tooltip="Record state take",
             enabled=session.adapter.caps.simulation,
@@ -1371,11 +1737,12 @@ class Study:
             self.preview._toggle_state_take_recording()
         playback_clicked = u.button(
             "playback-options",
-            tx + (130 if compact else 250) * s,
+            tx + (138 if compact else 250) * s,
             ty + 4 * s,
             26,
             28,
             icon="down",
+            icon_role="subtle",
             tooltip="Playback options",
             active=imgui.is_popup_open("Playback"),
         )
@@ -1450,18 +1817,18 @@ def icon_gallery(window, path, *, portable_fonts=False):
         pixels = window.end_frame(readback=True)
     Image.fromarray(np.asarray(pixels)[::-1], "RGB").save(path)
     focus = (
-        "move",
-        "rotate",
-        "scale",
-        "gear",
+        "visual",
+        "collision",
+        "both",
+        "joint-hinge",
+        "joint-slide",
+        "joint-ball",
+        "joint-free",
+        "perspective",
+        "orthographic",
+        "pose",
         "eye",
-        "camera",
-        "keyboard",
-        "mouse",
-        "world",
-        "file",
-        "play",
-        "pause",
+        "layers",
     )
     for _ in range(6):
         window.begin_frame()
@@ -1492,12 +1859,50 @@ def icon_gallery(window, path, *, portable_fonts=False):
         imgui.end()
         pixels = window.end_frame(readback=True)
     Image.fromarray(np.asarray(pixels)[::-1], "RGB").save(path.with_name("icon-geometry.png"))
+    for _ in range(6):
+        window.begin_frame()
+        imgui.set_next_window_pos((0, 0))
+        imgui.set_next_window_size(imgui.get_io().display_size)
+        imgui.begin("Icon roles", None, imgui.WindowFlags_.no_decoration)
+        ui.text(24 * s, 22 * s, "Native icon roles", TEXT, 18, bold=True)
+        ui.text(24 * s, 54 * s, "Canonical canvas / centered control slot (pt)", MUTED)
+        role_focus = (
+            "camera",
+            "inspect",
+            "pin",
+            "lock",
+            "close",
+            "previous",
+            "play",
+            "pause",
+            "next",
+            "reset",
+            "record",
+            "down",
+        )
+        for column, (role, spec) in enumerate(ICON_ROLES.items()):
+            x = (210 + column * 190) * s
+            ui.text(x, 98 * s, f"{role.title()} · {spec.canvas_size:g} / {spec.slot_size:g}")
+            for row, name in enumerate(role_focus):
+                y = (144 + row * 48) * s
+                if column == 0:
+                    ui.text(24 * s, y + 10 * s, name, MUTED)
+                size = spec.slot_size * s
+                ui.draw.add_rect((x, y), (x + size, y + size), color(LINE), 0)
+                ui.role_icon(name, x, y, size, size, role=role, c=TEXT)
+        imgui.end()
+        pixels = window.end_frame(readback=True)
+    Image.fromarray(np.asarray(pixels)[::-1], "RGB").save(path.with_name("icon-roles.png"))
     io = imgui.get_io()
     report = {
         "logical_viewport": list(io.display_size),
         "framebuffer_density": list(io.display_framebuffer_scale),
         "sizes": [14, 16, 18, 24, 56, 112],
         "anchor": [12, 12],
+        "roles": {
+            name: {"canvas_size": spec.canvas_size, "slot_size": spec.slot_size}
+            for name, spec in ICON_ROLES.items()
+        },
         "glyphs": {
             name: {"source_canvas": g["viewBox"], "visible_bounds": g["bounds"]}
             for name, g in GLYPHS.items()
@@ -1521,6 +1926,7 @@ def create_review_window(config, args):
             io.display_framebuffer_scale = (fw / args.width, fh / args.height)
 
         window._input.process_inputs = review_inputs
+        review_inputs()
     return window
 
 
@@ -1587,7 +1993,6 @@ def main(argv=None):
             window.show()
             while not window.should_close():
                 study.draw()
-                time.sleep(1 / 120)
             return
         edit = frames(window, study, args.output / "edit.png")
         if args.capture_only:

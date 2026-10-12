@@ -78,10 +78,12 @@ def _isolated_settings(tmp_path_factory):
             os.environ["MOJIVE_UI_SCALE"] = previous_ui_scale
 
 
-@pytest.fixture(scope="module")
-def canvas():
+@pytest.fixture(scope="module", params=("native", "classic"))
+def canvas(request):
     scene = canvas_scene()
-    viewer = build_scene(scene, vsync=False, width=1100, height=720)
+    viewer = build_scene(
+        scene, vsync=False, width=1100, height=720, config=ViewerConfig(ui=request.param)
+    )
     try:
         viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
         for _ in range(8):
@@ -611,7 +613,7 @@ def test_editor_undo_redo_updates_the_render_backend():
         viewer.release()
 
 
-def test_settings_window_docks_with_camera(canvas):
+def test_settings_window_uses_frontend_placement(canvas):
     from imgui_bundle import imgui
 
     viewer, _scene = canvas
@@ -625,6 +627,10 @@ def test_settings_window_docks_with_camera(canvas):
         title = settings.name if translated == settings.name else f"{translated}###{settings.name}"
         window = imgui.internal.find_window_by_name(title)
         assert window is not None
+        if hasattr(viewer.app, "workspace"):
+            assert window.dock_node is None
+            assert window.size.x <= imgui.get_main_viewport().size.x
+            return
         camera = imgui.internal.find_window_by_name("Camera")
         assert window.dock_node is not None
         assert camera is not None and camera.dock_node is not None
@@ -842,9 +848,23 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         monkeypatch.setattr(imgui, "checkbox", original_checkbox)
         monkeypatch.setattr(imgui, "drag_float", original_drag_float)
 
-        control_starts = [
-            captured[f"X##{name}_0_{node.node_id}"][0] for name in ("position", "target", "up")
-        ]
+        if hasattr(viewer.app, "workspace"):
+            hits = viewer.app.workspace.ui.hits
+            control_starts = [
+                hits[f"##insp_camera_transform{name}_0_{node.node_id}"][0]
+                for name in ("position", "target", "up")
+            ]
+            preview_x, preview_y, preview_w, preview_h = hits["##camera_preview_enabled"]
+            captured["##camera_preview_enabled"] = (
+                preview_x,
+                preview_y,
+                preview_x + preview_w,
+                preview_y + preview_h,
+            )
+        else:
+            control_starts = [
+                captured[f"X##{name}_0_{node.node_id}"][0] for name in ("position", "target", "up")
+            ]
         assert max(control_starts) - min(control_starts) <= 1.0
         projection_y = captured[f"##camera-inspector-projection-{node.node_id}-0"][1]
         assert captured["##inspector-camera-vertical fov-value"][1] < projection_y

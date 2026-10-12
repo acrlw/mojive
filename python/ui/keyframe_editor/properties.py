@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
@@ -11,9 +13,26 @@ from mojive.ui.panels import PanelContext, button_row_layout, button_width
 from .controller import TimelineEditor, _set_keyframe_command
 
 
-def draw_selected(editor: TimelineEditor, ctx: PanelContext, editable: bool) -> None:
+class SelectedKeyframePresentation(Protocol):
+    """Lay out selection details without owning drafts or edit commands."""
+
+    def fields(self, name: str, time: float) -> tuple[str, float]: ...
+    def actions(
+        self, *, applicable: bool, loadable: bool, deletable: bool
+    ) -> tuple[bool, bool, bool]: ...
+    def marker(self, name: str, time: float, *, loadable: bool) -> bool: ...
+    def error(self, message: str) -> bool: ...
+
+
+def draw_selected(
+    editor: TimelineEditor,
+    ctx: PanelContext,
+    editable: bool,
+    *,
+    presentation: SelectedKeyframePresentation | None = None,
+) -> None:
     if editor.edit_lane != "model" or editor.selected_id < 0 or len(editor.selected_keyframes) > 1:
-        draw_error(editor, ctx)
+        draw_error(editor, ctx, presentation=presentation)
         return
     generation = ctx.session.structure_generation
     if editor.selection_generation != generation:
@@ -26,15 +45,52 @@ def draw_selected(editor: TimelineEditor, ctx: PanelContext, editable: bool) -> 
     if properties is None:
         marker = editor.keyframe_by_id.get(editor.selected_id)
         if marker is not None:
-            imgui.separator()
-            imgui.text_disabled(f"{marker.name}  {marker.time:g} {ctx.tr('s')}")
-            imgui.begin_disabled(not editor.can_load_keyframes(ctx))
-            if imgui.button(ctx.tr("Load")):
+            loadable = editor.can_load_keyframes(ctx)
+            if presentation is not None:
+                load = presentation.marker(marker.name, marker.time, loadable=loadable)
+            else:
+                imgui.separator()
+                imgui.text_disabled(f"{marker.name}  {marker.time:g} {ctx.tr('s')}")
+                imgui.begin_disabled(not loadable)
+                load = imgui.button(ctx.tr("Load"))
+                imgui.end_disabled()
+            if load and loadable:
                 editor.load_keyframe(ctx, marker)
-            imgui.end_disabled()
-        draw_error(editor, ctx)
+        draw_error(editor, ctx, presentation=presentation)
         return
 
+    if presentation is None:
+        actions_inline = _draw_fields(editor, ctx)
+    else:
+        editor.name, editor.time = presentation.fields(editor.name, editor.time)
+        actions_inline = False
+    dirty = editor.name.strip() != properties.name or editor.time != properties.time
+    applicable = editable and dirty and bool(editor.name.strip())
+    loadable = editor.can_load_keyframes(ctx)
+    apply, load, delete = (
+        _draw_actions(ctx, applicable, loadable, editable, actions_inline)
+        if presentation is None
+        else presentation.actions(applicable=applicable, loadable=loadable, deletable=editable)
+    )
+    if apply and applicable:
+        time = float(editor.time)
+        ctx.submit_model_edit(
+            _set_keyframe_command(properties, editor.name.strip(), time),
+            lambda result: editor.snapshot_updated(result, time),
+        )
+    if load and loadable:
+        keyframe = KeyframeInfo(
+            properties.keyframe_id, properties.name, properties.time, properties.model_id
+        )
+        editor.load_keyframe(ctx, keyframe)
+    if delete and editable:
+        ctx.submit_model_edit(
+            cmd.RemoveModelKeyframe(properties.keyframe_id), editor.snapshot_removed
+        )
+    draw_error(editor, ctx, presentation=presentation)
+
+
+def _draw_fields(editor: TimelineEditor, ctx: PanelContext) -> bool:
     imgui.separator()
     imgui.text_disabled(ctx.tr("selected snapshot"))
     scale = ctx.style_scale
@@ -52,14 +108,15 @@ def draw_selected(editor: TimelineEditor, ctx: PanelContext, editable: bool) -> 
     _changed, editor.time = imgui.input_double("##keyframe-time", editor.time, 0.0, 0.0, "%.9g s")
     imgui.set_item_tooltip(ctx.tr("time"))
 
-    dirty = editor.name.strip() != properties.name or editor.time != properties.time
-    if not editable or not dirty or not editor.name.strip():
-        imgui.begin_disabled()
     action_labels = (ctx.tr("Apply"), ctx.tr("Load"), ctx.tr("Delete"))
     action_widths = tuple(button_width(label) for label in action_labels)
-    actions_inline = (
-        fields_inline and available >= name_width + time_width + sum(action_widths) + 5 * gap
-    )
+    return fields_inline and available >= name_width + time_width + sum(action_widths) + 5 * gap
+
+
+def _draw_actions(ctx, applicable, loadable, deletable, actions_inline):
+    action_labels = (ctx.tr("Apply"), ctx.tr("Load"), ctx.tr("Delete"))
+    action_widths = tuple(button_width(label) for label in action_labels)
+    imgui.begin_disabled(not applicable)
     if actions_inline:
         imgui.same_line()
     inline = button_row_layout(
@@ -67,39 +124,34 @@ def draw_selected(editor: TimelineEditor, ctx: PanelContext, editable: bool) -> 
         imgui.get_content_region_avail().x,
         imgui.get_style().item_spacing.x,
     )
-    if imgui.button(action_labels[0]):
-        time = float(editor.time)
-        ctx.submit_model_edit(
-            _set_keyframe_command(properties, editor.name.strip(), time),
-            lambda result: editor.snapshot_updated(result, time),
-        )
-    if not editable or not dirty or not editor.name.strip():
-        imgui.end_disabled()
+    apply = imgui.button(action_labels[0])
+    imgui.end_disabled()
     if inline[1]:
         imgui.same_line()
-    imgui.begin_disabled(not editor.can_load_keyframes(ctx))
-    if imgui.button(action_labels[1]):
-        keyframe = KeyframeInfo(
-            properties.keyframe_id, properties.name, properties.time, properties.model_id
-        )
-        editor.load_keyframe(ctx, keyframe)
+    imgui.begin_disabled(not loadable)
+    load = imgui.button(action_labels[1])
     imgui.end_disabled()
     if inline[2]:
         imgui.same_line()
-    if not editable:
-        imgui.begin_disabled()
-    if imgui.button(action_labels[2]):
-        ctx.submit_model_edit(
-            cmd.RemoveModelKeyframe(properties.keyframe_id), editor.snapshot_removed
-        )
-    if not editable:
-        imgui.end_disabled()
+    imgui.begin_disabled(not deletable)
+    delete = imgui.button(action_labels[2])
+    imgui.end_disabled()
+    if not deletable:
         imgui.set_item_tooltip(ctx.tr("Pause the simulation before editing keyframes"))
-    draw_error(editor, ctx)
+    return apply, load, delete
 
 
-def draw_error(editor: TimelineEditor, ctx: PanelContext) -> None:
+def draw_error(
+    editor: TimelineEditor,
+    ctx: PanelContext,
+    *,
+    presentation: SelectedKeyframePresentation | None = None,
+) -> None:
     if editor.error:
-        imgui.text_colored(imgui.ImVec4(*ctx.theme.danger), editor.error)
-        if imgui.small_button(f"{ctx.tr('Copy error')}##keyframes"):
+        if presentation is None:
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.danger), editor.error)
+            copy = imgui.small_button(f"{ctx.tr('Copy error')}##keyframes")
+        else:
+            copy = presentation.error(editor.error)
+        if copy:
             imgui.set_clipboard_text(editor.error)

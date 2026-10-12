@@ -5,10 +5,12 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
+from mojive.adapters.base import SceneModelInfo
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels import PanelContext, button_row_layout, segmented_control
 from mojive.ui.text_layout import fit_text
@@ -31,6 +33,18 @@ from .controls import (
 )
 
 _FOLLOW_ICONS = ("key-follow-off", "key-follow-page", "key-follow-locked")
+
+
+class ModelSelector(Protocol):
+    """Present a model choice while the shared header owns selection and edits."""
+
+    def __call__(
+        self,
+        editor: TimelineEditor,
+        ctx: PanelContext,
+        models: Sequence[SceneModelInfo],
+        width: float,
+    ) -> tuple[bool, int]: ...
 
 
 @dataclass(frozen=True)
@@ -570,17 +584,22 @@ def draw_model_header(
     width,
     *,
     icon_drawer: CommandIconDrawer = _draw_command_icon,
+    selector: ModelSelector | None = None,
 ):
     scale = ctx.style_scale
     gap = 5 * scale
     icon_width = _command_button_width("", scale)
-    imgui.set_next_item_width(max(1, width - icon_width - gap))
+    selector_width = max(1, width - icon_width - gap)
+    imgui.set_next_item_width(selector_width)
     model_ids = tuple(model.model_id for model in models)
     slot = model_ids.index(editor.model_id) if editor.model_id in model_ids else 0
     imgui.begin_disabled(not models)
-    changed, slot = imgui.combo(
-        "##keyframe-model", slot, tuple(model.name for model in models) or (ctx.tr("Scene"),)
-    )
+    if selector is None:
+        changed, slot = imgui.combo(
+            "##keyframe-model", slot, tuple(model.name for model in models) or (ctx.tr("Scene"),)
+        )
+    else:
+        changed, slot = selector(editor, ctx, models, selector_width)
     imgui.end_disabled()
     imgui.set_item_tooltip(models[slot].name if models else ctx.tr("Scene"))
     if changed:

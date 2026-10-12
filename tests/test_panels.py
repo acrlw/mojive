@@ -696,13 +696,16 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
         ("7 active, 0 used by export", "7 个生效，导出使用 0 个"),
         ("0 active, export-only plan", "0 个生效，仅用于导出规划"),
         ("custom backend diagnostic", "custom backend diagnostic"),
+        (0, "0"),
+        (28, "28"),
+        (1000000, "1000000"),
     ),
 )
 def test_render_count_notes_localize_values_and_preserve_backend_diagnostics(source, translated):
     chinese = Localizer(Language.SIMPLIFIED_CHINESE)
     english = Localizer(Language.ENGLISH)
     assert render_note_text(source, chinese.text) == translated
-    assert render_note_text(source, english.text) == source
+    assert render_note_text(source, english.text) == str(source)
     assert chinese.text("scene lights") == "场景灯光"
     assert chinese.text("shadow casters") == "投影灯光"
 

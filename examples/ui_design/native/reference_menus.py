@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from math import ceil, floor
 
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
+from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.input_bindings import InputAction
 
+from .color_editor import ColorEditor
 from .widgets import DIM, MUTED, SAGE, TEXT, color
 
 MENU_BG = (39, 45, 53, 255)
@@ -43,13 +47,19 @@ class Menus:
         self.dialog_pending = None
         self.color_before = None
         self.color_visible = False
+        self.color_editor = ColorEditor()
         self.shading = "Solid"
+        self.menu_rects = {}
+        self.menu_center_y = 0.0
+        self.menu_height = 0.0
+        self.visible_menus = TOP_MENUS
+        self.overflow_menus = ()
 
     @contextmanager
     def style(self, controls=False):
         s = self.s
         # ImGui snaps each cursor advance. Use an integral row height at fractional UI scales.
-        row_gap = (round(30 * s) - 14 * s) / s
+        row_gap = (round(30 * s) - 13 * s) / s
         values = [
             (imgui.StyleVar_.window_padding, ((16, 14) if controls else (12, 6 + row_gap / 2))),
             (imgui.StyleVar_.window_min_size, (0, 0)),
@@ -70,7 +80,7 @@ class Menus:
         ]
         for key, value in colors:
             imgui.push_style_color(key, imgui.ImVec4(*(v / 255 for v in value)))
-        imgui.push_font(self.ui.body, 14 * s)
+        imgui.push_font(self.ui.body, 13 * s)
         try:
             yield
         finally:
@@ -245,7 +255,11 @@ class Menus:
                 for n in ("Edit", "Author", "Review")
             ]
         if name == "Panels":
-            return [Item(n, "toggle:" + n, icon, checked=st.open[n]) for n, icon in self.panels] + [
+            return [
+                Item(n, "toggle:" + n, icon, checked=st.open[n])
+                for n, icon in self.panels
+                if n != "Settings"
+            ] + [
                 None,
                 Item("Inspector", "toggle:Inspector", "inspect", checked=st.open["Inspector"]),
                 Item("Timeline", "timeline", "key", "T", checked=st.open["Timeline"]),
@@ -315,17 +329,82 @@ class Menus:
                 imgui.internal.close_popup_to_level(0, True)
             self.reset_pending = False
 
-    def bar(self):
+    def bar_layout(self, width):
+        """Reserve a native More menu before selecting the visible menu prefix."""
+        spacing = imgui.get_style().item_spacing.x * 2
+        widths = [ceil(self.ui.measure(name) + spacing) for name in TOP_MENUS]
+        if sum(widths) <= width:
+            return TOP_MENUS, ()
+        available = width - ceil(self.ui.measure("More") + spacing)
+        count = 0
+        for item_width in widths:
+            if item_width > available:
+                break
+            available -= item_width
+            count += 1
+        return TOP_MENUS[:count], TOP_MENUS[count:]
+
+    def record_menu(self, name):
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        rect = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        self.menu_rects[name] = self.ui.hits["menu-" + name] = rect
+        return rect
+
+    def bar_menu(self, name):
+        self.reveal((name,))
+        self.constrain(name)
+        opened = imgui.begin_menu(self.ui.translate(name) + "###" + name)
+        self.record_menu(name)
+        if opened:
+            self.content(name, (name,))
+            imgui.end_menu()
+
+    def bar(self, right_edge=None):
+        """Fit menus before the first reserved header control's screen-space x coordinate."""
+        for name in (*TOP_MENUS, "More"):
+            self.ui.hits.pop("menu-" + name, None)
+        self.menu_rects.clear()
         if not imgui.begin_menu_bar():
             return
         imgui.set_cursor_pos_x(44 * self.s)
         with self.style():
-            for name in TOP_MENUS:
-                self.reveal((name,))
-                self.constrain(name)
-                if imgui.begin_menu(self.ui.translate(name) + "###" + name):
-                    self.content(name, (name,))
+            p = imgui.get_cursor_screen_pos()
+            window = imgui.internal.get_current_window()
+            ink = ImguiDraw2D().text_ink_bounds("H")
+            # Native RenderText floors its pen position; match its cap center exactly.
+            self.menu_center_y = floor(p.y + window.dc.curr_line_text_base_offset) + (
+                (ink[1] + ink[3]) / 2 if ink else imgui.get_font_size() / 2
+            )
+            if right_edge is None:
+                reserved = 228 if imgui.get_window_width() >= 760 * self.s else 57
+                right_edge = imgui.get_window_pos().x + imgui.get_window_width() - reserved * self.s
+            available = max(0, right_edge - 8 * self.s - p.x)
+            self.visible_menus, self.overflow_menus = self.bar_layout(available)
+            for name in self.visible_menus:
+                self.bar_menu(name)
+            if self.overflow_menus:
+                if (
+                    self.requested_path
+                    and self.requested_path[0] in self.overflow_menus
+                    and not imgui.is_popup_open("More")
+                ):
+                    imgui.open_popup("More")
+                width = max(
+                    160 * self.s,
+                    max(self.ui.measure(name) for name in self.overflow_menus) + 60 * self.s,
+                )
+                imgui.set_next_window_size_constraints(
+                    (width, 0), (width, imgui.get_main_viewport().size.y - 16 * self.s)
+                )
+                opened = imgui.begin_menu(self.ui.translate("More") + "###More")
+                self.record_menu("More")
+                if opened:
+                    self.shadow_and_record("More", ("More",))
+                    for name in self.overflow_menus:
+                        self.bar_menu(name)
                     imgui.end_menu()
+            first = self.menu_rects.get(self.visible_menus[0] if self.visible_menus else "More")
+            self.menu_height = first[3] if first else 0.0
         imgui.end_menu_bar()
 
     def popup(self, name, anchor, clicked=False):
@@ -409,19 +488,30 @@ class Menus:
         tail_x = right - 12 * s
         if visible:
             if row.icon:
-                u.icon(row.icon, p.x, p.y - s, 16, MUTED if row.enabled else DISABLED, draw=dl)
+                u.role_icon(
+                    row.icon,
+                    p.x,
+                    p.y - 7 * s,
+                    16 * s,
+                    28 * s,
+                    role="toolbar",
+                    c=MUTED if row.enabled else DISABLED,
+                    draw=dl,
+                )
             u.text(text_x, p.y, row.label, c, draw=dl)
             if row.shortcut:
                 width = u.measure(row.shortcut, 13)
                 tail_x = right - 24 * s - width
                 u.text(tail_x, p.y + s, row.shortcut, DIM if row.enabled else DISABLED, 13, draw=dl)
             if row.submenu or row.checked:
-                u.icon(
+                u.role_icon(
                     "right" if row.submenu else "check",
                     right - 12 * s,
                     p.y,
-                    12,
-                    DIM if row.submenu else SAGE,
+                    12 * s,
+                    14 * s,
+                    role="inline",
+                    c=DIM if row.submenu else SAGE,
                     draw=dl,
                 )
         record["rows"].append(
@@ -430,7 +520,7 @@ class Menus:
                 "enabled": row.enabled,
                 "checked": row.checked,
                 "rect": [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y],
-                "label_rect": [text_x, p.y, u.measure(row.label), 14 * s],
+                "label_rect": [text_x, p.y, u.measure(row.label), 13 * s],
                 "tail_x": tail_x,
                 "visible": visible,
             }
@@ -567,14 +657,40 @@ class Menus:
             imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * s, 0))
             imgui.begin_child("Guide content", (w, max(24 * s, height - 138 * s)))
             if self.dialog == "Interaction guide":
+                bindings = self.study.preview.input_bindings
                 for title, value in [
                     ("Orbit", "Drag an empty area"),
                     ("Pan", "Middle mouse drag"),
                     ("Zoom", "Mouse wheel"),
-                    ("Transform tools", "V / W / E / R"),
-                    ("World / body frame", "B"),
-                    ("Snap", "S"),
-                    ("Frame all / focus", "F / double-click"),
+                    (
+                        "Fly camera",
+                        " / ".join(
+                            " ".join(bindings.label(action) for action in group)
+                            for group in (
+                                (
+                                    InputAction.FLY_FORWARD,
+                                    InputAction.FLY_LEFT,
+                                    InputAction.FLY_BACK,
+                                    InputAction.FLY_RIGHT,
+                                ),
+                                (InputAction.FLY_UP, InputAction.FLY_DOWN),
+                            )
+                        ),
+                    ),
+                    (
+                        "Transform tools",
+                        "V / "
+                        + " / ".join(
+                            bindings.label(action)
+                            for action in (InputAction.GIZMO_TRANSLATE, InputAction.GIZMO_ROTATE)
+                        ),
+                    ),
+                    ("World / body frame", bindings.label(InputAction.GIZMO_SPACE)),
+                    ("Snap", bindings.label(InputAction.SNAP)),
+                    (
+                        "Frame all / focus",
+                        bindings.label(InputAction.FRAME_SCENE) + " / double-click",
+                    ),
                     ("Settings", "F9 / ⌘,"),
                     ("Precise gizmo input", "Double-click a handle"),
                     ("Undo / redo", "⌘Z / ⇧⌘Z"),
@@ -624,18 +740,20 @@ class Menus:
             3,
         )
         u.text(x + 34 * s, y + 31 * s, entity["color"].upper(), TEXT, 13, mono=True)
-        u.icon("down", x + width - 23 * s, y + 31 * s, 12, DIM)
+        u.role_icon("down", x + width - 23 * s, y + 23 * s, 12 * s, 28 * s, role="inline", c=DIM)
         with self.style(controls=True):
             if (clicked or self.requested_path == ("Color",)) and not imgui.is_popup_open("Color"):
                 self.color_before = True
                 self.study.preview.session.submit(cmd.BeginEditTransaction("Edit color"))
                 self.color_entity = entity
+                self.color_editor.begin(entity["rgba"])
                 imgui.open_popup("Color")
             if not imgui.is_popup_open("Color"):
                 return
             vp = imgui.get_main_viewport()
-            content_w = min(248 * s, max(136 * s, vp.work_size.y - 112 * s))
-            popup_w, popup_h = content_w + 32 * s, content_w + 86 * s
+            content_w = min(300 * s, max(136 * s, vp.work_size.x - 48 * s))
+            popup_w = content_w + 32 * s
+            popup_h = min(vp.work_size.y - 16 * s, content_w + 248 * s)
             px = min(x, vp.pos.x + vp.size.x - popup_w - 8 * s)
             py = y + 56 * s
             if py + popup_h > vp.pos.y + vp.size.y - 8 * s:
@@ -647,38 +765,25 @@ class Menus:
             self.color_visible = True
             record = self.shadow_and_record("Color", ("Color",))
             record["controls"] = {}
-            imgui.text_unformatted("Base color")
-            imgui.set_next_item_width(content_w)
-            flags = (
-                imgui.ColorEditFlags_.no_side_preview
-                | imgui.ColorEditFlags_.no_small_preview
-                | imgui.ColorEditFlags_.no_inputs
-                | imgui.ColorEditFlags_.no_options
-                | imgui.ColorEditFlags_.no_label
-                | imgui.ColorEditFlags_.picker_hue_bar
-            )
-            _, rgb = imgui.color_picker3("##base-color", rgba(entity["color"])[:3], flags)
-            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-            record["controls"]["picker"] = [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y]
-            imgui.set_next_item_width(content_w)
-            _, rgb = imgui.color_edit3(
-                "##hex",
-                rgb,
-                imgui.ColorEditFlags_.display_hex
-                | imgui.ColorEditFlags_.no_picker
-                | imgui.ColorEditFlags_.no_options
-                | imgui.ColorEditFlags_.no_small_preview
-                | imgui.ColorEditFlags_.no_label,
-            )
-            lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-            record["controls"]["hex"] = [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y]
-            updated = "#" + "".join(f"{round(max(0, min(1, v)) * 255):02x}" for v in rgb)
-            if updated != entity["color"].lower():
-                entity["color"] = updated
+            imgui.text_unformatted(u.translate("Base color"))
+            changed, values = self.color_editor.draw(u, "color-editor", entity["rgba"], content_w)
+            record["controls"]["picker"] = list(u.hits["color-editor-picker"])
+            if "color-editor-hex" in u.hits:
+                record["controls"]["hex"] = list(u.hits["color-editor-hex"])
+            if changed:
+                entity["rgba"] = values
+                entity["color"] = "#" + "".join(f"{round(value * 255):02x}" for value in values[:3])
             p = imgui.get_cursor_screen_pos()
             u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, 13)
             if u.button(
-                "done-color", p.x + content_w - 64 * s, p.y, 64, 28, label="Done", active=True
+                "done-color",
+                p.x + content_w - 64 * s,
+                p.y,
+                64,
+                28,
+                label="Done",
+                active=True,
+                enabled=not self.color_editor.error,
             ):
                 imgui.close_current_popup()
             record["controls"]["done"] = list(u.hits["done-color"])

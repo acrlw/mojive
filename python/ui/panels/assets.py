@@ -19,6 +19,7 @@ from . import (
     padded_selectable,
     search_input,
 )
+from .presentation import PropertyPresentation
 
 
 def unique_asset_name(base: str, assets: tuple[ModelAssetInfo, ...], asset_type: str) -> str:
@@ -87,31 +88,45 @@ def height_field_preview_color(value: float) -> tuple[float, float, float, float
     )
 
 
-def _hfield_size_editor(ctx: PanelContext, str_id: str, value) -> tuple[bool, np.ndarray]:
+def _hfield_size_editor(
+    ctx: PanelContext, str_id: str, value, presentation=None
+) -> tuple[bool, np.ndarray]:
     edited = np.asarray(value, np.float32).reshape(4).copy()
     changed = False
-    if begin_kv_table(str_id):
-        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch)
-        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-        for index, label in enumerate(
-            ("X half-size", "Y half-size", "elevation scale", "base depth")
-        ):
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr(label))
-            imgui.table_next_column()
-            imgui.set_next_item_width(-1.0)
-            item_changed, edited[index] = imgui.drag_float(
-                f"##{str_id}-{index}",
-                float(edited[index]),
-                0.01,
-                0.001,
-                1000000.0,
-                "%.3f",
-            )
-            changed |= item_changed
-        imgui.end_table()
+    if presentation:
+        if presentation.begin_table(str_id):
+            for index, label in enumerate(
+                ("X half-size", "Y half-size", "elevation scale", "base depth")
+            ):
+                presentation.row(ctx.tr(label))
+                item_changed, edited[index] = presentation.numeric(
+                    f"##{str_id}-{index}", float(edited[index]), 0.01, 0.001, 1000000, "%.3f"
+                )
+                changed |= item_changed
+            imgui.end_table()
+    else:
+        if begin_kv_table(str_id):
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+            for index, label in enumerate(
+                ("X half-size", "Y half-size", "elevation scale", "base depth")
+            ):
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.align_text_to_frame_padding()
+                imgui.text_disabled(ctx.tr(label))
+                imgui.table_next_column()
+                imgui.set_next_item_width(-1.0)
+                item_changed, edited[index] = imgui.drag_float(
+                    f"##{str_id}-{index}",
+                    float(edited[index]),
+                    0.01,
+                    0.001,
+                    1000000.0,
+                    "%.3f",
+                )
+                changed |= item_changed
+            imgui.end_table()
     return changed, edited
 
 
@@ -126,6 +141,7 @@ class AssetsPanel(Panel):
 
     def __init__(self) -> None:
         super().__init__()
+        self.presentation: PropertyPresentation | None = None
         self._model_id = -1
         self._cache_generation = -1
         self._assets: tuple[ModelAssetInfo, ...] = ()
@@ -167,16 +183,8 @@ class AssetsPanel(Panel):
             self._model_id = preferred if preferred in model_ids else model_ids[0]
             self._cache_generation = -1
 
-        if begin_kv_table("asset_model"):
-            imgui.table_setup_column(
-                "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
-            )
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("model"))
-            imgui.table_next_column()
+        if self._begin_properties(ctx, "asset_model"):
+            self._property(ctx.tr("model"))
             slot = model_ids.index(self._model_id)
             imgui.set_next_item_width(-1.0)
             changed, slot = imgui.combo("##asset-model", slot, tuple(item.name for item in models))
@@ -311,16 +319,8 @@ class AssetsPanel(Panel):
             ctx.request_texture_import(self._model_id, -1, self._texture_import_type)
         if not editable:
             imgui.end_disabled()
-        if begin_kv_table("texture_import_type"):
-            imgui.table_setup_column(
-                "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
-            )
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("texture type"))
-            imgui.table_next_column()
+        if self._begin_properties(ctx, "texture_import_type"):
+            self._property(ctx.tr("texture type"))
             texture_types = ("2d", "cube", "skybox")
             slot = texture_types.index(self._texture_import_type)
             imgui.set_next_item_width(-1.0)
@@ -332,26 +332,19 @@ class AssetsPanel(Panel):
             if changed:
                 self._texture_import_type = texture_types[slot]
             imgui.end_table()
-        hfield_open = imgui.collapsing_header(
+        hfield_open = self._section(
             f"{ctx.tr('Height-field import size')}##height-field-import-size"
         )
         imgui.set_item_tooltip(ctx.tr("Set physical dimensions before importing the PNG."))
         if hfield_open:
             _changed, self._hfield_import_size = _hfield_size_editor(
-                ctx, "hfield-import-size", self._hfield_import_size
+                ctx, "hfield-import-size", self._hfield_import_size, self.presentation
             )
-        material_open = imgui.collapsing_header(f"{ctx.tr('New material')}##new-material")
+        material_open = self._section(f"{ctx.tr('New material')}##new-material")
         imgui.set_item_tooltip(ctx.tr("Creates an unbound material asset for later assignment."))
         if material_open:
-            if begin_kv_table("new_material"):
-                imgui.table_setup_column(
-                    "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
-                )
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-                imgui.table_next_column()
-                imgui.align_text_to_frame_padding()
-                imgui.text_disabled(ctx.tr("name"))
-                imgui.table_next_column()
+            if self._begin_properties(ctx, "new_material"):
+                self._property(ctx.tr("name"))
                 imgui.set_next_item_width(-1.0)
                 _changed, self._material_create_name = imgui.input_text(
                     "##new-material-name", self._material_create_name
@@ -383,17 +376,23 @@ class AssetsPanel(Panel):
             self._hfield_source_size = self._hfield_size.copy()
         imgui.separator()
         imgui.text(f"{item.type}: {item.name}")
-        if begin_kv_table("asset_details"):
-            labeled(ctx.tr("source"), item.file or ctx.tr("inline"))
-            labeled(ctx.tr("references"), str(len(item.references)))
+        opened = (
+            self.presentation.begin_table("asset_details")
+            if self.presentation
+            else begin_kv_table("asset_details")
+        )
+        if opened:
+            display = self.presentation.labeled if self.presentation else labeled
+            display(ctx.tr("source"), item.file or ctx.tr("inline"))
+            display(ctx.tr("references"), str(len(item.references)))
             for field in item.fields:
                 if item.type == "hfield" and field.name == "elevation":
-                    labeled(
+                    display(
                         ctx.tr("elevation"),
                         f"{len(field.value.split())} {ctx.tr('inline samples')}",
                     )
                 elif field.value:
-                    labeled(field.name, field.value)
+                    display(field.name, field.value)
             imgui.end_table()
         for reference in item.references:
             imgui.bullet_text(reference)
@@ -537,9 +536,17 @@ class AssetsPanel(Panel):
         return self._hfield_preview_grid
 
     def _hfield_controls(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
-        imgui.separator()
-        imgui.text_disabled(ctx.tr("height-field dimensions"))
-        _changed, self._hfield_size = _hfield_size_editor(ctx, "hfield-size", self._hfield_size)
+        if self.presentation:
+            if not self.presentation.section(
+                ctx.tr("height-field dimensions"), imgui.TreeNodeFlags_.default_open
+            ):
+                return
+        else:
+            imgui.separator()
+            imgui.text_disabled(ctx.tr("height-field dimensions"))
+        _changed, self._hfield_size = _hfield_size_editor(
+            ctx, "hfield-size", self._hfield_size, self.presentation
+        )
         dirty = not np.allclose(self._hfield_size, self._hfield_source_size)
         if not dirty:
             imgui.begin_disabled()
@@ -575,21 +582,18 @@ class AssetsPanel(Panel):
         tex_uniform = material.tex_uniform
         changed = False
 
-        imgui.separator()
-        imgui.text_disabled(ctx.tr("material appearance"))
-        if begin_kv_table("asset_material"):
-            imgui.table_setup_column(
-                "label", imgui.TableColumnFlags_.width_fixed, 96.0 * ctx.style_scale
-            )
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("base color"))
-            imgui.table_next_column()
+        if self.presentation:
+            if not self.presentation.section(
+                ctx.tr("material appearance"), imgui.TreeNodeFlags_.default_open
+            ):
+                return
+        else:
+            imgui.separator()
+            imgui.text_disabled(ctx.tr("material appearance"))
+        if self._begin_properties(ctx, "asset_material"):
+            self._property(ctx.tr("base color"))
             imgui.set_next_item_width(-1.0)
-            item_changed, rgba = imgui.color_edit4("##asset-material-rgba", rgba)
+            item_changed, rgba = self._color("##asset-material-rgba", rgba)
             changed |= item_changed
 
             scalar_fields = (
@@ -600,13 +604,9 @@ class AssetsPanel(Panel):
             )
             edited_scalars: list[float] = []
             for label, value, maximum in scalar_fields:
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.align_text_to_frame_padding()
-                imgui.text_disabled(ctx.tr(label))
-                imgui.table_next_column()
+                self._property(ctx.tr(label))
                 imgui.set_next_item_width(-1.0)
-                item_changed, value = imgui.drag_float(
+                item_changed, value = self._numeric(
                     f"##asset-material-{label}", value, 0.01, 0.0, maximum, "%.2f"
                 )
                 changed |= item_changed
@@ -617,13 +617,9 @@ class AssetsPanel(Panel):
                 ("metallic", metallic, 0.0),
                 ("roughness", roughness, 0.5),
             ):
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.align_text_to_frame_padding()
-                imgui.text_disabled(ctx.tr(label))
-                imgui.table_next_column()
+                self._property(ctx.tr(label))
                 enabled = value >= 0.0
-                item_changed, enabled = imgui.checkbox(f"##asset-material-{label}-enabled", enabled)
+                item_changed, enabled = self._checkbox(f"##asset-material-{label}-enabled", enabled)
                 if item_changed:
                     value = default if enabled else -1.0
                     changed = True
@@ -634,7 +630,7 @@ class AssetsPanel(Panel):
                 if not enabled:
                     imgui.begin_disabled()
                 imgui.set_next_item_width(-1.0)
-                item_changed, value = imgui.drag_float(
+                item_changed, value = self._numeric(
                     f"##asset-material-{label}", value, 0.01, 0.0, 1.0, "%.2f"
                 )
                 changed |= item_changed
@@ -645,11 +641,7 @@ class AssetsPanel(Panel):
                 else:
                     roughness = float(value)
 
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("texture"))
-            imgui.table_next_column()
+            self._property(ctx.tr("texture"))
             imgui.set_next_item_width(-1.0)
             if imgui.begin_combo("##asset-material-texture", texture or ctx.tr("none")):
                 for candidate in (None, *ctx.session.model_texture_names(item.model_id)):
@@ -661,23 +653,15 @@ class AssetsPanel(Panel):
                         changed = True
                 imgui.end_combo()
 
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("texture repeat"))
-            imgui.table_next_column()
+            self._property(ctx.tr("texture repeat"))
             imgui.set_next_item_width(-1.0)
-            item_changed, tex_repeat = imgui.drag_float2(
+            item_changed, tex_repeat = self._numbers(
                 "##asset-material-repeat", tex_repeat, 0.05, 0.01, 1000.0, "%.2f"
             )
             changed |= item_changed
 
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.align_text_to_frame_padding()
-            imgui.text_disabled(ctx.tr("uniform scale"))
-            imgui.table_next_column()
-            item_changed, tex_uniform = imgui.checkbox("##asset-material-uniform", tex_uniform)
+            self._property(ctx.tr("uniform scale"))
+            item_changed, tex_uniform = self._checkbox("##asset-material-uniform", tex_uniform)
             changed |= item_changed
             imgui.end_table()
 
@@ -735,6 +719,60 @@ class AssetsPanel(Panel):
             return
         if imgui.button(ctx.tr("Assign to Selected Geometry")):
             ctx.submit(cmd.SetGeometryShape(node.node_id, item.type, item.name))
+
+    def _section(self, label, flags=0):
+        return (
+            self.presentation.section(label, flags)
+            if self.presentation
+            else imgui.collapsing_header(label, flags)
+        )
+
+    def _begin_properties(self, ctx, table_id):
+        if self.presentation:
+            return self.presentation.begin_table(table_id)
+        if not begin_kv_table(table_id):
+            return False
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, 96 * ctx.style_scale)
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
+        return True
+
+    def _property(self, label):
+        if self.presentation:
+            self.presentation.row(label)
+        else:
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.align_text_to_frame_padding()
+            imgui.text_disabled(label)
+            imgui.table_next_column()
+
+    def _numeric(self, key, value, speed, low, high, fmt):
+        return (
+            self.presentation.numeric(key, value, speed, low, high, fmt)
+            if self.presentation
+            else imgui.drag_float(key, value, speed, low, high, fmt)
+        )
+
+    def _numbers(self, key, values, speed, low, high, fmt):
+        return (
+            self.presentation.numbers(key, values, speed, low, high, fmt)
+            if self.presentation
+            else imgui.drag_float2(key, values, speed, low, high, fmt)
+        )
+
+    def _color(self, key, values):
+        return (
+            self.presentation.color(key, values)
+            if self.presentation
+            else imgui.color_edit4(key, values)
+        )
+
+    def _checkbox(self, key, value):
+        return (
+            self.presentation.checkbox(key, value)
+            if self.presentation
+            else imgui.checkbox(key, value)
+        )
 
 
 __all__ = [

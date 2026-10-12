@@ -388,6 +388,7 @@ class RecordingConfig:
 class ViewerConfig:
     """Configure the full interactive viewer; feature reduction is explicit opt-in."""
 
+    ui: str = field(default="native", kw_only=True)
     interactions: InteractionConfig = field(default_factory=InteractionConfig)
     selection: SelectionStyle = field(default_factory=SelectionStyle)
     panels: Mapping[str, PanelConfig] = field(default_factory=dict)

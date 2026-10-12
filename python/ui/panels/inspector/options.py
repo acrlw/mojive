@@ -7,8 +7,15 @@ from itertools import groupby
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
-from mojive.ui.controls import begin_property_table, property_row
 from mojive.ui.panels import PanelContext
+
+from .fields import (
+    _begin_property_table,
+    _property_control_row,
+    _property_section,
+    _property_text,
+    _property_toggle,
+)
 
 
 def _format(value) -> str:
@@ -50,22 +57,24 @@ class _Options:
         for index, (group, fields) in enumerate(groupby(options, key=lambda option: option.group)):
             fields = tuple(fields)
             flags = imgui.TreeNodeFlags_.default_open if index < 2 else 0
-            opened = imgui.collapsing_header(ctx.tr(group), flags)
+            opened = _property_section(ctx, group, flags)
             if fields[0].group_description and imgui.is_item_hovered():
                 imgui.set_tooltip(ctx.tr(fields[0].group_description))
             if not opened:
                 continue
             labels = tuple(ctx.tr(field.label) for field in fields)
-            if not begin_property_table(f"physics-{group}", labels=labels):
+            if not _begin_property_table(f"physics-{group}", ctx=ctx, labels=labels):
                 continue
             for field in fields:
-                property_row(
+                _property_control_row(
+                    ctx,
                     ctx.tr(field.label),
                     tooltip=ctx.tr(field.description) if field.description else field.key,
+                    toggle=field.kind == "bool",
                 )
                 item_id = f"##physics-{field.key}"
                 if field.kind == "bool":
-                    changed, value = imgui.checkbox(item_id, field.value)
+                    changed, value = _property_toggle(ctx, item_id, field.value)
                     if changed:
                         changes[field.key] = value
                 elif field.kind == "choice":
@@ -83,8 +92,8 @@ class _Options:
                         imgui.end_combo()
                 else:
                     text = self._physics_text.get(field.key, _format(field.value))
-                    entered, text = imgui.input_text(
-                        item_id, text, imgui.InputTextFlags_.enter_returns_true
+                    entered, text = _property_text(
+                        ctx, item_id, text, imgui.InputTextFlags_.enter_returns_true
                     )
                     self._physics_text[field.key] = text
                     if entered or imgui.is_item_deactivated_after_edit():

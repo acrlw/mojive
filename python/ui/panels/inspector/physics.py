@@ -23,8 +23,11 @@ from .fields import (
     _begin_property_table,
     _edited_float_components,
     _property_control_row,
+    _property_numbers,
+    _property_numeric,
     _property_section,
     _property_solver_rows,
+    _property_toggle,
     _property_vector_row,
     _vector_fields,
 )
@@ -38,31 +41,32 @@ def _joint_dynamics_rows(
 ) -> JointAdvancedProperties:
     """Edit dynamic values in display units without round-tripping idle values."""
     edited = properties
+    rotational = joint.type in ("hinge", "ball")
     _property_control_row(ctx, "group")
     changed, group = imgui.combo(
         "##joint_advanced_group", properties.group, tuple(str(value) for value in range(6))
     )
     if changed:
         edited = replace(edited, group=int(group))
-    _property_control_row(ctx, "armature")
-    changed, armature = imgui.drag_float(
-        "##joint_armature", properties.armature, 0.001, 0.0, 1000000000.0, "%.6g"
+    _property_control_row(ctx, "armature", unit="kg·m²" if rotational else "kg")
+    changed, armature = _property_numeric(
+        ctx, "##joint_armature", properties.armature, 0.001, 0.0, 1000000000.0, "%.6g"
     )
     if changed:
         edited = replace(edited, armature=float(armature))
-    _property_control_row(ctx, "friction loss")
-    changed, friction_loss = imgui.drag_float(
-        "##joint_friction_loss", properties.friction_loss, 0.001, 0.0, 1000000000.0, "%.6g"
+    _property_control_row(ctx, "friction loss", unit="N·m" if rotational else "N")
+    changed, friction_loss = _property_numeric(
+        ctx, "##joint_friction_loss", properties.friction_loss, 0.001, 0.0, 1000000000.0, "%.6g"
     )
     if changed:
         edited = replace(edited, friction_loss=float(friction_loss))
-    rotational = joint.type in ("hinge", "ball")
     for label, field, value in (
         ("reference", "reference", properties.reference),
         ("spring reference", "spring_reference", properties.spring_reference),
     ):
-        _property_control_row(ctx, label)
-        changed, value = imgui.drag_float(
+        _property_control_row(ctx, label, unit="°" if rotational else "m")
+        changed, value = _property_numeric(
+            ctx,
             f"##joint_{field}",
             float(np.degrees(value)) if rotational else float(value),
             0.25 if rotational else 0.001,
@@ -72,9 +76,9 @@ def _joint_dynamics_rows(
         )
         if changed:
             edited = replace(edited, **{field: float(np.radians(value) if rotational else value)})
-    _property_control_row(ctx, "limit margin")
-    changed, margin = imgui.drag_float(
-        "##joint_limit_margin", properties.margin, 0.001, 0.0, 1000000.0, "%.6g"
+    _property_control_row(ctx, "limit margin", unit="rad" if rotational else "m")
+    changed, margin = _property_numeric(
+        ctx, "##joint_limit_margin", properties.margin, 0.001, 0.0, 1000000.0, "%.6g"
     )
     if changed:
         edited = replace(edited, margin=float(margin))
@@ -82,7 +86,7 @@ def _joint_dynamics_rows(
 
 
 def _joint_actuator_rows(
-    ctx: PanelContext, properties: JointAdvancedProperties
+    ctx: PanelContext, properties: JointAdvancedProperties, *, force_unit: str = "N"
 ) -> JointAdvancedProperties:
     edited = properties
     force_modes = ("auto", "unlimited", "limited")
@@ -94,8 +98,9 @@ def _joint_actuator_rows(
     )
     if changed:
         edited = replace(edited, actuator_force_limit_mode=force_modes[mode])
-    _property_control_row(ctx, "actuator force range")
-    changed, values = imgui.drag_float2(
+    _property_control_row(ctx, "actuator force range", unit=force_unit, components=2)
+    changed, values = _property_numbers(
+        ctx,
         "##joint_actuator_force_range",
         properties.actuator_force_range,
         0.01,
@@ -113,9 +118,9 @@ def _joint_actuator_rows(
             edited,
             actuator_force_range=_edited_float_components(properties.actuator_force_range, values),
         )
-    _property_control_row(ctx, "actuator gravity compensation")
-    changed, gravity = imgui.checkbox(
-        "##joint_actuator_gravity_compensation", properties.actuator_gravity_compensation
+    _property_control_row(ctx, "actuator gravity compensation", toggle=True)
+    changed, gravity = _property_toggle(
+        ctx, "##joint_actuator_gravity_compensation", properties.actuator_gravity_compensation
     )
     if changed:
         edited = replace(edited, actuator_gravity_compensation=bool(gravity))
@@ -146,7 +151,9 @@ def _joint_advanced_rows(
         edited = replace(
             edited, friction_solver_reference=reference, friction_solver_impedance=impedance
         )
-    return _joint_actuator_rows(ctx, edited)
+    return _joint_actuator_rows(
+        ctx, edited, force_unit="N·m" if joint.type in ("hinge", "ball") else "N"
+    )
 
 
 class _Physics:
@@ -170,7 +177,7 @@ class _Physics:
             )
             self._body_property_error = ""
         properties = self._body_property_edit
-        if properties is None or not imgui.collapsing_header(ctx.tr("body inertial and dynamics")):
+        if properties is None or not _property_section(ctx, "body inertial and dynamics", 0):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -203,7 +210,7 @@ class _Physics:
         sleep_policy = (
             sleep_values.index(edited.sleep_policy) if edited.sleep_policy in sleep_values else 0
         )
-        if _begin_property_table("body_inertial_properties"):
+        if _begin_property_table("body_inertial_properties", ctx=ctx):
             _property_control_row(ctx, "inertia mode")
             mode_changed, mode = imgui.combo(
                 "##body-inertia-mode", mode, tuple(ctx.tr(label) for label in inertia_modes)
@@ -214,9 +221,9 @@ class _Physics:
             derived = inertia_mode == "auto"
             if derived:
                 imgui.begin_disabled()
-            _property_control_row(ctx, "mass")
-            mass_changed, mass = imgui.drag_float(
-                "##body-mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
+            _property_control_row(ctx, "mass", unit="kg")
+            mass_changed, mass = _property_numeric(
+                ctx, "##body-mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
             )
             position_changed, inertial_position = _property_vector_row(
                 ctx,
@@ -229,6 +236,7 @@ class _Physics:
                 lo=-1000000.0,
                 hi=1000000.0,
                 fmt="%.5f m",
+                unit="m",
                 reset_values=current.inertial_position,
             )
             rotation_disabled = derived or inertia_mode == "full"
@@ -243,6 +251,7 @@ class _Physics:
                 lo=-360000.0,
                 hi=360000.0,
                 fmt="%.2f°",
+                unit="°",
                 reset_values=_nearest_euler_degrees(
                     math3d.quat_to_mat3(current.inertial_quaternion), None
                 ),
@@ -264,11 +273,13 @@ class _Physics:
                     lo=0.000000001,
                     hi=1000000000000.0,
                     fmt="%.6g",
+                    unit="kg·m²",
                     reset_values=current.diagonal_inertia,
                 )
             else:
-                _property_control_row(ctx, "tensor xx / yy / zz")
-                full_diagonal_changed, full_diagonal = imgui.drag_float3(
+                _property_control_row(ctx, "tensor xx / yy / zz", unit="kg·m²", components=3)
+                full_diagonal_changed, full_diagonal = _property_numbers(
+                    ctx,
                     "##body-full-diagonal",
                     np.asarray(edited.full_inertia[:3], np.float32),
                     0.001,
@@ -276,8 +287,9 @@ class _Physics:
                     1000000000000.0,
                     "%.6g",
                 )
-                _property_control_row(ctx, "tensor xy / xz / yz")
-                full_cross_changed, full_cross = imgui.drag_float3(
+                _property_control_row(ctx, "tensor xy / xz / yz", unit="kg·m²", components=3)
+                full_cross_changed, full_cross = _property_numbers(
+                    ctx,
                     "##body-full-cross",
                     np.asarray(edited.full_inertia[3:], np.float32),
                     0.001,
@@ -289,7 +301,8 @@ class _Physics:
                 imgui.end_disabled()
 
             _property_control_row(ctx, "gravity compensation")
-            gravity_changed, gravity_compensation = imgui.drag_float(
+            gravity_changed, gravity_compensation = _property_numeric(
+                ctx,
                 "##body-gravity-compensation",
                 float(edited.gravity_compensation),
                 0.01,
@@ -297,8 +310,8 @@ class _Physics:
                 1000000.0,
                 "%.4f",
             )
-            _property_control_row(ctx, "mocap body")
-            mocap_changed, mocap = imgui.checkbox("##body-mocap", bool(edited.mocap))
+            _property_control_row(ctx, "mocap body", toggle=True)
+            mocap_changed, mocap = _property_toggle(ctx, "##body-mocap", bool(edited.mocap))
             _property_control_row(ctx, "sleep policy")
             if not movable_root:
                 imgui.begin_disabled()
@@ -399,7 +412,10 @@ class _Physics:
         if joint is None:
             imgui.text_disabled(ctx.tr("joint metadata is unavailable"))
             return
-        if _begin_property_table("joint_identity"):
+        presentation = ctx.inspector_presentation
+        if presentation is not None:
+            presentation.joint_metadata(joint)
+        elif _begin_property_table("joint_identity", ctx=ctx):
             for label, value in (
                 ("type", joint.type),
                 ("qpos address", str(joint.qpos_adr)),
@@ -442,7 +458,7 @@ class _Physics:
             np.float64,
         )
         displayed_range = value_range.copy() if range_valid else default_range
-        if _begin_property_table("joint_properties_table"):
+        if _begin_property_table("joint_properties_table", ctx=ctx):
             if joint.type in ("hinge", "slide"):
                 axis_changed, axis = _property_vector_row(
                     ctx,
@@ -460,25 +476,26 @@ class _Physics:
                 )
 
             if joint.type in ("hinge", "slide", "ball"):
-                _property_control_row(ctx, "limited")
-                limited_changed, limited = imgui.checkbox("##joint_limited", limited)
+                _property_control_row(ctx, "limited", toggle=True)
+                limited_changed, limited = _property_toggle(ctx, "##joint_limited", limited)
                 if joint.type == "ball":
                     upper_deg = float(np.degrees(displayed_range[1]))
-                    _property_control_row(ctx, "limit angle")
-                    range_changed, upper_deg = imgui.drag_float(
-                        "##joint_limit_angle", upper_deg, 0.5, 0.001, 360.0, "%.2f deg"
+                    _property_control_row(ctx, "limit angle", unit="°")
+                    range_changed, upper_deg = _property_numeric(
+                        ctx, "##joint_limit_angle", upper_deg, 0.5, 0.001, 360.0, "%.2f deg"
                     )
                     displayed_range[:] = (0.0, np.radians(upper_deg))
                 elif joint.type == "hinge":
                     degrees = np.degrees(displayed_range)
-                    _property_control_row(ctx, "range")
-                    range_changed, degrees = imgui.drag_float2(
-                        "##joint_range", degrees, 0.5, -36000.0, 36000.0, "%.2f deg"
+                    _property_control_row(ctx, "range", unit="°", components=2)
+                    range_changed, degrees = _property_numbers(
+                        ctx, "##joint_range", degrees, 0.5, -36000.0, 36000.0, "%.2f deg"
                     )
                     displayed_range[:] = np.radians(degrees)
                 else:
-                    _property_control_row(ctx, "range")
-                    range_changed, displayed_range = imgui.drag_float2(
+                    _property_control_row(ctx, "range", unit="m", components=2)
+                    range_changed, displayed_range = _property_numbers(
+                        ctx,
                         "##joint_range",
                         displayed_range,
                         0.01,
@@ -490,13 +507,23 @@ class _Physics:
                 if range_changed or (limited_changed and limited and not range_valid):
                     value_range = displayed_range
 
-            _property_control_row(ctx, "damping")
-            damping_changed, damping = imgui.drag_float(
-                "##joint_damping", damping, 0.01, 0.0, 1000000.0, "%.4f"
+            rotational = joint.type in ("hinge", "ball")
+            dynamic_units = joint.type in ("hinge", "ball", "slide")
+            _property_control_row(
+                ctx,
+                "damping",
+                unit=("N·m·s/rad" if rotational else "N·s/m") if dynamic_units else "",
             )
-            _property_control_row(ctx, "stiffness")
-            stiffness_changed, stiffness = imgui.drag_float(
-                "##joint_stiffness", stiffness, 0.01, 0.0, 1000000.0, "%.4f"
+            damping_changed, damping = _property_numeric(
+                ctx, "##joint_damping", damping, 0.01, 0.0, 1000000.0, "%.4f"
+            )
+            _property_control_row(
+                ctx,
+                "stiffness",
+                unit=("N·m/rad" if rotational else "N/m") if dynamic_units else "",
+            )
+            stiffness_changed, stiffness = _property_numeric(
+                ctx, "##joint_stiffness", stiffness, 0.01, 0.0, 1000000.0, "%.4f"
             )
             imgui.end_table()
         if not editable:
@@ -512,7 +539,11 @@ class _Physics:
                     else "This compiled joint has no editable source element"
                 )
             )
-            imgui.text_disabled(reason)
+            imgui.push_style_color(
+                imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+            )
+            imgui.text_wrapped(ctx.tr(reason))
+            imgui.pop_style_color()
 
         changed = any(
             (
@@ -567,7 +598,7 @@ class _Physics:
         )
         if not editable:
             imgui.begin_disabled()
-        if _begin_property_table("joint_advanced_properties_table"):
+        if _begin_property_table("joint_advanced_properties_table", ctx=ctx):
             self._joint_advanced_edit = _joint_advanced_rows(ctx, joint, properties)
             imgui.end_table()
         if not editable:
@@ -596,7 +627,7 @@ class _Physics:
             )
         apply_clicked = False
         revert_clicked = False
-        if _begin_property_table("joint_advanced_actions"):
+        if _begin_property_table("joint_advanced_actions", ctx=ctx):
             _property_control_row(ctx, "changes")
             if not editable or not dirty or invalid_force_range:
                 imgui.begin_disabled()
@@ -654,7 +685,7 @@ class _Physics:
             self._site_property_edit = current
             self._site_property_error = ""
         properties = self._site_property_edit
-        if properties is None or not imgui.collapsing_header(ctx.tr("site shape and endpoints")):
+        if properties is None or not _property_section(ctx, "site shape and endpoints", 0):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -669,7 +700,7 @@ class _Physics:
         type_value = site_types[site_type]
         supports_endpoints = type_value in ("capsule", "cylinder")
         use_from_to = properties.use_from_to if supports_endpoints else False
-        if _begin_property_table("site_shape_properties"):
+        if _begin_property_table("site_shape_properties", ctx=ctx):
             _property_control_row(ctx, "type")
             type_changed, site_type = imgui.combo(
                 "##site-type",
@@ -686,10 +717,12 @@ class _Physics:
                 int(properties.group),
                 tuple(str(value) for value in range(6)),
             )
-            _property_control_row(ctx, "define with endpoints")
+            _property_control_row(ctx, "define with endpoints", toggle=True)
             if not supports_endpoints:
                 imgui.begin_disabled()
-            endpoints_changed, use_from_to = imgui.checkbox("##site-define-endpoints", use_from_to)
+            endpoints_changed, use_from_to = _property_toggle(
+                ctx, "##site-define-endpoints", use_from_to
+            )
             if not supports_endpoints:
                 imgui.end_disabled()
                 imgui.set_item_tooltip(ctx.tr("Endpoints apply only to capsule and cylinder sites"))
@@ -706,6 +739,7 @@ class _Physics:
                     ("endpoint B (body frame)", from_to[3:], 0.001, "%.5f m", from_to[3:]),
                 ),
                 editable=editable,
+                units=("m", "m"),
             )
             from_to = np.asarray((*first, *second), np.float32)
         if not editable:

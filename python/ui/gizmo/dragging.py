@@ -113,7 +113,7 @@ class _Dragging:
         self._joint_precision_visible_until = time.monotonic() + (
             JOINT_PRECISION_REVEAL_GRACE_SECONDS
         )
-        return True
+        return self._start_edit(session)
 
     def _begin_handle(self, session, cam, rect, cursor, handle: GizmoHandle) -> bool:
         node = session.selected_node
@@ -206,19 +206,16 @@ class _Dragging:
                 return False
             self._axis_screen[:] = delta / length
             self._world_per_pt = scale / length
-            self._start_edit(session)
-            return True
+            return self._start_edit(session)
 
         if self._mode is GizmoMode.DIMENSIONS and self._active is GizmoHandle.SCREEN:
             self._axis_screen[:] = (np.sqrt(0.5), -np.sqrt(0.5))
             scale = world_scale(cam, pos, rect[3], SIZE_PT * self._style_scale)
             self._world_per_pt = scale / max(SIZE_PT * self._style_scale, 1e-6)
-            self._start_edit(session)
-            return True
+            return self._start_edit(session)
 
         if self._active is GizmoHandle.ROTATE_TRACKBALL:
-            self._start_edit(session)
-            return True
+            return self._start_edit(session)
 
         if self._active in (GizmoHandle.SCREEN, GizmoHandle.ROTATE_SCREEN):
             self._plane_normal[:] = cam.forward()
@@ -245,8 +242,7 @@ class _Dragging:
             self._prepare_rotation_drag(cam, rect)
         else:
             self._plane_start[:] = hit
-        self._start_edit(session)
-        return True
+        return self._start_edit(session)
 
     def _prepare_rotation_drag(self, cam: CameraView, rect) -> None:
         """Cache the rendered dial used to distinguish arc and linear drags."""
@@ -835,20 +831,28 @@ class _Dragging:
             return value
         return f"{value} · SNAP {_format_step(self.translation_snap_m)} m"
 
-    def _start_edit(self, session: Session) -> None:
-        if self._active_joint is not None or not session.adapter.caps.edit_history:
-            return
+    def _start_edit(self, session: Session) -> bool:
+        if not session.adapter.caps.edit_history:
+            return True
         node = session.selected_node
         if node is not None and node.type is NodeType.MODEL:
-            return
+            return True
         label = (
             "Resize geometry"
             if self._mode is GizmoMode.DIMENSIONS
             else f"{self._mode.value.title()} transform"
         )
-        result = session.submit(BeginEditTransaction(label))
-        if result.ok:
-            self._edit_session = session
+        try:
+            result = session.submit(BeginEditTransaction(label))
+        except RuntimeError as error:
+            session.report_message(str(error), level="error")
+            result = CommandResult.bad(str(error))
+        if not result.ok:
+            self._verdict = Verdict(False, result.message)
+            self._end()
+            return False
+        self._edit_session = session
+        return True
 
     def _end(self, *, commit: bool = False) -> None:
         if self._model_preview is not None and self._model_preview_session is not None:

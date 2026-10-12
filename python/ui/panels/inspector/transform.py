@@ -17,6 +17,7 @@ from mojive.ui.panels import (
 )
 
 from .fields import (
+    _property_section,
     _vector_fields,
 )
 from .support import (
@@ -33,9 +34,7 @@ class _Transform:
     """Private transform methods of InspectorPanel; state belongs to its owner."""
 
     def _transform(self, ctx: PanelContext, node: SceneNode) -> None:
-        self.show_transform = imgui.collapsing_header(
-            ctx.tr("transform"), imgui.TreeNodeFlags_.default_open
-        )
+        self.show_transform = _property_section(ctx, "transform", imgui.TreeNodeFlags_.default_open)
         if not self.show_transform:
             return
         frame = ctx.session.frame
@@ -72,6 +71,7 @@ class _Transform:
             ),
             editable=(editable, editable, scale_editable),
             label_width=label_width,
+            units=("m", "°", ""),
         )
         (pos_changed, new_pos), (rot_changed, new_euler), (scale_changed, new_scale) = edits
         if scale_changed:
@@ -91,6 +91,7 @@ class _Transform:
                 ),
                 editable=False,
                 label_width=label_width,
+                units=("m/s", "rad/s"),
             )
 
         if pos_changed or rot_changed:
@@ -145,7 +146,7 @@ class _Transform:
         imgui.text_wrapped(reason)
 
     def _velocity(self, ctx: PanelContext, node: SceneNode) -> None:
-        self.show_velocity = imgui.collapsing_header(ctx.tr("velocity"))
+        self.show_velocity = _property_section(ctx, "velocity", 0)
         if not self.show_velocity:
             return
         qvel = ctx.session.frame.qvel

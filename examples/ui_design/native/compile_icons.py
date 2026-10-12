@@ -12,6 +12,20 @@ from fontTools.svgLib.path import parse_path
 ROOT = Path(__file__).parent
 
 
+def library_masters():
+    """Preserve upstream SVG geometry and normalize the whole family's stroke."""
+    directory = ROOT / "svg"
+    manifest = json.loads((directory / "sources.json").read_text())
+    sources = {}
+    for name, path in manifest["icons"].items():
+        root = ET.fromstring((directory / path).read_text())
+        for element in root.iter():
+            element.tag = element.tag.rsplit("}", 1)[-1]
+        root.set("stroke-width", "1.75")
+        sources[name] = ET.tostring(root, encoding="unicode")
+    return sources
+
+
 class Contours(BasePen):
     def __init__(self):
         super().__init__(None)
@@ -207,12 +221,17 @@ def compile_svg(svg):
 
 def main():
     result = {}
-    for name, svg in json.loads((ROOT / "icons-source.json").read_text()).items():
+    sources = json.loads((ROOT / "icons-source.json").read_text())
+    sources.update(library_masters())
+    for name, svg in sources.items():
         try:
             result[name] = compile_svg(svg)
         except ValueError as error:
             raise ValueError(f"{name}: {error}") from error
-    (ROOT / "icons.json").write_text(json.dumps(result, separators=(",", ":")))
+    (ROOT / "icons-source.json").write_text(json.dumps(sources, separators=(",", ":")))
+    compiled = json.dumps(result, separators=(",", ":"))
+    (ROOT / "icons.json").write_text(compiled)
+    (ROOT.parents[2] / "python/ui/workspace/icons.json").write_text(compiled)
     print("Compiled and checked", len(result), "shared SVG masters")
 
 
