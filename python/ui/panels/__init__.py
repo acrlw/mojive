@@ -254,7 +254,9 @@ def value_edit(
             _EXPANDED.add(label)
         out.expanded = label in _EXPANDED
 
-    tooltip = f"{bindings.pointer_label(PointerAction.VALUE_RESET)}: reset · {bindings.pointer_label(PointerAction.VALUE_COPY)}: copy"
+    tooltip = f"{bindings.pointer_label(PointerAction.VALUE_COPY)}: copy"
+    if initial is not None:
+        tooltip = f"{bindings.pointer_label(PointerAction.VALUE_RESET)}: reset · " + tooltip
     if more_hint:
         tooltip += f" · {bindings.pointer_label(PointerAction.VALUE_EXPAND)}: {more_hint}"
     imgui.set_item_tooltip(tooltip)

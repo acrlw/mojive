@@ -1,7 +1,7 @@
 """Native presentation of the registered editor's real timeline and transport."""
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
@@ -60,6 +60,17 @@ _BUTTON_HITS = {
 }
 
 
+@dataclass(frozen=True)
+class _RangeEdit:
+    """Range state before a numeric drag, scoped to its original take."""
+
+    key: str
+    take_id: int
+    selected: tuple[int, int] | None
+    loop_enabled: bool
+    view: tuple[float, float, bool]
+
+
 class _ToolbarRows:
     """Keep measured control groups together while allowing narrow rows to wrap."""
 
@@ -101,6 +112,8 @@ class NativeTimelineToolbar(TimelineToolbar):
 
     def __init__(self, workspace):
         self.workspace = workspace
+        self._recording_edit: tuple[str, float] | None = None
+        self._range_edit: _RangeEdit | None = None
         super().__init__(self.draw_follow_icon, command_icon_drawer=self.draw_command_icon)
 
     def _icon(self, name, center, color, scale):
@@ -506,17 +519,31 @@ class NativeTimelineToolbar(TimelineToolbar):
             if take_times
             else (editor.view_start, editor.view_end)
         )
-        changed, values = False, []
+        changed, values, canceled = False, [], False
+        range_key = None
         imgui.begin_disabled(ctx.session.state_take_recording or ctx.take_video_active)
         for name, title, value in zip(("start", "end"), labels, endpoints, strict=True):
+            key = "##timeline-range-" + name
             edited, value = self._numeric_field(
                 rows,
-                "##timeline-range-" + name,
+                key,
                 title,
                 value,
                 format="%.2f s",
                 label_width=label_width,
             )
+            state = self.workspace.ui.numeric_edits[key]
+            if state.activated:
+                self._range_edit = _RangeEdit(
+                    key,
+                    ctx.session.active_state_take_id,
+                    limits,
+                    ctx.session.state_take_loop_enabled,
+                    (editor.view_start, editor.view_end, editor.view_needs_fit),
+                )
+            if self._range_edit is not None and self._range_edit.key == key:
+                range_key = key
+                canceled |= state.canceled
             changed |= edited
             values.append(value)
         x, y, _ = rows.place(28)
@@ -533,7 +560,18 @@ class NativeTimelineToolbar(TimelineToolbar):
         ):
             ctx.submit(cmd.SetStateTakeLoopEnabled(not ctx.session.state_take_loop_enabled))
         start, end = values
-        if changed and math.isfinite(start) and math.isfinite(end) and end > start:
+        if canceled:
+            original = self._range_edit
+            if original.take_id == ctx.session.active_state_take_id:
+                if len(take_times) > 1:
+                    result = ctx.submit(cmd.SetStateTakeRange(*(original.selected or (None, None))))
+                    if result.ok:
+                        result = ctx.submit(cmd.SetStateTakeLoopEnabled(original.loop_enabled))
+                    editor.error = "" if result.ok else result.message
+                editor.view_start, editor.view_end, editor.view_needs_fit = original.view
+            imgui.internal.clear_active_id()
+            self._range_edit = None
+        elif changed and math.isfinite(start) and math.isfinite(end) and end > start:
             if len(take_times) > 1:
                 first, last = (
                     nearest_take_frame(take_times, start),
@@ -543,6 +581,8 @@ class NativeTimelineToolbar(TimelineToolbar):
                     ctx.submit(cmd.SetStateTakeLoop(first, last))
             else:
                 editor.view_start, editor.view_end, editor.view_needs_fit = start, end, False
+        if range_key is not None and self.workspace.ui.numeric_edits[range_key].deactivated:
+            self._range_edit = None
         imgui.end_disabled()
 
     def _draw_pause_at_end(self, ctx, x, y, width):
@@ -581,11 +621,24 @@ class NativeTimelineToolbar(TimelineToolbar):
             changed, value = self._numeric_field(
                 rows, key, label, getattr(config, field), format="%.1f", label_width=label_width
             )
+            state = self.workspace.ui.numeric_edits[key]
+            if state.activated:
+                self._recording_edit = key, getattr(config, field)
+            if state.canceled and self._recording_edit is not None:
+                edit_key, original = self._recording_edit
+                if edit_key == key:
+                    config = replace(config, **{field: original})
+                    ctx.apply_setting(ctx.set_recording_config, config, persist=False)
+                    imgui.internal.clear_active_id()
+                    self._recording_edit = None
+                    continue
             if changed:
                 config = replace(config, **{field: value})
                 ctx.apply_setting(ctx.set_recording_config, config, persist=False)
-            if self.workspace.ui.numeric_edits[key].committed:
+            if state.committed:
                 ctx.apply_setting(ctx.set_recording_config, config)
+            if state.deactivated:
+                self._recording_edit = None
 
 
 class WorkspaceTimeline:

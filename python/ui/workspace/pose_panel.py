@@ -70,6 +70,7 @@ class NativePoseEditor:
         self._nodes = {}
         self._rotations = {}
         self._failed_gestures = set()
+        self._active_joint = None
 
     def draw(self, ctx, x, y, w, *, joints, select_joint, show_names=True, joint_color=None):
         u, s = self.workspace.ui, self.workspace.s
@@ -80,17 +81,15 @@ class NativePoseEditor:
             self._nodes = {
                 node.joint_index: node for node in ctx.session.nodes if node.type is NodeType.JOINT
             }
-        aliases = {
-            name: next((joint.joint_id for joint in ctx.session.joints if joint.name == name), -1)
-            for name in ("hinge_limited", "slide")
-        }
+            self._active_joint = None
+        window = imgui.internal.get_current_window()
+        clip_top, clip_bottom = window.clip_rect.min.y, window.clip_rect.max.y
+        if not imgui.is_any_item_active():
+            self._active_joint = None
+        qpos = ctx.session.frame.qpos
+        vector_layout = None
         for joint in joints:
             top = y
-            node = self._nodes.get(joint.joint_id)
-            if show_names:
-                self._heading(ctx, joint, node, select_joint, x, y, w, joint_color)
-                y += 34 * s
-            qpos = ctx.session.frame.qpos
             size = _QPOS_SIZE.get(joint.type)
             available = (
                 qpos is not None
@@ -98,6 +97,25 @@ class NativePoseEditor:
                 and joint.qpos_adr >= 0
                 and joint.qpos_adr + size <= len(qpos)
             )
+            if available and joint.type in ("ball", "free"):
+                if vector_layout is None:
+                    vector_layout = u.vector_layout(w)
+                height = (vector_layout.height + 8 * s) * (2 if joint.type == "free" else 1)
+            else:
+                height = (42 if available and show_names else 36) * s
+            bottom = top + height + (34 * s if show_names else 0)
+            # Keep the full scroll extent without submitting offscreen text, icons,
+            # quaternion conversions, or controls. An active drag keeps its owner alive.
+            if (bottom < clip_top or top > clip_bottom) and self._active_joint != (
+                window.id_,
+                joint.joint_id,
+            ):
+                y = bottom
+                continue
+            node = self._nodes.get(joint.joint_id)
+            if show_names:
+                self._heading(ctx, joint, node, select_joint, x, y, w, joint_color)
+                y += 34 * s
             enabled = (
                 available
                 and ctx.session.paused
@@ -113,11 +131,10 @@ class NativePoseEditor:
                 )
                 y += 36 * s
             elif joint.type in ("hinge", "slide"):
-                y = self._scalar(ctx, joint, node, select_joint, aliases, x, y, w, enabled)
-                if show_names:
-                    y += 6 * s
+                self._scalar(ctx, joint, node, select_joint, x, y, w, enabled)
             else:
-                y = self._pose(ctx, joint, node, select_joint, x, y, w, enabled)
+                self._pose(ctx, joint, node, select_joint, x, y, w, enabled, vector_layout)
+            y = bottom
             u.hits[f"pose-fields-{joint.joint_id}"] = (x, top, w, y - top)
         if joints:
             publish_focus_item_hint(ctx)
@@ -147,19 +164,12 @@ class NativePoseEditor:
             select_joint(ctx, joint, node, focused=focused)
         copyable_name_item(ctx, joint.name, w)
 
-    def _scalar(self, ctx, joint, node, select_joint, aliases, x, y, w, enabled):
+    def _scalar(self, ctx, joint, node, select_joint, x, y, w, enabled):
         u = self.workspace.ui
         angular = joint.type == "hinge"
         factor = 180 / np.pi if angular else 1
         lo, hi = joint.range if joint.limited else (0, 0)
-        suffix = (
-            "hinge"
-            if aliases["hinge_limited"] == joint.joint_id
-            else "slide"
-            if aliases["slide"] == joint.joint_id
-            else "joint-" + str(joint.joint_id)
-        )
-        key = "##pose-" + suffix
+        key = "##pose-joint-" + str(joint.joint_id)
         imgui.begin_disabled(not enabled)
         imgui.begin_group()
         changed, value = u.slider(
@@ -195,7 +205,7 @@ class NativePoseEditor:
         )
         return y + 36 * u.s
 
-    def _pose(self, ctx, joint, node, select_joint, x, y, w, enabled):
+    def _pose(self, ctx, joint, node, select_joint, x, y, w, enabled, layout):
         u = self.workspace.ui
         qpos = ctx.session.frame.qpos
         start = joint.qpos_adr
@@ -215,7 +225,6 @@ class NativePoseEditor:
             else _nearest_euler_degrees(matrix, previous[1] if previous is not None else None)
         )
         self._rotations[joint.joint_id] = (matrix.copy(), rotation.copy())
-        layout = u.vector_layout(w)
         fields = (
             (("position", qpos[start : start + 3], "m", 0.01, "%.6g"),)
             if joint.type == "free"
@@ -292,6 +301,11 @@ class NativePoseEditor:
         if not enabled:
             return False
         edit_key = f"{key}##window-{imgui.internal.get_current_window().id_}"
+        owner = (imgui.internal.get_current_window().id_, joint.joint_id)
+        if state.active or state.activated:
+            self._active_joint = owner
+        elif state.deactivated and self._active_joint == owner:
+            self._active_joint = None
         if state.activated:
             self._failed_gestures.discard(edit_key)
             select_joint(ctx, joint, node)

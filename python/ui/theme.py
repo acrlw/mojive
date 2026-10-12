@@ -23,6 +23,18 @@ def with_alpha(color: RGBA, alpha: float) -> RGBA:
     return (color[0], color[1], color[2], alpha)
 
 
+def mix_color(background: RGBA, foreground: RGBA, amount: float) -> RGBA:
+    """Blend RGB channels while retaining the foreground opacity."""
+    weight = min(1.0, max(0.0, float(amount)))
+    return (
+        *(
+            background[index] + (foreground[index] - background[index]) * weight
+            for index in range(3)
+        ),
+        foreground[3],
+    )
+
+
 def relative_luminance(color: RGBA) -> float:
     r, g, b = (_to_linear(c) for c in color[:3])
     return 0.2126 * r + 0.7152 * g + 0.0722 * b

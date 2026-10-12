@@ -65,6 +65,26 @@ def property_section(ui, label, flags, *, item_id=None):
     return opened
 
 
+def property_toggle(ui, key, label, value, *, width=None, tooltip=""):
+    """Draw a complete switch row with shared label bounds and row spacing."""
+    pos = imgui.get_cursor_screen_pos()
+    width = imgui.get_content_region_avail().x if width is None else width
+    clicked = ui.button(
+        key + "-label",
+        pos.x,
+        pos.y,
+        max(1, width / ui.s - SWITCH_WIDTH - DESIGN.label_gap),
+        DESIGN.control_height,
+        label=label,
+        align="left",
+        text_color=MUTED,
+        tooltip=tooltip,
+    )
+    edited = ui.switch(key, pos.x + max(0, width - SWITCH_WIDTH * ui.s), pos.y, value)
+    advance(ui, pos.x, pos.y + (DESIGN.control_height + DESIGN.row_gap) * ui.s)
+    return not value if clicked else edited
+
+
 class NativePropertyPresentation:
     def __init__(self, ui, *, prefix="property"):
         self.ui = ui
@@ -104,7 +124,7 @@ class NativePropertyPresentation:
         key = self.prefix + "-label-" + label
         property_label(ui, key, label, pos.x, pos.y, layout.label_width, above=layout.label_above)
         imgui.set_cursor_screen_pos((pos.x, pos.y))
-        label_height = 24 * scale if layout.label_above else DESIGN.control_height * scale
+        label_height = layout.fields[0][1] if layout.label_above else DESIGN.control_height * scale
         imgui.invisible_button("##" + key, (layout.label_width, label_height))
         if (
             imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
@@ -157,7 +177,7 @@ class NativePropertyPresentation:
             imgui.calc_item_width(),
             len(values),
             axis=False,
-            minimum=self.ui.numeric_minimum(axis=False, format=fmt, values=values),
+            minimum=self.ui.numeric_minimum(axis=False, format=fmt),
         )
         changed, out = False, list(values)
         imgui.begin_group()
@@ -191,20 +211,7 @@ class NativePropertyPresentation:
         return result
 
     def toggle(self, key, label, value, *, width=None):
-        pos = imgui.get_cursor_screen_pos()
-        width = imgui.get_content_region_avail().x if width is None else width
-        clicked = self.ui.button(
-            key + "-label",
-            pos.x,
-            pos.y,
-            max(1, width / self.ui.s - SWITCH_WIDTH - DESIGN.label_gap),
-            label=label,
-            align="left",
-            text_color=MUTED,
-        )
-        edited = self.ui.switch(key, pos.x + width - SWITCH_WIDTH * self.ui.s, pos.y, value)
-        advance(self.ui, pos.x, pos.y + (DESIGN.control_height + DESIGN.row_gap) * self.ui.s)
-        return not value if clicked else edited
+        return property_toggle(self.ui, key, label, value, width=width)
 
     def toggles(self, items):
         """Fit complete switch/label pairs into equal columns, then wrap rows."""

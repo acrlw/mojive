@@ -51,6 +51,32 @@ Screenshots, reports, saved scenes and layout files go to
 output directory. Production sources and icon data live under `python/ui/workspace/`;
 no file in `output/` is required at startup.
 
+## Production module boundaries
+
+| Module | Responsibility |
+|---|---|
+| `ui/workspace/design.py` | Shared field sizes, spacing and rail geometry |
+| `ui/workspace/widgets.py` | Basic controls and per-frame hit/edit state |
+| `ui/workspace/numeric_fields.py` | Numeric gestures, responsive groups and value rails |
+| `ui/workspace/widget_style.py`, `widget_icons.py` | Font/theme setup and icon drawing |
+| `ui/workspace/property_style.py` | Section headings, labels and switch rows shared by panels |
+| `ui/panels/settings.py` | Settings navigation, draft state and presentation hooks |
+| `ui/panels/settings_pages/` | Domain settings and writes through `PanelContext` callbacks |
+| `ui/workspace/settings_panel.py` | Native presentation of the shared settings pages |
+| `ui/workspace/entities.py`, `navigation.py`, `pose_panel.py` | Inspector projection, browsing and joint editing respectively |
+
+The `UI` instance owns control state; numeric and icon modules do not create a second
+control registry. Settings pages reuse the same actions in the classic and native
+presentations. Preview values remain separate from persistent preferences, and
+Escape restores the value at gesture activation.
+
+Pose submits visible rows plus the active drag owner. Session owns the joint index;
+navigation caches only browsing results and invalidates them when metadata changes.
+Inspector keeps load-time transform and RGBA defaults for Restore and builds full
+presentation data only for selected or pinned entities.
+
+## Shared panel presentation
+
 Camera sections share the Inspector heading, label and row-spacing controls. The
 slider, numeric field and unit button use one native compound control; angle units
 switch between degrees and radians without changing the camera pose. Narrow rows

@@ -14,6 +14,7 @@ class WorkspaceDesign:
     mono_size: float = 14
     control_height: float = 28
     control_radius: float = 6
+    checkbox_size: float = 18
     container_radius: float = 8
     grab_radius: float = 4
     child_radius: float = 6

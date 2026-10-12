@@ -100,6 +100,7 @@ class Session(_Editing, _Playback, _Source):
         self._by_node_id: dict[int, SceneNode] = {}
         self._by_object_id: dict[int, SceneNode] = {}
         self._joints: list[JointInfo] = []
+        self._joints_by_id: dict[int, JointInfo] = {}
         self._joints_by_body: dict[int, tuple[JointInfo, ...]] = {}
         self._actuators: list[ActuatorInfo] = []
         self._actuators_by_joint: dict[int, tuple[ActuatorInfo, ...]] = {}
@@ -251,6 +252,10 @@ class Session(_Editing, _Playback, _Source):
     def joints(self) -> list[JointInfo]:
         """Return editable joint metadata from the adapter."""
         return self._joints
+
+    def joint(self, joint_id: int) -> JointInfo | None:
+        """Look up joint metadata by its adapter-provided ID."""
+        return self._joints_by_id.get(int(joint_id))
 
     def joints_for_body(self, body_index: int) -> tuple[JointInfo, ...]:
         """Return joints attached directly to one physics body."""

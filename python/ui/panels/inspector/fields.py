@@ -23,6 +23,7 @@ from mojive.ui.panels import (
 )
 from mojive.ui.panels.value_cards import value_rail
 from mojive.ui.pointer_bindings import PointerAction
+from mojive.ui.theme import mix_color as _mix_color
 
 
 def _compact_transform(width: float, style_scale: float) -> bool:
@@ -591,14 +592,3 @@ def _axis_field(
 
 def _format_vector(values) -> str:
     return ", ".join(f"{float(value):.6g}" for value in values)
-
-
-def _mix_color(background, foreground, amount: float):
-    weight = min(1.0, max(0.0, float(amount)))
-    return (
-        *(
-            background[index] + (foreground[index] - background[index]) * weight
-            for index in range(3)
-        ),
-        foreground[3],
-    )

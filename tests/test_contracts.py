@@ -372,9 +372,9 @@ def test_debug_view_combo_lists_every_enum_member():
     import inspect
     import textwrap
 
-    from mojive.ui.panels import settings as settings_panel
+    from mojive.ui.panels.settings_pages import rendering
 
-    src = textwrap.dedent(inspect.getsource(settings_panel.SettingsPanel._debug_view))
+    src = textwrap.dedent(inspect.getsource(rendering.debug_view))
     tree = ast.parse(src)
     loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)]
     assert loops

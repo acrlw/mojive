@@ -48,9 +48,7 @@ NODE_ICONS = {
 
 def node_icon(node, session):
     if node.type is NodeType.JOINT:
-        joint = next(
-            (joint for joint in session.joints if joint.joint_id == node.joint_index), None
-        )
+        joint = session.joint(node.joint_index)
         if joint is not None:
             return joint_icon(joint.type)
     return NODE_ICONS[node.type.value]
@@ -88,6 +86,9 @@ class Navigation:
         self._range_anchor = None
         self.pose_search_visible = False
         self._pose_copy_pending = False
+        self._pose_browse_key = None
+        self._pose_browse_source = None
+        self._pose_browse_joints = ()
         self.pose_editor = NativePoseEditor(workspace)
 
     def scene_filters(self, ctx):
@@ -423,20 +424,31 @@ class Navigation:
 
     def pose_joints(self, ctx, node_id=None):
         self.joints._snapshot(ctx)
-        joints = ctx.session.joints
+        session = ctx.session
         if node_id is not None:
-            node = ctx.session.node(node_id)
+            node = session.node(node_id)
             if node is None:
                 return ()
-            joints = (
-                tuple(joint for joint in joints if joint.joint_id == node.joint_index)
-                if node.type is NodeType.JOINT
-                else ctx.session.joints_for_body(node.body_index)
+            if node.type is NodeType.JOINT:
+                joint = session.joint(node.joint_index)
+                return (joint,) if joint is not None else ()
+            return sort_joints(
+                session.joints_for_body(node.body_index), by_name=self.joints._sort_by_name
             )
-        return sort_joints(
-            filter_joints(joints, "" if node_id is not None else self.joints._search),
-            by_name=self.joints._sort_by_name,
+        key = (
+            session.document_id,
+            session.structure_generation,
+            self.joints._search.strip().casefold(),
+            self.joints._sort_by_name,
         )
+        if key != self._pose_browse_key or self._pose_browse_source is not session.joints:
+            self._pose_browse_key = key
+            self._pose_browse_source = session.joints
+            self._pose_browse_joints = sort_joints(
+                filter_joints(session.joints, self.joints._search),
+                by_name=self.joints._sort_by_name,
+            )
+        return self._pose_browse_joints
 
     def draw_pose(self, ctx, x, y, w, *, node_id=None):
         if node_id is None:

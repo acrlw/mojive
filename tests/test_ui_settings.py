@@ -13,6 +13,7 @@ from mojive.scene import Scene
 from mojive.session import Session
 from mojive.ui.app import ViewerApp
 from mojive.ui.panels import PanelContext, settings
+from mojive.ui.panels.settings_pages import interaction
 from mojive.ui.preferences import Preferences
 
 
@@ -91,6 +92,7 @@ def test_view_padding_drag_previews_then_commits_once_and_idle_preserves_precisi
             end_table=lambda: None,
         ),
     )
+    monkeypatch.setattr(interaction, "imgui", settings.imgui)
     ctx = PanelContext(
         app.session,
         app.backend,
@@ -98,17 +100,17 @@ def test_view_padding_drag_previews_then_commits_once_and_idle_preserves_precisi
         set_view_selection_padding=app.set_view_selection_padding,
     )
     original = app.view_cube.selection_padding
-    panel._view_settings(ctx)
+    interaction.view_settings(panel, ctx)
     assert saved == [] and app.view_cube.selection_padding == original
     phase.changed, phase.value = True, 1.234567890123
-    panel._view_settings(ctx)
+    interaction.view_settings(panel, ctx)
     assert saved == [] and app.view_cube.selection_padding == phase.value
     phase.changed, phase.committed = False, True
-    panel._view_settings(ctx)
+    interaction.view_settings(panel, ctx)
     assert len(saved) == 1
     assert saved[0]["view_selection_padding"] == phase.value
     phase.committed = False
-    panel._view_settings(ctx)
+    interaction.view_settings(panel, ctx)
     assert len(saved) == 1 and app.view_cube.selection_padding == phase.value
 
 
@@ -122,13 +124,14 @@ def test_failed_view_padding_commit_finishes_the_ui_table_and_keeps_preview(app,
     monkeypatch.setattr(
         app.preferences, "_save", lambda values: (_ for _ in ()).throw(OSError("full"))
     )
+    monkeypatch.setattr(interaction, "imgui", settings.imgui)
     ctx = PanelContext(
         app.session,
         app.backend,
         view_cube=app.view_cube,
         set_view_selection_padding=app.set_view_selection_padding,
     )
-    panel._view_settings(ctx)
+    interaction.view_settings(panel, ctx)
     assert completed == ["table"]
     assert app.view_cube.selection_padding == 1.7
     assert "could not be saved: full" in ctx.status

@@ -855,3 +855,54 @@ def test_adopted_dimensions_share_drawing_and_input_geometry(workspace):
     assert lane[0] == track.lo[0]
     assert lane[2] == track.channel_width
     assert lane[3] == track.row_height
+
+
+@pytest.mark.parametrize(
+    "category,field,config_name,attribute,part",
+    (
+        ("Camera", "##camera_focus_duration", "camera_navigation", "focus_duration", ""),
+        ("Recording", "##recording_delay", "recording", "countdown", ""),
+        ("Recording", "##recording_crf", "recording", "crf", "-value"),
+        ("Recording", "##recording_crf", "recording", "crf", "-track"),
+    ),
+)
+def test_native_settings_escape_restores_preview_without_saving(
+    workspace, category, field, config_name, attribute, part
+):
+    viewer, shell = workspace, workspace.app.workspace
+    shell.activate("Settings")
+    viewer.frame()
+    viewer.click("settings-" + category)
+
+    def current():
+        config = (
+            viewer.app.camera.navigation if category == "Camera" else viewer.app.recording_config
+        )
+        return getattr(config, attribute)
+
+    original = current()
+    saved = viewer.app.preferences.get(config_name)
+    x, y, w, h = shell.ui.hits[field + part]
+    content = next(
+        window
+        for window in imgui.get_current_context().windows
+        if window.active and "Reference settings content" in window.name
+    )
+    if y + h > content.clip_rect.max.y:
+        imgui.internal.set_scroll_y(
+            content, content.scroll.y + y + h - content.clip_rect.max.y + 8 * shell.s
+        )
+        viewer.frame()
+        x, y, w, h = shell.ui.hits[field + part]
+    viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
+    viewer.event("add_mouse_button_event", 0, True)
+    for step in range(1, 4):
+        viewer.event("add_mouse_pos_event", x + w / 2 + step * 40 * shell.s, y + h / 2)
+    assert current() != original
+    viewer.event("add_key_event", imgui.Key.escape, True)
+    assert current() == original
+    viewer.event("add_key_event", imgui.Key.escape, False)
+    viewer.event("add_mouse_button_event", 0, False)
+    viewer.frame()
+    assert current() == original
+    assert viewer.app.preferences.get(config_name) == saved

@@ -13,7 +13,7 @@ from mojive.ui.panels.settings import (
 
 from .design import DESIGN, TITLE_SIZE
 from .property_style import NativePropertyPresentation, advance, property_controls, property_section
-from .widgets import SAGE, TEXT
+from .widgets import SAGE, TEXT, NumericEditState
 
 CATEGORIES = ("General", "Camera", "Interaction", "Rendering", "Recording", "MuJoCo Visuals")
 CATEGORY_ICONS = ("settings", "camera", "mouse", "shading", "video", "layers")
@@ -36,13 +36,15 @@ class WorkspaceSettings(SettingsPanel):
         self.workspace = workspace
         self._checkbox_labels = frozenset()
         self.fields = NativePropertyPresentation(workspace.ui, prefix="settings")
+        self._number_origin = None
+        self._number_committed = False
 
     def _control_padding(self, *, checkbox=False):
         # Shared settings actions size checkboxes from the current frame height.
         s = self.workspace.s
-        height = 18 if checkbox else 28
+        height = DESIGN.checkbox_size if checkbox else DESIGN.control_height
         imgui.get_style().frame_padding = (
-            8 * s,
+            DESIGN.frame_padding_x * s,
             max(0, (height * s - imgui.get_font_size()) / 2),
         )
 
@@ -56,7 +58,8 @@ class WorkspaceSettings(SettingsPanel):
         self.fields.row(label)
         if label in self._checkbox_labels:
             self._control_padding(checkbox=True)
-            imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5 * self.workspace.s)
+            offset = (DESIGN.control_height - DESIGN.checkbox_size) * self.workspace.s / 2
+            imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + offset)
 
     def _group_heading(self, title):
         self._control_padding()
@@ -66,11 +69,18 @@ class WorkspaceSettings(SettingsPanel):
         advance(ui, p.x, p.y + 38 * ui.s)
 
     def _collapsing_header(self, label, flags=0):
-        self._control_padding()
+        # The section painter owns its geometry. Preserve the following fields' padding.
         return property_section(self.workspace.ui, label.split("##", 1)[0], flags, item_id=label)
 
     def _drag_float(self, key, value, speed, low, high, fmt="%.3f", flags=0):
-        return self.fields.numeric(key, value, speed, low, high, fmt)
+        changed, result = self.fields.numeric(key, value, speed, low, high, fmt)
+        return self._finish_number(
+            key, value, changed, result, self.workspace.ui.numeric_edits[key]
+        )
+
+    def _drag_int(self, key, value, speed, low, high, fmt="%d", flags=0):
+        changed, result = self._drag_float(key, value, speed, low, high, "%.0f", flags)
+        return changed, round(result)
 
     def _input_float(self, key, value, step=0, fast_step=0, fmt="%.3f", flags=0):
         return self._drag_float(key, value, step or 0.01, 0, 0, fmt)
@@ -79,7 +89,34 @@ class WorkspaceSettings(SettingsPanel):
         edit = self.fields.value_rail(
             key, value, (low, high), initial=None, fmt=fmt, show_reset=False
         )
-        return edit.changed, edit.value
+        active = imgui.is_item_active()
+        deactivated = imgui.is_item_deactivated()
+        state = NumericEditState(
+            activated=edit.activated,
+            active=active,
+            deactivated=deactivated,
+            committed=imgui.is_item_deactivated_after_edit(),
+            canceled=(active or deactivated) and imgui.is_key_pressed(imgui.Key.escape, False),
+        )
+        return self._finish_number(key, value, edit.changed, edit.value, state)
+
+    def _finish_number(self, key, value, changed, result, state):
+        """Restore a canceled preview and keep it out of persistent preferences."""
+        if state.activated:
+            self._number_origin = key, value
+        self._number_committed = state.committed and not state.canceled
+        if self._number_origin is not None and self._number_origin[0] == key:
+            if state.canceled:
+                result = self._number_origin[1]
+                changed = result != value
+                self._number_origin = None
+                imgui.internal.clear_active_id()
+            elif state.deactivated:
+                self._number_origin = None
+        return changed, result
+
+    def _value_committed(self):
+        return self._number_committed
 
     def _slider_int(self, key, value, low, high, fmt="%d", flags=0):
         changed, result = self._slider_float(key, value, low, high, "%.0f", flags)

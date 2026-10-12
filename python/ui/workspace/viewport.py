@@ -399,6 +399,7 @@ def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
 def transport(workspace, x, y, w, shell):
     u, s = workspace.ui, workspace.s
     session = workspace.app.session
+    replay = session.replay_info
     compact = w < 340 * s
     width = 168 if compact else 282
     if w < (width + 20) * s:
@@ -417,9 +418,11 @@ def transport(workspace, x, y, w, shell):
         icon="previous",
         icon_role="subtle",
         tooltip="Previous frame",
-        enabled=session.can_step_back,
+        enabled=replay.frame_index > 0 if replay is not None else session.can_step_back,
     ):
-        session.submit(cmd.StepBack())
+        session.submit(
+            cmd.SeekReplay(max(0, replay.frame_index - 1)) if replay is not None else cmd.StepBack()
+        )
     if u.button(
         "play",
         tx + 33 * s,
@@ -441,9 +444,18 @@ def transport(workspace, x, y, w, shell):
         icon="next",
         icon_role="subtle",
         tooltip="Next frame",
-        enabled=not workspace.playing and session.adapter.caps.simulation,
+        enabled=not workspace.playing
+        and (
+            replay.frame_index < replay.frame_count - 1
+            if replay is not None
+            else session.adapter.caps.simulation
+        ),
     ):
-        session.submit(cmd.Step())
+        session.submit(
+            cmd.SeekReplay(min(replay.frame_count - 1, replay.frame_index + 1))
+            if replay is not None
+            else cmd.Step()
+        )
     if not compact:
         caption = f"{workspace.time:.3f} s"
         imgui.push_font(u.mono, MONO_SIZE * s)

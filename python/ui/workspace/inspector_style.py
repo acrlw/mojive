@@ -71,7 +71,7 @@ class NativeInspectorPresentation:
         )
         return imgui.begin_table(table_id, 1, flags)
 
-    def _draw_label(self, key, text, x, y, width, *, above, row_height=28):
+    def _draw_label(self, key, text, x, y, width, *, above, row_height=DESIGN.control_height):
         return property_label(self.ui, key, text, x, y, width, above=above, row_height=row_height)
 
     def row(self, label, tooltip="", *, unit="", toggle_unit=None, toggle=False, components=1):
@@ -102,9 +102,11 @@ class NativeInspectorPresentation:
             minimum=0 if group_vector else self._control_minimum * s,
         )
         above = not toggle and layout.label_above
-        label_width = max(s, width - (SWITCH_WIDTH + 12) * s) if toggle else layout.label_width
-        row_height = 28
-        hit_width, text_height = self._draw_label(
+        label_width = (
+            max(s, width - (SWITCH_WIDTH + DESIGN.label_gap) * s) if toggle else layout.label_width
+        )
+        row_height = DESIGN.control_height
+        hit_width, _ = self._draw_label(
             "property-label-" + label,
             shown,
             p.x,
@@ -114,7 +116,7 @@ class NativeInspectorPresentation:
             row_height=row_height,
         )
         imgui.set_cursor_screen_pos((p.x, p.y))
-        label_height = text_height + 11 * s if above else row_height * s
+        label_height = layout.fields[0][1] if above else row_height * s
         if (
             imgui.invisible_button("##property-label-" + label, (hit_width, label_height))
             and toggle_unit
@@ -126,13 +128,13 @@ class NativeInspectorPresentation:
             if self.ui.measure(shown, BODY_SIZE, translate=False) > label_width:
                 self.ui.tooltip(shown, translate=False)
         control_x, control_y = (
-            (p.x, p.y + (row_height - 28) * s / 2)
+            (p.x, p.y)
             if toggle
             else (p.x, p.y + label_height)
             if above
             else (
                 round(p.x + layout.fields[0][0]),
-                p.y + (row_height - 28) * s / 2,
+                p.y,
             )
         )
         self._row = (p.x, control_y, width)
@@ -227,22 +229,19 @@ class NativeInspectorPresentation:
         p = imgui.get_cursor_screen_pos()
         width = imgui.get_content_region_avail().x
         count = len(values)
-        # Reserve precision and sign from the declared format and bounds rather
-        # than resizing fields while the user edits a value.
-        samples = (0.123456789, 1000.0, -0.123456789) if lo < 0 else (0.123456789, 1000.0)
-        imgui.push_font(self.ui.mono, MONO_SIZE * self.ui.s)
-        minimum = max(
-            50 * self.ui.s, max(imgui.calc_text_size(fmt % v).x for v in samples) + 16 * self.ui.s
+        layout = self.ui.numeric_layout(
+            width,
+            count,
+            axis=False,
+            minimum=self.ui.numeric_minimum()
+            if self._vector_group
+            else self.ui.numeric_minimum(axis=False, format=fmt),
         )
-        imgui.pop_font()
-        gap = 4 * self.ui.s
-        columns = count if count * minimum + (count - 1) * gap <= width else 1
-        field_width = (width - (columns - 1) * gap) / columns
         changed = False
         out = list(values)
         imgui.begin_group()
         for index, value in enumerate(values):
-            dx, dy = (index % columns) * (field_width + gap), (index // columns) * 36 * self.ui.s
+            dx, dy, field_width, _ = layout.fields[index]
             edit, out[index] = self._field(
                 f"{item_id}-{index}",
                 value,
@@ -298,7 +297,10 @@ class NativeInspectorPresentation:
         s = self.ui.s
         rgba = tuple(values) if len(values) == 4 else (*values, 1.0)
         pressed = imgui.color_button(
-            item_id + "-picker", rgba, imgui.ColorEditFlags_.no_tooltip, (28 * s, 28 * s)
+            item_id + "-picker",
+            rgba,
+            imgui.ColorEditFlags_.no_tooltip,
+            (DESIGN.control_height * s, DESIGN.control_height * s),
         )
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         self.ui.hits[item_id + "-picker"] = (a.x, a.y, b.x - a.x, b.y - a.y)
@@ -375,7 +377,7 @@ class NativeInspectorPresentation:
             mono=True,
         )
         x = p.x
-        y = b.y + 6 * self.ui.s
+        y = b.y + DESIGN.row_gap * self.ui.s
         layout = self.ui.numeric_layout(width, len(out), column_options=(4, 2, 1))
         imgui.begin_group()
         for index, axis in enumerate("RGBA"[: len(out)]):
@@ -428,8 +430,9 @@ class NativeInspectorPresentation:
         )
         extra_height = max(0, label_height - BODY_SIZE * s)
         imgui.set_cursor_screen_pos((p.x, p.y))
+        label_bounds_height = layout.fields[0][1] if above else DESIGN.control_height * s
         imgui.invisible_button(
-            "##vector-label-" + name, (hit_width, (24 if above else 28) * s + extra_height)
+            "##vector-label-" + name, (hit_width, label_bounds_height + extra_height)
         )
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
             if pointer_pressed(self.ctx, PointerAction.PROPERTY_COPY):
@@ -492,5 +495,10 @@ class NativeInspectorPresentation:
         imgui.table_next_row()
         imgui.table_next_column()
         options.pop("tooltip", None)
+        if self._vector_group:
+            # Related rows use the table's XYZ budget, including scalar label columns.
+            options["layout"] = self.ui.form_layout(
+                imgui.get_content_region_avail().x, 3, axis=True
+            )
         result = self._vector(node, name, label, values, **options)
         return result

@@ -5,12 +5,12 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
-from .design import BODY_SIZE, TITLE_SIZE
+from .design import BODY_SIZE, DESIGN, TITLE_SIZE
 from .inspector_components import draw_component
+from .property_style import property_toggle
 from .widgets import (
     MUTED,
     SAGE,
-    SWITCH_WIDTH,
     TEXT,
     color,
 )
@@ -192,22 +192,19 @@ def inspector(workspace, x, y, w, h):
                     e[key] = val
                 workspace.app.apply_document_edits()
                 workspace.finish_numeric_edit(edit_key, state)
-                row_y += layout.height + 8 * s
+                row_y += layout.height + DESIGN.row_gap * s
             yy = row_y + 16 * s
         else:
             yy += 40 * s
         if u.section("DISPLAY", bx, yy, bw, workspace.expanded["DISPLAY"]):
             workspace.expanded["DISPLAY"] = not workspace.expanded["DISPLAY"]
         if workspace.expanded["DISPLAY"]:
-            u.text(bx, yy + 44 * s, "Visible", MUTED, BODY_SIZE)
-            e["hidden"] = not u.switch(
-                "entity-visible", bx + bw - SWITCH_WIDTH * s, yy + 36.5 * s, not e["hidden"]
+            imgui.set_cursor_screen_pos((bx, yy + 38 * s))
+            e["hidden"] = not property_toggle(u, "entity-visible", "Visible", not e["hidden"])
+            workspace.app.gizmos = property_toggle(
+                u, "gizmos", "Transform handles", workspace.app.gizmos
             )
-            u.text(bx, yy + 78 * s, "Transform handles", MUTED, BODY_SIZE)
-            workspace.app.gizmos = u.switch(
-                "gizmos", bx + bw - SWITCH_WIDTH * s, yy + 70.5 * s, workspace.app.gizmos
-            )
-            yy += 113 * s
+            yy = imgui.get_cursor_screen_pos().y
         else:
             yy += 40 * s
         if u.section("IDENTITY", bx, yy, bw, workspace.expanded["IDENTITY"]):

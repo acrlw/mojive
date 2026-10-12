@@ -13,12 +13,11 @@ from mojive.ui.panels import activate_edit_gizmo, pointer_pressed, publish_focus
 from mojive.ui.pointer_bindings import PointerAction
 
 from .design import BODY_SIZE, DESIGN
-from .property_style import NativePropertyPresentation, advance, property_section
+from .property_style import NativePropertyPresentation, advance, property_section, property_toggle
 from .widgets import (
     LINE,
     MUTED,
     SAGE,
-    SWITCH_WIDTH,
     TEXT,
     color,
 )
@@ -168,7 +167,7 @@ def assets_panel(workspace, x, y, w):
         ("Coral polymer", "#d58979"),
     ]
     for n, (name, hexcolor) in enumerate(palette):
-        yy = y + (38 + n * 56) * s
+        yy = y + (38 + n * (48 + DESIGN.row_gap)) * s
         u.rect(x, yy, w, 48 * s, (37, 41, 46, 255), 6)
         if u.button("material-" + name, x, yy, w / s, 48, active=workspace.material == n):
             workspace.material = n
@@ -239,19 +238,8 @@ def layers_panel(workspace, x, y, w):
     yy = y
 
     def visibility_row(key, label, visible, tooltip=""):
-        toggled = u.button(
-            key + "-label",
-            x,
-            yy,
-            max(1, w / s - SWITCH_WIDTH - 8),
-            28,
-            label=label,
-            text_color=MUTED,
-            tooltip=tooltip,
-            align="left",
-        )
-        value = u.switch(key, x + w - SWITCH_WIDTH * s, yy, visible)
-        return not visible if toggled else value
+        imgui.set_cursor_screen_pos((x, yy))
+        return property_toggle(u, key, label, visible, width=w, tooltip=tooltip)
 
     labels = (
         "Viewport UI",

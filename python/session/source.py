@@ -398,6 +398,7 @@ class _Source:
     def _refresh_joint_metadata(self) -> None:
         """Refresh joint lookup tables without rebuilding stable scene geometry."""
         self._joints = self._adapter.joints()
+        self._joints_by_id = {joint.joint_id: joint for joint in self._joints}
         joints_by_body: dict[int, list[JointInfo]] = {}
         for joint in self._joints:
             joints_by_body.setdefault(int(joint.body), []).append(joint)

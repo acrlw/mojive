@@ -63,18 +63,20 @@ class EntityProjection:
         session = self.app.session
         new_document = self._document_id != self.app.session.document_id
         if new_document:
-            self._entity_cache.clear()
             self.initial_entities.clear()
             if getattr(self.app, "workspace", None) is not None:
                 self.app.workspace.pinned = None
         if new_document or self._structure_generation != session.structure_generation:
+            self._entity_cache.clear()
             self._node_ids_by_identity = {
                 self._identity(node): node.node_id for node in session.nodes
             }
             originals = {e["identity"] for e in self.initial_entities}
             for node in session.nodes:
                 if self._identity(node) not in originals:
-                    self.initial_entities.append(self._project_node(node))
+                    self.initial_entities.append(
+                        {**self._transform_snapshot(node), "rgba": self._node_rgba(node)}
+                    )
             self._structure_generation = session.structure_generation
             self._document_id = session.document_id
         active = []
@@ -107,9 +109,7 @@ class EntityProjection:
     def _project_node(self, node):
         from .navigation import node_accent, node_icon
 
-        position, rotation = node_world_pose(self.app.session, node)
-        indices = node_geometry_indices(self.app.session, node)
-        rgba = self.app.session.source.geom_rgba[indices[0]] if len(indices) else (0.6, 0.7, 0.8, 1)
+        rgba = self._node_rgba(node)
         return {
             "id": str(node.node_id),
             "node_id": node.node_id,
@@ -117,20 +117,34 @@ class EntityProjection:
             "parent": node.parent,
             "name": node.name,
             "type": node.type.value,
-            "identity": self._identity(node),
+            **self._transform_snapshot(node),
             "icon": node_icon(node, self.app.session),
             "icon_color": node_accent(self.app.theme, node.type.value),
-            "position": position.tolist(),
-            "rotation": np.degrees(math3d.mat3_to_euler_xyz(rotation)).tolist(),
-            "scale": list(self.app.session.scale_factors(node.node_id)),
             "color": "#" + "".join(f"{round(np.clip(v, 0, 1) * 255):02x}" for v in rgba[:3]),
-            "rgba": [float(v) for v in rgba],
+            "rgba": rgba,
             "hidden": not node.visible,
             "posable": node.posable,
             "scalable": self.app.session.scale_target(node.node_id) is not None,
             "colorable": node.type is NodeType.GEOM
             or any(self.app.session.node(child).type is NodeType.GEOM for child in node.children),
         }
+
+    def _transform_snapshot(self, node):
+        """Capture numeric transform defaults without building display fields."""
+        position, rotation = node_world_pose(self.app.session, node)
+        return {
+            "identity": self._identity(node),
+            "position": position.tolist(),
+            "rotation": np.degrees(math3d.mat3_to_euler_xyz(rotation)).tolist(),
+            "scale": list(self.app.session.scale_factors(node.node_id)),
+        }
+
+    def _node_rgba(self, node):
+        indices = node_geometry_indices(self.app.session, node)
+        value = (
+            self.app.session.source.geom_rgba[indices[0]] if len(indices) else (0.6, 0.7, 0.8, 1)
+        )
+        return [float(channel) for channel in value]
 
     def apply_document_edits(self):
         """Route reference field changes through the same command boundary as gizmos."""
