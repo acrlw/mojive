@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
-from ...adapters.base import FrameNeeds
-from . import (
+from mojive.adapters.base import FrameNeeds
+from mojive.ui.panels import (
     Panel,
     PanelContext,
     begin_kv_table,
@@ -15,7 +15,7 @@ from . import (
     copy_state_vector,
     labeled,
 )
-from .presentation import PropertyPresentation
+from mojive.ui.panels.presentation import PropertyPresentation
 
 
 def sensor_value_preview(values, *, max_items: int = 24) -> str:
@@ -59,7 +59,11 @@ class SensorsPanel(Panel):
         self.sensor_index = min(self.sensor_index, len(infos) - 1)
         names = [sensor.name for sensor in infos]
         imgui.set_next_item_width(-1)
-        _changed, self.sensor_index = imgui.combo("##sensor", self.sensor_index, names)
+        _changed, self.sensor_index = (
+            self.presentation.combo("##sensor", self.sensor_index, names)
+            if self.presentation
+            else imgui.combo("##sensor", self.sensor_index, names)
+        )
         sensor = infos[self.sensor_index]
         values = ctx.session.frame.sensors
         value = (
@@ -84,7 +88,10 @@ class SensorsPanel(Panel):
                 display(ctx.tr("value"), ctx.tr("not produced this frame"))
             elif sensor.dim <= 6:
                 display(ctx.tr("value"), np.array2string(value, precision=6, separator=", "))
-            imgui.end_table()
+            if self.presentation:
+                self.presentation.end_table()
+            else:
+                imgui.end_table()
         if value is not None and sensor.dim > 6:
             imgui.separator()
             imgui.text_disabled(ctx.tr("value"))
@@ -95,11 +102,12 @@ class SensorsPanel(Panel):
                 imgui.get_content_region_avail().x,
                 imgui.get_style().item_spacing.x,
             )
-            if imgui.button(labels[0]):
+            button = self.presentation.button if self.presentation is not None else imgui.button
+            if button(labels[0]):
                 copy_state_vector(value)
             if inline[1]:
                 imgui.same_line()
-            if imgui.button(labels[1]) and ctx.panels is not None:
+            if button(labels[1]) and ctx.panels is not None:
                 panel = ctx.panels.load("Plot")
                 focus = getattr(panel, "focus_sensor", None)
                 if callable(focus):

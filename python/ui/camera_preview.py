@@ -8,9 +8,10 @@ from typing import Any
 import numpy as np
 from imgui_bundle import imgui
 
-from ..adapters.base import NodeType, SceneFrame, SceneSource
-from ..render.backend import RenderRequest
-from ..types import CameraView, ViewportImage
+from mojive.adapters.base import NodeType, SceneFrame, SceneSource
+from mojive.render.backend import RenderRequest
+from mojive.types import CameraView, ViewportImage
+from mojive.ui.preview_geometry import preview_image_fit, preview_origin, preview_surface
 
 
 class CameraPreview:
@@ -74,6 +75,13 @@ class CameraPreview:
         margin_pt: float = 12.0,
         header_height_pt: float = 25.0,
         image_padding_pt: float = 0.0,
+        maximum_width_pt: float = 340.0,
+        image_height_pt: float | None = None,
+        image_fit: str = "stretch",
+        body_margin_pt: tuple[float, float, float, float] = (0, 0, 0, 0),
+        row_gap_pt: float = 0.0,
+        draw_frame: Any = None,
+        record_image: Any = None,
     ) -> None:
         if not self._enabled:
             self._bounds = None
@@ -83,42 +91,48 @@ class CameraPreview:
             self._bounds = None
             return
         t = translate or str
-        x, y, width, height = viewport
+        _x, _y, width, height = viewport
         scale = window.style_scale
         header_height = header_height_pt * scale
-        image_padding = image_padding_pt * scale
         margin = margin_pt * scale
-        if (
-            width <= 2 * (margin + image_padding)
-            or height <= header_height + image_padding + 2 * margin
-        ):
+        left, top, right, bottom = body_margin_pt
+        surface = preview_surface(
+            max(0, width - 2 * margin),
+            max(0, height - 2 * margin),
+            maximum_width=min(
+                maximum_width_pt * scale,
+                max(180 * scale, width * 0.48) if draw_header is None else width,
+            ),
+            header_height=header_height,
+            image_aspect=image.aspect,
+            image_height=None if image_height_pt is None else image_height_pt * scale,
+            insets=(
+                (image_padding_pt + left) * scale,
+                top * scale,
+                (image_padding_pt + right) * scale,
+                (image_padding_pt + bottom) * scale,
+            ),
+            row_gap=row_gap_pt * scale,
+        )
+        if surface is None:
             self._bounds = None
             return
-        panel_width = min(
-            340.0 * scale,
-            max(180.0 * scale, width * 0.48) if draw_header is None else width,
-            max(1.0, width - 2.0 * margin),
-            max(1.0, height - header_height - image_padding - 2.0 * margin) * 16.0 / 9.0
-            + 2 * image_padding,
+        panel_width, panel_height = surface.panel_width, surface.panel_height
+        px, py = preview_origin(
+            viewport, (panel_width, panel_height), desired=self._position, margin=margin
         )
-        image_width = panel_width - 2 * image_padding
-        image_height = image_width * 9.0 / 16.0
-        panel_height = header_height + image_height + image_padding
-        if self._position is None:
-            self._position = (x + width - panel_width - margin, y + height - panel_height - margin)
-        px = min(max(self._position[0], x + margin), x + width - panel_width - margin)
-        py = min(max(self._position[1], y + margin), y + height - panel_height - margin)
-        self._position = (px, py)
         self._bounds = (px, py, px + panel_width, py + panel_height)
 
         imgui.set_cursor_screen_pos(imgui.ImVec2(px, py))
-        child_flags = imgui.ChildFlags_.borders.value
+        child_flags = imgui.ChildFlags_.borders.value if draw_frame is None else 0
         window_flags = (
             imgui.WindowFlags_.no_scrollbar.value | imgui.WindowFlags_.no_scroll_with_mouse.value
         )
         if draw_header is not None:
             imgui.push_style_var(imgui.StyleVar_.window_padding, (0.0, 0.0))
             imgui.push_style_var(imgui.StyleVar_.item_spacing, (0.0, 0.0))
+        if draw_frame is not None:
+            draw_frame(px, py, panel_width, panel_height)
         if not imgui.begin_child(
             "##camera_preview", imgui.ImVec2(panel_width, panel_height), child_flags, window_flags
         ):
@@ -133,14 +147,16 @@ class CameraPreview:
                 self._position = (px + float(delta.x), py + float(delta.y))
         else:
             self._draw_header(camera_name, t, header_height, scale, px, py)
-        if image_padding:
-            imgui.set_cursor_screen_pos((px + image_padding, py + header_height))
-            available = imgui.ImVec2(image_width, image_height)
-        else:
-            available = imgui.get_content_region_avail()
-        uv0 = imgui.ImVec2(0.0, 1.0) if image.flip_y else imgui.ImVec2(0.0, 0.0)
-        uv1 = imgui.ImVec2(1.0, 0.0) if image.flip_y else imgui.ImVec2(1.0, 1.0)
-        imgui.image(window.viewport_texture_ref(image), available, uv0, uv1)
+        ix, iy, iw, ih = surface.image_rect
+        frame = (px + ix, py + iy, iw, ih)
+        destination, uv0, uv1 = preview_image_fit(
+            frame, image.aspect, fit=image_fit, flip_y=image.flip_y
+        )
+        dx, dy, dw, dh = destination
+        imgui.set_cursor_screen_pos((dx, dy))
+        imgui.image(window.viewport_texture_ref(image), imgui.ImVec2(dw, dh), uv0, uv1)
+        if record_image is not None:
+            record_image(frame, destination, uv0, uv1)
         imgui.end_child()
         if draw_header is not None:
             imgui.pop_style_var(2)

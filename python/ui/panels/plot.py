@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
-from ...adapters.base import FrameNeeds
-from . import Panel, PanelContext, segmented_control
-from .presentation import PropertyPresentation
+from mojive.adapters.base import FrameNeeds
+from mojive.ui.panels import Panel, PanelContext, segmented_control
+from mojive.ui.panels.presentation import PropertyPresentation
 
 CAPACITY = 512
 
@@ -124,7 +124,7 @@ class PlotPanel(Panel):
         self.joint_index = max(0, min(self.joint_index, len(joints) - 1))
         names = [j.name or f"joint{j.joint_id}" for j in joints]
         imgui.set_next_item_width(-1)
-        changed, self.joint_index = imgui.combo("##joint", self.joint_index, names)
+        changed, self.joint_index = self._combo("##joint", self.joint_index, names)
         if changed or self._tracked != self.joint_index:
             self._angle.clear()
             self._velocity.clear()
@@ -171,12 +171,12 @@ class PlotPanel(Panel):
         self.sensor_index = max(0, min(self.sensor_index, len(infos) - 1))
         names = [sensor.name for sensor in infos]
         imgui.set_next_item_width(-1.0)
-        changed, self.sensor_index = imgui.combo("##plot_sensor", self.sensor_index, names)
+        changed, self.sensor_index = self._combo("##plot_sensor", self.sensor_index, names)
         sensor = infos[self.sensor_index]
         self.sensor_component = max(0, min(self.sensor_component, sensor.dim - 1))
         if sensor.dim > 1:
             imgui.set_next_item_width(-1.0)
-            component_changed, self.sensor_component = imgui.combo(
+            component_changed, self.sensor_component = self._combo(
                 "##plot_sensor_component",
                 self.sensor_component,
                 tuple(f"{ctx.tr('component')} {index}" for index in range(sensor.dim)),
@@ -196,6 +196,13 @@ class PlotPanel(Panel):
             self._sensor,
             120.0 * ctx.style_scale,
             f"{sensor.name} [{self.sensor_component}]",
+        )
+
+    def _combo(self, key, index, labels):
+        return (
+            self.presentation.combo(key, index, labels)
+            if self.presentation
+            else imgui.combo(key, index, labels)
         )
 
     def _sample(self, ctx: PanelContext) -> None:

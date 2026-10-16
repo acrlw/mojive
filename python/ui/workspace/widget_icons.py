@@ -8,12 +8,12 @@ from typing import Literal
 
 from imgui_bundle import imgui
 
-from mojive.ui.icon_draw import ImguiIconDraw
-from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.icons import draw_icon as draw_production_icon
+from mojive.ui.imgui_draw import ImguiDraw2D, _cached_color
 from mojive.ui.severity_icons import severity_icon
-
-from .design import BODY_SIZE
-from .widget_style import PANEL
+from mojive.ui.workspace.design import BODY_SIZE
+from mojive.ui.workspace.icon_mesh import prepared_icon
+from mojive.ui.workspace.widget_style import PANEL
 
 ROOT = Path(__file__).parent
 GLYPHS = json.loads((ROOT / "icons.json").read_text())
@@ -70,6 +70,15 @@ def icon_geometry(name, size):
 
 def draw_icon(draw, name, x, y, size, tint, scale):
     """Paint one glyph in a screen-positioned canonical canvas."""
+    if name in ("transport-first", "transport-last"):
+        draw_production_icon(
+            ImguiDraw2D(draw),
+            (x + size * scale / 2, y + size * scale / 2),
+            size * scale,
+            name,
+            tuple(channel / 255 for channel in tint),
+        )
+        return
     severity = {"info": "info", "warn": "warning", "err": "error"}.get(name)
     if severity is not None:
         severity_icon(
@@ -81,32 +90,18 @@ def draw_icon(draw, name, x, y, size, tint, scale):
         )
         return
     first_vertex = len(draw.vtx_buffer)
-    # Filled strokes retain the canonical weight below one pixel as well.
-    painter = ImguiIconDraw(
-        ImguiDraw2D(draw), min(1.0, ICON_STROKE * size * scale / (2 * ICON_GRID))
-    )
     alpha = imgui.get_style().alpha
-    for contour, pts, paths, thickness in icon_geometry(name, size * scale):
-        if len(pts) < 2:
-            continue
-        fill = contour["fill"]
-        if fill != "none":
-            fill_color = PANEL if fill.startswith("var") else tint
-            fill_color = (
-                *(channel / 255 for channel in fill_color[:3]),
-                fill_color[3] / 255 * contour["opacity"] * contour["fill_opacity"] * alpha,
-            )
-            painter.fringed_concave_fill(pts, fill_color)
-        if contour["stroke"] != "none":
-            stroke_color = (
-                *(channel / 255 for channel in tint[:3]),
-                tint[3] / 255 * contour["opacity"] * contour["stroke_opacity"] * alpha,
-            )
-            closed = contour["closed"] and "stroke_paths" not in contour
-            for path in paths:
-                painter.polyline(
-                    path, stroke_color, thickness, closed=closed, cap="round", smoothing=0.0
-                )
+    for background, opacity, operations in prepared_icon(name, size * scale):
+        color = PANEL if background else tint
+        rgba = _cached_color(
+            (color[0] / 255, color[1] / 255, color[2] / 255, color[3] / 255 * opacity * alpha)
+        )
+        for fringe, vertices, indices in operations:
+            if fringe:
+                if draw.flags & imgui.ImDrawListFlags_.anti_aliased_fill.value:
+                    draw.add_poly_fringe(vertices, indices, rgba)
+            else:
+                draw.add_indexed_fill(vertices, indices, rgba)
     # Local tessellation avoids precision loss at large screen coordinates.
     imgui.internal.shade_verts_transform_pos(
         draw, first_vertex, len(draw.vtx_buffer), (0, 0), 1.0, 0.0, (x, y)

@@ -18,10 +18,12 @@ from mojive.adapters.base import (
 from mojive.ui.panels import (
     PanelContext,
 )
-
-from .fields import (
+from mojive.ui.panels.inspector.fields import (
     _begin_property_table,
     _edited_float_components,
+    _end_property_table,
+    _property_button,
+    _property_combo,
     _property_control_row,
     _property_numbers,
     _property_numeric,
@@ -31,7 +33,7 @@ from .fields import (
     _property_vector_row,
     _vector_fields,
 )
-from .support import (
+from mojive.ui.panels.inspector.support import (
     _nearest_euler_degrees,
 )
 
@@ -42,9 +44,9 @@ def _joint_dynamics_rows(
     """Edit dynamic values in display units without round-tripping idle values."""
     edited = properties
     rotational = joint.type in ("hinge", "ball")
-    _property_control_row(ctx, "group")
-    changed, group = imgui.combo(
-        "##joint_advanced_group", properties.group, tuple(str(value) for value in range(6))
+    _property_control_row(ctx, "group", control_part="select")
+    changed, group = _property_combo(
+        ctx, "##joint_advanced_group", properties.group, tuple(str(value) for value in range(6))
     )
     if changed:
         edited = replace(edited, group=int(group))
@@ -90,8 +92,9 @@ def _joint_actuator_rows(
 ) -> JointAdvancedProperties:
     edited = properties
     force_modes = ("auto", "unlimited", "limited")
-    _property_control_row(ctx, "actuator force limit")
-    changed, mode = imgui.combo(
+    _property_control_row(ctx, "actuator force limit", control_part="select")
+    changed, mode = _property_combo(
+        ctx,
         "##joint_actuator_force_limit",
         force_modes.index(properties.actuator_force_limit_mode),
         tuple(ctx.tr(value) for value in force_modes),
@@ -211,9 +214,9 @@ class _Physics:
             sleep_values.index(edited.sleep_policy) if edited.sleep_policy in sleep_values else 0
         )
         if _begin_property_table("body_inertial_properties", ctx=ctx):
-            _property_control_row(ctx, "inertia mode")
-            mode_changed, mode = imgui.combo(
-                "##body-inertia-mode", mode, tuple(ctx.tr(label) for label in inertia_modes)
+            _property_control_row(ctx, "inertia mode", control_part="select")
+            mode_changed, mode = _property_combo(
+                ctx, "##body-inertia-mode", mode, tuple(ctx.tr(label) for label in inertia_modes)
             )
             inertia_mode = mode_values[mode]
             edited = replace(properties, inertia_mode=inertia_mode) if mode_changed else properties
@@ -312,10 +315,11 @@ class _Physics:
             )
             _property_control_row(ctx, "mocap body", toggle=True)
             mocap_changed, mocap = _property_toggle(ctx, "##body-mocap", bool(edited.mocap))
-            _property_control_row(ctx, "sleep policy")
+            _property_control_row(ctx, "sleep policy", control_part="select")
             if not movable_root:
                 imgui.begin_disabled()
-            sleep_changed, sleep_policy = imgui.combo(
+            sleep_changed, sleep_policy = _property_combo(
+                ctx,
                 "##body-sleep-policy",
                 sleep_policy,
                 tuple(ctx.tr(label) for label in sleep_labels),
@@ -325,7 +329,7 @@ class _Physics:
                 imgui.set_item_tooltip(
                     ctx.tr("MuJoCo sleep policies apply only to movable root bodies")
                 )
-            imgui.end_table()
+            _end_property_table(ctx)
         derived = inertia_mode == "auto"
         rotation_disabled = derived or inertia_mode == "full"
         sleep_policy_value = sleep_values[sleep_policy]
@@ -370,7 +374,7 @@ class _Physics:
         dirty = edited != current
         if not editable or not dirty:
             imgui.begin_disabled()
-        if imgui.button(f"{ctx.tr('Apply')}##body-properties"):
+        if _property_button(ctx, f"{ctx.tr('Apply')}##body-properties"):
             result = ctx.submit(
                 cmd.SetBodyProperties(
                     node_id=edited.node_id,
@@ -394,7 +398,7 @@ class _Physics:
         if not editable or not dirty:
             imgui.end_disabled()
         imgui.same_line()
-        if imgui.button(f"{ctx.tr('Revert')}##body-properties"):
+        if _property_button(ctx, f"{ctx.tr('Revert')}##body-properties"):
             self._body_property_edit = current
             self._body_inertial_euler = _nearest_euler_degrees(
                 math3d.quat_to_mat3(current.inertial_quaternion), None
@@ -402,7 +406,7 @@ class _Physics:
             self._body_property_error = ""
         if self._body_property_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._body_property_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##body-properties"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##body-properties"):
                 imgui.set_clipboard_text(self._body_property_error)
 
     def _joint(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -424,7 +428,7 @@ class _Physics:
                 _property_control_row(ctx, label)
                 imgui.align_text_to_frame_padding()
                 imgui.text(value)
-            imgui.end_table()
+            _end_property_table(ctx)
         if _property_section(ctx, "joint properties"):
             self._joint_properties(ctx, node, joint)
         self._joint_advanced_properties(ctx, joint)
@@ -525,7 +529,7 @@ class _Physics:
             stiffness_changed, stiffness = _property_numeric(
                 ctx, "##joint_stiffness", stiffness, 0.01, 0.0, 1000000.0, "%.4f"
             )
-            imgui.end_table()
+            _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()
             reason = (
@@ -600,7 +604,7 @@ class _Physics:
             imgui.begin_disabled()
         if _begin_property_table("joint_advanced_properties_table", ctx=ctx):
             self._joint_advanced_edit = _joint_advanced_rows(ctx, joint, properties)
-            imgui.end_table()
+            _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled(ctx.tr("Pause the simulation to edit advanced joint properties"))
@@ -631,13 +635,13 @@ class _Physics:
             _property_control_row(ctx, "changes")
             if not editable or not dirty or invalid_force_range:
                 imgui.begin_disabled()
-            apply_clicked = imgui.button(f"{ctx.tr('Apply')}##joint-advanced")
+            apply_clicked = _property_button(ctx, f"{ctx.tr('Apply')}##joint-advanced")
             imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
             if not editable or not dirty or invalid_force_range:
                 imgui.end_disabled()
             imgui.same_line()
-            revert_clicked = imgui.button(f"{ctx.tr('Revert')}##joint-advanced")
-            imgui.end_table()
+            revert_clicked = _property_button(ctx, f"{ctx.tr('Revert')}##joint-advanced")
+            _end_property_table(ctx)
         if apply_clicked:
             result = ctx.submit(
                 cmd.SetJointAdvancedProperties(
@@ -667,7 +671,7 @@ class _Physics:
             self._joint_advanced_error = ""
         if self._joint_advanced_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._joint_advanced_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##joint-advanced"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##joint-advanced"):
                 imgui.set_clipboard_text(self._joint_advanced_error)
 
     def _site_properties(self, ctx: PanelContext, node: SceneNode) -> None:
@@ -701,8 +705,9 @@ class _Physics:
         supports_endpoints = type_value in ("capsule", "cylinder")
         use_from_to = properties.use_from_to if supports_endpoints else False
         if _begin_property_table("site_shape_properties", ctx=ctx):
-            _property_control_row(ctx, "type")
-            type_changed, site_type = imgui.combo(
+            _property_control_row(ctx, "type", control_part="select")
+            type_changed, site_type = _property_combo(
+                ctx,
                 "##site-type",
                 site_type,
                 tuple(value.title() for value in site_types),
@@ -711,8 +716,9 @@ class _Physics:
             supports_endpoints = type_value in ("capsule", "cylinder")
             if not supports_endpoints:
                 use_from_to = False
-            _property_control_row(ctx, "visual group")
-            group_changed, group = imgui.combo(
+            _property_control_row(ctx, "visual group", control_part="select")
+            group_changed, group = _property_combo(
+                ctx,
                 "##site-visual-group",
                 int(properties.group),
                 tuple(str(value) for value in range(6)),
@@ -726,7 +732,7 @@ class _Physics:
             if not supports_endpoints:
                 imgui.end_disabled()
                 imgui.set_item_tooltip(ctx.tr("Endpoints apply only to capsule and cylinder sites"))
-            imgui.end_table()
+            _end_property_table(ctx)
         from_to = np.asarray(properties.from_to, np.float32)
         first_changed = second_changed = False
         if use_from_to:
@@ -771,7 +777,7 @@ class _Physics:
         dirty = edited != current
         if not editable or not dirty or invalid_endpoints:
             imgui.begin_disabled()
-        if imgui.button(f"{ctx.tr('Apply')}##site-properties"):
+        if _property_button(ctx, f"{ctx.tr('Apply')}##site-properties"):
             result = ctx.submit(
                 cmd.SetSiteProperties(
                     node_id=edited.node_id,
@@ -790,10 +796,10 @@ class _Physics:
         if not editable or not dirty or invalid_endpoints:
             imgui.end_disabled()
         imgui.same_line()
-        if imgui.button(f"{ctx.tr('Revert')}##site-properties"):
+        if _property_button(ctx, f"{ctx.tr('Revert')}##site-properties"):
             self._site_property_edit = current
             self._site_property_error = ""
         if self._site_property_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._site_property_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##site-properties"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##site-properties"):
                 imgui.set_clipboard_text(self._site_property_error)

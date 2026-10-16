@@ -6,17 +6,74 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.ui.input_bindings import InputAction
-from mojive.ui.viewcube import BACKDROP_RADIUS_PT, widget_center
-
-from .constants import VIEWPORT_TOOLS
-from .design import BODY_SIZE, DESIGN, MONO_SIZE
-from .widgets import (
+from mojive.ui.viewcube import BACKDROP_RADIUS_PT
+from mojive.ui.workspace.component_layout import control_frame_size, control_size
+from mojive.ui.workspace.constants import VIEWPORT_TOOLS
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN, MONO_SIZE
+from mojive.ui.workspace.viewport_controls import camera_controls, toolbox
+from mojive.ui.workspace.widgets import (
     AMBER,
-    DIM,
     PANEL,
     TEXT,
-    color,
 )
+
+
+def _bottom_controls(workspace):
+    ui, scale = workspace.ui, workspace.s
+    return (
+        ("expand-timeline", "right", "", 26, "Expand Timeline"),
+        ("timeline-tab", "key", "Timeline", max(95, ui.measure("Timeline") / scale + 39), ""),
+        ("output-tab", "terminal", "Output", max(85, ui.measure("Output") / scale + 39), ""),
+    )
+
+
+def collapsed_bottom_height(workspace):
+    ui = workspace.ui
+    return (
+        max(
+            control_size(ui, key, width, 28, label=label, icon=icon)[1]
+            for key, icon, label, width, _ in _bottom_controls(workspace)
+        )
+        + 10 * workspace.s
+    )
+
+
+def _collapsed_bottom(workspace, x, y, width):
+    ui, scale = workspace.ui, workspace.s
+    height = collapsed_bottom_height(workspace)
+    box = ui.component_box(
+        "bottom_header",
+        x,
+        y,
+        width,
+        height,
+        key="collapsed-bottom-header",
+        padding=(8 * scale, 5 * scale, 8 * scale, 5 * scale),
+    )
+    ui.rect(*box.frame.tuple(), PANEL, 0)
+    ui.line(x, y, width)
+    gap = ui.metric("bottom_header", "columnGap", ui.metric("bottom_header", "gap", 4)) * scale
+    cursor = box.content.x
+    for key, icon, label, requested, tooltip in _bottom_controls(workspace):
+        ow, oh = control_size(ui, key, requested, 28, label=label, icon=icon)
+        if cursor + ow > box.content.right:
+            break
+        fw, fh = control_frame_size(ui, key, ow, oh, label=label, icon=icon)
+        if ui.button(
+            key,
+            cursor,
+            box.content.y + (box.content.height - oh) / 2,
+            fw,
+            fh,
+            icon=icon,
+            label=label,
+            tooltip=tooltip,
+        ):
+            if key == "expand-timeline":
+                workspace.toggle_timeline()
+            else:
+                workspace.activate(label)
+        cursor += ow + gap
 
 
 def viewport(workspace, preview_name=""):
@@ -29,10 +86,45 @@ def viewport(workspace, preview_name=""):
     )
     x, y, w, h = app._viewport_rect
     workspace.rects["viewport_content"] = [x, y, w, h]
-    horizontal = h < 440 * s
-    step = 32 if w < 280 * s else 40
-    wrapped = horizontal and w < 260 * s
-    tools_height = 76 if wrapped else 40
+    if u.design is not None:
+        node = imgui.internal.dock_builder_get_node(workspace.window.dockspace_id)
+        if node is not None:
+            u.design.record(
+                "workspace-layout",
+                ("workspace",),
+                (node.pos.x, node.pos.y, node.size.x, node.size.y),
+                "workspace",
+            )
+    toolbox_style = u.component_style("toolbox")
+    slot = toolbox_style.get("slotSize", 36)
+    tool_gap = toolbox_style.get("rowGap", toolbox_style.get("gap", 4)) * s
+    tool_padding = toolbox_style.edges("padding", s, (4, 4, 4, 4))
+    tool_margin = toolbox_style.edges("margin", s)
+    child_extents = tuple(
+        control_size(u, "tool-" + name, slot, slot, icon=name) for name, _ in VIEWPORT_TOOLS
+    )
+    tool_width, tool_height = max(v[0] for v in child_extents), max(v[1] for v in child_extents)
+    vertical_height = (
+        6 * tool_height
+        + 5 * tool_gap
+        + tool_padding[1]
+        + tool_padding[3]
+        + tool_margin[1]
+        + tool_margin[3]
+    )
+    horizontal = h < max(440 * s, vertical_height + 150 * s)
+    wrapped = (
+        horizontal
+        and w < 6 * tool_width + 5 * tool_gap + tool_padding[0] + tool_padding[2] + 20 * s
+    )
+    tools_height = (
+        (2 if wrapped else 1) * tool_height
+        + (tool_gap if wrapped else 0)
+        + tool_padding[1]
+        + tool_padding[3]
+        + tool_margin[1]
+        + tool_margin[3]
+    )
     footer_space = (
         10
         if app.model_edits.active and h < 300 * s
@@ -41,18 +133,27 @@ def viewport(workspace, preview_name=""):
         else 32
     )
     tools_y = (
-        y + h - (tools_height + footer_space) * s
+        y + h - tools_height - footer_space * s
         if horizontal
-        else y + max(148, (h / s - 248) / 2) * s
+        else y + max(148 * s, (h - vertical_height) / 2)
     )
-    compact_camera = w < 240 * s
     stacked_camera = w < 160 * s
     camera_height = 68 if stacked_camera else 36
     transport_visible = h >= (248 if w < 260 * s else 220) * s
     transport_width = 168 if w < 340 * s else 282
-    rail_width = step * (3 if wrapped else 6) + 8 if horizontal else 44
+    rail_width = (
+        (
+            (3 if wrapped else 6) * tool_width + (2 if wrapped else 5) * tool_gap
+            if horizontal
+            else tool_width
+        )
+        + tool_padding[0]
+        + tool_padding[2]
+        + tool_margin[0]
+        + tool_margin[2]
+    )
     collapsed_controls = (
-        w < (rail_width + 20) * s
+        w < rail_width + 20 * s
         or (horizontal and tools_y < y + (camera_height + 18) * s)
         or (transport_visible and w < (transport_width + 20) * s)
         or (app.camera_preview.enabled and bool(preview_name) and h < 300 * s)
@@ -60,19 +161,20 @@ def viewport(workspace, preview_name=""):
     if app.model_edits.active and horizontal:
         pending_height = 70 if w < 412 * s and h >= 300 * s else 40
         collapsed_controls |= tools_y - (pending_height + 8) * s < y + (camera_height + 18) * s
+    workspace.cube.design_ui = u
     cube_scale = workspace.cube.scale_for((x, y, w, h), s)
     cube_rect = None
     if cube_scale > 0:
-        center = widget_center((x, y, w, h), cube_scale)
+        center = workspace.cube.widget_center((x, y, w, h), cube_scale)
         radius = BACKDROP_RADIUS_PT * cube_scale
         cube_rect = (center[0] - radius, center[1] - radius, radius * 2, radius * 2)
         cx, cy, cw, ch = cube_rect
         if horizontal:
             collapsed_controls |= (
                 x + 10 * s < cx + cw
-                and cx < x + (10 + rail_width) * s
+                and cx < x + 10 * s + rail_width
                 and tools_y < cy + ch
-                and cy < tools_y + tools_height * s
+                and cy < tools_y + tools_height
             )
     imgui.push_clip_rect((x, y), (x + w, y + h), True)
     app._draw_scene_overlays(workspace.window.painter())
@@ -94,8 +196,8 @@ def viewport(workspace, preview_name=""):
         imgui.end()
         return
 
-    def shell(rx, ry, rw, rh):
-        u.rect(rx, ry, rw * s, rh * s, (22, 25, 28, 230), 8)
+    def shell(rx, ry, rw, rh, *, radius=8):
+        u.rect(rx, ry, rw * s, rh * s, (22, 25, 28, 230), radius)
         overlay.append((rx, ry, rw * s, rh * s))
 
     if collapsed_controls:
@@ -123,31 +225,32 @@ def viewport(workspace, preview_name=""):
             and not imgui.is_popup_open(popup)
         ):
             imgui.open_popup(popup)
-        with workspace.menus.style():
-            if imgui.begin_popup(popup):
+        with workspace.menus.local_popup(popup) as opened:
+            if opened:
 
                 def menu_action(key, label, shortcut="", checked=False, enabled=True):
-                    clicked, _ = imgui.menu_item(u.translate(label), shortcut, checked, enabled)
-                    lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-                    u.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+                    clicked, _ = workspace.menus.local_item(
+                        label, shortcut, checked, enabled, key=key
+                    )
                     return clicked
 
                 for name in ("Camera", "Shading"):
                     workspace.menus.reveal((name,))
                     workspace.menus.constrain(name)
-                    if imgui.begin_menu(u.translate(name) + "###" + name):
-                        workspace.menus.content(name, (name,))
-                        imgui.end_menu()
-                if (
-                    cube_scale <= 0
-                    and workspace.cube.preview_active
-                    and imgui.begin_menu(u.translate("View direction"))
-                ):
-                    for name in ("Front", "Back", "Left", "Right", "Top", "Bottom"):
-                        if menu_action("camera-preview-view-" + name, name):
-                            app._leave_model_camera()
-                            app.camera.set_preset(name.lower())
-                    imgui.end_menu()
+                    with workspace.menus.local_submenu(
+                        name, key=name, content=False
+                    ) as submenu_open:
+                        if submenu_open:
+                            workspace.menus.content(name, (name,))
+                if cube_scale <= 0 and workspace.cube.preview_active:
+                    with workspace.menus.local_submenu(
+                        "View direction", key="viewport-view-direction"
+                    ) as direction_open:
+                        if direction_open:
+                            for name in ("Front", "Back", "Left", "Right", "Top", "Bottom"):
+                                if menu_action("camera-preview-view-" + name, name):
+                                    app._leave_model_camera()
+                                    app.camera.set_preset(name.lower())
                 imgui.separator()
                 for name, action in VIEWPORT_TOOLS:
                     shortcut = "V" if action is None else app.input_bindings.label(action)
@@ -171,205 +274,110 @@ def viewport(workspace, preview_name=""):
                 imgui.separator()
                 workspace.menus.reveal(("Playback",))
                 workspace.menus.constrain("Playback")
-                if imgui.begin_menu(u.translate("Playback options") + "###Playback"):
-                    session = app.session
-                    if menu_action(
-                        "play", "Pause simulation" if workspace.playing else "Play simulation"
-                    ):
-                        app._toggle_playback()
-                    if menu_action("go-start", "Go to start"):
-                        app._reset_playback()
-                    if menu_action(
-                        "record",
-                        "Record simulation",
-                        checked=session.state_take_recording,
-                        enabled=session.adapter.caps.simulation,
-                    ):
-                        app._toggle_state_take_recording()
-                    imgui.separator()
-                    workspace.menus.content("Playback", ("Playback",))
-                    imgui.end_menu()
-                imgui.end_popup()
+                with workspace.menus.local_submenu(
+                    "Playback options", key="Playback", content=False
+                ) as playback_open:
+                    if playback_open:
+                        session = app.session
+                        if menu_action(
+                            "play", "Pause simulation" if workspace.playing else "Play simulation"
+                        ):
+                            app._toggle_playback()
+                        if menu_action("go-start", "Go to start"):
+                            app._reset_playback()
+                        if menu_action(
+                            "record",
+                            "Record simulation",
+                            checked=session.state_take_recording,
+                            enabled=session.adapter.caps.simulation,
+                        ):
+                            app._toggle_state_take_recording()
+                        imgui.separator()
+                        workspace.menus.content("Playback", ("Playback",))
     else:
-        camera_width = (
-            44 if stacked_camera else 72 if compact_camera else 144 if w < 300 * s else 176
-        )
-        shell(x + 10 * s, y + 10 * s, camera_width, 68 if stacked_camera else 36)
-        camera_clicked = u.button(
-            "projection-button",
-            x + 13 * s,
-            y + 14 * s,
-            28 if compact_camera else 98,
-            28,
-            icon="camera",
-            label=""
-            if compact_camera
-            else "Ortho"
-            if workspace.app.camera.orthographic
-            else "Persp",
-            tooltip="Camera" if compact_camera else None,
-            active=imgui.is_popup_open("Camera"),
-            align="left",
-        )
-        if not compact_camera:
-            u.role_icon("down", x + 92 * s, y + 14 * s, 12 * s, 28 * s, role="inline", c=DIM)
-        workspace.menus.popup("Camera", u.hits["projection-button"], camera_clicked)
-        shading_clicked = u.button(
-            "shading",
-            x + (13 if stacked_camera else 47 if compact_camera else 116) * s,
-            y + (46 if stacked_camera else 14) * s,
-            28,
-            28,
-            icon="shading",
-            tooltip="Shading",
-            active=imgui.is_popup_open("Shading"),
-        )
-        workspace.menus.popup("Shading", u.hits["shading"], shading_clicked)
-        if camera_width == 176 and u.button(
-            "viewport-layers",
-            x + 148 * s,
-            y + 14 * s,
-            28,
-            28,
-            icon="layers",
-            tooltip="Viewport layers",
-        ):
-            workspace.activate("Layers")
+        camera_controls(workspace, (x, y, w, h), overlay)
         if transport_visible:
             workspace.transport(x, y, w, shell)
-        shell(
-            x + 10 * s,
-            tools_y,
-            step * (3 if wrapped else 6) + 8 if horizontal else 44,
-            tools_height if horizontal else 248,
-        )
-
-        def tool_pos(n):
-            if wrapped:
-                return x + (14 + n % 3 * step) * s, tools_y + (4 + n // 3 * 36) * s
-            return (
-                x + (14 + n * step if horizontal else 14) * s,
-                tools_y + (4 if horizontal else (176, 211)[n - 4] if n >= 4 else 4 + n * 40) * s,
-            )
-
-        for n, (name, action) in enumerate(VIEWPORT_TOOLS):
-            xx, yy = tool_pos(n)
-            button_size = step - 4 if horizontal else 36
-            shortcut = "V" if action is None else app.input_bindings.label(action)
-            tip = "Dimensions: select a geometry" if name == "scale" else name.title()
-            if shortcut != "Unbound":
-                tip += " · " + shortcut
-            if u.button(
-                "tool-" + name,
-                xx,
-                yy,
-                button_size,
-                32 if horizontal else 36,
-                icon=name,
-                active=workspace.app.tool == name,
-                solid=True,
-                tooltip=tip,
-            ):
-                workspace.app.tool = name
-        if not horizontal:
-            u.line(x + 18 * s, tools_y + 168 * s, 28 * s)
-        if u.button(
-            "frame",
-            *tool_pos(4),
-            step - 4 if horizontal else 36,
-            32,
-            icon="body" if workspace.space == "Body" else "world",
-            tooltip="World / body frame · " + app.input_bindings.label(InputAction.GIZMO_SPACE),
-        ):
-            workspace.space = "Body" if workspace.space == "World" else "World"
-        if u.button(
-            "snap",
-            *tool_pos(5),
-            step - 4 if horizontal else 36,
-            32,
-            icon="snap",
-            active=workspace.snap,
-            tooltip="Snap · " + app.input_bindings.label(InputAction.SNAP),
-        ):
-            workspace.snap = not workspace.snap
+        toolbox(workspace, (x, y, w, h), tools_y, horizontal, wrapped, overlay)
     workspace.input_overlays = list(overlay)
     if cube_rect is not None:
         overlay.append(cube_rect)
     workspace.rects["overlays"] = overlay
     imgui.pop_clip_rect()
     if not workspace.bottom_open:
-        yy = y + h
-        u.rect(x, yy, w, 38 * s, PANEL, 0)
-        u.line(x, yy, w)
-        if u.button(
-            "expand-timeline",
-            x + 8 * s,
-            yy + 5 * s,
-            26,
-            28,
-            icon="right",
-            tooltip="Expand Timeline",
-        ):
-            workspace.toggle_timeline()
-        timeline_width = max(95, u.measure(u.translate("Timeline")) / s + 39)
-        output_width = max(85, u.measure(u.translate("Output")) / s + 39)
-        if u.button(
-            "timeline-tab",
-            x + 38 * s,
-            yy + 5 * s,
-            timeline_width,
-            28,
-            icon="key",
-            label="Timeline",
-        ):
-            workspace.activate("Timeline")
-        if w > (timeline_width + output_width + 53) * s and u.button(
-            "output-tab",
-            x + (45 + timeline_width) * s,
-            yy + 5 * s,
-            output_width,
-            28,
-            icon="terminal",
-            label="Output",
-        ):
-            workspace.activate("Output")
+        _collapsed_bottom(workspace, x, y + h, w)
     app._draw_workspace_camera_preview(preview_name)
     imgui.end()
 
 
 def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
-    u, s, app = workspace.ui, workspace.s, workspace.app
-    width = min(w / s - 20, 392)
-    compact = width < 392 and h < 300 * s
-    stacked = width < 392 and not compact
-    height = 70 if stacked else 40
-    px = x + (w - width * s) / 2
+    from mojive.design.native.geometry import Rect
+
+    ui, scale, app = workspace.ui, workspace.s, workspace.app
+    style = ui.component_style("pending_edits")
+    margins = style.edges("margin", scale)
+    padding = style.edges("padding", scale, (12, 6, 8, 6))
+    gap = style.get("columnGap", style.get("gap", 6)) * scale
+    width = min(w - 20 * scale - margins[0] - margins[2], 392 * scale)
+    compact = width < 392 * scale and h < 300 * scale
+    stacked = width < 392 * scale and not compact
+    row_height = DESIGN.control_height * scale
+    height = (2 * row_height + gap if stacked else row_height) + padding[1] + padding[3]
+    px = x + (w - width - margins[0] - margins[2]) / 2
+    bottom = style.get("bottom", 10) * scale
     py = (
-        bottom_limit - (height + 8) * s
+        bottom_limit - height - bottom
         if bottom_limit is not None
-        else y + max(10, h / s - height - 10) * s
+        else y + max(10 * scale, h - height - bottom)
     )
-    u.rect(px, py, width * s, height * s, (22, 25, 28, 245), 8)
-    overlay.append((px, py, width * s, height * s))
+    box = ui.component_box(
+        "pending_edits", px, py, width, height, key="pending-model-edits", padding=padding
+    )
+    ui.rect(*box.frame.tuple(), (22, 25, 28, 245), style.get("radius", 8))
+    overlay.append(box.outer.tuple())
     label = "Applying…" if app.model_edits.applying else "Pending model edits"
+    apply_width = (
+        min(76 * scale, (box.content.width - 28 * scale - 2 * gap) / 2) if compact else 76 * scale
+    )
+    discard_width = (
+        min(80 * scale, (box.content.width - 28 * scale - 2 * gap) / 2) if compact else 80 * scale
+    )
+    actions_width = apply_width + discard_width + gap
+    label_width = box.content.width if stacked else max(0, box.content.width - actions_width - gap)
+    label_rect = style.align_rect(
+        Rect(box.content.x, box.content.y, label_width, row_height),
+        label_width,
+        min(row_height, style.line_height(style.get("fontSize", BODY_SIZE) * 1.4) * scale),
+        horizontal="start",
+    )
     if compact:
-        u.button("model-edit-status", px + 8 * s, py + 6 * s, 28, 28, icon="info", tooltip=label)
+        ui.button(
+            "model-edit-status",
+            label_rect.x,
+            label_rect.y,
+            min(28, label_width / scale),
+            28,
+            icon="info",
+            tooltip=label,
+        )
     else:
-        u.text(px + 12 * s, py + 13 * s, label, AMBER, BODY_SIZE)
+        ui.component_text("pending_edits", label_rect, label, AMBER)
     if app.model_edits.error and imgui.is_mouse_hovering_rect(
-        (px, py), (px + width * s, py + height * s)
+        (box.frame.x, box.frame.y), (box.frame.right, box.frame.bottom)
     ):
-        u.tooltip(app.model_edits.error)
-    apply_width = min(76, (width - 52) / 2) if compact else 76
-    discard_width = min(80, (width - 52) / 2) if compact else 80
-    bx = px + (width - apply_width - discard_width - 14 if not stacked else 8) * s
-    by = py + (36 if stacked else 6) * s
+        ui.tooltip(app.model_edits.error)
+    bx = box.content.x if stacked else box.content.right - actions_width
+    by = (
+        box.content.y + row_height + gap
+        if stacked
+        else style.align_rect(box.content, actions_width, row_height, horizontal="end").y
+    )
     enabled = not app.model_edits.applying and not app.gizmo.using
-    if u.button(
+    if ui.button(
         "apply-model-edits",
         bx,
         by,
-        apply_width,
+        max(0, apply_width) / scale,
         28,
         label="" if compact else "Apply",
         icon="check" if compact else None,
@@ -379,11 +387,11 @@ def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
         enabled=enabled,
     ):
         app._apply_model_edits_requested = True
-    if u.button(
+    if ui.button(
         "discard-model-edits",
-        bx + (apply_width + 6) * s,
+        bx + apply_width + gap,
         by,
-        discard_width,
+        max(0, discard_width) / scale,
         28,
         label="" if compact else "Discard",
         icon="close" if compact else None,
@@ -397,118 +405,171 @@ def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
 
 
 def transport(workspace, x, y, w, shell):
-    u, s = workspace.ui, workspace.s
-    session = workspace.app.session
-    replay = session.replay_info
-    compact = w < 340 * s
-    width = 168 if compact else 282
-    if w < (width + 20) * s:
-        return
-    tx = x + (w - width * s) / 2
-    ty = y + (104 if w < 500 * s else 52 if w < 700 * s else 10) * s
-    padding = DESIGN.transport_padding_y
-    height = DESIGN.control_height + 2 * padding
-    shell(tx, ty, width, height)
-    if u.button(
-        "previous",
-        tx + 4 * s,
-        ty + padding * s,
-        26,
-        28,
-        icon="previous",
-        icon_role="subtle",
-        tooltip="Previous frame",
-        enabled=replay.frame_index > 0 if replay is not None else session.can_step_back,
-    ):
-        session.submit(
-            cmd.SeekReplay(max(0, replay.frame_index - 1)) if replay is not None else cmd.StepBack()
-        )
-    if u.button(
-        "play",
-        tx + 33 * s,
-        ty + padding * s,
-        32,
-        28,
-        icon="pause" if workspace.playing else "play",
-        icon_role="subtle",
-        active=True,
-        tooltip="Play / pause",
-    ):
-        workspace.app._toggle_playback()
-    if u.button(
-        "next",
-        tx + 69 * s,
-        ty + padding * s,
-        26,
-        28,
-        icon="next",
-        icon_role="subtle",
-        tooltip="Next frame",
-        enabled=not workspace.playing
-        and (
-            replay.frame_index < replay.frame_count - 1
-            if replay is not None
-            else session.adapter.caps.simulation
-        ),
-    ):
-        session.submit(
-            cmd.SeekReplay(min(replay.frame_count - 1, replay.frame_index + 1))
-            if replay is not None
-            else cmd.Step()
-        )
-    if not compact:
-        caption = f"{workspace.time:.3f} s"
-        imgui.push_font(u.mono, MONO_SIZE * s)
-        caption_width = imgui.calc_text_size(caption).x
-        imgui.pop_font()
-        u.text(
-            tx + 142 * s - caption_width / 2,
-            ty + (height - MONO_SIZE) * s / 2,
-            caption,
-            TEXT,
-            MONO_SIZE,
-            mono=True,
-        )
-    for offset in (100,) if compact else (102, 182):
-        u.draw.add_line(
-            (tx + offset * s, ty + (padding + 5) * s),
-            (tx + offset * s, ty + (height - padding - 5) * s),
-            color((255, 255, 255, 32)),
-            s,
-        )
-    if u.button(
-        "go-start",
-        tx + (107 if compact else 189) * s,
-        ty + padding * s,
-        27,
-        28,
-        icon="reset",
-        icon_role="subtle",
-        tooltip="Go to start",
-    ):
-        workspace.app._reset_playback()
-    if not compact and u.button(
-        "record",
-        tx + 220 * s,
-        ty + padding * s,
-        26,
-        28,
-        icon="record",
-        icon_role="subtle",
-        active=workspace.app.session.state_take_recording,
-        tooltip="Record state take",
-        enabled=session.adapter.caps.simulation,
-    ):
-        workspace.app._toggle_state_take_recording()
-    playback_clicked = u.button(
-        "playback-options",
-        tx + (138 if compact else 250) * s,
-        ty + padding * s,
-        26,
-        28,
-        icon="down",
-        icon_role="subtle",
-        tooltip="Playback options",
-        active=imgui.is_popup_open("Playback"),
+    from mojive.design.native.geometry import Rect
+    from mojive.ui.workspace.component_layout import control_frame_size, flow_layout
+
+    u, scale = workspace.ui, workspace.s
+    session, replay = workspace.app.session, workspace.app.session.replay_info
+    compact = w < 340 * scale
+    style = u.component_style("transport")
+    gap = style.get("columnGap", style.get("gap", 3)) * scale
+    time_gap = u.metric("time_field", "columnGap", u.metric("time_field", "gap", 4)) * scale
+    caption = f"{workspace.time:.3f}"
+    time_font = style.get("fontSize", MONO_SIZE)
+    time_width = max(
+        80 * scale,
+        u.measure(caption, time_font, translate=False, mono=True, font_resolved=True)
+        + u.measure("s", time_font, translate=False, mono=True, font_resolved=True)
+        + time_gap
+        + 16 * scale,
     )
-    workspace.menus.popup("Playback", u.hits["playback-options"], playback_clicked)
+    pad = style.edges(
+        "padding", scale, (4, DESIGN.transport_padding_y, 4, DESIGN.transport_padding_y)
+    )
+    names = (
+        ("previous", "play", "next", "go-start", "playback-options")
+        if compact
+        else ("previous", "play", "next", "time", "go-start", "record", "playback-options")
+    )
+    widths = tuple(80 if name == "time" else 32 if name == "play" else 26 for name in names)
+    sizes = tuple(
+        (time_width, DESIGN.control_height * scale)
+        if name == "time"
+        else control_size(u, name, width, 28, icon=name)
+        for name, width in zip(names, widths, strict=True)
+    )
+    width = sum(size[0] for size in sizes) + (len(sizes) - 1) * gap + pad[0] + pad[2]
+    margins = style.edges("margin", scale)
+    if width + margins[0] + margins[2] > w - 20 * scale:
+        return
+    tx = x + (w - width - margins[0] - margins[2]) / 2
+    default_top = 104 if w < 500 * scale else 52 if w < 700 * scale else 10
+    ty = y + max(style.get("top", 10), default_top) * scale
+    box = u.component_box(
+        "transport",
+        tx,
+        ty,
+        width + margins[0] + margins[2],
+        max(v[1] for v in sizes) + pad[1] + pad[3] + margins[1] + margins[3],
+        key="viewport-transport",
+        observe=False,
+        padding=pad,
+    )
+    shell(
+        box.frame.x,
+        box.frame.y,
+        box.frame.width / scale,
+        box.frame.height / scale,
+        radius=style.get("radius", 8),
+    )
+    layout = flow_layout(
+        box.content,
+        sizes,
+        column_gap=gap,
+        align_items=style.get("alignItems", "center"),
+    )
+    u.record_component_box(
+        "transport",
+        box,
+        key="viewport-transport",
+        fields=[list(r.tuple()) for r in layout.rectangles],
+        anchorRect=[x, y, w, 0],
+    )
+    for name, p in zip(names, layout.rectangles, strict=True):
+        if name == "time":
+            number_width = u.measure(
+                caption, time_font, translate=False, mono=True, font_resolved=True
+            )
+            unit_width = u.measure("s", time_font, translate=False, mono=True, font_resolved=True)
+            start = p.x + max(0, (p.width - number_width - unit_width - time_gap) / 2)
+            u.component_text(
+                "transport",
+                Rect(start, p.y, number_width, p.height),
+                caption,
+                TEXT,
+                size=time_font,
+                mono=True,
+                translate=False,
+            )
+            if u.design is not None:
+                u.design.record(
+                    "viewport-time",
+                    ("time_field",),
+                    p.tuple(),
+                    "number-unit",
+                    gap=time_gap,
+                    fields=[
+                        [start, p.y, number_width, p.height],
+                        [start + number_width + time_gap, p.y, unit_width, p.height],
+                    ],
+                    content=[start, p.y, number_width + time_gap + unit_width, p.height],
+                )
+            u.component_text(
+                "transport",
+                Rect(start + number_width + time_gap, p.y, unit_width, p.height),
+                "s",
+                TEXT,
+                size=time_font,
+                mono=True,
+                translate=False,
+            )
+            continue
+        enabled = True
+        if name == "previous":
+            enabled = replay.frame_index > 0 if replay else session.can_step_back
+        elif name == "next":
+            enabled = not workspace.playing and (
+                replay.frame_index < replay.frame_count - 1
+                if replay
+                else session.adapter.caps.simulation
+            )
+        elif name == "record":
+            enabled = session.adapter.caps.simulation
+        icons = {
+            "previous": "previous",
+            "play": "pause" if workspace.playing else "play",
+            "next": "next",
+            "go-start": "reset",
+            "record": "record",
+            "playback-options": "down",
+        }
+        tips = {
+            "previous": "Previous frame",
+            "play": "Play / pause",
+            "next": "Next frame",
+            "go-start": "Go to start",
+            "record": "Record state take",
+            "playback-options": "Playback options",
+        }
+        clicked = u.button(
+            name,
+            p.x,
+            p.y,
+            *control_frame_size(u, name, p.width, p.height, icon=icons[name]),
+            icon=icons[name],
+            icon_role="subtle",
+            tooltip=tips[name],
+            enabled=enabled,
+            active=name == "play"
+            or (name == "record" and session.state_take_recording)
+            or (name == "playback-options" and imgui.is_popup_open("Playback")),
+        )
+        if name == "playback-options":
+            workspace.menus.popup("Playback", u.hits[name], clicked)
+        elif clicked:
+            if name == "play":
+                workspace.app._toggle_playback()
+            elif name == "go-start":
+                workspace.app._reset_playback()
+            elif name == "record":
+                workspace.app._toggle_state_take_recording()
+            elif name == "previous":
+                session.submit(
+                    cmd.SeekReplay(max(0, replay.frame_index - 1)) if replay else cmd.StepBack()
+                )
+            elif name == "next":
+                session.submit(
+                    cmd.SeekReplay(min(replay.frame_count - 1, replay.frame_index + 1))
+                    if replay
+                    else cmd.Step()
+                )

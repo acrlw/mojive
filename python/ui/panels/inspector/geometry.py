@@ -20,12 +20,14 @@ from mojive.scene.geometry import geometry_dimensions, geometry_size_from_dimens
 from mojive.ui.panels import (
     PanelContext,
 )
-
-from .fields import (
+from mojive.ui.panels.inspector.fields import (
     _begin_property_table,
     _edited_float_components,
+    _end_property_table,
+    _property_button,
     _property_button_row,
     _property_color_edit4,
+    _property_combo,
     _property_control_row,
     _property_integer,
     _property_numbers,
@@ -35,7 +37,11 @@ from .fields import (
     _property_toggle,
     _property_vector_row,
 )
-from .materials import _material_asset_rows, _material_surface_rows, _material_texture_rows
+from mojive.ui.panels.inspector.materials import (
+    _material_asset_rows,
+    _material_surface_rows,
+    _material_texture_rows,
+)
 
 
 def _shape_resources(properties: GeometryShapeProperties) -> tuple[str, ...]:
@@ -51,21 +57,24 @@ def _geometry_shape_rows(
 ) -> GeometryShapeProperties:
     """Edit a shape/resource value; the panel owns its draft and commit lifecycle."""
     types = ("plane", "hfield", "sphere", "capsule", "ellipsoid", "cylinder", "box", "mesh")
-    _property_control_row(ctx, "geometry type")
-    changed, index = imgui.combo(
-        "##geometry_type", types.index(properties.type), tuple(value.title() for value in types)
+    _property_control_row(ctx, "geometry type", control_part="select")
+    changed, index = _property_combo(
+        ctx,
+        "##geometry_type",
+        types.index(properties.type),
+        tuple(value.title() for value in types),
     )
     edited = replace(properties, type=types[index]) if changed else properties
     resources = _shape_resources(edited)
     if changed:
         edited = replace(edited, resource_name=resources[0] if resources else "")
     if edited.type in ("mesh", "hfield"):
-        _property_control_row(ctx, "resource")
+        _property_control_row(ctx, "resource", control_part="select")
         if resources:
             index = (
                 resources.index(edited.resource_name) if edited.resource_name in resources else 0
             )
-            resource_changed, index = imgui.combo("##geometry_resource", index, resources)
+            resource_changed, index = _property_combo(ctx, "##geometry_resource", index, resources)
             if resource_changed or not edited.resource_name:
                 edited = replace(edited, resource_name=resources[index])
         else:
@@ -95,9 +104,9 @@ def _contact_collision_rows(
         if properties.contact_dimension in dimensions
         else 1
     )
-    _property_control_row(ctx, "contact dimension")
-    changed, dimension = imgui.combo(
-        "##contact_dimension", dimension, tuple(ctx.tr(label) for label in dimension_labels)
+    _property_control_row(ctx, "contact dimension", control_part="select")
+    changed, dimension = _property_combo(
+        ctx, "##contact_dimension", dimension, tuple(ctx.tr(label) for label in dimension_labels)
     )
     if changed:
         edited = replace(edited, contact_dimension=dimensions[dimension])
@@ -222,16 +231,20 @@ def _geometry_mass_rows(
     ctx: PanelContext, properties: GeometryAdvancedProperties
 ) -> GeometryAdvancedProperties:
     edited = properties
-    _property_control_row(ctx, "visual group")
-    changed, group = imgui.combo(
-        "##geometry_visual_group", properties.visual_group, tuple(str(value) for value in range(6))
+    _property_control_row(ctx, "visual group", control_part="select")
+    changed, group = _property_combo(
+        ctx,
+        "##geometry_visual_group",
+        properties.visual_group,
+        tuple(str(value) for value in range(6)),
     )
     imgui.set_item_tooltip(ctx.tr("MuJoCo geom group used by visibility filters"))
     if changed:
         edited = replace(edited, visual_group=int(group))
     mass_modes = ("density", "mass")
-    _property_control_row(ctx, "mass source")
-    changed, mode = imgui.combo(
+    _property_control_row(ctx, "mass source", control_part="select")
+    changed, mode = _property_combo(
+        ctx,
         "##geometry_mass_source",
         mass_modes.index(properties.mass_mode),
         (ctx.tr("density"), ctx.tr("explicit mass")),
@@ -261,8 +274,9 @@ def _geometry_mass_rows(
         if changed:
             edited = replace(edited, mass=float(mass))
     inertia_modes = ("volume", "shell")
-    _property_control_row(ctx, "inertia distribution")
-    changed, mode = imgui.combo(
+    _property_control_row(ctx, "inertia distribution", control_part="select")
+    changed, mode = _property_combo(
+        ctx,
         "##geometry_inertia_distribution",
         inertia_modes.index(properties.inertia_mode),
         tuple(ctx.tr(value) for value in inertia_modes),
@@ -443,7 +457,7 @@ class _Geometry:
                         1000000.0,
                         "%.3f",
                     )
-                imgui.end_table()
+                _end_property_table(ctx)
             if not editable_size:
                 imgui.end_disabled()
             hint = (
@@ -508,7 +522,7 @@ class _Geometry:
         else:
             _property_control_row(ctx, "material properties")
             imgui.text_disabled(ctx.tr("Create or assign a shared material to edit its properties"))
-        imgui.end_table()
+        _end_property_table(ctx)
 
         # Submit after drawing: assignment and creation rebuild the material catalog and
         # take precedence over property edits made against the old assignment this frame.
@@ -563,7 +577,7 @@ class _Geometry:
             imgui.begin_disabled()
         if _begin_property_table("insp_geometry_shape", ctx=ctx):
             self._geometry_shape_edit = _geometry_shape_rows(ctx, properties)
-            imgui.end_table()
+            _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled(ctx.tr("Pause the simulation to edit model geometry shape"))
@@ -606,7 +620,7 @@ class _Geometry:
                 ("Import and assign mesh", "Import and assign height field"),
                 enabled=(can_import, can_import),
             )
-            imgui.end_table()
+            _end_property_table(ctx)
         # Resource navigation and model rebuilds run after all actions have been drawn.
         if open_assets:
             panel = ctx.panels.load("Assets")
@@ -632,7 +646,7 @@ class _Geometry:
             ctx.request_geometry_resource_import(edited.node_id, "hfield")
         if self._geometry_shape_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_shape_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##geometry-shape"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##geometry-shape"):
                 imgui.set_clipboard_text(self._geometry_shape_error)
 
     def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
@@ -653,7 +667,7 @@ class _Geometry:
             edited = _contact_collision_rows(ctx, edited)
             edited = _contact_solver_rows(ctx, edited)
             edited = _contact_surface_rows(ctx, node, edited, editable=editable)
-            imgui.end_table()
+            _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled(ctx.tr("Pause the simulation to edit model contact properties"))
@@ -708,7 +722,7 @@ class _Geometry:
         if _begin_property_table("insp_geometry_advanced", ctx=ctx):
             edited = _geometry_mass_rows(ctx, properties)
             self._geometry_advanced_edit = _geometry_fluid_rows(ctx, edited)
-            imgui.end_table()
+            _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()
             imgui.text_disabled(ctx.tr("Pause the simulation to edit model geometry properties"))
@@ -730,7 +744,7 @@ class _Geometry:
             apply, revert = _property_button_row(
                 ctx, "changes", ("Apply", "Revert"), enabled=(editable and dirty, dirty)
             )
-            imgui.end_table()
+            _end_property_table(ctx)
         if apply:
             result = ctx.submit(
                 cmd.SetGeometryAdvancedProperties(
@@ -754,5 +768,5 @@ class _Geometry:
             self._geometry_advanced_error = ""
         if self._geometry_advanced_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_advanced_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##geometry-advanced"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##geometry-advanced"):
                 imgui.set_clipboard_text(self._geometry_advanced_error)

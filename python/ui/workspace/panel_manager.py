@@ -1,9 +1,12 @@
 """Stable panel registration with the native shell owning visibility and docking."""
 
-from mojive.ui.panels import PanelManager
+from contextlib import nullcontext
 
-from .constants import LEFT_PANELS
-from .property_style import property_controls
+from imgui_bundle import imgui
+
+from mojive.ui.panels import PanelManager, _panel_id
+from mojive.ui.workspace.constants import LEFT_PANELS
+from mojive.ui.workspace.property_style import property_controls
 
 PANEL_NAMES = {
     "hierarchy": "Scene",
@@ -63,6 +66,7 @@ class WorkspacePanels(PanelManager):
     def draw(self, ctx):
         ctx.panels = self
         ctx.status_hints_by_panel.clear()
+        visibility = getattr(self.workspace.app, "scrollbar_visibility", None)
         # Public panel methods (including Assets.focus) use Panel.open directly.
         # Route a newly opened sidebar through the same single-pane activation.
         for panel in self.panels:
@@ -83,21 +87,37 @@ class WorkspacePanels(PanelManager):
                 if self.workspace.panel(panel.name, ctx):
                     ctx.status_hints_by_panel[panel.name] = tuple(ctx.status_hints)
                 self._visibility_snapshot[panel.id] = panel.open
-            elif panel.enabled and panel.open:
+            else:
+                owner = _panel_id(panel)
+                showing = panel.enabled and panel.open
+                if visibility is not None:
+                    visibility.set_visible(owner, showing)
+                if not showing:
+                    continue
                 title = (
                     ctx.tr(panel.name) + "###" + panel.name
                     if ctx.tr(panel.name) != panel.name
                     else panel.name
                 )
-                visible, opened = self._begin_panel_window(panel, title, ctx.style_scale)
-                if opened is not None:
-                    panel.open = opened
-                if visible:
-                    with property_controls(self.workspace.ui):
-                        panel.draw(ctx)
-                panel.finish_frame(ctx)
-                from imgui_bundle import imgui
-
-                imgui.end()
+                scope = (
+                    visibility.panel_scope(owner, window_name=panel.name)
+                    if visibility is not None
+                    else nullcontext()
+                )
+                with scope:
+                    visible, opened = self._begin_panel_window(panel, title, ctx.style_scale)
+                    if visibility is not None:
+                        visibility.bind_current_window()
+                    try:
+                        if opened is not None:
+                            panel.open = opened
+                            if visibility is not None:
+                                visibility.set_visible(owner, panel.enabled and panel.open)
+                        if visible:
+                            with property_controls(self.workspace.ui):
+                                panel.draw(ctx)
+                        panel.finish_frame(ctx)
+                    finally:
+                        imgui.end()
         self.workspace.menus.finish_color_edit()
         self.workspace.finish_numeric_frame(ctx)

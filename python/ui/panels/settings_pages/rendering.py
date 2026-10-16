@@ -6,12 +6,7 @@ from imgui_bundle import imgui
 
 from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag, ShadowQuality
 from mojive.ui.localization import render_note_text
-from mojive.ui.panels import (
-    PanelContext,
-    padded_selectable,
-    segmented_control,
-    themed_checkbox,
-)
+from mojive.ui.panels import PanelContext
 
 _RND_FLAGS: tuple[RenderFlag, ...] = (
     RenderFlag.SHADOW,
@@ -91,7 +86,7 @@ def draw(panel, ctx: PanelContext) -> None:
     if caps.shadows:
         panel._group_heading(t("Shadows"))
         if panel._begin_properties("settings_shadow_quality"):
-            panel._property(t("Shadow quality"))
+            panel._property(t("Shadow quality"), control_part="segment")
             getter = getattr(ctx.backend, "get_shadow_quality", None)
             try:
                 current = ShadowQuality(getter()) if getter is not None else ShadowQuality.BALANCED
@@ -99,7 +94,7 @@ def draw(panel, ctx: PanelContext) -> None:
                 current = ShadowQuality.BALANCED
             qualities = tuple(ShadowQuality)
             imgui.begin_group()
-            index = segmented_control(
+            index = panel._segmented(
                 "shadow-quality",
                 tuple(t(label) for label in ("Performance", "Balanced", "High")),
                 qualities.index(current),
@@ -112,7 +107,7 @@ def draw(panel, ctx: PanelContext) -> None:
             selected = qualities[index]
             if selected is not current and ctx.set_shadow_quality is not None:
                 ctx.apply_setting(ctx.set_shadow_quality, selected)
-            imgui.end_table()
+            panel._end_properties()
 
     renderer_flags = flag_groups()[-1][1]
     if renderer_flags:
@@ -123,34 +118,33 @@ def draw(panel, ctx: PanelContext) -> None:
     if panel._collapsing_header(f"{t('Debug')}###render_debug", flags) and panel._begin_properties(
         "settings_render_debug"
     ):
-        panel._property(t("Debug view"))
+        panel._property(t("Debug view"), control_part="select")
         debug_view(panel, ctx)
-        panel._property(t("Labels"))
+        panel._property(t("Labels"), control_part="select")
         label_mode(panel, ctx)
-        panel._property(t("Frames"))
+        panel._property(t("Frames"), control_part="select")
         frame_mode(panel, ctx)
-        imgui.end_table()
+        panel._end_properties()
 
     panel._group_heading(t("Backend info"))
     if panel._begin_properties("settings_render_backend"):
-        panel._property(t("Backend"))
-        imgui.text_disabled(caps.name)
+        panel._readonly_value(t("Backend"), caps.name)
         if caps.gl_version:
-            panel._property(t("Graphics device"))
-            imgui.text_wrapped(f"{caps.gl_version}  {caps.renderer}")
+            panel._readonly_value(
+                t("Graphics device"), f"{caps.gl_version}  {caps.renderer}", muted=False
+            )
         light_notes = ctx.backend.stats.notes
         for name in ("scene lights", "shadow casters"):
             if name in light_notes:
-                panel._property(t(name))
-                imgui.text_disabled(render_note_text(light_notes[name], t))
-        imgui.end_table()
+                panel._readonly_value(t(name), render_note_text(light_notes[name], t))
+        panel._end_properties()
 
 
 def flag_row(panel, ctx: PanelContext, flag: RenderFlag, display_label: str) -> None:
     caps = ctx.backend.caps
     supported = caps.supports(flag)
     imgui.begin_disabled(not supported)
-    changed, value = themed_checkbox(f"##rf_{flag.value}", ctx.backend.get_flag(flag), ctx.theme)
+    changed, value = panel._checkbox(f"##rf_{flag.value}", ctx.backend.get_flag(flag), ctx.theme)
     imgui.end_disabled()
     if not supported:
         imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{display_label}”")
@@ -209,59 +203,59 @@ def flag_table(
             imgui.text(display_label)
             imgui.table_next_column()
             panel._flag_row(ctx, flag, display_label)
-    imgui.end_table()
+    panel._end_properties()
 
 
 def debug_view(panel, ctx: PanelContext) -> None:
     caps = ctx.backend.caps
     current = panel.current_view(ctx.backend)
     imgui.set_next_item_width(-1)
-    if not imgui.begin_combo("##debugview", current.value):
-        return
-
-    for view in DebugView:
-        ok = (view in caps.debug_views) if caps.debug_views else False
-        imgui.begin_disabled(not ok)
-        selected, _ = padded_selectable(view.value, view is current)
-        imgui.end_disabled()
-        if not ok:
-            imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{view.value}”")
-        elif selected:
-            if ctx.backend.set_debug_view(view):
-                panel._view = view
-                panel._message = ""
-            else:
-                panel._message = (
-                    f"{view.value} · {ctx.tr('backend refused the change')} ({caps.name})"
-                )
-    imgui.end_combo()
+    views = tuple(DebugView)
+    enabled = tuple(view in caps.debug_views for view in views)
+    changed, selected = panel._choice_list(
+        "##debugview",
+        views.index(current),
+        tuple(view.value for view in views),
+        enabled=enabled,
+        tooltips=tuple(
+            "" if supported else f"{caps.name} {ctx.tr('does not implement')} “{view.value}”"
+            for view, supported in zip(views, enabled, strict=True)
+        ),
+    )
+    if changed:
+        view = views[selected]
+        if ctx.backend.set_debug_view(view):
+            panel._view = view
+            panel._message = ""
+        else:
+            panel._message = f"{view.value} · {ctx.tr('backend refused the change')} ({caps.name})"
 
 
 def label_mode(panel, ctx: PanelContext) -> None:
     backend = ctx.backend
     label = backend.get_label_mode()
     imgui.set_next_item_width(-1)
-    if imgui.begin_combo("##label_mode", label.value):
-        for mode in LabelMode:
-            supported = mode in backend.caps.label_modes
-            imgui.begin_disabled(not supported)
-            selected, _ = padded_selectable(mode.value, mode is label)
-            imgui.end_disabled()
-            if selected and supported:
-                backend.set_label_mode(mode)
-        imgui.end_combo()
+    modes = tuple(LabelMode)
+    changed, selected = panel._choice_list(
+        "##label_mode",
+        modes.index(label),
+        tuple(mode.value for mode in modes),
+        enabled=tuple(mode in backend.caps.label_modes for mode in modes),
+    )
+    if changed:
+        backend.set_label_mode(modes[selected])
 
 
 def frame_mode(panel, ctx: PanelContext) -> None:
     backend = ctx.backend
     frame = backend.get_frame_mode()
     imgui.set_next_item_width(-1)
-    if imgui.begin_combo("##frame_mode", frame.value):
-        for mode in FrameMode:
-            supported = mode in backend.caps.frame_modes
-            imgui.begin_disabled(not supported)
-            selected, _ = padded_selectable(mode.value, mode is frame)
-            imgui.end_disabled()
-            if selected and supported:
-                backend.set_frame_mode(mode)
-        imgui.end_combo()
+    modes = tuple(FrameMode)
+    changed, selected = panel._choice_list(
+        "##frame_mode",
+        modes.index(frame),
+        tuple(mode.value for mode in modes),
+        enabled=tuple(mode in backend.caps.frame_modes for mode in modes),
+    )
+    if changed:
+        backend.set_frame_mode(modes[selected])

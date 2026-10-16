@@ -110,7 +110,8 @@ help:
 		'  make ui-svg-icons      compare production code and SVG files in ImGui' \
 		'  make ui-icon-references compare icon outline and filled references' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
-		'  make ui-design-native  production native workspace (--interactive via ARGS)' \
+		'  make ui-native-design  live native UI parameter editor and production preview' \
+		'  make ui-native-capture capture production panels and menus' \
 		'  make ui-design         serve the browser design reference locally' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
@@ -1235,13 +1236,18 @@ canvas-2d-gallery:
 canvas-2d-test:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_canvas2d.py
 
-.PHONY: ui-design-native ui-native-design ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime ui-design-reference
+.PHONY: ui-design-native ui-native-design ui-native-capture ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime ui-design-reference
 
-## Open the production UI with ARGS=--interactive; default captures cover its panels and menus.
-ui-design-native:
-	$(PY) -m mojive.tools.native_workspace --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
+## Compatibility alias for the native parameter editor.
+ui-design-native: ui-native-design
 
-ui-native-design: ui-design-native
+## Edit native component parameters in a separate window attached to the actual workspace.
+ui-native-design:
+	$(PY) -m mojive.tools.design_workbench --backend $(BACKEND) $(ARGS)
+
+## Capture production panels and menus, then exit.
+ui-native-capture:
+	$(PY) -m mojive.tools.native_workspace --capture --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
 
 ## Retain the standalone design study for typography/icon galleries and the prototype workbench.
 ui-design-reference:
@@ -1256,7 +1262,17 @@ ui-design-gizmos:
 
 ## Verify scaled panels, scene selection, numeric edits, timeline and file actions.
 ui-design-runtime:
-	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py tests/gpu/test_design_workbench.py
+
+.PHONY: ui-native-audit ui-native-pick-check
+UI_AUDIT_SCALE ?= 1
+## Edit and reset every component field against the production workspace.
+ui-native-audit:
+	$(PY) -m mojive.tools.design_audit --backend $(BACKEND) --scale $(UI_AUDIT_SCALE) --output output/design-parameter-audit/$(BACKEND)-$(UI_AUDIT_SCALE)x/audit.json $(ARGS)
+
+## Alt-click each visible production instance and check its component groups.
+ui-native-pick-check:
+	$(PY) -m mojive.tools.design_audit --pick --backend $(BACKEND) --scale $(UI_AUDIT_SCALE) --output output/design-picking-audit/$(BACKEND)-$(UI_AUDIT_SCALE)x/audit.json $(ARGS)
 
 ## Recompile tracked icon contours after editing the SVG masters.
 ui-design-icons:

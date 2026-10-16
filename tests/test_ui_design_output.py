@@ -105,7 +105,7 @@ def test_multiline_rows_and_auto_scroll_use_the_shared_renderer(monkeypatch):
     monkeypatch.setattr(shared_output, "ImguiDraw2D", lambda: None)
     monkeypatch.setattr(shared_output, "text_line_y", lambda _draw, center: center - 7)
     monkeypatch.setattr(panel, "_draw_entry", lambda *args: rows.append(args))
-    ctx = SimpleNamespace(output=output, style_scale=1)
+    ctx = SimpleNamespace(output=output, style_scale=1, language="en", tr=str)
     panel._toggle_auto_scroll()
     shared_output.OutputPanel._draw_entries(panel, ctx, output.entries(), False)
     assert rows[0][3] == "10:00:00  first line\nsecond line"
@@ -192,6 +192,7 @@ def test_native_output_draws_wrapped_rows_and_search_with_real_imgui(scale, widt
     ctx = SimpleNamespace(
         output=output,
         tr=str,
+        language="en",
         style_scale=scale,
         theme=THEME,
         input_bindings=None,

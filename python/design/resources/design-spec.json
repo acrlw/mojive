@@ -1,0 +1,232 @@
+{
+  "version": 1,
+  "name": "Mojive native design",
+  "tokens": {
+    "body_font_size": 14.0,
+    "title_font_size": 16,
+    "mono_font_size": 14,
+    "font_family": "system",
+    "control_height": 28,
+    "panel_padding": 12,
+    "panel_padding_y": 10,
+    "row_gap": 8,
+    "numeric_gap": 4,
+    "frame_padding_x": 8,
+    "frame_padding_y": 8,
+    "item_spacing_x": 6,
+    "item_spacing_y": 8,
+    "label_width": 120,
+    "label_minimum": 48,
+    "label_gap": 12,
+    "icon_size": 18,
+    "control_radius": 6,
+    "container_radius": 8,
+    "radius_popup": 8,
+    "radius_tab": 6,
+    "radius_grab": 4,
+    "radius_scrollbar": 4,
+    "radius_child": 6,
+    "icon_activity_canvas": 24,
+    "icon_activity_slot": 36,
+    "icon_title_canvas": 22,
+    "icon_title_slot": 30,
+    "icon_toolbar_canvas": 18,
+    "icon_toolbar_slot": 28,
+    "icon_subtle_canvas": 16,
+    "icon_subtle_slot": 28,
+    "icon_inline_canvas": 14,
+    "icon_inline_slot": 28,
+    "icon_status_canvas": 12,
+    "icon_status_slot": 20,
+    "text_color": "#E6E8EB",
+    "muted_color": "#A9AFB7",
+    "dim_color": "#8E98A5",
+    "sage_color": "#9CBF8D",
+    "amber_color": "#E8B04F",
+    "panel_color": "#1E2125",
+    "input_color": "#2B2F34",
+    "border_color": "#ffffff0d"
+  },
+  "components": {},
+  "elements": {},
+  "native": {
+    "g3": false,
+    "g3_smoothing": 0.6,
+    "g3_capsule_smoothing": 0.16,
+    "g3_capsule_optical": true
+  },
+  "layout": {
+    "application_height": 46,
+    "sidebar_width": 48,
+    "scene_width": 252,
+    "inspector_width": 320,
+    "bottom_height": 268
+  },
+  "tools": {
+    "snap": true,
+    "snap_step": 2
+  },
+  "parts": {
+    "range": {
+      "thumbSize": 12,
+      "trackSize": 4
+    },
+    "output_list": {
+      "rowGap": 12
+    },
+    "output_row": {
+      "textAlign": "left",
+      "paddingY": 4,
+      "marginBottom": 0,
+      "alignItems": "center"
+    },
+    "timeline_toolbar": {
+      "paddingX": 0,
+      "marginRight": 0
+    },
+    "lane_label": {
+      "lineHeightMode": "fixed",
+      "gap": 8,
+      "columnGap": 14
+    },
+    "timeline_ruler": {
+      "fontSize": 12
+    },
+    "timeline_lane": {
+      "fontSize": 12,
+      "height": 36,
+      "marginRight": 0
+    },
+    "titlebar": {
+      "height": 46
+    },
+    "camera_preview": {
+      "rowGap": 0,
+      "marginLeft": 0,
+      "marginBottom": 0,
+      "bottom": 0,
+      "right": 0
+    },
+    "timeline_sheet": {
+      "rowGap": 2
+    },
+    "menu_item": {
+      "iconSize": 16,
+      "gap": 8
+    },
+    "camera_header": {
+      "lineHeightMode": "auto",
+      "marginLeft": 0
+    },
+    "nav_widget": {
+      "size": 90
+    },
+    "transport": {
+      "paddingY": 6
+    },
+    "data_list": {
+      "gap": 10
+    },
+    "file_receipt": {
+      "paddingY": 12,
+      "paddingX": 12
+    },
+    "axis_input": {
+      "paddingX": 4
+    },
+    "statusbar": {
+      "fontSize": 12,
+      "paddingY": 0,
+      "paddingX": 0,
+      "height": 42,
+      "iconSize": 8
+    },
+    "form_label": {
+      "fontSize": 14
+    },
+    "button": {
+      "fontSize": 12
+    },
+    "icon_button": {
+      "iconSize": 18,
+      "marginRight": 0
+    },
+    "input_number": {
+      "widthMode": "auto"
+    },
+    "section": {
+      "marginLeft": 0,
+      "marginRight": 0,
+      "marginTop": 0
+    },
+    "menu": {
+      "rowGap": 2,
+      "heightMode": "auto",
+      "height": 320,
+      "widthMode": "auto",
+      "width": 210,
+      "paddingLeft": 4,
+      "paddingRight": 4,
+      "paddingTop": 4,
+      "paddingBottom": 2
+    },
+    "separator": {
+      "margin": 4
+    },
+    "tree_row": {
+      "rowGap": 0,
+      "marginRight": 0,
+      "paddingY": 0,
+      "paddingTop": 0,
+      "paddingBottom": 0,
+      "marginLeft": 0
+    },
+    "type_filters": {
+      "rowGap": 6,
+      "columnGap": 6,
+      "gap": 4
+    },
+    "output_toolbar": {
+      "columnGap": 4
+    },
+    "tree_label": {
+      "align": "start"
+    },
+    "rail": {
+      "rowGap": 8
+    },
+    "menu_trigger": {
+      "paddingX": 12
+    },
+    "menu_item_content": {
+      "columnGap": 26
+    },
+    "select_option": {
+      "gap": 12,
+      "marginBottom": 0,
+      "marginTop": 0,
+      "marginRight": 0,
+      "marginLeft": 0
+    },
+    "switch": {
+      "switchWidth": 54,
+      "switchHeight": 24,
+      "switchThumb": 18
+    },
+    "select_popup": {
+      "rowGap": 6,
+      "paddingLeft": 4,
+      "paddingX": 8,
+      "marginBottom": 0,
+      "paddingBottom": 4,
+      "paddingTop": 4,
+      "paddingRight": 4
+    },
+    "panel_header": {
+      "paddingX": 0
+    },
+    "application": {
+      "rowGap": 0
+    }
+  }
+}

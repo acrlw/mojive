@@ -7,13 +7,15 @@ from contextlib import contextmanager
 
 from imgui_bundle import imgui
 
+from mojive.ui.compound_fields import (
+    borderless_numeric_input,
+    draw_focus_frame,
+)
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.panels import copyable_name_item, pointer_pressed, value_edit
+from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import fit_text
-
-from ..compound_fields import borderless_numeric_input, draw_focus_frame, draw_joined_field_frame
-from ..pointer_bindings import PointerAction
-from ..viewport_widgets import draw_reset_glyph
-from . import copyable_name_item, pointer_pressed, value_edit
+from mojive.ui.viewport_widgets import draw_reset_glyph
 
 
 def interval_text(bounds: tuple[float, float], unit: str = "") -> str:
@@ -125,6 +127,10 @@ def value_rail(
     show_unit=True,
     hit_bounds=None,
     unit_font=None,
+    frame_draw=None,
+    entry_painter=None,
+    track_height=None,
+    align_items="center",
 ):
     """Thin bounded rail plus numeric entry; unbounded values use only numeric entry.
 
@@ -150,15 +156,18 @@ def value_rail(
     gap = style.item_spacing.x
     reset_width = imgui.get_frame_height() if show_reset else 0.0
     reset_space = reset_width + gap if show_reset else 0.0
-    unit_width = ctx.rail_style.unit_width * scale if shown_unit else 0.0
-    number_width = min(
-        ctx.rail_style.entry_width * scale + unit_width, max(1.0, width - reset_space)
-    )
-    stacked = _stacked(width, scale) or (
-        ctx.rail_style.minimum_track_width > 0
-        and width < number_width + reset_space + gap + ctx.rail_style.minimum_track_width * scale
+    number_width = min(ctx.rail_style.entry_width * scale, max(1.0, width - reset_space))
+    stacked = (
+        width < number_width + reset_space + gap + ctx.rail_style.minimum_track_width * scale
+        if ctx.rail_style.minimum_track_width > 0
+        else _stacked(width, scale)
     )
     result = None
+    origin = imgui.get_cursor_screen_pos()
+    entry_height = imgui.get_frame_height()
+    rail_height = max(imgui.get_font_size(), track_height or entry_height)
+    alignment = 0.5 if align_items == "center" else 1 if align_items == "end" else 0
+    row_height = max(entry_height, rail_height)
     imgui.push_id(label)
     if bounds is not None:
         lo, hi = bounds
@@ -172,6 +181,11 @@ def value_rail(
         ):
             imgui.push_style_color(slot, imgui.ImVec4(0, 0, 0, 0))
         imgui.push_style_var(imgui.StyleVar_.grab_min_size, ctx.rail_style.thumb_size * scale)
+        imgui.push_style_var(
+            imgui.StyleVar_.frame_padding,
+            (style.frame_padding.x, max(0, (rail_height - imgui.get_font_size()) / 2)),
+        )
+        imgui.set_cursor_screen_pos((origin.x, origin.y + (row_height - rail_height) * alignment))
         imgui.set_next_item_width(rail_width)
         flags = imgui.SliderFlags_.no_input
         if logarithmic:
@@ -183,7 +197,7 @@ def value_rail(
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         if hit_bounds is not None:
             hit_bounds[label + "-track"] = (a.x, a.y, b.x - a.x, b.y - a.y)
-        imgui.pop_style_var()
+        imgui.pop_style_var(2)
         imgui.pop_style_color(5)
         result = value_edit(
             label, value, changed, current, initial=initial, fmt=fmt, bindings=ctx.input_bindings
@@ -216,9 +230,13 @@ def value_rail(
             track_size=ctx.rail_style.track_size,
         )
         if not stacked:
-            imgui.same_line()
+            imgui.set_cursor_screen_pos(
+                (origin.x + rail_width + gap, origin.y + (row_height - entry_height) * alignment)
+            )
+        else:
+            imgui.set_cursor_screen_pos((origin.x, origin.y + row_height + style.item_spacing.y))
     entry_width = max(1.0, width - reset_space) if stacked or bounds is None else number_width
-    numeric = _value_entry(
+    numeric = (entry_painter or _value_entry)(
         ctx,
         label,
         value,
@@ -230,6 +248,7 @@ def value_rail(
         toggle_unit if unit == "rad" and show_unit else None,
         hit_bounds,
         unit_font,
+        frame_draw,
     )
     activated = numeric.activated or (result is not None and result.activated)
     if result is None or numeric.changed:
@@ -266,18 +285,46 @@ def _value_entry(
     toggle_unit,
     hit_bounds=None,
     unit_font=None,
+    frame_draw=None,
 ):
-    """Join a native numeric editor to a trailing unit badge without a seam."""
+    """Center the complete value/unit caption inside one native numeric editor."""
     style = imgui.get_style()
-    unit_width = min(ctx.rail_style.unit_width * ctx.style_scale, width * 0.45) if unit else 0
-    draw_list = imgui.get_window_draw_list()
-    splitter = imgui.ImDrawListSplitter()
+    origin = imgui.get_cursor_screen_pos()
+    height = imgui.get_frame_height()
+    suffix = ("" if unit in ("°", "rad") else " ") + unit if unit else ""
+    display_format = fmt + suffix
+    caption = display_format % value
+    caption_width = imgui.calc_text_size(caption).x
+    unit_width = imgui.calc_text_size(unit).x if unit else 0.0
+    caption_x = origin.x + max(0.0, (width - caption_width) / 2)
+    unit_x = max(origin.x, caption_x + caption_width - unit_width)
+    unit_extent = max(1.0, min(width, unit_width + 8 * ctx.style_scale))
+    unit_x = min(max(origin.x, unit_x - 4 * ctx.style_scale), origin.x + width - unit_extent)
+    badge_hovered = badge_active = False
+    badge_id = None
     if unit:
+        if hit_bounds is not None:
+            hit_bounds[label + "-unit"] = (unit_x, origin.y, unit_extent, height)
+        if toggle_unit:
+            # Submit the small unit target first so it owns pointer input over
+            # the suffix while the complete field retains native text editing.
+            imgui.set_cursor_screen_pos((unit_x, origin.y))
+            if imgui.invisible_button(f"##{label}-unit", (unit_extent, height)):
+                toggle_unit()
+            badge_hovered, badge_active = imgui.is_item_hovered(), imgui.is_item_active()
+            badge_id = imgui.get_item_id()
+            if badge_hovered:
+                imgui.set_item_tooltip(ctx.tr("° / rad"))
+    imgui.set_cursor_screen_pos(origin)
+    imgui.set_next_item_width(max(1.0, width))
+    draw_list = imgui.get_window_draw_list()
+    splitter = None
+    if frame_draw is not None:
+        splitter = imgui.ImDrawListSplitter()
         splitter.split(draw_list, 2)
         splitter.set_current_channel(draw_list, 1)
         for slot in (imgui.Col_.frame_bg, imgui.Col_.frame_bg_hovered, imgui.Col_.frame_bg_active):
             imgui.push_style_color(slot, (0, 0, 0, 0))
-    imgui.set_next_item_width(max(1.0, width - unit_width))
     lo, hi = bounds if bounds is not None else (0.0, 0.0)
     with borderless_numeric_input():
         changed, current = imgui.drag_float(
@@ -286,7 +333,7 @@ def _value_entry(
             0.01,
             lo,
             hi,
-            fmt,
+            display_format,
             imgui.SliderFlags_.always_clamp if bounds is not None else 0,
         )
     field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
@@ -302,100 +349,23 @@ def _value_entry(
     edit = value_edit(
         label, value, changed, current, initial=initial, fmt=fmt, bindings=ctx.input_bindings
     )
-    if unit:
+    if splitter is not None:
         imgui.pop_style_color(3)
-        imgui.same_line(0, 0)
-        for slot in (imgui.Col_.button, imgui.Col_.button_hovered, imgui.Col_.button_active):
-            imgui.push_style_color(slot, (0, 0, 0, 0))
-        imgui.push_style_var(imgui.StyleVar_.button_text_align, (0.5, 0.5))
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, (0, style.frame_padding.y))
-        imgui.push_style_color(
-            imgui.Col_.text,
-            (ctx.theme.bg_popup if ctx.rail_style.unit_accent else ctx.theme.primary)
-            if toggle_unit
-            else (ctx.theme.text if ctx.rail_style.unit_accent else ctx.theme.text_disabled),
-        )
-        imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
-        if unit_font is not None:
-            imgui.push_font(unit_font, imgui.get_font_size())
-            # Static unit captions use the label tint without extra disabled dimming.
-            imgui.push_style_var(imgui.StyleVar_.disabled_alpha, 1)
-        imgui.begin_disabled(toggle_unit is None)
-        if (
-            imgui.button(f"{unit}##{label}-unit", (unit_width, imgui.get_frame_height()))
-            and toggle_unit
-        ):
-            toggle_unit()
-        imgui.end_disabled()
-        badge_lo, badge_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        if hit_bounds is not None:
-            hit_bounds[label + "-unit"] = (
-                badge_lo.x,
-                badge_lo.y,
-                badge_hi.x - badge_lo.x,
-                badge_hi.y - badge_lo.y,
-            )
-        badge_hover, badge_active = imgui.is_item_hovered(), imgui.is_item_active()
-        if unit_font is not None:
-            imgui.pop_style_var()
-            imgui.pop_font()
-        imgui.pop_style_color(5)
-        imgui.pop_style_var(2)
-        if toggle_unit:
-            imgui.set_item_tooltip(
-                ctx.tr("Switch to degrees" if unit == "rad" else "Switch to radians")
-            )
         splitter.set_current_channel(draw_list, 0)
-        draw_joined_field_frame(
-            draw_list,
-            badge_lo,
-            badge_hi,
-            field_lo,
-            field_hi,
-            badge_color=(
-                ctx.theme.primary_dim
-                if badge_active
-                else ctx.theme.primary_bright
-                if badge_hover
-                else ctx.theme.primary
-            )
-            if toggle_unit and ctx.rail_style.unit_accent
-            else (
-                ctx.theme.bg_frame_active
-                if badge_active
-                else ctx.theme.bg_frame_hovered
-                if badge_hover
-                else ctx.theme.bg_frame
-            )
-            if toggle_unit
-            else ctx.theme.bg_child,
-            field_color=ctx.theme.bg_frame_active
-            if active
+        fill = (
+            ctx.theme.bg_frame_active
+            if active or badge_active
             else ctx.theme.bg_frame_hovered
-            if hovered
-            else ctx.theme.bg_frame,
-            rounding=style.frame_rounding,
-            badge_opacity=style.alpha,
-            field_opacity=style.alpha,
+            if hovered or badge_hovered
+            else ctx.theme.bg_frame
         )
+        frame_draw(field_lo, field_hi, fill)
         splitter.set_current_channel(draw_list, 1)
-        draw_focus_frame(
-            badge_lo,
-            badge_hi,
-            rounding=style.frame_rounding,
-            corners=imgui.ImDrawFlags_.round_corners_right,
-            color=ctx.theme.bg_popup if toggle_unit and ctx.rail_style.unit_accent else None,
-        )
-        draw_focus_frame(
-            field_lo,
-            field_hi,
-            rounding=style.frame_rounding,
-            corners=imgui.ImDrawFlags_.round_corners_left,
-            item_id=field_id,
-        )
+    draw_focus_frame(field_lo, field_hi, rounding=style.frame_rounding, item_id=field_id)
+    if badge_id is not None:
+        draw_focus_frame(field_lo, field_hi, rounding=style.frame_rounding, item_id=badge_id)
+    if splitter is not None:
         splitter.merge(draw_list)
-    else:
-        draw_focus_frame(field_lo, field_hi, rounding=style.frame_rounding, item_id=field_id)
     return edit
 
 

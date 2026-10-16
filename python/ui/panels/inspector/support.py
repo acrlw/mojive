@@ -23,6 +23,12 @@ from mojive.ui.edit_policy import (
 from mojive.ui.panels import (
     PanelContext,
 )
+from mojive.ui.panels.inspector.fields import (
+    _property_begin_combo,
+    _property_choice,
+    _property_end_combo,
+    _property_input_text,
+)
 
 _MATERIAL_PRESETS = {
     "Matte": (0.0, 0.05, 0.10, 0.0),
@@ -64,6 +70,13 @@ _MULTILINE_COMPONENT_FIELDS = {
 }
 
 
+def _property_input_text_multiline(ctx, label, value, size, flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.input_text_multiline(label, value, size, flags)
+    return imgui.input_text_multiline(label, value, size, flags)
+
+
 def _component_value_editor(
     ctx: PanelContext,
     label: str,
@@ -73,24 +86,26 @@ def _component_value_editor(
     multiline: bool = False,
 ) -> str:
     if choices:
-        if imgui.begin_combo(label, value or ctx.tr("select")):
+        if _property_begin_combo(ctx, label, value or ctx.tr("select")):
             for index, choice in enumerate(choices):
-                selected, _ = imgui.selectable(
+                selected, _ = _property_choice(
+                    ctx,
                     f"{choice or ctx.tr('<default>')}##choice-{index}",
                     choice == value,
                 )
                 if selected:
                     value = choice
-            imgui.end_combo()
+            _property_end_combo(ctx)
         return value
     if multiline:
-        _changed, value = imgui.input_text_multiline(
+        _changed, value = _property_input_text_multiline(
+            ctx,
             label,
             value,
-            imgui.ImVec2(-1.0, 68.0),
+            imgui.ImVec2(-1.0, 68.0 * ctx.style_scale),
         )
         return value
-    _changed, value = imgui.input_text(label, value)
+    _changed, value = _property_input_text(ctx, label, value)
     return value
 
 

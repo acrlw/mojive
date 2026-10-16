@@ -15,12 +15,12 @@ from mojive.ui.panels import (
     begin_kv_table,
     labeled,
 )
-
-from .fields import (
+from mojive.ui.panels.inspector.fields import (
+    _end_property_table,
     _property_section,
     _vector_fields,
 )
-from .support import (
+from mojive.ui.panels.inspector.support import (
     _free_velocity,
     _has_free_velocity,
     _nearest_euler_degrees,
@@ -162,4 +162,4 @@ class _Transform:
                 lo = j.qvel_adr
                 hi = min(lo + max(1, j.dof), len(qvel))
                 labeled(j.name or f"dof{lo}", "  ".join(f"{v:+.4f}" for v in qvel[lo:hi]))
-            imgui.end_table()
+            _end_property_table(ctx)

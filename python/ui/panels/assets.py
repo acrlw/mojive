@@ -7,9 +7,9 @@ from dataclasses import replace
 import numpy as np
 from imgui_bundle import imgui
 
-from ... import commands as cmd
-from ...adapters.base import FrameNeeds, ModelAssetInfo, NodeType
-from . import (
+from mojive import commands as cmd
+from mojive.adapters.base import FrameNeeds, ModelAssetInfo, NodeType
+from mojive.ui.panels import (
     Panel,
     PanelContext,
     begin_kv_table,
@@ -19,7 +19,7 @@ from . import (
     padded_selectable,
     search_input,
 )
-from .presentation import PropertyPresentation
+from mojive.ui.panels.presentation import PropertyPresentation
 
 
 def unique_asset_name(base: str, assets: tuple[ModelAssetInfo, ...], asset_type: str) -> str:
@@ -103,7 +103,7 @@ def _hfield_size_editor(
                     f"##{str_id}-{index}", float(edited[index]), 0.01, 0.001, 1000000, "%.3f"
                 )
                 changed |= item_changed
-            imgui.end_table()
+            presentation.end_table()
     else:
         if begin_kv_table(str_id):
             imgui.table_setup_column("label", imgui.TableColumnFlags_.width_stretch)
@@ -184,15 +184,15 @@ class AssetsPanel(Panel):
             self._cache_generation = -1
 
         if self._begin_properties(ctx, "asset_model"):
-            self._property(ctx.tr("model"))
+            self._property(ctx.tr("model"), control_part="select")
             slot = model_ids.index(self._model_id)
             imgui.set_next_item_width(-1.0)
-            changed, slot = imgui.combo("##asset-model", slot, tuple(item.name for item in models))
+            changed, slot = self._combo("##asset-model", slot, tuple(item.name for item in models))
             if changed:
                 self._model_id = model_ids[slot]
                 self._cache_generation = -1
                 self._selected = None
-            imgui.end_table()
+            self._end_properties()
 
         self._refresh(ctx)
         self._import_controls(ctx)
@@ -212,7 +212,7 @@ class AssetsPanel(Panel):
         slot = types.index(self._asset_type)
         type_labels = tuple(ctx.tr("All") if item == "all" else item for item in types)
         imgui.set_next_item_width(-1.0)
-        changed, slot = imgui.combo("##asset-type", slot, type_labels)
+        changed, slot = self._combo("##asset-type", slot, type_labels)
         if changed:
             self._asset_type = types[slot]
 
@@ -254,7 +254,7 @@ class AssetsPanel(Panel):
                         imgui.table_next_column()
                         imgui.align_text_to_frame_padding()
                         imgui.text_disabled(str(len(item.references)))
-                imgui.end_table()
+                self._end_properties()
         imgui.end_child()
         if not visible:
             imgui.text_disabled(ctx.tr("no matching assets"))
@@ -320,18 +320,18 @@ class AssetsPanel(Panel):
         if not editable:
             imgui.end_disabled()
         if self._begin_properties(ctx, "texture_import_type"):
-            self._property(ctx.tr("texture type"))
+            self._property(ctx.tr("texture type"), control_part="select")
             texture_types = ("2d", "cube", "skybox")
             slot = texture_types.index(self._texture_import_type)
             imgui.set_next_item_width(-1.0)
-            changed, slot = imgui.combo(
+            changed, slot = self._combo(
                 "##texture-import-type",
                 slot,
                 (ctx.tr("2D"), ctx.tr("Cube"), ctx.tr("Skybox")),
             )
             if changed:
                 self._texture_import_type = texture_types[slot]
-            imgui.end_table()
+            self._end_properties()
         hfield_open = self._section(
             f"{ctx.tr('Height-field import size')}##height-field-import-size"
         )
@@ -349,7 +349,7 @@ class AssetsPanel(Panel):
                 _changed, self._material_create_name = imgui.input_text(
                     "##new-material-name", self._material_create_name
                 )
-                imgui.end_table()
+                self._end_properties()
             material_name = self._material_create_name.strip()
             if not material_name or not editable:
                 imgui.begin_disabled()
@@ -393,7 +393,7 @@ class AssetsPanel(Panel):
                     )
                 elif field.value:
                     display(field.name, field.value)
-            imgui.end_table()
+            self._end_properties()
         for reference in item.references:
             imgui.bullet_text(reference)
         if item.type == "hfield":
@@ -641,17 +641,19 @@ class AssetsPanel(Panel):
                 else:
                     roughness = float(value)
 
-            self._property(ctx.tr("texture"))
+            self._property(ctx.tr("texture"), control_part="select")
             imgui.set_next_item_width(-1.0)
-            if imgui.begin_combo("##asset-material-texture", texture or ctx.tr("none")):
-                for candidate in (None, *ctx.session.model_texture_names(item.model_id)):
-                    selected, _ = padded_selectable(
-                        candidate or ctx.tr("none"), candidate == texture
-                    )
-                    if selected:
-                        texture = candidate
-                        changed = True
-                imgui.end_combo()
+            textures = (None, *ctx.session.model_texture_names(item.model_id))
+            slot = textures.index(texture) if texture in textures else -1
+            texture_changed, selected = self._combo(
+                "##asset-material-texture",
+                slot,
+                tuple(candidate or ctx.tr("none") for candidate in textures),
+                preview=texture or ctx.tr("none"),
+            )
+            if texture_changed:
+                texture = textures[selected]
+                changed = True
 
             self._property(ctx.tr("texture repeat"))
             imgui.set_next_item_width(-1.0)
@@ -663,7 +665,7 @@ class AssetsPanel(Panel):
             self._property(ctx.tr("uniform scale"))
             item_changed, tex_uniform = self._checkbox("##asset-material-uniform", tex_uniform)
             changed |= item_changed
-            imgui.end_table()
+            self._end_properties()
 
         if changed:
             result = ctx.submit(
@@ -727,6 +729,12 @@ class AssetsPanel(Panel):
             else imgui.collapsing_header(label, flags)
         )
 
+    def _end_properties(self):
+        if self.presentation:
+            self.presentation.end_table()
+        else:
+            imgui.end_table()
+
     def _begin_properties(self, ctx, table_id):
         if self.presentation:
             return self.presentation.begin_table(table_id)
@@ -736,15 +744,28 @@ class AssetsPanel(Panel):
         imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
         return True
 
-    def _property(self, label):
+    def _property(self, label, *, control_part="input_number"):
         if self.presentation:
-            self.presentation.row(label)
+            self.presentation.row(label, control_part=control_part)
         else:
             imgui.table_next_row()
             imgui.table_next_column()
             imgui.align_text_to_frame_padding()
             imgui.text_disabled(label)
             imgui.table_next_column()
+
+    def _combo(self, key, index, labels, *, preview=None):
+        if self.presentation:
+            return self.presentation.combo(key, index, labels, preview=preview)
+        if preview is None:
+            return imgui.combo(key, index, labels)
+        selected = index
+        if imgui.begin_combo(key, preview):
+            for option, label in enumerate(labels):
+                if imgui.selectable(label, option == index)[0]:
+                    selected = option
+            imgui.end_combo()
+        return selected != index, selected
 
     def _numeric(self, key, value, speed, low, high, fmt):
         return (

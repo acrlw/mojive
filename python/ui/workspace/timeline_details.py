@@ -5,10 +5,10 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
+from mojive.design.native.geometry import Rect
 from mojive.ui.keyframe_editor.properties import draw_error, draw_selected
-
-from .design import CONTROL_RADIUS
-from .widgets import MUTED, SAGE, TEXT
+from mojive.ui.workspace.design import CONTROL_RADIUS
+from mojive.ui.workspace.widgets import ACCENT, MUTED, TEXT
 
 
 class NativeTimelineDetails:
@@ -21,13 +21,37 @@ class NativeTimelineDetails:
         self._width = 0.0
         self._action_pos = (0.0, 0.0)
 
+    def _style(self):
+        return self.workspace.ui.component_style("timeline_details")
+
+    def _row_height(self):
+        style = self._style()
+        height = (
+            max(style.get("height", 28), style.line_height(style.get("fontSize", 14) * 1.4))
+            * self.workspace.s
+        )
+        ui = self.workspace.ui
+        if ui.design is not None:
+            for part in ("input_text", "input_number"):
+                margin = ui.component_style(part).edges("margin", self.workspace.s)
+                height = max(
+                    height,
+                    ui.design.primitives.field_height(part) * self.workspace.s
+                    + margin[1]
+                    + margin[3],
+                )
+        return height
+
+    def _row_gap(self):
+        return self._style().get("rowGap", self._style().get("gap", 6)) * self.workspace.s
+
     def _gap(self, width):
-        return (4 if width < 420 * self.workspace.s else 6) * self.workspace.s
+        style = self._style()
+        return style.get("columnGap", style.get("gap", 6)) * self.workspace.s
 
     def _identity_width(self, width):
-        return (
-            20 if 260 * self.workspace.s <= width < 420 * self.workspace.s else 24
-        ) * self.workspace.s
+        extent = self._style().get("iconSize", 20) * self.workspace.s
+        return extent + self._gap(width)
 
     def _action_widths(self, labels, width):
         ui, s = self.workspace.ui, self.workspace.s
@@ -36,7 +60,9 @@ class NativeTimelineDetails:
             if (len(labels) > 1 and index == len(labels) - 1)
             or (len(labels) == 3 and index == 0 and width < 420 * s)
             else max(
-                44 * s, ui.measure(label, 14) + (20 if len(labels) == 3 and index == 0 else 12) * s
+                44 * s,
+                ui.measure(label, self._style().get("fontSize", 14))
+                + (20 if len(labels) == 3 and index == 0 else 12) * s,
             )
             for index, label in enumerate(labels)
         )
@@ -50,8 +76,9 @@ class NativeTimelineDetails:
         inline = width >= 260 * s
         time_width = (70 if inline and width < 420 * s else 88) * s
         fields_inline = inline or available >= 72 * s + time_width + gap
-        content_height = (28 if fields_inline or not fields else 62) * s
-        actions_y = 0 if inline else content_height + 6 * s
+        row_height, row_gap = self._row_height(), self._row_gap()
+        content_height = row_height if fields_inline or not fields else 2 * row_height + row_gap
+        actions_y = 0 if inline else content_height + row_gap
         if inline:
             available -= action_width + gap
         time_width = min(time_width, available)
@@ -68,11 +95,19 @@ class NativeTimelineDetails:
                 action_rows += 1
                 row_width = 0.0
             row_width += button_width + gap
-        height = max(content_height, actions_y + (28 + 34 * (action_rows - 1)) * s)
+        height = max(
+            content_height, actions_y + row_height * action_rows + row_gap * (action_rows - 1)
+        )
         return widths, inline, fields_inline, name_width, time_width, actions_y, height
 
     def height(self, editor, ctx, width):
         """Return physical height, including the empty row and current error feedback."""
+        style = self._style()
+        margin, padding = (
+            style.edges("margin", self.workspace.s),
+            style.edges("padding", self.workspace.s),
+        )
+        width = max(self.workspace.s, width - margin[0] - margin[2] - padding[0] - padding[2])
         selected = editor.selected_snapshot >= 0 or (
             editor.edit_lane == "model"
             and editor.selected_id >= 0
@@ -86,17 +121,37 @@ class NativeTimelineDetails:
         height = (
             self._layout(width, labels, fields=editor.selected_snapshot < 0)[-1]
             if selected
-            else 28 * self.workspace.s
+            else self._row_height()
         )
-        return height + (34 * self.workspace.s if editor.error else 0)
+        return (
+            height
+            + (self._row_height() + self._row_gap() if editor.error else 0)
+            + margin[1]
+            + margin[3]
+            + padding[1]
+            + padding[3]
+        )
 
     def draw(self, editor, ctx, editable):
         self.ctx = ctx
         p = imgui.get_cursor_screen_pos()
-        self._origin, self._width = (p.x, p.y), imgui.get_content_region_avail().x
-        imgui.push_font(self.workspace.ui.body, 14 * self.workspace.s)
+        ui, scale = self.workspace.ui, self.workspace.s
+        width = imgui.get_content_region_avail().x
+        box = ui.component_box(
+            "timeline_details",
+            p.x,
+            p.y,
+            width,
+            self.height(editor, ctx, width),
+            key="timeline-detail-container",
+        )
+        self._origin, self._width = (box.content.x, box.content.y), box.content.width
+        font_size = self._style().get("fontSize", 14)
+        imgui.set_cursor_screen_pos(self._origin)
+        imgui.push_font(ui.body, font_size * scale)
         imgui.push_style_var(
-            imgui.StyleVar_.frame_padding, (8 * self.workspace.s, 7 * self.workspace.s)
+            imgui.StyleVar_.frame_padding,
+            (8 * scale, max(0, (self._row_height() - font_size * scale) / 2)),
         )
         imgui.push_style_var(imgui.StyleVar_.frame_rounding, CONTROL_RADIUS * self.workspace.s)
         imgui.begin_group()
@@ -107,6 +162,12 @@ class NativeTimelineDetails:
             else:
                 draw_selected(editor, ctx, editable, presentation=self)
             self._reserve_empty_row()
+            self._advance(
+                max(
+                    box.outer.bottom,
+                    imgui.get_cursor_screen_pos().y + box.padding[3] + box.margin[3],
+                )
+            )
         finally:
             imgui.end_group()
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
@@ -116,8 +177,8 @@ class NativeTimelineDetails:
 
     def _reserve_empty_row(self):
         _, y = self._origin
-        if imgui.get_cursor_screen_pos().y < y + 28 * self.workspace.s:
-            self._advance(y + 28 * self.workspace.s)
+        if imgui.get_cursor_screen_pos().y < y + self._row_height():
+            self._advance(y + self._row_height())
 
     def _advance(self, y):
         imgui.set_cursor_screen_pos((self._origin[0], y))
@@ -127,16 +188,22 @@ class NativeTimelineDetails:
 
     def _identity(self, icon):
         x, y = self._origin
-        self.workspace.ui.role_icon(
-            icon, x, y, 20 * self.workspace.s, 28 * self.workspace.s, role="inline", c=MUTED
+        style = self._style()
+        size = style.get("iconSize", 20) * self.workspace.s
+        rect = style.align_rect(
+            Rect(x, y, self._identity_width(self._width), self._row_height()),
+            size,
+            size,
+            horizontal="start",
         )
+        self.workspace.ui.icon(icon, rect.x, rect.y, size / self.workspace.s, MUTED)
 
     def _record(self, key):
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         self.workspace.ui.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
 
     def fields(self, name, time):
-        ui, s = self.workspace.ui, self.workspace.s
+        ui = self.workspace.ui
         x, y = self._origin
         labels = (self.ctx.tr("Apply"), self.ctx.tr("Load"), self.ctx.tr("Delete"))
         _, _, inline, name_width, time_width, actions_y, _ = self._layout(
@@ -145,17 +212,13 @@ class NativeTimelineDetails:
         identity_width = self._identity_width(self._width)
         gap = self._gap(self._width)
         self._identity("diamond")
-        imgui.set_cursor_screen_pos((x + identity_width, y))
-        imgui.set_next_item_width(name_width)
-        _, name = imgui.input_text("##keyframe-name", name)
+        _, name = ui.input_text("##keyframe-name", x + identity_width, y, name_width, name)
         self._record("timeline-detail-name")
         if imgui.is_item_hovered():
             ui.tooltip(f"{self.ctx.tr('name')}: {name}" if name else self.ctx.tr("name"))
         time_x = x + identity_width + name_width + gap if inline else x + identity_width
-        time_y = y if inline else y + 34 * s
-        imgui.set_cursor_screen_pos((time_x, time_y))
-        imgui.set_next_item_width(time_width)
-        _, time = imgui.input_double("##keyframe-time", time, 0.0, 0.0, "%.9g s")
+        time_y = y if inline else y + self._row_height() + self._row_gap()
+        _, time = ui.input("##keyframe-time", time_x, time_y, time_width, time, format="%.9g s")
         self._record("timeline-detail-time")
         if imgui.is_item_hovered():
             ui.tooltip(self.ctx.tr("time"))
@@ -172,7 +235,7 @@ class NativeTimelineDetails:
         clicked = []
         for label, key, width, active in zip(labels, keys, widths, enabled, strict=True):
             if x > row_x and x + width > self._origin[0] + self._width:
-                x, y = self._origin[0], y + 34 * s
+                x, y = self._origin[0], y + self._row_height() + self._row_gap()
             icon = None
             if key == "timeline-detail-delete":
                 icon = "delete"
@@ -182,11 +245,13 @@ class NativeTimelineDetails:
                 ui.button(
                     key,
                     x,
-                    y,
+                    self._style()
+                    .align_rect(Rect(x, y, width, self._row_height()), width, 28 * s)
+                    .y,
                     min(width, self._width) / s,
                     label="" if icon else label,
                     icon=icon,
-                    icon_color=SAGE if key == "timeline-detail-apply" and active else None,
+                    icon_color=ACCENT if key == "timeline-detail-apply" and active else None,
                     enabled=active,
                     filled=key == "timeline-detail-apply" and active,
                     align="center",
@@ -194,7 +259,7 @@ class NativeTimelineDetails:
                 )
             )
             x += width + gap
-        self._advance(y + 28 * s)
+        self._advance(y + self._row_height())
         return tuple(clicked)
 
     def actions(self, *, applicable, loadable, deletable):
@@ -207,7 +272,7 @@ class NativeTimelineDetails:
         )
 
     def _marker(self, name, time, *, loadable, deletable):
-        ui, s = self.workspace.ui, self.workspace.s
+        ui = self.workspace.ui
         x, y = self._origin
         labels = (
             (self.ctx.tr("Load"), self.ctx.tr("Delete")) if deletable else (self.ctx.tr("Load"),)
@@ -217,23 +282,28 @@ class NativeTimelineDetails:
         )
         identity_width = self._identity_width(self._width)
         self._identity("link" if deletable else "diamond")
-        ui.text(x + identity_width, y + 7 * s, name, TEXT, 14, max_width=name_width)
-        ui.hits["timeline-detail-name"] = (x + identity_width, y, name_width, 28 * s)
-        if ui.measure(name, 14) > name_width and imgui.is_mouse_hovering_rect(
-            (x + identity_width, y), (x + identity_width + name_width, y + 28 * s)
+        ui.component_text(
+            "timeline_details",
+            Rect(x + identity_width, y, name_width, self._row_height()),
+            name,
+            TEXT,
+        )
+        ui.hits["timeline-detail-name"] = (x + identity_width, y, name_width, self._row_height())
+        if ui.measure(
+            name, self._style().get("fontSize", 14)
+        ) > name_width and imgui.is_mouse_hovering_rect(
+            (x + identity_width, y), (x + identity_width + name_width, y + self._row_height())
         ):
             ui.tooltip(name)
         time_x = x + identity_width + name_width + self._gap(self._width)
-        ui.text(
-            time_x,
-            y + 7 * s,
+        ui.component_text(
+            "timeline_details",
+            Rect(time_x, y, time_width, self._row_height()),
             f"{time:g} {self.ctx.tr('s')}",
             MUTED,
-            14,
             mono=True,
-            max_width=time_width,
         )
-        ui.hits["timeline-detail-time"] = (time_x, y, time_width, 28 * s)
+        ui.hits["timeline-detail-time"] = (time_x, y, time_width, self._row_height())
         return self._buttons(
             labels,
             ("timeline-detail-load", "timeline-detail-delete")
@@ -280,10 +350,18 @@ class NativeTimelineDetails:
     def error(self, message):
         ui, s = self.workspace.ui, self.workspace.s
         x = self._origin[0]
-        y = max(imgui.get_cursor_screen_pos().y, self._origin[1] + 28 * s) + 6 * s
+        y = (
+            max(imgui.get_cursor_screen_pos().y, self._origin[1] + self._row_height())
+            + self._row_gap()
+        )
         danger = tuple(round(value * 255) for value in self.ctx.theme.danger)
-        ui.text(x, y + 7 * s, message, danger, 14, max_width=max(s, self._width - 34 * s))
-        ui.hits["timeline-detail-error"] = (x, y, max(s, self._width - 34 * s), 28 * s)
+        ui.component_text(
+            "timeline_details",
+            Rect(x, y, max(s, self._width - 34 * s), self._row_height()),
+            message,
+            danger,
+        )
+        ui.hits["timeline-detail-error"] = (x, y, max(s, self._width - 34 * s), self._row_height())
         copy = ui.button(
             "timeline-detail-copy-error",
             x + max(0, self._width - 28 * s),
@@ -291,7 +369,9 @@ class NativeTimelineDetails:
             icon="copy",
             tooltip=self.ctx.tr("Copy error"),
         )
-        if imgui.is_mouse_hovering_rect((x, y), (x + max(s, self._width - 34 * s), y + 28 * s)):
+        if imgui.is_mouse_hovering_rect(
+            (x, y), (x + max(s, self._width - 34 * s), y + self._row_height())
+        ):
             ui.tooltip(message)
-        self._advance(y + 28 * s)
+        self._advance(y + self._row_height())
         return copy

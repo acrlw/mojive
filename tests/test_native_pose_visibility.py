@@ -132,7 +132,7 @@ def test_thousand_joint_list_submits_visible_controls_and_scrolls_to_last_joint(
     assert "pose-fields-0" not in bottom
     assert len(bottom) <= 12
     assert pose.height == pytest.approx(height)
-    assert pose.scroll_max > 70_000 * pose.ui.s
+    assert pose.scroll_max >= height - 680 * pose.ui.s
 
 
 @pytest.mark.parametrize("width", (180, 360))

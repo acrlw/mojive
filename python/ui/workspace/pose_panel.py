@@ -11,9 +11,9 @@ from mojive.adapters.base import NodeType
 from mojive.ui.panels import copyable_name_item, pointer_pressed, publish_focus_item_hint
 from mojive.ui.panels.inspector import _nearest_euler_degrees
 from mojive.ui.pointer_bindings import PointerAction
-
-from .design import BODY_SIZE, DESIGN
-from .widgets import MUTED, NumericEditState
+from mojive.ui.workspace.component_layout import control_frame_size, control_size
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.widgets import MUTED, NumericEditState
 
 _QPOS_SIZE = {"hinge": 1, "slide": 1, "ball": 4, "free": 7}
 
@@ -87,7 +87,21 @@ class NativePoseEditor:
         if not imgui.is_any_item_active():
             self._active_joint = None
         qpos = ctx.session.frame.qpos
+        style = u.component_style("joint")
+        pads, margin = style.edges("padding", s), style.edges("margin", s)
+        inner_width = max(s, w - pads[0] - pads[2] - margin[0] - margin[2])
+        gap = style.get("rowGap", style.get("gap", 8)) * s
         vector_layout = None
+        scalar_heights = {}
+        with u.component_scope("joint"):
+            heading_height = (
+                control_size(
+                    u, "pose-joint", inner_width / s, 28, label="Joint", icon="joint-hinge"
+                )[1]
+                if show_names
+                else 0
+            )
+        heading_gap = DESIGN.numeric_gap * s if show_names else 0
         for joint in joints:
             top = y
             size = _QPOS_SIZE.get(joint.type)
@@ -97,13 +111,29 @@ class NativePoseEditor:
                 and joint.qpos_adr >= 0
                 and joint.qpos_adr + size <= len(qpos)
             )
-            if available and joint.type in ("ball", "free"):
-                if vector_layout is None:
-                    vector_layout = u.vector_layout(w)
-                height = (vector_layout.height + 8 * s) * (2 if joint.type == "free" else 1)
-            else:
-                height = (42 if available and show_names else 36) * s
-            bottom = top + height + (34 * s if show_names else 0)
+            with u.component_scope("joint"):
+                if available and joint.type in ("ball", "free"):
+                    if vector_layout is None:
+                        vector_layout = u.vector_layout(inner_width)
+                    field_height = vector_layout.height * (
+                        2 if joint.type == "free" else 1
+                    ) + gap * (1 if joint.type == "free" else 0)
+                else:
+                    if available and joint.limited not in scalar_heights:
+                        scalar_heights[joint.limited] = u.rail_extent(
+                            inner_width, bounded=joint.limited
+                        )
+                    field_height = scalar_heights[joint.limited] if available else 28 * s
+            height = (
+                heading_height
+                + heading_gap
+                + field_height
+                + pads[1]
+                + pads[3]
+                + margin[1]
+                + margin[3]
+            )
+            bottom = top + height + gap
             # Keep the full scroll extent without submitting offscreen text, icons,
             # quaternion conversions, or controls. An active drag keeps its owner alive.
             if (bottom < clip_top or top > clip_bottom) and self._active_joint != (
@@ -113,27 +143,46 @@ class NativePoseEditor:
                 y = bottom
                 continue
             node = self._nodes.get(joint.joint_id)
-            if show_names:
-                self._heading(ctx, joint, node, select_joint, x, y, w, joint_color)
-                y += 34 * s
-            enabled = (
-                available
-                and ctx.session.paused
-                and not ctx.session.state_take_playing
-                and ctx.session.adapter.caps.write_qpos
+            box = u.component_box(
+                "joint", x, top, w, height, key=f"joint-card-{joint.joint_id}", observe=False
             )
-            if not available:
-                u.text(
-                    x,
-                    y + DESIGN.control_padding_y(BODY_SIZE) * s,
-                    "qpos not produced this frame",
-                    MUTED,
+            u.record_component_box(
+                "joint",
+                box,
+                key=f"joint-card-{joint.joint_id}",
+                fieldRegions={
+                    "gap": [x, box.outer.bottom, w, gap],
+                    "rowGap": [
+                        box.content.x,
+                        box.content.y + heading_height,
+                        box.content.width,
+                        heading_gap,
+                    ],
+                },
+            )
+            bx, y, bw, _ = box.content.tuple()
+            with u.component_scope("joint"):
+                if show_names:
+                    self._heading(
+                        ctx, joint, node, select_joint, bx, y, bw, joint_color, heading_height
+                    )
+                    y += heading_height + heading_gap
+                enabled = (
+                    available
+                    and ctx.session.paused
+                    and not ctx.session.state_take_playing
+                    and ctx.session.adapter.caps.write_qpos
                 )
-                y += 36 * s
-            elif joint.type in ("hinge", "slide"):
-                self._scalar(ctx, joint, node, select_joint, x, y, w, enabled)
-            else:
-                self._pose(ctx, joint, node, select_joint, x, y, w, enabled, vector_layout)
+                if not available:
+                    u.component_text(
+                        "joint", (bx, y, bw, field_height), "qpos not produced this frame", MUTED
+                    )
+                elif joint.type in ("hinge", "slide"):
+                    self._scalar(ctx, joint, node, select_joint, bx, y, bw, enabled)
+                else:
+                    self._pose(
+                        ctx, joint, node, select_joint, bx, y, bw, enabled, vector_layout, gap
+                    )
             y = bottom
             u.hits[f"pose-fields-{joint.joint_id}"] = (x, top, w, y - top)
         if joints:
@@ -145,15 +194,19 @@ class NativePoseEditor:
         imgui.dummy((1, 1))
         return y
 
-    def _heading(self, ctx, joint, node, select_joint, x, y, w, color):
+    def _heading(self, ctx, joint, node, select_joint, x, y, w, color, height):
         u = self.workspace.ui
+        key, label = "pose-joint-" + str(joint.joint_id), joint.name or f"joint{joint.joint_id}"
+        width, frame_height = control_frame_size(u, key, w, height, label=label)
         pressed = u.button(
-            "pose-joint-" + str(joint.joint_id),
+            key,
             x,
             y,
-            w / u.s,
+            width,
+            h=frame_height,
+            width_limit=width * u.s,
             icon=joint_icon(joint.type),
-            label=joint.name or f"joint{joint.joint_id}",
+            label=label,
             active=node is not None and ctx.session.selected_node is node,
             icon_color=color,
             translate=False,
@@ -167,20 +220,22 @@ class NativePoseEditor:
     def _scalar(self, ctx, joint, node, select_joint, x, y, w, enabled):
         u = self.workspace.ui
         angular = joint.type == "hinge"
-        factor = 180 / np.pi if angular else 1
         lo, hi = joint.range if joint.limited else (0, 0)
         key = "##pose-joint-" + str(joint.joint_id)
         imgui.begin_disabled(not enabled)
         imgui.begin_group()
-        changed, value = u.slider(
+        edit = u.rail(
             key,
             x,
             y,
             w,
-            float(ctx.session.frame.qpos[joint.qpos_adr]) * factor,
-            lo * factor,
-            hi * factor,
-            "%.1f°" if angular else "%.3f m",
+            float(ctx.session.frame.qpos[joint.qpos_adr]),
+            (lo, hi) if joint.limited else None,
+            initial=None,
+            fmt="%.1f" if angular else "%.3f",
+            show_reset=False,
+            unit="rad" if angular else "m",
+            angular_degrees=True,
         )
         imgui.end_group()
         active, deactivated = imgui.is_item_active(), imgui.is_item_deactivated()
@@ -199,13 +254,13 @@ class NativePoseEditor:
             select_joint,
             key,
             state,
-            changed,
+            edit.changed,
             enabled,
-            lambda: cmd.SetQpos(joint.qpos_adr, value / factor),
+            lambda: cmd.SetQpos(joint.qpos_adr, edit.value),
         )
         return y + 36 * u.s
 
-    def _pose(self, ctx, joint, node, select_joint, x, y, w, enabled, layout):
+    def _pose(self, ctx, joint, node, select_joint, x, y, w, enabled, layout, gap):
         u = self.workspace.ui
         qpos = ctx.session.frame.qpos
         start = joint.qpos_adr
@@ -278,24 +333,8 @@ class NativePoseEditor:
                     math3d.euler_xyz_to_mat3(np.radians(edited)),
                     np.asarray(edited, np.float64),
                 )
-            self._label_hint(ctx, joint, name, key, x, y, layout)
-            y += layout.height + 8 * u.s
+            y += layout.height + gap
         return y
-
-    def _label_hint(self, ctx, joint, name, key, x, y, layout):
-        u = self.workspace.ui
-        bounds = (x, y, layout.label_width, 20 * u.s)
-        u.hits[key + "-label"] = bounds
-        if imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
-            (x, y), (x + bounds[2], y + bounds[3])
-        ):
-            u.tooltip(
-                "Position uses world coordinates."
-                if name == "position"
-                else "Euler angles (XYZ), in world coordinates."
-                if joint.type == "free"
-                else "Euler angles (XYZ), relative to the joint frame."
-            )
 
     def _edit(self, ctx, joint, node, select_joint, key, state, changed, enabled, command):
         if not enabled:

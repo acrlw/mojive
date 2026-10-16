@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from imgui_bundle import imgui
 
-from ...adapters.base import FrameNeeds
-from ..localization import render_note_text
-from . import Panel, PanelContext, begin_kv_table, labeled
-from .plot import Ring
+from mojive.adapters.base import FrameNeeds
+from mojive.ui.localization import render_note_text
+from mojive.ui.panels import Panel, PanelContext, begin_kv_table, labeled
+from mojive.ui.panels.plot import Ring
 
 _FRAME_SCALE_STEPS = (16.7, 25.0, 33.4, 50.0, 66.7, 100.0, 133.4, 200.0)
 
@@ -25,8 +25,9 @@ class StatsPanel(Panel):
     default_open = False
     shortcut = "F8"
 
-    def __init__(self) -> None:
+    def __init__(self, *, presentation=None) -> None:
         super().__init__()
+        self.presentation = presentation
         self._frame_ms = Ring(240)
         self._scale_ms = _FRAME_SCALE_STEPS[0]
         self._scale_hold = 0
@@ -42,6 +43,9 @@ class StatsPanel(Panel):
         _lo, hi = self._frame_ms.span()
         self._update_scale(hi)
         recent = ctx.dt * 1000.0
+        if self.presentation is not None:
+            self.presentation.draw(ctx, self._frame_ms, self._scale_ms, stats, caps)
+            return
         imgui.plot_lines(
             "##frame",
             self._frame_ms.values,

@@ -28,8 +28,9 @@ Run these programs from the repository root after `make setup`. Commands use
 
 All generated files in these examples are placed under the ignored `output/` directory.
 
-The [UI design study](ui_design/README.md) is a standalone native docking and
-scene-authoring reference. Run `make ui-design-native ARGS=--interactive` after setup.
+Run `make ui-native-design` after setup to edit UI parameters alongside the production workspace.
+The [UI design study](ui_design/README.md) documents the editor and capture commands;
+`make ui-design-reference` runs the standalone reference.
 
 Run `make passive-viewer` for a three-second 1000 Hz physics / 60 FPS display example.
 Use `ARGS='--physics-hz 500 --display-fps 30 --hidden'` for an automated run.

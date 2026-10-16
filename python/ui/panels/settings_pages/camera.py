@@ -55,14 +55,15 @@ def draw(panel, ctx: PanelContext) -> None:
 
     def choice(name, label, choices):
         nonlocal config
-        panel._property(t(label))
+        panel._property(t(label), control_part="select")
         current = getattr(config, name)
-        if imgui.begin_combo(f"##camera_{name}", t(dict(choices)[current])):
-            for value, text in choices:
-                if imgui.selectable(t(text), current == value)[0]:
-                    config = replace(config, **{name: value})
-                    ctx.apply_setting(ctx.set_camera_navigation, config)
-            imgui.end_combo()
+        values, labels = zip(*choices, strict=True)
+        changed, selected = panel._combo(
+            f"##camera_{name}", values.index(current), tuple(t(text) for text in labels)
+        )
+        if changed:
+            config = replace(config, **{name: values[selected]})
+            ctx.apply_setting(ctx.set_camera_navigation, config)
 
     panel._group_heading(t("Focus"))
     if panel._begin_properties("settings_camera_focus"):
@@ -91,7 +92,7 @@ def draw(panel, ctx: PanelContext) -> None:
                 )
             ),
         )
-        imgui.end_table()
+        panel._end_properties()
     panel._group_heading(t("Zoom"))
     if panel._begin_properties("settings_camera_zoom"):
         choice("zoom_mode", "Zoom mode", (("proportional", "Proportional"), ("linear", "Linear")))
@@ -121,6 +122,6 @@ def draw(panel, ctx: PanelContext) -> None:
             "%.4g",
             "World units; orthographic zoom uses the equivalent perspective distance.",
         )
-        imgui.end_table()
-    if imgui.button(t("Reset camera navigation")):
+        panel._end_properties()
+    if panel._button(t("Reset camera navigation")):
         ctx.apply_setting(ctx.set_camera_navigation, defaults)

@@ -10,18 +10,17 @@ from mojive.geometry2d.curves import (
     CORNER_SMOOTHING,
 )
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS, InputAction, InputBindings
+from mojive.ui.overlay_geometry import mouse_button_geometry as mouse_button_geometry
+from mojive.ui.overlay_geometry import mouse_wheel_geometry as mouse_wheel_geometry
 from mojive.ui.paint_protocol import Draw2D
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import text_line_y
 from mojive.ui.theme import RGBA, Theme
-
-from ..overlay_geometry import mouse_button_geometry as mouse_button_geometry
-from ..overlay_geometry import mouse_wheel_geometry as mouse_wheel_geometry
-from .capsules import (
+from mojive.ui.viewport_widgets.capsules import (
     draw_capsule,
 )
-from .chrome import draw_keycap_background, draw_separator
-from .model import (
+from mojive.ui.viewport_widgets.chrome import draw_keycap_background, draw_separator
+from mojive.ui.viewport_widgets.model import (
     DEFAULT_VIEWPORT_LABELS,
     OVERLAY_GEOMETRY,
     OverlayGeometry,
@@ -53,7 +52,11 @@ def _inline_text(draw: Draw2D, x: float, center_y: float, value: str, color) -> 
     return width
 
 
-def _key_width(draw: Draw2D, label: str, scale: float, text_scale: float = 1.0) -> float:
+def _key_width(
+    draw: Draw2D, label: str, scale: float, text_scale: float = 1.0, *, presentation=None
+) -> float:
+    if presentation is not None:
+        return presentation.size(label)[0] * text_scale
     return draw.text_size(label)[0] * text_scale + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale
 
 
@@ -71,7 +74,10 @@ def _keycap(
     scale: float,
     *,
     muted: bool = False,
+    presentation=None,
 ) -> float:
+    if presentation is not None:
+        return presentation.draw(x, center_y, label, theme, muted=muted)
     text_width = draw.text_size(label)[0]
     width = text_width + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale
     height = OVERLAY_GEOMETRY.hint_control_height * scale
@@ -323,6 +329,7 @@ def _tool_hint_width(
     *,
     text_scale: float = 1.0,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
+    keycap=None,
 ) -> float:
     chord = OVERLAY_GEOMETRY.hint_chord_gap * scale
     input_gap = OVERLAY_GEOMETRY.hint_input_gap * scale
@@ -337,18 +344,22 @@ def _tool_hint_width(
         return (
             (text_width(group.label) + input_gap if group.label else 0.0)
             + sum(
-                _key_width(draw, key, scale, text_scale) + input_gap + text_width(meaning)
+                _key_width(draw, key, scale, text_scale, presentation=keycap)
+                + input_gap
+                + text_width(meaning)
                 for key, meaning in group.keys
             )
             + (2 * chord + text_width("/")) * (len(group.keys) - 1)
         )
     if group.kind == "key":
         return (
-            _key_width(draw, group.control, scale, text_scale) + input_gap + text_width(group.label)
+            _key_width(draw, group.control, scale, text_scale, presentation=keycap)
+            + input_gap
+            + text_width(group.label)
         )
     if group.kind == "mouse":
         modifier_width = (
-            _key_width(draw, group.modifier, scale, text_scale)
+            _key_width(draw, group.modifier, scale, text_scale, presentation=keycap)
             + input_gap
             + text_width("+")
             + chord
@@ -362,7 +373,7 @@ def _tool_hint_width(
             + text_width(group.label)
         )
     return (
-        _key_width(draw, group.control, scale, text_scale)
+        _key_width(draw, group.control, scale, text_scale, presentation=keycap)
         + input_gap
         + text_width("+")
         + chord
@@ -404,6 +415,19 @@ def tool_hints_size(
     )
 
 
+def tool_hints_height(
+    draw: Draw2D, scale: float, hints: Sequence[ToolHint], *, keycap=None
+) -> float:
+    """Measure the actual single-row mouse shells, text and authored keycaps."""
+    if not hints:
+        return 0
+    return max(
+        OVERLAY_GEOMETRY.hint_control_height * scale,
+        draw.text_size("M")[1],
+        keycap.size("Esc")[1] if keycap is not None else 0,
+    )
+
+
 def hint_size(
     draw: Draw2D,
     scale: float,
@@ -432,14 +456,16 @@ def fitting_tool_hints(
     max_width: float,
     *,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
+    group_gap: float | None = None,
+    keycap=None,
 ) -> tuple[ToolHint, ...]:
     """Return the largest whole-hint prefix that fits ``max_width``."""
 
     fitted: list[ToolHint] = []
     used = 0.0
-    gap = OVERLAY_GEOMETRY.hint_group_gap * scale
+    gap = OVERLAY_GEOMETRY.hint_group_gap * scale if group_gap is None else max(0, group_gap)
     for hint in hints:
-        width = _tool_hint_width(draw, scale, hint, labels=labels)
+        width = _tool_hint_width(draw, scale, hint, labels=labels, keycap=keycap)
         candidate = used + (gap if fitted else 0.0) + width
         if candidate > max(0.0, float(max_width)):
             break
@@ -542,13 +568,19 @@ def draw_tool_hints(
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     pixel_size: float = 1.0,
     muted: bool = False,
+    group_gap: float | None = None,
+    keycap=None,
+    separator_width=None,
+    separator_margin=None,
+    record_item=None,
+    separator_draw=None,
 ) -> float:
     """Draw tool hints inline and return their consumed width."""
 
     x, center_y = float(origin[0]), float(origin[1])
     cursor = x
     input_gap = OVERLAY_GEOMETRY.hint_input_gap * scale
-    group_gap = OVERLAY_GEOMETRY.hint_group_gap * scale
+    group_gap = OVERLAY_GEOMETRY.hint_group_gap * scale if group_gap is None else max(0, group_gap)
     chord_gap = OVERLAY_GEOMETRY.hint_chord_gap * scale
     text_color = theme.text_disabled if muted else theme.text
     accent_color = theme.text_disabled if muted else theme.primary_bright
@@ -559,7 +591,10 @@ def draw_tool_hints(
 
     def key(label: str, meaning: str) -> None:
         nonlocal cursor
-        cursor += _keycap(draw, cursor, center_y, label, theme, scale, muted=muted) + input_gap
+        cursor += (
+            _keycap(draw, cursor, center_y, label, theme, scale, muted=muted, presentation=keycap)
+            + input_gap
+        )
         text(meaning)
 
     def mouse(button: str, meaning: str, *, suffix: str = "", after: float = 0.0) -> None:
@@ -583,7 +618,12 @@ def draw_tool_hints(
 
     def perturb(modifier: str) -> None:
         nonlocal cursor
-        cursor += _keycap(draw, cursor, center_y, modifier, theme, scale, muted=muted) + input_gap
+        cursor += (
+            _keycap(
+                draw, cursor, center_y, modifier, theme, scale, muted=muted, presentation=keycap
+            )
+            + input_gap
+        )
         text("+", theme.text_disabled)
         cursor += chord_gap
         text(labels.drag, accent_color)
@@ -593,6 +633,7 @@ def draw_tool_hints(
 
     groups = tuple(hints)
     for index, group in enumerate(groups):
+        start_x = cursor
         if group.kind == "text":
             text(group.label)
         elif group.kind == "keys":
@@ -610,7 +651,16 @@ def draw_tool_hints(
         elif group.kind == "mouse":
             if group.modifier:
                 cursor += (
-                    _keycap(draw, cursor, center_y, group.modifier, theme, scale, muted=muted)
+                    _keycap(
+                        draw,
+                        cursor,
+                        center_y,
+                        group.modifier,
+                        theme,
+                        scale,
+                        muted=muted,
+                        presentation=keycap,
+                    )
                     + input_gap
                 )
                 text("+", theme.text_disabled)
@@ -618,15 +668,37 @@ def draw_tool_hints(
             mouse(group.control, group.label, suffix=group.suffix)
         else:
             perturb(group.control)
+        if record_item is not None:
+            height = tool_hints_height(draw, scale, (group,), keycap=keycap)
+            record_item((start_x, center_y - height / 2, cursor - start_x, height))
         if index + 1 < len(groups):
             divider_x = cursor + group_gap * 0.5
-            draw_separator(
-                draw,
-                (divider_x, center_y - 5.0 * scale),
-                (divider_x, center_y + 5.0 * scale),
-                (*theme.border[:3], min(0.62, theme.border[3])),
-                1.0 * scale,
-            )
+            if separator_draw is not None:
+                separator_draw(divider_x)
+            else:
+                draw_separator(
+                    draw,
+                    (
+                        divider_x,
+                        center_y
+                        - (
+                            5 * scale
+                            if separator_margin is None
+                            else max(0, 12 * scale - separator_margin)
+                        ),
+                    ),
+                    (
+                        divider_x,
+                        center_y
+                        + (
+                            5 * scale
+                            if separator_margin is None
+                            else max(0, 12 * scale - separator_margin)
+                        ),
+                    ),
+                    (*theme.border[:3], min(0.62, theme.border[3])),
+                    1.0 * scale if separator_width is None else separator_width,
+                )
             cursor += group_gap
     return cursor - x
 

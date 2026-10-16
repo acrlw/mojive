@@ -738,6 +738,33 @@ def _item_rect(
     reveal: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     workspace = getattr(viewer.app, "workspace", None)
+    if workspace is not None and function_name in ("button", "combo"):
+        ui = workspace.ui
+        draw_control = getattr(ui, function_name)
+        measured = []
+        scroll_to_control = reveal
+
+        def native_control(key, *args, **kwargs):
+            result = draw_control(key, *args, **kwargs)
+            if key in (label, "property-button/" + label) and key in ui.hits:
+                measured.append(ui.hits[key])
+                if scroll_to_control:
+                    imgui.set_scroll_here_y(0.5)
+            return result
+
+        setattr(ui, function_name, native_control)
+        try:
+            viewer.sync()
+            if reveal and measured:
+                scroll_to_control = False
+                measured.clear()
+                viewer.sync()
+                viewer.sync()
+        finally:
+            setattr(ui, function_name, draw_control)
+        if measured:
+            x, y, w, h = measured[-1]
+            return (x, y), (x + w, y + h)
     if (
         workspace is not None
         and function_name == "invisible_button"

@@ -5,28 +5,34 @@ from dataclasses import replace
 from imgui_bundle import imgui
 
 from mojive.text.sources import FontSource
+from mojive.ui.design_palette import rgba8
 from mojive.ui.theme import THEME
+from mojive.ui.workspace.design import BODY_SIZE, CONTROL_RADIUS, DESIGN, MONO_SIZE
+from mojive.ui.workspace.fonts import (
+    font_em_ratio,
+    font_vertical_offset,
+    resolve_cjk_faces,
+    resolve_fonts,
+)
 
-from .design import BODY_SIZE, CONTROL_RADIUS, DESIGN, MONO_SIZE
-from .fonts import font_em_ratio, font_vertical_offset, resolve_cjk_faces, resolve_fonts
-
-TEXT = (230, 232, 235, 255)
-MUTED = (169, 175, 183, 255)
-DIM = (142, 152, 165, 255)
-SAGE = (156, 191, 141, 255)
-AMBER = (232, 176, 79, 255)
-PANEL = (30, 33, 37, 255)
-INPUT = (43, 47, 52, 255)
+TEXT = rgba8("text")
+MUTED = rgba8("secondary")
+DIM = rgba8("disabled")
+ACCENT = rgba8("primary")
+SAGE = ACCENT
+AMBER = rgba8("warning")
+PANEL = rgba8("background")
+INPUT = rgba8("field")
 LINE = (255, 255, 255, 13)
 CONTROL_THEME = replace(
     THEME,
     text=tuple(channel / 255 for channel in TEXT),
-    primary_bright=tuple(channel / 255 for channel in SAGE),
+    primary_bright=tuple(channel / 255 for channel in ACCENT),
 )
 FORM_LABEL_COLUMN_WIDTH = DESIGN.label_width
 FORM_LABEL_COLUMN_MINIMUM = DESIGN.label_minimum
 FORM_LABEL_COLUMN_GAP = DESIGN.label_gap
-SWITCH_WIDTH = 36
+SWITCH_WIDTH = DESIGN.switch_track_width + 4
 SWITCH_HEIGHT = DESIGN.control_height
 # ImGuiFreeTypeLoaderFlags_NoHinting, from the bundled imgui_freetype.h.
 # Sampling the outlines at 2x preserves small SF counters before GPU filtering.
@@ -128,34 +134,34 @@ def install_style(scale):
         "text_disabled": DIM,
         "window_bg": PANEL,
         "child_bg": PANEL,
-        "popup_bg": (37, 41, 46, 255),
+        "popup_bg": rgba8("popup"),
         "frame_bg": INPUT,
-        "frame_bg_hovered": (49, 54, 60, 255),
-        "frame_bg_active": INPUT,
+        "frame_bg_hovered": rgba8("field_hovered"),
+        "frame_bg_active": rgba8("field_active"),
         "button": INPUT,
-        "button_hovered": (54, 59, 65, 255),
-        "button_active": (64, 71, 78, 255),
+        "button_hovered": rgba8("field_hovered"),
+        "button_active": rgba8("field_active"),
         "border": LINE,
         "separator": LINE,
         "separator_hovered": (91, 99, 108, 255),
         "separator_active": (121, 131, 142, 255),
-        "header": (156, 191, 141, 24),
+        "header": rgba8("primary", 24),
         "header_hovered": (255, 255, 255, 8),
-        "header_active": (156, 191, 141, 32),
-        "tab": (26, 29, 32, 255),
-        "tab_hovered": (40, 44, 49, 255),
-        "tab_selected": (30, 33, 37, 255),
-        "tab_dimmed": (26, 29, 32, 255),
-        "tab_dimmed_selected": (30, 33, 37, 255),
+        "header_active": rgba8("primary", 32),
+        "tab": rgba8("child"),
+        "tab_hovered": rgba8("field_hovered"),
+        "tab_selected": PANEL,
+        "tab_dimmed": rgba8("child"),
+        "tab_dimmed_selected": PANEL,
         "tab_selected_overline": (0, 0, 0, 0),
         "tab_dimmed_selected_overline": (0, 0, 0, 0),
-        "title_bg": (26, 29, 32, 255),
-        "title_bg_active": (26, 29, 32, 255),
-        "check_mark": SAGE,
-        "slider_grab": SAGE,
-        "slider_grab_active": (177, 209, 161, 255),
-        "docking_preview": (156, 191, 141, 90),
-        "nav_cursor": SAGE,
+        "title_bg": rgba8("child"),
+        "title_bg_active": rgba8("child"),
+        "check_mark": ACCENT,
+        "slider_grab": ACCENT,
+        "slider_grab_active": rgba8("primary_bright"),
+        "docking_preview": rgba8("primary", 90),
+        "nav_cursor": ACCENT,
         "scrollbar_bg": (0, 0, 0, 0),
         "scrollbar_grab": (69, 75, 82, 255),
     }

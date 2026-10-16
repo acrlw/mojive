@@ -2,21 +2,34 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
-
-from .constants import BOTTOM_PANELS, LEFT_PANELS
-from .design import BODY_SIZE, DESIGN
-from .property_style import property_controls
-from .widgets import (
+from mojive.ui.workspace.component_layout import control_frame_size, control_size
+from mojive.ui.workspace.constants import BOTTOM_PANELS, LEFT_PANELS
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN, current_design, use_design
+from mojive.ui.workspace.property_style import property_controls
+from mojive.ui.workspace.widgets import (
     TEXT,
 )
 
 
 def panel(workspace, name, ctx):
+    visibility = getattr(workspace.app, "scrollbar_visibility", None)
+    if visibility is not None:
+        visibility.set_visible(name, workspace.open[name])
+    if visibility is None or not workspace.open[name]:
+        return _panel(workspace, name, ctx)
+    with visibility.panel_scope(name, window_name=name):
+        return _panel(workspace, name, ctx)
+
+
+def _panel(workspace, name, ctx):
     panel = workspace.app.panels.get(name)
+    u = workspace.ui
     if not workspace.open[name]:
         if name == "Inspector":
             presentation = getattr(workspace, "inspector_presentation", None)
@@ -96,7 +109,16 @@ def panel(workspace, name, ctx):
         flags |= imgui.WindowFlags_.no_docking
     if name in LEFT_PANELS:
         flags |= imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
+    panel_style = u.component_style("panel")
+    imgui.push_style_var(
+        imgui.StyleVar_.window_rounding,
+        panel_style.get("radius", DESIGN.container_radius) * workspace.s,
+    )
     visible, workspace.open[name] = imgui.begin(title, True, flags)
+    visibility = getattr(workspace.app, "scrollbar_visibility", None)
+    if visibility is not None:
+        visibility.bind_current_window()
+    imgui.pop_style_var()
     if visible:
         if name in BOTTOM_PANELS:
             window = imgui.internal.get_current_window()
@@ -110,13 +132,76 @@ def panel(workspace, name, ctx):
         p = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
         x, y, w, h = p.x, p.y, size.x, size.y
+        outer = u.component_box("panel", x, y, w, h, key="panel-" + name, observe=False)
+        window = imgui.get_current_context().current_window
+        background_command = next(
+            (command for command in window.draw_list.cmd_buffer if command.elem_count > 0), None
+        )
+        u.record_component_box(
+            "panel",
+            outer,
+            key="panel-" + name,
+            windowRect=[window.pos.x, window.pos.y, window.size.x, window.size.y],
+            docked=bool(window.dock_id),
+            nativeBackgroundClip=list(background_command.clip_rect)
+            if background_command is not None
+            else None,
+            consumedFields={
+                "panel": [
+                    "widthMode",
+                    "width",
+                    "heightMode",
+                    "height",
+                    "radius",
+                    "marginLeft",
+                    "marginRight",
+                    "marginTop",
+                    "marginBottom",
+                    *(("rowGap",) if name in (*LEFT_PANELS, "Inspector") else ()),
+                ]
+            },
+            spacing="header-content" if name in (*LEFT_PANELS, "Inspector") else None,
+        )
+        x, y, w, h = outer.content.tuple()
         if name in LEFT_PANELS:
-            workspace.panel_header(name, x, y, w)
-            y += 38 * workspace.s
-            h -= 38 * workspace.s
+            body_top = workspace.panel_header(name, x, y, w)
+            extra_gap = panel_style.get("rowGap", 0) * workspace.s
+            body_top += extra_gap
+            h -= body_top - y
+            y = body_top
+        if name != "Inspector":
+            body = u.component_box(
+                "panel_body",
+                x,
+                y,
+                w,
+                max(workspace.s, h),
+                key="panel-body-" + name,
+                observe=False,
+            )
+            u.record_component_box(
+                "panel_body",
+                body,
+                key="panel-body-" + name,
+                ownedSpacingPart={
+                    "Scene": "tree_row",
+                    "Statistics": "statistics_list",
+                    "Output": "output_list",
+                    "Timeline": "timeline_sheet",
+                    "Sensors": "sensor",
+                }.get(name),
+            )
+            x, y, w, h = body.content.tuple()
             imgui.set_cursor_screen_pos((x, y))
             imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-            imgui.begin_child("Panel content", (w, max(workspace.s, h)))
+            # A stable gutter prevents numeric reflow from changing its own
+            # available width when the new row count removes vertical overflow.
+            flags = (
+                imgui.WindowFlags_.always_vertical_scrollbar
+                if name in ("Pose", "Control", "Cameras")
+                else 0
+            )
+            imgui.begin_child("Panel content", (w, max(workspace.s, h)), window_flags=flags)
             imgui.pop_style_var()
             p = imgui.get_cursor_screen_pos()
             size = imgui.get_content_region_avail()
@@ -131,7 +216,13 @@ def panel(workspace, name, ctx):
             "Layers": workspace.layers_panel,
             "Timeline": workspace.timeline,
         }.get(name)
-        with property_controls(workspace.ui):
+        body_style = u.component_style("panel_body")
+        dimensions = replace(current_design(), row_gap=body_style.get("rowGap", DESIGN.row_gap))
+        with (
+            use_design(lambda _: dimensions),
+            u.component_scope("panel_body"),
+            property_controls(workspace.ui),
+        ):
             if name == "Settings":
                 workspace.settings.draw(ctx)
             elif name in ("Scene", "Inspector", "Timeline"):
@@ -140,7 +231,7 @@ def panel(workspace, name, ctx):
                 draw(x, y, w)
             elif name in ("Sensors", "Output", "Statistics", "Plot"):
                 panel.draw(ctx)
-        if name in LEFT_PANELS:
+        if name != "Inspector":
             imgui.end_child()
         workspace.app.apply_document_edits()
     if name == "Inspector":
@@ -161,6 +252,12 @@ def panel(workspace, name, ctx):
 
 def panel_header(workspace, name, x, y, w):
     u, s = workspace.ui, workspace.s
+    style = u.component_style("panel_header")
+    padding = style.edges("padding", s)
+    margin = style.edges("margin", s)
+    font = style.get("fontSize", BODY_SIZE)
+    gap = style.get("columnGap", style.get("gap", 2)) * s
+    icon_size = style.get("iconSize", 16)
     actions = {
         "Scene": (
             ("search", "search", "Search scene"),
@@ -177,19 +274,46 @@ def panel_header(workspace, name, x, y, w):
         "Layers": (("gizmos", "move", "Transform handles"),),
     }.get(name, ())
     if name == "Pose" and not hasattr(workspace, "navigation"):
-        from .navigation import Navigation
+        from mojive.ui.workspace.navigation import Navigation
 
         workspace.navigation = Navigation(workspace)
     enabled = [item for item in actions if item[0] in workspace.header_actions[name]]
+    sizes = {
+        key: control_size(u, "header-" + name + "-" + key, 26, 28, icon=icon, icon_size=icon_size)
+        for key, icon, _label in (*enabled, ("more", "more", "More"))
+    }
+    height = max(
+        style.get("height", 30) * s,
+        max(max(font, style.line_height(font * 1.4)) * s, *(v[1] for v in sizes.values()))
+        + padding[1]
+        + padding[3],
+    )
+    box = u.component_box(
+        "panel_header", x, y, w, height + margin[1] + margin[3], key="panel-header-" + name
+    )
+    x, y, w, _ = box.content.tuple()
     # Keep the title readable as dock panels narrow; remaining actions stay in More.
-    slots = max(0, int((w / s - 74) / 28) - 1)
-    visible = enabled[:slots]
-    right = x + w - 28 * s
-    imgui.push_clip_rect((x, y), (right - len(visible) * 28 * s - 4 * s, y + 30 * s), True)
-    u.text(x, y + DESIGN.control_padding_y(BODY_SIZE) * s, name, TEXT, BODY_SIZE, bold=True)
-    imgui.pop_clip_rect()
-    for index, (key, icon, label) in enumerate(visible):
-        xx = right - (len(visible) - index) * 28 * s
+    more_width = min(w, sizes["more"][0])
+    available = max(0, w - 74 * s - more_width - gap)
+    visible = []
+    for item in enabled:
+        required = sizes[item[0]][0] + gap
+        if required > available:
+            break
+        visible.append(item)
+        available -= required
+    right = x + w - more_width
+    action_x = right - sum(sizes[item[0]][0] + gap for item in visible)
+    from mojive.design.native.geometry import Rect
+
+    title_rect = Rect(x, y, max(0, action_x - x - 4 * s), box.content.height)
+    u.component_text("panel_header", title_rect, name, TEXT, bold=True)
+    vertical = style.get("alignItems", "center")
+    factor = 0 if vertical in ("start", "top") else 1 if vertical in ("end", "bottom") else 0.5
+    for key, icon, label in visible:
+        width, height = sizes[key]
+        button_y = y + max(0, box.content.height - height) * factor
+        frame = control_frame_size(u, "header-" + name + "-" + key, width, height, icon=icon)
         active = (
             workspace.navigation.pose_action_active(key)
             if name == "Pose"
@@ -197,58 +321,98 @@ def panel_header(workspace, name, x, y, w):
             or (key == "gizmos" and workspace.app.gizmos)
         )
         if u.button(
-            "header-" + name + "-" + key, xx, y, 26, 28, icon=icon, tooltip=label, active=active
+            "header-" + name + "-" + key,
+            action_x,
+            button_y,
+            *frame,
+            icon=icon,
+            tooltip=label,
+            active=active,
+            icon_size=icon_size,
+            width_limit=frame[0] * s,
         ):
             workspace.header_action(name, key)
+        action_x += width + gap
     popup = "Panel actions###" + name
     filtered = name == "Scene" and workspace.filter != "All"
     hint = u.translate("Filter") + ": " + u.translate(workspace.filter) if filtered else "More"
+    more_frame = control_frame_size(
+        u, "header-" + name + "-more", more_width, sizes["more"][1], icon="more"
+    )
     if u.button(
-        "header-" + name + "-more", right, y, 26, 28, icon="more", tooltip=hint, active=filtered
+        "header-" + name + "-more",
+        right,
+        y + max(0, box.content.height - sizes["more"][1]) * factor,
+        *more_frame,
+        icon="more",
+        tooltip=hint,
+        active=filtered,
+        icon_size=icon_size,
+        width_limit=more_frame[0] * s,
     ):
         imgui.open_popup(popup)
-    with workspace.menus.style():
-        if imgui.begin_popup(popup):
+    with workspace.menus.local_popup(popup) as opened:
+        if opened:
             for key, _icon, label in actions:
-                clicked, _ = imgui.menu_item(u.translate(label), "", False)
+                clicked, _ = workspace.menus.local_item(
+                    label, key="header-menu-" + name + "-" + key, icon=_icon
+                )
                 if clicked:
                     workspace.header_action(name, key)
             if name == "Scene":
                 imgui.separator()
-                if imgui.begin_menu(u.translate("Filter")):
-                    from .navigation import Navigation
+                with workspace.menus.local_submenu(
+                    "Filter", key="header-menu-" + name + "-filters"
+                ) as filters_open:
+                    if filters_open:
+                        from mojive.ui.workspace.navigation import Navigation
 
-                    if not hasattr(workspace, "navigation"):
-                        workspace.navigation = Navigation(workspace)
-                    for kind, count in workspace.navigation.scene_filters(workspace._panel_context):
-                        label = f"{u.translate(kind.title())} {count}"
-                        clicked, _ = imgui.menu_item(label, "", workspace.filter.casefold() == kind)
-                        if clicked:
-                            workspace.filter = kind.title()
-                    imgui.end_menu()
+                        if not hasattr(workspace, "navigation"):
+                            workspace.navigation = Navigation(workspace)
+                        for kind, count in workspace.navigation.scene_filters(
+                            workspace._panel_context
+                        ):
+                            label = f"{u.translate(kind.title())} {count}"
+                            clicked, _ = workspace.menus.local_item(
+                                label,
+                                checked=workspace.filter.casefold() == kind,
+                                key="header-filter-" + kind,
+                            )
+                            if clicked:
+                                workspace.filter = kind.title()
             if actions:
                 imgui.separator()
-                if imgui.begin_menu(u.translate("Header actions")):
-                    for key, _icon, label in actions:
-                        changed, checked = imgui.checkbox(
-                            u.translate(label), key in workspace.header_actions[name]
-                        )
-                        if changed:
-                            if checked:
-                                workspace.header_actions[name].add(key)
-                            else:
-                                workspace.header_actions[name].discard(key)
-                    imgui.end_menu()
+                with workspace.menus.local_submenu(
+                    "Header actions", key="header-menu-" + name + "-actions"
+                ) as actions_open:
+                    if actions_open:
+                        for key, _icon, label in actions:
+                            pos = imgui.get_cursor_screen_pos()
+                            changed, checked = u.checkbox(
+                                "##header-action-" + name + "-" + key,
+                                pos.x,
+                                pos.y,
+                                key in workspace.header_actions[name],
+                                label=u.translate(label),
+                            )
+                            if changed:
+                                if checked:
+                                    workspace.header_actions[name].add(key)
+                                else:
+                                    workspace.header_actions[name].discard(key)
             imgui.separator()
-            clicked, _ = imgui.menu_item(workspace.app.localizer.text("Hide panel"), "", False)
+            clicked, _ = workspace.menus.local_item(
+                "Hide panel", key="header-menu-" + name + "-hide", icon="close"
+            )
             if clicked:
                 workspace.open[name] = False
-            imgui.end_popup()
     if name == "Scene":
         if workspace.header_add_pending or imgui.is_popup_open("Add"):
-            workspace.menus.popup("Add", (right, y, 26 * s, 28 * s), workspace.header_add_pending)
+            anchor = u.hits.get("header-Scene-add", u.hits["header-Scene-more"])
+            workspace.menus.popup("Add", anchor, workspace.header_add_pending)
         workspace.header_add_pending = False
-    u.line(x - 12 * s, y + 32 * s, w + 24 * s)
+    u.line(box.frame.x - 12 * s, box.outer.bottom + 2 * s, box.frame.width + 24 * s)
+    return box.outer.bottom + 8 * s
 
 
 def header_action(workspace, name, key):

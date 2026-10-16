@@ -41,6 +41,14 @@ def _begin_property_table(
     )
 
 
+def _end_property_table(ctx):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        presentation.end_table()
+    else:
+        imgui.end_table()
+
+
 def _property_section(
     ctx: PanelContext, label: str, flags: int = imgui.TreeNodeFlags_.default_open
 ) -> bool:
@@ -61,6 +69,8 @@ def _property_control_row(
     toggle_unit=None,
     toggle: bool = False,
     components: int = 1,
+    control_part: str = "input_number",
+    control_labels=(),
 ) -> None:
     """Advance a property table to one left-label/right-control row."""
 
@@ -73,9 +83,64 @@ def _property_control_row(
             toggle_unit=toggle_unit,
             toggle=toggle,
             components=components,
+            control_part=control_part,
+            control_labels=control_labels,
         )
     else:
         property_row(ctx.tr(label), tooltip=ctx.tr(tooltip) if tooltip else "")
+
+
+def _property_button(ctx, label, size=None):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.button(label, size)
+    return imgui.button(label) if size is None else imgui.button(label, size)
+
+
+def _property_combo(ctx, key, index, labels, flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.combo(key, index, labels, flags)
+    return imgui.combo(key, index, labels, flags)
+
+
+def _property_begin_combo(ctx, key, preview, flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.begin_combo(key, preview, flags)
+    return imgui.begin_combo(key, preview, flags)
+
+
+def _property_choice(ctx, label, selected=False, *, enabled=True):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.choice(label, selected, enabled=enabled)
+    flags = 0 if enabled else imgui.SelectableFlags_.disabled
+    return imgui.selectable(label, selected, flags)
+
+
+def _property_end_combo(ctx):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        presentation.end_combo()
+    else:
+        imgui.end_combo()
+
+
+def _property_input_text(ctx, key, value, flags=0):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.text(key, value, flags)
+    return imgui.input_text(key, value, flags)
+
+
+def _property_segmented(ctx, key, labels, selected, *, icons=None, theme=None):
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.segmented(key, labels, selected, icons=icons)
+    from mojive.ui.panels import segmented_control
+
+    return segmented_control(key, labels, selected, icons=icons, theme=theme or ctx.theme)
 
 
 def _property_numeric(ctx, item_id, value, speed=1.0, lo=0.0, hi=0.0, fmt="%.3f", flags=0):
@@ -136,8 +201,11 @@ def _property_button_row(
 ) -> tuple[bool, ...]:
     """Draw a wrapping row with optional availability for each independent action."""
 
-    _property_control_row(ctx, label)
     translated = tuple(ctx.tr(button) for button in buttons)
+    _property_control_row(ctx, label, control_part="button_row", control_labels=translated)
+    presentation = getattr(ctx, "inspector_presentation", None)
+    if presentation is not None:
+        return presentation.button_row("property-actions/" + label, translated, enabled)
     widths = tuple(button_width(button) for button in translated)
     layout = button_row_layout(
         widths,

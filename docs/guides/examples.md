@@ -24,9 +24,10 @@ not required.
 
 ## Example catalog
 
+Run `make ui-native-design` to edit native UI parameters alongside the production workspace.
+`make ui-native-capture` captures its panels and menus under `output/ui_design/native/`.
 The [UI design study](https://github.com/acrlw/mojive/tree/main/examples/ui_design)
-provides a standalone docking and scene-authoring reference through
-`make ui-design-native ARGS=--interactive`. Its captures are written under `output/ui_design/`.
+remains available through `make ui-design-reference`.
 
 | Example | Result |
 |---|---|

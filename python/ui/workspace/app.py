@@ -9,17 +9,44 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.render.backend import RenderFlag
 from mojive.ui.app import ViewerApp
-
-from .design import DESIGN, RAIL_STYLE
-from .entities import EntityProjection
-from .notices import draw_operation_notice
-from .panel_manager import WorkspacePanels
-from .shell import WorkspaceShell
-from .viewcube import WorkspaceViewCube
+from mojive.ui.scrollbar_visibility import (
+    DEFAULT_HIDE_DELAY,
+    NativeScrollbarVisibility,
+    normalize_hide_delay,
+)
+from mojive.ui.workspace.design import DESIGN, rail_style
+from mojive.ui.workspace.entities import EntityProjection
+from mojive.ui.workspace.notices import draw_operation_notice
+from mojive.ui.workspace.panel_manager import WorkspacePanels
+from mojive.ui.workspace.shell import WorkspaceShell
+from mojive.ui.workspace.viewcube import WorkspaceViewCube
 
 
 class WorkspaceApp(ViewerApp):
+    def release(self):
+        try:
+            workbench = getattr(self.design, "workbench", None)
+            if workbench is not None:
+                workbench.editor.close()
+        finally:
+            super().release()
+
+    def _draw_center_notice(self, overlay, message, *, border=False):
+        from mojive.ui.workspace.notices import draw_center_notice
+
+        return draw_center_notice(self, overlay, message, border=border)
+
+    def _draw_file_status(self, overlay, message, path, *, padding_pt=12):
+        from mojive.ui.workspace.notices import draw_file_receipt
+
+        return draw_file_receipt(self, overlay, message, path, padding_pt=padding_pt)
+
     def __init__(self, session, backend, window, **kwargs):
+        self.design = kwargs.pop("design", None)
+        if self.design is None:
+            from mojive.design.runtime import DesignRuntime
+
+            self.design = DesignRuntime()
         super().__init__(session, backend, window, **kwargs)
         config = kwargs.get("config")
         self.panels = WorkspacePanels(
@@ -28,12 +55,22 @@ class WorkspaceApp(ViewerApp):
         )
         self.projection = EntityProjection(self)
         self.workspace = WorkspaceShell(self)
+        from mojive.ui.workspace.typography import Typography
+
+        self.workspace.ui.typography = Typography.resolve(self.preferences.get("typography"))
+        self.scrollbar_visibility = NativeScrollbarVisibility(
+            idle_seconds=self.preferences.get("scrollbar_hide_delay", DEFAULT_HIDE_DELAY)
+        )
+        if self.design is not None:
+            from mojive.design.native.presentation import DesignPresentation
+
+            self.workspace.ui.design = DesignPresentation(self.workspace.ui, self.design)
         self._numeric_cancel_frame = -1
         self._selection_status_revision = -1
         self._selection_notice_sequence = None
         self.view_cube = WorkspaceViewCube(self.view_cube.selection_padding)
         self.workspace.cube = self.view_cube
-        self.window._layout_done = True
+        self.window.set_layout_builder(self.workspace.ensure_layout)
         self.gizmo.set_style("2d")
 
     @property
@@ -106,20 +143,50 @@ class WorkspaceApp(ViewerApp):
             super()._panel_context(),
             translate=self.workspace.ui.translate,
             font_report=fonts,
-            rail_style=RAIL_STYLE,
+            rail_style=rail_style(),
+            scrollbar_hide_delay=self.scrollbar_visibility.idle_seconds,
+            set_scrollbar_hide_delay=self.set_scrollbar_hide_delay,
         )
 
+    def set_typography(self, value, *, persist=True):
+        from dataclasses import asdict
+
+        if persist:
+            self.preferences.update({"typography": asdict(value)})
+        self.workspace.ui.typography = value
+
+    def set_scrollbar_hide_delay(self, value: float, *, persist: bool = True) -> None:
+        value = normalize_hide_delay(value)
+        if persist:
+            self.preferences.update({"scrollbar_hide_delay": value})
+        self.scrollbar_visibility.set_idle_seconds(value)
+
     def _draw_main_menu(self):
+        self.scrollbar_visibility.update()
+        self.scrollbar_visibility.sync_visible(self.workspace.open)
         self.projection.refresh_document()
         self.workspace.begin_frame()
 
     def frame(self):
+        imgui.set_current_context(self.window._imgui_context)
         # DockSpace settings must be restored before ImGui starts the next frame.
         if self.workspace.restore_next:
             imgui.set_current_context(self.window._imgui_context)
             imgui.load_ini_settings_from_memory(self.workspace.saved)
             self.workspace.restore_next = False
-        super().frame()
+        if self.design is None:
+            with self.scrollbar_visibility.scope():
+                super().frame()
+        else:
+            with self.design.scope(self.workspace):
+                self.workspace.ui.design.begin_frame()
+                with self.scrollbar_visibility.scope():
+                    super().frame()
+
+    def _present_frame(self, elapsed):
+        if self.design is not None and self.design.workbench is not None:
+            self.design.workbench.draw_overlay(self.workspace)
+        super()._present_frame(elapsed)
 
     def _poll_application_shortcuts(self):
         # A numeric gesture owns Escape before application selection shortcuts.
@@ -194,11 +261,10 @@ class WorkspaceApp(ViewerApp):
 
     def _begin_viewport_panel(self):
         workspace = self.workspace
-        if workspace.needs_layout:
-            workspace.build()
         if workspace.pending:
             workspace.command(workspace.pending)
             workspace.pending = None
+        workspace.ensure_layout()
         # DockBuilder changes must finish before the affected window's Begin/End scope.
         workspace.apply_timeline_layout()
         wc = imgui.WindowClass()
@@ -206,10 +272,17 @@ class WorkspaceApp(ViewerApp):
             0 if workspace.show_viewport_tab else imgui.DockNodeFlags_.auto_hide_tab_bar
         )
         imgui.set_next_window_class(wc)
-        self.viewport_surface.begin("Viewport")
+        with self.scrollbar_visibility.panel_scope("Viewport", window_name="Viewport"):
+            self.viewport_surface.begin("Viewport")
+            self.scrollbar_visibility.bind_current_window()
         if not workspace.bottom_open:
+            from mojive.ui.workspace.viewport import collapsed_bottom_height
+
             width, height = self.viewport_surface.size
-            self.viewport_surface.size = (width, max(20 * workspace.s, height - 38 * workspace.s))
+            self.viewport_surface.size = (
+                width,
+                max(20 * workspace.s, height - collapsed_bottom_height(workspace)),
+            )
 
     def _scene_input_blocked(self):
         if self._numeric_cancel_frame == imgui.get_frame_count():
@@ -231,6 +304,10 @@ class WorkspaceApp(ViewerApp):
         return super()._input_state()
 
     def _draw_viewport_contents(self, preview_name="", *, session_busy=False):
+        with self.scrollbar_visibility.panel_scope("Viewport", window_name="Viewport"):
+            self._draw_owned_viewport_contents(preview_name, session_busy=session_busy)
+
+    def _draw_owned_viewport_contents(self, preview_name="", *, session_busy=False):
         if session_busy:
             # The worker owns Session during a rebuild. Present its last image
             # without projecting entities or reading interaction targets.
@@ -246,7 +323,7 @@ class WorkspaceApp(ViewerApp):
             self._draw_joint_gizmo_picker()
 
     def _draw_workspace_camera_preview(self, preview_name):
-        from .camera_preview import WorkspaceCameraPreview
+        from mojive.ui.workspace.camera_preview import WorkspaceCameraPreview
 
         if not hasattr(self, "_workspace_camera_preview"):
             self._workspace_camera_preview = WorkspaceCameraPreview(self.workspace)
@@ -254,8 +331,9 @@ class WorkspaceApp(ViewerApp):
 
     def reset_layout(self, *, persist=True):
         super().reset_layout(persist=persist)
-        self.window._layout_done = True
-        self.workspace.pending = "reset"
+        from mojive.ui.workspace.docking import reset_visibility
+
+        reset_visibility(self.workspace)
 
     def show_physics_options(self):
         super().show_physics_options()

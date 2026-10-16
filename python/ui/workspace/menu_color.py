@@ -3,27 +3,75 @@
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
-
-from .design import BODY_SIZE, MONO_SIZE
-from .widgets import DIM, MUTED, TEXT
+from mojive.design.native.geometry import Rect
+from mojive.ui.workspace.design import BODY_SIZE, MONO_SIZE
+from mojive.ui.workspace.widgets import DIM, MUTED, TEXT
 
 
 def color_control(menu, entity, x, y, width):
-    from .entities import rgba
+    from mojive.ui.workspace.entities import rgba
 
     u, s = menu.ui, menu.s
     u.text(x, y, "Base color", MUTED, BODY_SIZE)
-    clicked = u.button("material-color", x, y + 22 * s, width / s, 30, filled=True)
+    clicked = u.button(
+        "material-color", x, y + 22 * s, width / s, 30, filled=True, width_limit=width
+    )
+    frame = Rect(*u.hits["material-color"])
+    style = u.component_style("color_input")
+    content = frame.inset(*style.edges("padding", s, (7, 6, 7, 6)))
+    arrow_width = min(12 * s, content.width)
+    size = min(16 * s, content.height, max(0, content.width - arrow_width))
+    gap = min(10 * s, max(0, content.width - arrow_width - size))
+    text_x = content.x + size + gap
+    arrow_x = content.right - arrow_width
+    text_width = max(0, arrow_x - text_x - 4 * s)
+    u.draw.push_clip_rect((content.x, content.y), (content.right, content.bottom), True)
     u.rect(
-        x + 7 * s,
-        y + 29 * s,
-        16 * s,
-        16 * s,
+        content.x,
+        content.y + (content.height - size) / 2,
+        size,
+        size,
         tuple(int(v * 255) for v in rgba(entity["color"])),
         3,
     )
-    u.text(x + 34 * s, y + 31 * s, entity["color"].upper(), TEXT, MONO_SIZE, mono=True)
-    u.role_icon("down", x + width - 23 * s, y + 23 * s, 12 * s, 28 * s, role="inline", c=DIM)
+    u.text(
+        text_x,
+        content.y + max(0, (content.height - MONO_SIZE * s) / 2),
+        entity["color"].upper(),
+        TEXT,
+        MONO_SIZE,
+        mono=True,
+        max_width=text_width,
+    )
+    u.role_icon(
+        "down",
+        arrow_x,
+        content.y,
+        arrow_width,
+        content.height,
+        role="inline",
+        c=DIM,
+    )
+    u.draw.pop_clip_rect()
+    if (
+        imgui.is_item_hovered()
+        and u.measure(entity["color"], MONO_SIZE, mono=True, translate=False) > text_width
+    ):
+        u.tooltip(entity["color"].upper(), translate=False)
+    if u.design is not None:
+        u.design.record(
+            "material-color-content",
+            ("color_input",),
+            frame.tuple(),
+            "color_input_content",
+            owner="material-color",
+            content=content.tuple(),
+            swatchRect=[content.x, content.y + (content.height - size) / 2, size, size],
+            arrowRect=[arrow_x, content.y, arrow_width, content.height],
+            textRect=[text_x, content.y, text_width, content.height],
+            textPresent=text_width > 0,
+            minimumTextWidth=u.measure(entity["color"], MONO_SIZE, mono=True, translate=False),
+        )
     with menu.style(controls=True):
         if (clicked or menu.requested_path == ("Color",)) and not imgui.is_popup_open("Color"):
             menu.color_before = True
@@ -49,6 +97,7 @@ def color_control(menu, entity, x, y, width):
         record = menu.shadow_and_record("Color", ("Color",))
         record["controls"] = {}
         imgui.text_unformatted(u.translate("Base color"))
+        content_w = imgui.get_content_region_avail().x
         changed, values = menu.color_editor.draw(u, "color-editor", entity["rgba"], content_w)
         record["controls"]["picker"] = list(u.hits["color-editor-picker"])
         if "color-editor-hex" in u.hits:

@@ -18,7 +18,7 @@ from mojive.assets import resolve
 from mojive.config import LayoutConfig, ViewerConfig
 from mojive.types import CameraView
 from mojive.ui.workspace.constants import PANELS
-from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.design import DEFAULT_DESIGN
 
 
 def capture(viewer, path: Path):
@@ -43,7 +43,11 @@ def capture(viewer, path: Path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--interactive", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--interactive", action="store_true", help="Open the production workspace (default)"
+    )
+    mode.add_argument("--capture", action="store_true", help="Capture panels and menus, then exit")
     parser.add_argument("--backend", choices=("opengl", "bgfx"), default="opengl")
     parser.add_argument("--asset", default="joint_types")
     parser.add_argument("--output", type=Path, default=Path("output/native-workspace"))
@@ -52,7 +56,7 @@ def main(argv=None):
     parser.add_argument("--language", choices=("en", "zh_CN"), default="zh_CN")
     parser.add_argument("--panel", choices=(*PANELS, "Inspector", "Timeline", "Plot"))
     args = parser.parse_args(argv)
-    if not args.interactive:
+    if args.capture:
         args.output.mkdir(parents=True, exist_ok=True)
         os.environ["MOJIVE_SETTINGS"] = str(args.output / "settings.json")
     viewer = build_workspace(
@@ -61,7 +65,7 @@ def main(argv=None):
         config=ViewerConfig(layout=LayoutConfig(persistence=False), debug_server=False),
         width=args.width,
         height=args.height,
-        show_window=args.interactive,
+        show_window=not args.capture,
     )
     try:
         viewer.app.set_language(args.language)
@@ -81,7 +85,7 @@ def main(argv=None):
             node = next((n for n in viewer.session.nodes if n.name == "hinge_body"), None)
             if node is not None:
                 viewer.session.submit(cmd.SelectNode(node.node_id))
-        if args.interactive:
+        if not args.capture:
             if args.panel is not None:
                 viewer.app.workspace.activate(args.panel)
             viewer.run()
@@ -92,7 +96,7 @@ def main(argv=None):
             "backend": args.backend,
             "size": [args.width, args.height],
             "scale": viewer.window.style_scale,
-            "design": asdict(DESIGN),
+            "design": asdict(viewer.app.design.dimensions(DEFAULT_DESIGN)),
             "states": {},
         }
         states = report["states"]

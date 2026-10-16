@@ -10,6 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from imgui_bundle import imgui
 
+from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.scene.state import (
     apply_camera_bookmark,
     camera_bookmark,
@@ -19,13 +20,11 @@ from mojive.scene.state import (
     next_available_snapshot_name,
     save_named_snapshot,
 )
-
-from ...adapters.base import FrameNeeds, NodeType
-from ...types import CameraView
-from ..camera import DEFAULT_PITCH, DEFAULT_YAW
-from ..camera_tracking import can_track_node
-from ..controls import begin_property_table, clearable_combo, property_row
-from . import (
+from mojive.types import CameraView
+from mojive.ui.camera import DEFAULT_PITCH, DEFAULT_YAW
+from mojive.ui.camera_tracking import can_track_node
+from mojive.ui.controls import begin_property_table, clearable_combo, property_row
+from mojive.ui.panels import (
     Panel,
     PanelContext,
     ValueEdit,
@@ -33,7 +32,7 @@ from . import (
     search_input,
     segmented_control,
 )
-from .value_cards import value_rail
+from mojive.ui.panels.value_cards import value_rail
 
 PRESETS: tuple[tuple[str, float, float], ...] = (
     ("front", -90.0, 0.0),
@@ -83,9 +82,16 @@ class CameraPresentation(Protocol):
 
     def section(self, label: str, flags: int = 0) -> bool: ...
     def begin_table(self, table_id: str) -> bool: ...
-    def row(self, label: str, *, rail: bool = False) -> None: ...
+    def end_table(self) -> None: ...
+    def row(self, label: str, *, rail: bool = False, control_part="input_number") -> None: ...
     def value_rail(self, item_id: str, value: float, bounds, **options) -> ValueEdit: ...
     def segmented(self, item_id: str, labels, selected: int, *, icons=None) -> int: ...
+    def combo(self, key: str, index: int, labels, flags: int = 0, *, preview=None): ...
+    def clearable_combo(self, key: str, preview: str, *, choices=(), **options): ...
+    def choice(self, label: str, selected: bool = False, *, enabled: bool = True): ...
+    def choice_filter(self, key: str, value: str, *, hint: str, clear_tooltip: str): ...
+    def input_text(self, key: str, value: str, flags: int = 0): ...
+    def button(self, label: str, size=None) -> bool: ...
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -145,11 +151,28 @@ class CameraPanel(Panel):
             return
         node = ctx.session.node(ctx.tracking_node_id) if ctx.tracking_node_id is not None else None
         if self._begin_properties(ctx, "tracking_properties"):
-            self._property_label(ctx.tr("Target"))
+            self._property_label(ctx.tr("Target"), control_part="select")
             current = node.name if node is not None else ctx.tr("Choose target")
             imgui.set_next_item_width(-1)
-            imgui.set_next_window_size_constraints((240 * ctx.style_scale, 0), (10000, 10000))
-            with clearable_combo(
+            selected_node = ctx.session.selected_node
+            selected_label = ctx.tr("Use selection")
+            if selected_node is not None:
+                selected_label += f": {selected_node.name}"
+            candidates = tuple(
+                candidate
+                for candidate in ctx.session.nodes
+                if candidate.type in (NodeType.ROBOT, NodeType.LINK)
+                or (candidate.type is NodeType.GEOM and candidate.body_index < 0)
+                or candidate.node_id == ctx.tracking_node_id
+            )
+            combo = self.presentation.clearable_combo if self.presentation else clearable_combo
+            choice = self.presentation.choice if self.presentation else imgui.selectable
+            options = {}
+            if self.presentation:
+                options["choices"] = (selected_label, *(candidate.name for candidate in candidates))
+            else:
+                imgui.set_next_window_size_constraints((240 * ctx.style_scale, 0), (10000, 10000))
+            with combo(
                 "##tracking-target",
                 current,
                 has_value=node is not None,
@@ -157,37 +180,37 @@ class CameraPanel(Panel):
                 tooltip=node.name
                 if node is not None
                 else ctx.tr("Choose an object to start tracking."),
+                **options,
             ) as (opened, cleared):
                 if cleared:
                     ctx.track_node(None)
                 if opened:
-                    selected_node = ctx.session.selected_node
                     imgui.begin_disabled(not can_track_node(selected_node))
-                    selected_label = ctx.tr("Use selection")
-                    if selected_node is not None:
-                        selected_label += f": {selected_node.name}"
-                    if imgui.selectable(selected_label + "##track-selected", False)[0]:
+                    if choice(selected_label + "##track-selected", False)[0]:
                         ctx.track_node(selected_node.node_id)
                     imgui.end_disabled()
-                    imgui.separator()
-                    imgui.set_next_item_width(-1)
-                    _, self._tracking_filter = search_input(
-                        "##tracking-filter",
-                        self._tracking_filter,
-                        hint=ctx.tr("Filter targets"),
-                        search_tooltip=ctx.tr("Filter targets"),
-                        clear_tooltip=ctx.tr("Clear search"),
-                    )
-                    query = self._tracking_filter.casefold()
-                    for candidate in ctx.session.nodes:
-                        primary = candidate.type in (NodeType.ROBOT, NodeType.LINK) or (
-                            candidate.type is NodeType.GEOM and candidate.body_index < 0
+                    if self.presentation:
+                        _, self._tracking_filter = self.presentation.choice_filter(
+                            "##tracking-filter",
+                            self._tracking_filter,
+                            hint=ctx.tr("Filter targets"),
+                            clear_tooltip=ctx.tr("Clear search"),
                         )
-                        if not primary and candidate.node_id != ctx.tracking_node_id:
-                            continue
+                    else:
+                        imgui.separator()
+                        imgui.set_next_item_width(-1)
+                        _, self._tracking_filter = search_input(
+                            "##tracking-filter",
+                            self._tracking_filter,
+                            hint=ctx.tr("Filter targets"),
+                            search_tooltip=ctx.tr("Filter targets"),
+                            clear_tooltip=ctx.tr("Clear search"),
+                        )
+                    query = self._tracking_filter.casefold()
+                    for candidate in candidates:
                         if query not in candidate.name.casefold():
                             continue
-                        if imgui.selectable(
+                        if choice(
                             f"{candidate.name}##tracking-{candidate.node_id}",
                             candidate.node_id == ctx.tracking_node_id,
                         )[0]:
@@ -219,7 +242,7 @@ class CameraPanel(Panel):
             )
             if edit.changed:
                 ctx.set_camera_tracking(replace(ctx.tracking, smoothing=max(0.0, edit.value)))
-            imgui.end_table()
+            self._end_properties()
         if self.presentation is None:
             imgui.separator()
 
@@ -232,8 +255,11 @@ class CameraPanel(Panel):
         view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
 
         imgui.set_next_item_width(-1.0)
-        _changed, self._bookmark_name = imgui.input_text("##bookmark_name", self._bookmark_name)
-        if imgui.button(f"{ctx.tr('Save')}##camera_bookmark"):
+        input_text = (
+            self.presentation.input_text if self.presentation is not None else imgui.input_text
+        )
+        _changed, self._bookmark_name = input_text("##bookmark_name", self._bookmark_name)
+        if self._bookmark_button(ctx, "Save"):
             try:
                 name = next_available_snapshot_name(self._bookmark_name, camera_dir)
                 path = save_named_snapshot(
@@ -255,7 +281,8 @@ class CameraPanel(Panel):
         self._bookmark_index = min(self._bookmark_index, max(len(bookmarks) - 1, 0))
         if bookmarks:
             imgui.set_next_item_width(-1.0)
-            changed, self._bookmark_index = imgui.combo(
+            combo = self.presentation.combo if self.presentation is not None else imgui.combo
+            changed, self._bookmark_index = combo(
                 "##camera_bookmarks", self._bookmark_index, bookmarks
             )
             name = bookmarks[self._bookmark_index]
@@ -268,15 +295,16 @@ class CameraPanel(Panel):
                     ctx.report(f"{ctx.tr('Loaded camera bookmark')} '{name}'", level="success")
                 except (OSError, KeyError, TypeError, ValueError) as error:
                     self._report_storage_error(ctx, error)
-            if imgui.button(f"{ctx.tr('Copy')}##camera_bookmark"):
+            if self._bookmark_button(ctx, "Copy"):
                 try:
                     imgui.set_clipboard_text(
                         json.dumps(load_named_snapshot(name, camera_dir), indent=2)
                     )
                 except (OSError, TypeError, ValueError) as error:
                     self._report_storage_error(ctx, error)
-            imgui.same_line()
-            if imgui.button(f"{ctx.tr('Delete')}##camera_bookmark"):
+            if self.presentation is None:
+                imgui.same_line()
+            if self._bookmark_button(ctx, "Delete"):
                 try:
                     delete_named_snapshot(name, camera_dir)
                     ctx.report(f"{ctx.tr('Deleted camera bookmark')} '{name}'", level="success")
@@ -285,8 +313,14 @@ class CameraPanel(Panel):
 
         if self._bookmark_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._bookmark_error)
-            if imgui.small_button(f"{ctx.tr('Copy error')}##camera_bookmark"):
+            if self._bookmark_button(ctx, "Copy error", small=True):
                 imgui.set_clipboard_text(self._bookmark_error)
+
+    def _bookmark_button(self, ctx, label, *, small=False):
+        if self.presentation is not None:
+            return self.presentation.button(ctx.tr(label))
+        button = imgui.small_button if small else imgui.button
+        return button(f"{ctx.tr(label)}##camera_bookmark")
 
     def _report_storage_error(self, ctx: PanelContext, error: Exception) -> None:
         self._bookmark_error = str(error)
@@ -302,6 +336,17 @@ class CameraPanel(Panel):
             if ctx.model_camera_id < 0
             else by_id.get(ctx.model_camera_id, ctx.tr("missing"))
         )
+        if self.presentation is not None:
+            ids = (-1, *(info.camera_id for info in cameras))
+            labels = (ctx.tr("Editor Camera"), *(info.name for info in cameras))
+            index = ids.index(ctx.model_camera_id) if ctx.model_camera_id in ids else -1
+            imgui.set_next_item_width(-1)
+            changed, selected = self.presentation.combo(
+                "##camera_source", index, labels, preview=f"{ctx.tr('source')}: {current}"
+            )
+            if changed and ctx.select_model_camera is not None:
+                ctx.select_model_camera(ids[selected])
+            return
         imgui.set_next_item_width(-1)
         if not imgui.begin_combo("##camera_source", f"{ctx.tr('source')}: {current}"):
             return
@@ -395,7 +440,7 @@ class CameraPanel(Panel):
                     setattr(camera, attr, edit.value / factor)
             if title == "Lens":
                 self._projection(ctx, camera)
-            imgui.end_table()
+            self._end_properties()
 
     def _projection(self, ctx: PanelContext, camera: Any) -> None:
         ortho = _get(camera, "orthographic")
@@ -446,6 +491,12 @@ class CameraPanel(Panel):
             else segmented_control(item_id, labels, selected, theme=theme, icons=icons)
         )
 
+    def _end_properties(self):
+        if self.presentation:
+            self.presentation.end_table()
+        else:
+            imgui.end_table()
+
     def _begin_properties(self, ctx, str_id):
         if self.presentation:
             return self.presentation.begin_table(str_id)
@@ -465,8 +516,8 @@ class CameraPanel(Panel):
         )
         return begin_property_table(str_id, labels=labels)
 
-    def _property_label(self, label: str, *, rail=False) -> None:
+    def _property_label(self, label: str, *, rail=False, control_part="input_number") -> None:
         if self.presentation:
-            self.presentation.row(label, rail=rail)
+            self.presentation.row(label, rail=rail, control_part=control_part)
         else:
             property_row(label, wrap=True)

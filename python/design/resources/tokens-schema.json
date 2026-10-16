@@ -1,0 +1,558 @@
+{
+  "version": 1,
+  "tokens": {
+    "body_font_size": {
+      "default": 14,
+      "group": "文字",
+      "label": "正文字号",
+      "type": "number",
+      "min": 9,
+      "max": 24,
+      "step": 0.5,
+      "description": "原生界面的正文、标签和分组标题。"
+    },
+    "title_font_size": {
+      "default": 16,
+      "group": "文字",
+      "label": "标题字号",
+      "type": "number",
+      "min": 10,
+      "max": 30,
+      "step": 0.5,
+      "description": "原生界面的对象标题和设置页标题。"
+    },
+    "mono_font_size": {
+      "default": 14,
+      "group": "文字",
+      "label": "数字字号",
+      "type": "number",
+      "min": 9,
+      "max": 24,
+      "step": 0.5,
+      "description": "原生界面的数值输入框和等宽数值。"
+    },
+    "font_family": {
+      "default": "system",
+      "group": "文字",
+      "label": "字体方案",
+      "type": "select",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "系统字体使用本机字体；便携字体使用随稿件提供的 Roboto 和中文回退字体。",
+      "choices": [
+        "system",
+        "portable"
+      ],
+      "choiceLabels": {
+        "system": "系统字体",
+        "portable": "便携字体"
+      }
+    },
+    "control_height": {
+      "default": 28,
+      "group": "间距",
+      "label": "控件高度",
+      "type": "number",
+      "min": 22,
+      "max": 44,
+      "step": 1,
+      "description": "原生共用控件的点击区域高度及数字输入行高度。"
+    },
+    "panel_padding": {
+      "default": 12,
+      "group": "间距",
+      "label": "面板水平内边距",
+      "type": "number",
+      "min": 0,
+      "max": 32,
+      "step": 1,
+      "description": "原生窗口默认的水平内边距。"
+    },
+    "panel_padding_y": {
+      "default": 10,
+      "group": "间距",
+      "label": "面板垂直内边距",
+      "type": "number",
+      "min": 0,
+      "max": 32,
+      "step": 1,
+      "description": "原生窗口默认的垂直内边距。"
+    },
+    "row_gap": {
+      "default": 8,
+      "group": "间距",
+      "label": "行间距",
+      "type": "number",
+      "min": 2,
+      "max": 20,
+      "step": 1,
+      "description": "原生共用数值行的行距及相邻行间距。"
+    },
+    "numeric_gap": {
+      "default": 4,
+      "group": "间距",
+      "label": "数字列间距",
+      "type": "number",
+      "min": 0,
+      "max": 16,
+      "step": 1,
+      "description": "原生数值分组中的列间距。"
+    },
+    "frame_padding_x": {
+      "default": 8,
+      "group": "间距",
+      "label": "控件水平内边距",
+      "type": "number",
+      "min": 2,
+      "max": 20,
+      "step": 1,
+      "description": "原生共用输入框的水平内边距。"
+    },
+    "frame_padding_y": {
+      "default": 8,
+      "group": "间距",
+      "label": "控件垂直内边距",
+      "type": "number",
+      "min": 2,
+      "max": 16,
+      "step": 0.5,
+      "description": "原生默认输入框的垂直内边距。"
+    },
+    "item_spacing_x": {
+      "default": 6,
+      "group": "间距",
+      "label": "元素水平间距",
+      "type": "number",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "description": "原生默认元素水平间距。"
+    },
+    "item_spacing_y": {
+      "default": 8,
+      "group": "间距",
+      "label": "元素垂直间距",
+      "type": "number",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "description": "原生默认元素垂直间距。"
+    },
+    "label_width": {
+      "default": 120,
+      "group": "表单",
+      "label": "标签列最大宽度",
+      "type": "number",
+      "min": 48,
+      "max": 220,
+      "step": 2,
+      "description": "原生共用表单的标签列最大宽度。"
+    },
+    "label_minimum": {
+      "default": 48,
+      "group": "表单",
+      "label": "标签列最小宽度",
+      "type": "number",
+      "min": 24,
+      "max": 100,
+      "step": 2,
+      "description": "标签列低于此宽度时，将标签移至输入框上方。"
+    },
+    "label_gap": {
+      "default": 12,
+      "group": "表单",
+      "label": "标签与输入框间距",
+      "type": "number",
+      "min": 2,
+      "max": 24,
+      "step": 1,
+      "description": "原生共用表单中标签与输入框之间的间距。"
+    },
+    "icon_size": {
+      "default": 18,
+      "group": "图标",
+      "label": "工具栏图标尺寸",
+      "type": "number",
+      "min": 10,
+      "max": 28,
+      "step": 1,
+      "description": "工具栏角色图标画布的通用尺寸；单独设置工具栏角色画布尺寸时，以该设置为准。"
+    },
+    "control_radius": {
+      "default": 6,
+      "group": "圆角",
+      "label": "控件圆角",
+      "type": "number",
+      "min": 0,
+      "max": 16,
+      "step": 0.2,
+      "description": "原生共用自绘矩形及输入框的圆角半径。"
+    },
+    "container_radius": {
+      "default": 8,
+      "group": "圆角",
+      "label": "容器圆角",
+      "type": "number",
+      "min": 0,
+      "max": 24,
+      "step": 0.5,
+      "description": "原生窗口和视口浮层容器的圆角半径。"
+    },
+    "radius_popup": {
+      "default": 8,
+      "group": "圆角",
+      "label": "弹出层圆角",
+      "type": "number",
+      "min": 0,
+      "max": 24,
+      "step": 0.5,
+      "description": "原生弹出层的圆角半径。"
+    },
+    "radius_tab": {
+      "default": 6,
+      "group": "圆角",
+      "label": "标签页圆角",
+      "type": "number",
+      "min": 0,
+      "max": 16,
+      "step": 0.2,
+      "description": "原生停靠标签页的圆角半径。"
+    },
+    "radius_grab": {
+      "default": 4,
+      "group": "圆角",
+      "label": "滑块圆角",
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 0.5,
+      "description": "原生滑动条滑块的圆角半径。"
+    },
+    "radius_scrollbar": {
+      "default": 4,
+      "group": "圆角",
+      "label": "滚动条圆角",
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 0.5,
+      "description": "原生滚动条的圆角半径。"
+    },
+    "radius_child": {
+      "default": 6,
+      "group": "圆角",
+      "label": "子容器圆角",
+      "type": "number",
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "description": "原生设置页导航子容器的圆角半径。"
+    },
+    "icon_activity_canvas": {
+      "default": 24,
+      "group": "图标",
+      "label": "活动栏图标画布",
+      "type": "number",
+      "min": 8,
+      "max": 36,
+      "step": 1,
+      "description": "活动栏角色使用统一的 24 单位母版，按此画布尺寸等比例缩放。"
+    },
+    "icon_activity_slot": {
+      "default": 36,
+      "group": "图标",
+      "label": "活动栏图标默认占位",
+      "type": "number",
+      "min": 16,
+      "max": 48,
+      "step": 1,
+      "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
+    },
+    "icon_title_canvas": {
+      "default": 22,
+      "group": "图标",
+      "label": "标题图标画布",
+      "type": "number",
+      "min": 8,
+      "max": 36,
+      "step": 1,
+      "description": "标题角色使用统一的 24 单位母版，按此画布尺寸等比例缩放。"
+    },
+    "icon_title_slot": {
+      "default": 30,
+      "group": "图标",
+      "label": "标题图标默认占位",
+      "type": "number",
+      "min": 16,
+      "max": 48,
+      "step": 1,
+      "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
+    },
+    "icon_toolbar_canvas": {
+      "default": 18,
+      "group": "图标",
+      "label": "工具栏图标画布",
+      "type": "number",
+      "min": 8,
+      "max": 36,
+      "step": 1,
+      "description": "工具栏角色使用统一的 24 单位母版，按此画布尺寸等比例缩放。"
+    },
+    "icon_toolbar_slot": {
+      "default": 28,
+      "group": "图标",
+      "label": "工具栏图标默认占位",
+      "type": "number",
+      "min": 16,
+      "max": 48,
+      "step": 1,
+      "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
+    },
+    "icon_subtle_canvas": {
+      "default": 16,
+      "group": "图标",
+      "label": "次级操作图标画布",
+      "type": "number",
+      "min": 8,
+      "max": 36,
+      "step": 1,
+      "description": "次级操作角色使用统一的 24 单位母版，按此画布尺寸等比例缩放。"
+    },
+    "icon_subtle_slot": {
+      "default": 28,
+      "group": "图标",
+      "label": "次级操作图标默认占位",
+      "type": "number",
+      "min": 16,
+      "max": 48,
+      "step": 1,
+      "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
+    },
+    "icon_inline_canvas": {
+      "default": 14,
+      "group": "图标",
+      "label": "行内图标画布",
+      "type": "number",
+      "min": 8,
+      "max": 36,
+      "step": 1,
+      "description": "行内角色使用统一的 24 单位母版，按此画布尺寸等比例缩放。"
+    },
+    "icon_inline_slot": {
+      "default": 28,
+      "group": "图标",
+      "label": "行内图标默认占位",
+      "type": "number",
+      "min": 16,
+      "max": 48,
+      "step": 1,
+      "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
+    },
+    "icon_status_canvas": {
+      "default": 12,
+      "group": "图标",
+      "label": "状态栏图标画布",
+      "type": "number",
+      "min": 8,
+      "max": 36,
+      "step": 1,
+      "description": "状态栏角色使用统一的 24 单位母版，按此画布尺寸等比例缩放。"
+    },
+    "icon_status_slot": {
+      "default": 20,
+      "group": "图标",
+      "label": "状态栏图标默认占位",
+      "type": "number",
+      "min": 16,
+      "max": 48,
+      "step": 1,
+      "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
+    },
+    "text_color": {
+      "default": "#e6e8eb",
+      "group": "颜色",
+      "label": "正文颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "muted_color": {
+      "default": "#a9afb7",
+      "group": "颜色",
+      "label": "次级文字颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "dim_color": {
+      "default": "#8e98a5",
+      "group": "颜色",
+      "label": "弱化文字颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "sage_color": {
+      "default": "#9cbf8d",
+      "group": "颜色",
+      "label": "强调颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "amber_color": {
+      "default": "#e8b04f",
+      "group": "颜色",
+      "label": "警告颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "panel_color": {
+      "default": "#1e2125",
+      "group": "颜色",
+      "label": "面板背景颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "input_color": {
+      "default": "#2b2f34",
+      "group": "颜色",
+      "label": "输入框背景颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "border_color": {
+      "default": "#ffffff0d",
+      "group": "颜色",
+      "label": "边框颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    }
+  },
+  "componentFamilies": [
+    "inspector",
+    "timeline",
+    "settings",
+    "menus",
+    "output",
+    "pose",
+    "navigation",
+    "viewport",
+    "chrome"
+  ],
+  "native": {
+    "g3": {
+      "type": "boolean",
+      "default": false,
+      "description": "使用 Mojive 既有的 G3 曲率渐变曲线，统一 Python 提交的原生圆角填充、轮廓和 Draw2D 矩形。ImGui 内部绘制的圆角仍使用标准圆角。",
+      "label": "G3 连续圆角"
+    },
+    "g3_smoothing": {
+      "type": "number",
+      "min": 0.05,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.6,
+      "label": "G3 平滑程度",
+      "description": "G3 曲率渐变段在圆角中的占比，范围为 0.05 至 1。"
+    },
+    "g3_capsule_smoothing": {
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "default": 0.6,
+      "label": "胶囊端部平滑度",
+      "description": "采用 Mojive 胶囊体的曲率渐变端帽；短胶囊自动约束端帽深度。"
+    },
+    "g3_capsule_optical": {
+      "type": "boolean",
+      "default": true,
+      "label": "胶囊端部视觉留白",
+      "description": "按胶囊曲线计算开关圆点的端部留白。"
+    }
+  },
+  "layout": {
+    "application_height": {
+      "min": 28,
+      "max": 64,
+      "step": 1,
+      "label": "应用栏高度",
+      "description": "应用顶部菜单、文档名称及工作区切换区域的高度。",
+      "reference": "从应用顶边量至菜单栏底边；增大会减少下方工作区高度。",
+      "unit": "像素"
+    },
+    "sidebar_width": {
+      "min": 40,
+      "max": 80,
+      "step": 1,
+      "label": "活动栏宽度",
+      "description": "最左侧活动图标导航栏的宽度。",
+      "reference": "从应用左边量至场景面板左边；图标在此区域内居中。",
+      "unit": "像素"
+    },
+    "scene_width": {
+      "min": 180,
+      "max": 480,
+      "step": 4,
+      "label": "左侧面板宽度",
+      "description": "左侧场景等停靠面板的初始宽度。",
+      "reference": "不包含最左侧活动栏；从面板左边量至中央视口左边。",
+      "unit": "像素"
+    },
+    "inspector_width": {
+      "min": 230,
+      "max": 560,
+      "step": 4,
+      "label": "属性检查器宽度",
+      "description": "右侧属性检查器的初始宽度。",
+      "reference": "从中央视口右边量至原生预览右边；不包含设计工作台。",
+      "unit": "像素"
+    },
+    "bottom_height": {
+      "min": 160,
+      "max": 450,
+      "step": 4,
+      "label": "底部面板高度",
+      "description": "底部时间轴、输出及统计面板的初始高度。",
+      "reference": "从中央视口底边量至状态栏顶边；增大会减少视口高度。",
+      "unit": "像素"
+    }
+  },
+  "elements": {
+    "scope": "browser",
+    "description": "单个 HTML 元素的调整保留在导出参数中；原生界面通过共享参数和模块参数应用设计规格。"
+  },
+  "componentFamilyLabels": {
+    "inspector": "属性检查器",
+    "timeline": "时间轴",
+    "settings": "设置",
+    "menus": "菜单与对话框",
+    "output": "输出",
+    "pose": "姿态",
+    "navigation": "场景导航",
+    "viewport": "视口",
+    "chrome": "应用框架"
+  }
+}

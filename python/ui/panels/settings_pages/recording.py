@@ -31,19 +31,31 @@ def draw(panel, ctx: PanelContext) -> None:
         if changed or committed:
             ctx.apply_setting(ctx.set_recording_config, config, persist=committed)
 
+    def choice(identifier, attribute, choices):
+        nonlocal config
+        values, labels = zip(*choices, strict=True)
+        changed, selected = panel._combo(
+            identifier,
+            values.index(getattr(config, attribute)),
+            tuple(ctx.tr(label) for label in labels),
+        )
+        if changed:
+            config = replace(config, **{attribute: values[selected]})
+            ctx.apply_setting(ctx.set_recording_config, config)
+
     if panel._begin_properties("settings_recording"):
-        panel._property(ctx.tr("Copy to clipboard"))
-        changed, value = imgui.checkbox("##capture_clipboard", config.copy_to_clipboard)
+        panel._property(ctx.tr("Copy to clipboard"), control_part="checkbox")
+        changed, value = panel._checkbox("##capture_clipboard", config.copy_to_clipboard)
         imgui.set_item_tooltip(
             ctx.tr("Copy screenshots as images and videos as files after saving.")
         )
         if changed:
             config = replace(config, copy_to_clipboard=value)
             ctx.apply_setting(ctx.set_recording_config, config)
-        panel._property(ctx.tr("Run simulation when recording starts"))
+        panel._property(ctx.tr("Run simulation when recording starts"), control_part="checkbox")
         clock_control = ctx.session.adapter.caps.clock_control
         imgui.begin_disabled(not clock_control)
-        changed, value = imgui.checkbox(
+        changed, value = panel._checkbox(
             "##recording_run_simulation", config.run_simulation and clock_control
         )
         imgui.end_disabled()
@@ -69,32 +81,19 @@ def draw(panel, ctx: PanelContext) -> None:
             "Take videos stop automatically after holding the final frame.",
         )
         number("recording_fps", "Video frame rate", "fps", 1.0, 10.0)
-        panel._property(ctx.tr("Default capture area"))
+        panel._property(ctx.tr("Default capture area"), control_part="select")
         surfaces = tuple(CaptureSurface)
         labels = ("Scene Only", "Viewport with UI", "Entire Window")
-        selected = surfaces.index(config.surface)
-        if imgui.begin_combo("##recording_surface", ctx.tr(labels[selected])):
-            for index, label in enumerate(labels):
-                clicked, _ = imgui.selectable(ctx.tr(label), index == selected)
-                if clicked:
-                    config = replace(config, surface=surfaces[index])
-                    ctx.apply_setting(ctx.set_recording_config, config)
-            imgui.end_combo()
+        choice("##recording_surface", "surface", tuple(zip(surfaces, labels, strict=True)))
         imgui.set_item_tooltip(
             ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
         )
-        imgui.end_table()
+        panel._end_properties()
     panel._group_heading(ctx.tr("Video encoding"))
     if panel._begin_properties("settings_video_encoding"):
-        panel._property(ctx.tr("Rate control"))
+        panel._property(ctx.tr("Rate control"), control_part="select")
         modes = (("quality", "Quality priority"), ("bitrate", "Target bitrate"))
-        label = next(label for value, label in modes if value == config.rate_control)
-        if imgui.begin_combo("##recording_rate_control", ctx.tr(label)):
-            for value, label in modes:
-                if imgui.selectable(ctx.tr(label), value == config.rate_control)[0]:
-                    config = replace(config, rate_control=value)
-                    ctx.apply_setting(ctx.set_recording_config, config)
-            imgui.end_combo()
+        choice("##recording_rate_control", "rate_control", modes)
         imgui.set_item_tooltip(ctx.tr("Encoding settings apply to the next recording."))
         if config.rate_control == "quality":
             panel._property(ctx.tr("Quality (CRF)"))
@@ -114,30 +113,18 @@ def draw(panel, ctx: PanelContext) -> None:
                 5.0,
                 "Target average bitrate; actual bitrate varies with the scene.",
             )
-        panel._property(ctx.tr("Encoding speed"))
+        panel._property(ctx.tr("Encoding speed"), control_part="select")
         presets = (("fast", "Fast"), ("medium", "Balanced"), ("slow", "Slow"))
-        label = next(label for value, label in presets if value == config.encoder_preset)
-        if imgui.begin_combo("##recording_preset", ctx.tr(label)):
-            for value, label in presets:
-                if imgui.selectable(ctx.tr(label), value == config.encoder_preset)[0]:
-                    config = replace(config, encoder_preset=value)
-                    ctx.apply_setting(ctx.set_recording_config, config)
-            imgui.end_combo()
+        choice("##recording_preset", "encoder_preset", presets)
         imgui.set_item_tooltip(
             ctx.tr(
                 "Slower encoding spends more CPU time on compression and may slow live recording."
             )
         )
-        panel._property(ctx.tr("Color sampling"))
+        panel._property(ctx.tr("Color sampling"), control_part="select")
         formats = (("yuv420p", "Compatible (4:2:0)"), ("yuv444p", "Full chroma (4:4:4)"))
-        label = next(label for value, label in formats if value == config.pixel_format)
-        if imgui.begin_combo("##recording_pixel_format", ctx.tr(label)):
-            for value, label in formats:
-                if imgui.selectable(ctx.tr(label), value == config.pixel_format)[0]:
-                    config = replace(config, pixel_format=value)
-                    ctx.apply_setting(ctx.set_recording_config, config)
-            imgui.end_combo()
+        choice("##recording_pixel_format", "pixel_format", formats)
         imgui.set_item_tooltip(
             ctx.tr("4:4:4 preserves fine color detail but requires a compatible player.")
         )
-        imgui.end_table()
+        panel._end_properties()

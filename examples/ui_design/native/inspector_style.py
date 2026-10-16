@@ -79,7 +79,18 @@ class NativeInspectorPresentation:
         self.ui.hits[key] = (x, top, hit_width, height)
         return hit_width, height
 
-    def row(self, label, tooltip="", *, unit="", toggle_unit=None, toggle=False, components=1):
+    def row(
+        self,
+        label,
+        tooltip="",
+        *,
+        unit="",
+        toggle_unit=None,
+        toggle=False,
+        components=1,
+        control_part="input_number",
+        control_labels=(),
+    ):
         imgui.table_next_row()
         imgui.table_next_column()
         p = imgui.get_cursor_screen_pos()
@@ -146,6 +157,56 @@ class NativeInspectorPresentation:
         self._row_unit = unit
         imgui.set_cursor_screen_pos((control_x, control_y))
         imgui.set_next_item_width(max(s, width - (control_x - p.x)))
+
+    @staticmethod
+    def end_table():
+        imgui.end_table()
+
+    @staticmethod
+    def combo(key, index, labels, flags=0):
+        return imgui.combo(key, index, labels, flags)
+
+    @staticmethod
+    def begin_combo(key, preview, flags=0):
+        return imgui.begin_combo(key, preview, flags)
+
+    @staticmethod
+    def choice(label, selected=False, *, enabled=True):
+        return imgui.selectable(label, selected, 0 if enabled else imgui.SelectableFlags_.disabled)
+
+    @staticmethod
+    def end_combo():
+        imgui.end_combo()
+
+    @staticmethod
+    def button(label, size=None):
+        return imgui.button(label) if size is None else imgui.button(label, size)
+
+    @staticmethod
+    def button_row(key, labels, enabled=None):
+        from mojive.ui.panels import button_row_layout, button_width
+
+        widths = tuple(button_width(label) for label in labels)
+        layout = button_row_layout(
+            widths, imgui.get_content_region_avail().x, imgui.get_style().item_spacing.x
+        )
+        pressed = []
+        for index, (label, width, same_row) in enumerate(zip(labels, widths, layout, strict=True)):
+            if same_row:
+                imgui.same_line()
+            imgui.begin_disabled(enabled is not None and not enabled[index])
+            pressed.append(imgui.button(label + "##" + key, (width, 0)))
+            imgui.end_disabled()
+        return tuple(pressed)
+
+    @staticmethod
+    def input_text_multiline(item_id, value, size, flags=0):
+        return imgui.input_text_multiline(item_id, value, size, flags)
+
+    def segmented(self, item_id, labels, selected, *, icons=None):
+        from mojive.ui.panels import segmented_control
+
+        return segmented_control(item_id, labels, selected, icons=icons, theme=self.ctx.theme)
 
     def section(self, label, flags):
         p = imgui.get_cursor_screen_pos()

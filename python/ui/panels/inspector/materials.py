@@ -11,9 +11,16 @@ from mojive import commands as cmd
 from mojive.adapters.base import SceneSource
 from mojive.types import Material
 from mojive.ui.panels import PanelContext
-
-from .fields import _property_button_row, _property_color_edit4, _property_control_row
-from .support import _MATERIAL_PRESETS, _unique_component_name
+from mojive.ui.panels.inspector.fields import (
+    _property_begin_combo,
+    _property_button_row,
+    _property_choice,
+    _property_color_edit4,
+    _property_control_row,
+    _property_end_combo,
+    _property_toggle,
+)
+from mojive.ui.panels.inspector.support import _MATERIAL_PRESETS, _unique_component_name
 
 
 @dataclass(frozen=True)
@@ -46,22 +53,23 @@ def _material_asset_rows(
     assignment_label = material.name if assigned else ctx.tr("inline appearance")
     if not editable:
         imgui.begin_disabled()
-    _property_control_row(ctx, "assigned material")
+    _property_control_row(ctx, "assigned material", control_part="select")
     if not assignment_editable:
         imgui.begin_disabled()
-    if imgui.begin_combo("##assigned_material", assignment_label):
-        selected, _ = imgui.selectable(ctx.tr("inline appearance"), not assigned)
+    if _property_begin_combo(ctx, "##assigned_material", assignment_label):
+        selected, _ = _property_choice(ctx, ctx.tr("inline appearance"), not assigned)
         if selected and assigned:
             assignment = cmd.SetGeometryMaterial(node_id, -1)
         for candidate in compatible_materials:
             candidate_material = source.materials[candidate]
-            selected, _ = imgui.selectable(
+            selected, _ = _property_choice(
+                ctx,
                 candidate_material.name or f"{ctx.tr('material')} {candidate}",
                 candidate == material_index,
             )
             if selected and candidate != material_index:
                 assignment = cmd.SetGeometryMaterial(node_id, candidate)
-        imgui.end_combo()
+        _property_end_combo(ctx)
     if not assignment_editable:
         imgui.end_disabled()
 
@@ -116,8 +124,8 @@ def _material_asset_rows(
 def _material_override_rows(
     ctx: PanelContext, name: str, value: float, enabled_default: float
 ) -> tuple[bool, float]:
-    _property_control_row(ctx, f"{name} override")
-    toggle_changed, enabled = imgui.checkbox(f"##material_{name}_override", value >= 0.0)
+    _property_control_row(ctx, f"{name} override", toggle=True)
+    toggle_changed, enabled = _property_toggle(ctx, f"##material_{name}_override", value >= 0.0)
     if toggle_changed:
         value = enabled_default if enabled else -1.0
     _property_control_row(ctx, name)
@@ -140,14 +148,14 @@ def _material_surface_rows(ctx: PanelContext, material: Material, material_index
     changed, rgba = _property_color_edit4(ctx, "##material_base_color", material.rgba)
     emission, specular = material.emission, material.specular
     shininess, reflectance = material.shininess, material.reflectance
-    _property_control_row(ctx, "preset")
-    if imgui.begin_combo("##material_preset", ctx.tr("Presets...")):
+    _property_control_row(ctx, "preset", control_part="select")
+    if _property_begin_combo(ctx, "##material_preset", ctx.tr("Presets...")):
         for preset, values in _MATERIAL_PRESETS.items():
-            selected, _ = imgui.selectable(preset, False)
+            selected, _ = _property_choice(ctx, preset, False)
             if selected:
                 emission, specular, shininess, reflectance = values
                 changed = True
-        imgui.end_combo()
+        _property_end_combo(ctx)
     _property_control_row(ctx, "emission")
     edited, emission = imgui.drag_float("##material_emission", emission, 0.01, 0.0, 10.0, "%.2f")
     changed |= edited
@@ -186,23 +194,25 @@ def _material_texture_rows(
     """Edit texture sampling without changing any surface parameters."""
     texture = material.texture
     texture_changed = False
-    _property_control_row(ctx, "texture")
-    if imgui.begin_combo("##material_texture", texture or ctx.tr("none")):
+    _property_control_row(ctx, "texture", control_part="select")
+    if _property_begin_combo(ctx, "##material_texture", texture or ctx.tr("none")):
         compatible_textures = (
             ctx.session.model_texture_names(model_id) if model_assets else tuple(source.textures)
         )
         for candidate in (None, *compatible_textures):
-            selected, _ = imgui.selectable(candidate or ctx.tr("none"), candidate == texture)
+            selected, _ = _property_choice(ctx, candidate or ctx.tr("none"), candidate == texture)
             if selected:
                 texture = candidate
                 texture_changed = True
-        imgui.end_combo()
+        _property_end_combo(ctx)
     _property_control_row(ctx, "texture repeat")
     repeat_changed, repeat = imgui.drag_float2(
         "##material_texture_repeat", material.tex_repeat, 0.05, 0.01, 1000.0, "%.2f"
     )
-    _property_control_row(ctx, "uniform texture scale")
-    uniform_changed, uniform = imgui.checkbox("##material_texture_uniform", material.tex_uniform)
+    _property_control_row(ctx, "uniform texture scale", toggle=True)
+    uniform_changed, uniform = _property_toggle(
+        ctx, "##material_texture_uniform", material.tex_uniform
+    )
     if not (texture_changed or repeat_changed or uniform_changed):
         return material
     return replace(

@@ -3,18 +3,26 @@
 from dataclasses import replace
 
 from mojive import commands as cmd
-
-from . import chrome, docking, inspector, panel_host, scene_panels, transactions, viewport
-from .camera_panel import camera_panel
-from .constants import BOTTOM_PANELS, ICONS, LEFT_PANELS, PANELS
-from .localization import workspace_text
-from .menus import Menus
-from .output_panel import WorkspaceOutput
-from .property_style import NativePropertyPresentation
-from .settings_panel import WorkspaceSettings
-from .statistics import WorkspaceStatistics
-from .visibility import PanelVisibility
-from .widgets import DIM, INPUT, LINE, PANEL, SAGE, TEXT, UI
+from mojive.ui.workspace import (
+    chrome,
+    docking,
+    inspector,
+    panel_host,
+    scene_panels,
+    transactions,
+    viewport,
+)
+from mojive.ui.workspace.camera_panel import camera_panel
+from mojive.ui.workspace.constants import BOTTOM_PANELS, ICONS, LEFT_PANELS, PANELS
+from mojive.ui.workspace.localization import workspace_text
+from mojive.ui.workspace.menus import Menus
+from mojive.ui.workspace.output_panel import WorkspaceOutput
+from mojive.ui.workspace.property_style import NativePropertyPresentation
+from mojive.ui.workspace.sensors_panel import WorkspaceSensors
+from mojive.ui.workspace.settings_panel import WorkspaceSettings
+from mojive.ui.workspace.statistics import WorkspaceStatistics
+from mojive.ui.workspace.visibility import PanelVisibility
+from mojive.ui.workspace.widgets import ACCENT, DIM, INPUT, LINE, PANEL, TEXT, UI
 
 
 class WorkspaceShell:
@@ -68,11 +76,16 @@ class WorkspaceShell:
         self.menus = Menus(self, tuple(zip(PANELS, ICONS, strict=True)))
         self.settings = WorkspaceSettings(self)
         app.panels.workspace = self
-        for panel_id in ("sensors", "plot"):
+        for panel_id in ("plot",):
             panel = app.panels.get(panel_id)
             if panel is not None:
                 panel.presentation = NativePropertyPresentation(self.ui, prefix=panel_id)
-        for replacement in (self.settings, WorkspaceOutput(self), WorkspaceStatistics()):
+        for replacement in (
+            self.settings,
+            WorkspaceOutput(self),
+            WorkspaceStatistics(self),
+            WorkspaceSensors(self),
+        ):
             previous = app.panels.get(replacement.id)
             if previous is not None:
                 replacement.enabled = previous.enabled
@@ -89,7 +102,7 @@ class WorkspaceShell:
                     ("bg_child", PANEL),
                     ("bg_frame", INPUT),
                     ("border", LINE),
-                    ("primary", SAGE),
+                    ("primary", ACCENT),
                 )
             },
         )
@@ -153,6 +166,10 @@ class WorkspaceShell:
         self.menus.begin_frame()
         self.ui.hits.clear()
         self.ui.numeric_edits.clear()
+        if self.app.design is not None and self.app.design.workbench is not None:
+            self.app.design.workbench.begin_frame(self)
+            self.app.design.workbench.draw(self)
+            self.app.design.workbench.claim_production_pointer()
         self.chrome()
         # Native menu actions can replace documents or start capture workers.
         # Execute them after all menu and sidebar Begin/End scopes have closed.
@@ -167,6 +184,57 @@ class WorkspaceShell:
         result = {key: list(value) for key, value in self.rects.items()}
         result["viewport_content"] = self.rects.get("viewport_content")
         result["overlays"] = self.rects.get("overlays", [])
+        result["window_size"] = list(self.window.size_pixels)
+        if self.ui.hits:
+            result["hits"] = {
+                str(key): [round(float(v), 2) for v in rect]
+                for key, rect in self.ui.hits.items()
+                if isinstance(rect, (list, tuple))
+                and len(rect) == 4
+                and rect[2] > 0
+                and rect[3] > 0
+            }
+        design = self.app.design
+        if design is not None and (design.workbench is not None or design.observe_components):
+            primitives = getattr(self.ui, "design_primitives", None)
+            raw_records = list(primitives.observed) if primitives else []
+            raw_records.extend(design.observed)
+            components = []
+            seen = set()
+            w, h = self.window.size_pixels
+            window_clip = (0.0, 0.0, float(w), float(h))
+            for record in raw_records:
+                hit = record.get("hit")
+                if not hit or len(hit) != 4:
+                    continue
+                clip = record.get("clip") or window_clip
+                left = max(float(hit[0]), float(clip[0]), 0.0)
+                top = max(float(hit[1]), float(clip[1]), 0.0)
+                right = min(float(hit[0] + hit[2]), float(clip[2]), float(w))
+                bottom = min(float(hit[1] + hit[3]), float(clip[3]), float(h))
+                if right - left < 2 or bottom - top < 2:
+                    continue
+                visible_rect = [
+                    round(left, 2),
+                    round(top, 2),
+                    round(right - left, 2),
+                    round(bottom - top, 2),
+                ]
+                parts = [str(p) for p in record.get("parts", ()) if p]
+                key = str(record.get("key", ""))
+                sig = (key, tuple(parts), tuple(visible_rect))
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                components.append(
+                    {
+                        "key": key,
+                        "parts": parts,
+                        "kind": str(record.get("kind", "")),
+                        "rect": visible_rect,
+                    }
+                )
+            result["components"] = components
         return result
 
     def sidebar(self, name, direction, size):
@@ -186,6 +254,15 @@ class WorkspaceShell:
 
     def build(self):
         return docking.build(self)
+
+    def ensure_layout(self, force=False):
+        if not self.window.config.docking:
+            self.needs_layout = False
+            return
+        if force:
+            self.needs_layout = True
+        if self.needs_layout and not self.window.layout_reset_pending:
+            self.build()
 
     def toggle_timeline(self):
         return docking.toggle_timeline(self)

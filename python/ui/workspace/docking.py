@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from imgui_bundle import imgui
 
-from .constants import BOTTOM_HEIGHT_PT, BOTTOM_PANELS, LEFT_PANELS, PANELS
-from .design import DESIGN
+from mojive.ui.workspace.constants import BOTTOM_PANELS, LEFT_PANELS
+from mojive.ui.workspace.design import DESIGN
 
 
 def toggle_activity(workspace, name):
@@ -69,7 +69,7 @@ def build(workspace):
     )
     if workspace.bottom_open:
         _, workspace.bottom, workspace.center = ii.dock_builder_split_node_py(
-            workspace.center, imgui.Dir.down, min(0.68, BOTTOM_HEIGHT_PT * workspace.s / size.y)
+            workspace.center, imgui.Dir.down, min(0.68, DESIGN.bottom_height * workspace.s / size.y)
         )
         for name in BOTTOM_PANELS:
             ii.dock_builder_dock_window(name, workspace.bottom)
@@ -112,7 +112,9 @@ def apply_timeline_layout(workspace):
         node = window.dock_node if window is not None else None
         if workspace.bottom is None and node is not None:
             _, workspace.bottom, workspace.center = imgui.internal.dock_builder_split_node_py(
-                node.id_, imgui.Dir.down, min(0.68, BOTTOM_HEIGHT_PT * workspace.s / node.size.y)
+                node.id_,
+                imgui.Dir.down,
+                min(0.68, DESIGN.bottom_height * workspace.s / node.size.y),
             )
         if workspace.bottom is not None:
             for name in BOTTOM_PANELS:
@@ -120,20 +122,27 @@ def apply_timeline_layout(workspace):
             imgui.internal.dock_builder_finish(workspace.window.dockspace_id)
 
 
+def reset_visibility(workspace):
+    """Reset local panel state; native docking is rebuilt by the next frame."""
+    for name in workspace.open:
+        panel = workspace.app.panels.get(name)
+        workspace.open[name] = name == "Scene" and panel is not None and panel.enabled
+    inspector = workspace.app.panels.get("Inspector")
+    workspace.open.update(Inspector=inspector is not None and inspector.enabled, Timeline=False)
+    workspace.left_active = workspace.active = "Scene"
+    workspace.float_next = False
+    workspace.focus_next = "Scene"
+    workspace.bottom_focus = None
+    workspace.restore_next = False
+    workspace.pending = None
+    workspace.needs_layout = True
+    workspace.timeline_layout_pending = False
+
+
 def command(workspace, action):
     ii = imgui.internal
     if action == "reset":
-        for n in PANELS:
-            panel = workspace.app.panels.get(n)
-            workspace.open[n] = n == "Scene" and panel is not None and panel.enabled
-        panel = workspace.app.panels.get("Inspector")
-        workspace.open.update(Inspector=panel is not None and panel.enabled, Timeline=False)
-        workspace.left_active = workspace.active = "Scene"
-        workspace.float_next = False
-        workspace.focus_next = "Scene"
-        workspace.bottom_focus = None
-        workspace.restore_next = False
-        workspace.build()
+        workspace.app.reset_layout()
     elif action == "float":
         workspace.open["Inspector"] = True
         workspace.float_next = True

@@ -57,7 +57,7 @@ class ReferenceSettings(SettingsPanel):
         imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
         return True
 
-    def _property(self, label):
+    def _property(self, label, *, control_part="input_number"):
         self._control_padding()
         s = self.study.s
         compact = imgui.table_get_column_count() == 1
@@ -69,7 +69,7 @@ class ReferenceSettings(SettingsPanel):
         imgui.text_disabled(label)
         imgui.pop_text_wrap_pos()
         imgui.table_next_column()
-        if label in self._checkbox_labels:
+        if control_part == "checkbox" or label in self._checkbox_labels:
             self._control_padding(checkbox=True)
             if not compact:
                 imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 5 * s)

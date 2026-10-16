@@ -18,16 +18,18 @@ from mojive.types import DEFAULT_HEADLIGHT, Environment, LightType, TextureType
 from mojive.ui.panels import (
     PanelContext,
     button_width,
-    segmented_control,
 )
-
-from .fields import (
+from mojive.ui.panels.inspector.fields import (
     _begin_property_table,
+    _end_property_table,
+    _property_button,
     _property_color_edit3,
+    _property_combo,
     _property_control_row,
     _property_integer,
     _property_numeric,
     _property_section,
+    _property_segmented,
     _property_toggle,
     _property_value_rail,
     _property_vector_row,
@@ -63,8 +65,9 @@ class _Environment:
         ):
             _property_control_row(ctx, "enabled", toggle=True)
             active_changed, active = _property_toggle(ctx, "##light_enabled", light.active)
-            _property_control_row(ctx, "type")
-            kind_changed, kind_index = imgui.combo(
+            _property_control_row(ctx, "type", control_part="select")
+            kind_changed, kind_index = _property_combo(
+                ctx,
                 "##light_type",
                 int(light.type),
                 ("directional", "point", "spot", "area", "image"),
@@ -84,10 +87,10 @@ class _Environment:
                 ]
                 texture_index = textures.index(light.texture) if light.texture in textures else 0
                 texture_changed = False
-                _property_control_row(ctx, "texture")
+                _property_control_row(ctx, "texture", control_part="select")
                 if textures:
-                    texture_changed, texture_index = imgui.combo(
-                        "##light_texture", texture_index, textures
+                    texture_changed, texture_index = _property_combo(
+                        ctx, "##light_texture", texture_index, textures
                     )
                     texture = textures[texture_index]
                 else:
@@ -122,7 +125,7 @@ class _Environment:
                     or ambient_changed
                     or shadow_changed
                 )
-            imgui.end_table()
+            _end_property_table(ctx)
 
         if _property_section(ctx, "light transform") and _begin_property_table(
             "insp_light_transform", ctx=ctx
@@ -153,7 +156,7 @@ class _Environment:
                 fmt="%.3f",
                 reset_values=np.array((0.0, 0.0, -1.0)),
             )
-            imgui.end_table()
+            _end_property_table(ctx)
             changed |= pos_changed or dir_changed
 
         range_changed = cutoff_changed = exponent_changed = attenuation_changed = False
@@ -199,7 +202,7 @@ class _Environment:
                 area_changed, area_radius = _property_numeric(
                     ctx, "##light_area_radius", light.area_radius, 0.01, 0.0, 1000.0, "%.3f"
                 )
-            imgui.end_table()
+            _end_property_table(ctx)
 
         if (
             ctx.session.adapter.caps.simulation
@@ -213,7 +216,7 @@ class _Environment:
             if lock_changed:
                 ctx.session.set_entity_gizmo_lock(node, locked)
             imgui.set_item_tooltip(ctx.tr("Lock gizmo while simulation runs"))
-            imgui.end_table()
+            _end_property_table(ctx)
         changed |= (
             range_changed
             or cutoff_changed
@@ -250,7 +253,8 @@ class _Environment:
     def _environment(self, ctx: PanelContext) -> None:
         caps = ctx.session.adapter.caps
         if caps.simulation or caps.supports("physics.options"):
-            self._environment_tab = segmented_control(
+            self._environment_tab = _property_segmented(
+                ctx,
                 "##environment-category",
                 (ctx.tr("Rendering"), ctx.tr("Physics")),
                 self._environment_tab,
@@ -280,13 +284,14 @@ class _Environment:
         ):
             _property_control_row(ctx, "enabled", toggle=True)
             self._render_flag(ctx, RenderFlag.SKYBOX, "##environment-skybox-enabled")
-            _property_control_row(ctx, "texture")
-            skybox_changed, skybox_index = imgui.combo(
+            _property_control_row(ctx, "texture", control_part="select")
+            skybox_changed, skybox_index = _property_combo(
+                ctx,
                 "##environment-skybox-texture",
                 skybox_index,
                 [name or ctx.tr("none") for name in skyboxes],
             )
-            imgui.end_table()
+            _end_property_table(ctx)
             if skybox_changed:
                 self._submit_edit(ctx, cmd.SetSkybox(skyboxes[skybox_index]))
 
@@ -299,7 +304,7 @@ class _Environment:
                 ctx, "##environment-ambient-color", ambient
             )
             changed |= ambient_changed
-            imgui.end_table()
+            _end_property_table(ctx)
 
         headlight_enabled = environment.headlight is not None
         headlight = environment.headlight or DEFAULT_HEADLIGHT
@@ -330,7 +335,7 @@ class _Environment:
             headlight_ambient_changed, headlight_ambient = _property_color_edit3(
                 ctx, "##environment-headlight-ambient", headlight_ambient
             )
-            imgui.end_table()
+            _end_property_table(ctx)
             changed |= (
                 enabled_changed
                 or color_changed
@@ -357,7 +362,7 @@ class _Environment:
             fog_end_changed, fog_end = _property_numeric(
                 ctx, "##environment-fog-end", fog_end, 0.05, 0.0, 1e6, "%.2f m"
             )
-            imgui.end_table()
+            _end_property_table(ctx)
             changed |= fog_color_changed or fog_start_changed or fog_end_changed
 
         haze_mode = int(environment.horizon_haze)
@@ -367,8 +372,9 @@ class _Environment:
         if _property_section(ctx, "haze") and _begin_property_table("environment_haze", ctx=ctx):
             _property_control_row(ctx, "enabled", toggle=True)
             self._render_flag(ctx, RenderFlag.HAZE, "##environment-haze-enabled")
-            _property_control_row(ctx, "Mode")
-            mode_changed, haze_mode = imgui.combo(
+            _property_control_row(ctx, "Mode", control_part="select")
+            mode_changed, haze_mode = _property_combo(
+                ctx,
                 "##environment-haze-mode",
                 haze_mode,
                 (ctx.tr("volumetric"), ctx.tr("horizon")),
@@ -397,7 +403,7 @@ class _Environment:
                 slices_changed, haze_slices = _property_integer(
                     ctx, "##environment-haze-slices", haze_slices, 1.0, 3, 512, "%d"
                 )
-            imgui.end_table()
+            _end_property_table(ctx)
             changed |= haze_color_changed or haze_density_changed or mode_changed or slices_changed
 
         horizon_haze = bool(haze_mode)
@@ -520,12 +526,13 @@ class _Environment:
             fov_changed, fov = fields[0].changed, fields[0].value
             near_changed, near = fields[1].changed, fields[1].value
             far_changed, far = fields[2].changed, fields[2].value
-            _property_control_row(ctx, ctx.tr("projection"))
+            _property_control_row(ctx, ctx.tr("projection"), control_part="segment")
             imgui.set_next_item_width(-1)
             projection = 1 if orthographic else 0
             supported = ctx.backend.caps.orthographic
             imgui.begin_disabled(not supported)
-            selected_projection = segmented_control(
+            selected_projection = _property_segmented(
+                ctx,
                 f"camera-inspector-projection-{node.node_id}",
                 (ctx.tr("persp"), ctx.tr("ortho")),
                 projection,
@@ -553,7 +560,7 @@ class _Environment:
                     unit="m",
                 )
                 height_changed, ortho_height = height_edit.changed, height_edit.value
-            imgui.end_table()
+            _end_property_table(ctx)
 
         if _property_section(ctx, "camera behavior") and _begin_property_table(
             "insp_camera_behavior", ctx=ctx
@@ -561,8 +568,8 @@ class _Environment:
             if ctx.select_model_camera is not None:
                 active = ctx.model_camera_id == info.camera_id
                 label = "Editor Camera" if active else "View Camera"
-                _property_control_row(ctx, "camera view")
-                if imgui.button(ctx.tr(label), imgui.ImVec2(-1.0, 0.0)):
+                _property_control_row(ctx, "camera view", control_part="button")
+                if _property_button(ctx, ctx.tr(label), imgui.ImVec2(-1.0, 0.0)):
                     ctx.select_model_camera(-1 if active else info.camera_id)
                 imgui.set_item_tooltip(
                     ctx.tr("Return to Editor Camera" if active else "View Through Camera")
@@ -589,7 +596,7 @@ class _Environment:
                 imgui.set_item_tooltip(ctx.tr("Show Camera Preview"))
                 if changed:
                     ctx.camera_preview.set_enabled(enabled)
-            imgui.end_table()
+            _end_property_table(ctx)
 
         if any(
             (
@@ -641,7 +648,8 @@ class _Environment:
         actions_width = button_width(sync_label) + button_width(paste_label) + gap
         inline = width >= actions_width + 120 * ctx.style_scale + gap
         imgui.set_next_item_width(max(1, width - actions_width - gap) if inline else -1)
-        changed, slot = imgui.combo(
+        changed, slot = _property_combo(
+            ctx,
             "##camera-sync-source",
             ids.index(self._camera_sync_source),
             tuple(item[1] for item in sources),
@@ -651,7 +659,7 @@ class _Environment:
         if inline:
             imgui.same_line()
         imgui.begin_disabled(self._camera_sync_source < 0 and ctx.camera is None)
-        sync = imgui.button(sync_label + "##camera-sync")
+        sync = _property_button(ctx, sync_label + "##camera-sync")
         imgui.end_disabled()
         if sync:
             source = (
@@ -663,7 +671,7 @@ class _Environment:
                 self._submit_edit(ctx, cmd.SetSceneCamera(camera_info.camera_id, source))
         if actions_width <= width:
             imgui.same_line()
-        if imgui.button(paste_label + "##camera-paste"):
+        if _property_button(ctx, paste_label + "##camera-paste"):
             try:
                 bookmark = json.loads(imgui.get_clipboard_text())
                 if not isinstance(bookmark, dict):

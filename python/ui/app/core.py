@@ -535,6 +535,10 @@ class ViewerApp(
         if self.window is None:
             self.window = Window(WindowConfig(title=self.title))
             self.window.apply_theme(self.theme)
+        # A parameter editor may own the current context before the first frame.
+        # Initial scene uploads must use the viewer's render context.
+        self.window.make_current()
+        imgui.set_current_context(self.window._imgui_context)
         self.window.clipboard_publisher = self._capture_clipboard
         self._sync_structure()
         if not self._initial_camera_set:

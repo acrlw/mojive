@@ -9,7 +9,14 @@ _PAGE_MIN_WIDTH_PT = 224.0
 _COLUMN_GAP_PT = 8.0
 
 _CATEGORY_SEARCH_TERMS = {
-    "General": ("language", "ui font", "cjk font", "model realtime rebuild apply"),
+    "General": (
+        "language",
+        "ui font",
+        "cjk font",
+        "numeric output typography 字体 字号 数值 输出",
+        "model realtime rebuild apply",
+        "scrollbar hide delay 滚动条 隐藏 延迟",
+    ),
     "Camera": (
         "focus distance margin transition duration easing curve zoom speed mode minimum maximum limits 相机 聚焦 距离 过渡 时长 曲线 缩放 速度 上限 下限",
     ),

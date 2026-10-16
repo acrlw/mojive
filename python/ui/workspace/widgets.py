@@ -4,46 +4,61 @@ from types import SimpleNamespace
 
 from imgui_bundle import imgui
 
+from mojive.design.native.geometry import Rect
 from mojive.ui.compound_fields import draw_focus_frame
 from mojive.ui.controls import segmented_control
+from mojive.ui.design_palette import rgba8
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.interaction_paint import ItemPaint, draw_switch
 from mojive.ui.text_layout import fit_text, text_line_y
 from mojive.ui.theme import THEME
-
-from .design import BODY_SIZE, CONTROL_RADIUS, RAIL_STYLE
-from .numeric_fields import NumericEditState as NumericEditState
-from .numeric_fields import NumericGroupLayout as NumericGroupLayout
-from .numeric_fields import _NumericFields
-from .widget_icons import GLYPHS as GLYPHS
-from .widget_icons import ICON_GRID as ICON_GRID
-from .widget_icons import ICON_ROLES, IconRole, draw_icon, icon_role_canvas
-from .widget_icons import ICON_STROKE as ICON_STROKE
-from .widget_icons import IconRoleSpec as IconRoleSpec
-from .widget_icons import icon_geometry as icon_geometry
-from .widget_style import AMBER as AMBER
-from .widget_style import (
+from mojive.ui.workspace.component_style import ComponentStyles
+from mojive.ui.workspace.design import (
+    BODY_SIZE,
+    CONTROL_RADIUS,
+    DESIGN,
+    MONO_SIZE,
+    RAIL_STYLE,
+    TITLE_SIZE,
+)
+from mojive.ui.workspace.numeric_fields import NumericEditState as NumericEditState
+from mojive.ui.workspace.numeric_fields import NumericGroupLayout as NumericGroupLayout
+from mojive.ui.workspace.numeric_fields import _NumericFields
+from mojive.ui.workspace.typography import Typography
+from mojive.ui.workspace.widget_icons import GLYPHS as GLYPHS
+from mojive.ui.workspace.widget_icons import ICON_GRID as ICON_GRID
+from mojive.ui.workspace.widget_icons import ICON_ROLES, IconRole, draw_icon, icon_role_canvas
+from mojive.ui.workspace.widget_icons import ICON_STROKE as ICON_STROKE
+from mojive.ui.workspace.widget_icons import IconRoleSpec as IconRoleSpec
+from mojive.ui.workspace.widget_icons import icon_geometry as icon_geometry
+from mojive.ui.workspace.widget_style import (
+    ACCENT,
     CONTROL_THEME,
     DIM,
     INPUT,
     LINE,
     MUTED,
     PANEL,
-    SAGE,
     SWITCH_HEIGHT,
     SWITCH_WIDTH,
     TEXT,
     install_fonts,
     install_style,
 )
-from .widget_style import font_config as font_config
+from mojive.ui.workspace.widget_style import AMBER as AMBER
+from mojive.ui.workspace.widget_style import SAGE as SAGE
+from mojive.ui.workspace.widget_style import font_config as font_config
 
 
 def color(c):
     return imgui.get_color_u32(imgui.ImVec4(*(v / 255 for v in c)))
 
 
-class UI(_NumericFields):
+class UI(ComponentStyles, _NumericFields):
+    design = None
+    typography = Typography()
+
     def __init__(self, window, *, portable_fonts=False):
         self.window = window
         self.s = window.style_scale
@@ -53,6 +68,7 @@ class UI(_NumericFields):
         install_style(self.s)
         self.hits = {}
         self.numeric_edits = {}
+        self.design = None
         self.value_context = SimpleNamespace(
             style_scale=self.s,
             rail_style=RAIL_STYLE,
@@ -62,8 +78,25 @@ class UI(_NumericFields):
         )
 
     @property
+    def numeric_font(self):
+        return self.mono if self.typography.numeric.family == "mono" else self.body
+
+    @property
+    def output_font(self):
+        return self.mono if self.typography.output.family == "mono" else self.body
+
+    @property
     def draw(self):
         return imgui.get_window_draw_list()
+
+    def metric(self, part, field, fallback):
+        if field == "fontSize":
+            size = self.typography.size_for((part,))
+            if size is not None:
+                return size
+        if self.design is None:
+            return fallback
+        return self.design.runtime.metric(part, field, fallback, family=self.design.family())
 
     def text(
         self,
@@ -79,9 +112,20 @@ class UI(_NumericFields):
         max_width=None,
         translate=True,
         native_line=False,
+        font_resolved=False,
     ):
         """Center cap height in the requested line box, retaining a common text baseline."""
-        font = self.mono if mono else self.bold if bold else self.body
+        if self.design is not None:
+            if not font_resolved and size == BODY_SIZE:
+                size = self.design.text_size(
+                    self.design.runtime.value(
+                        "mono_font_size" if mono else "body_font_size", self.design.family()
+                    )
+                )
+            elif not font_resolved and size == TITLE_SIZE:
+                size = self.design.runtime.value("title_font_size", self.design.family())
+            c = self.design.runtime.ink(c)
+        font = self.numeric_font if mono else self.bold if bold else self.body
         draw_list = draw or self.draw
         imgui.push_font(font, size * self.s)
         painter = ImguiDraw2D(draw_list)
@@ -97,19 +141,70 @@ class UI(_NumericFields):
         )
         imgui.pop_font()
 
-    def measure(self, text, size=BODY_SIZE, *, translate=True):
-        imgui.push_font(self.body, size * self.s)
+    def measure(
+        self, text, size=BODY_SIZE, *, translate=True, font_resolved=False, mono=False, bold=False
+    ):
+        if not font_resolved and self.design is not None and size == BODY_SIZE:
+            size = self.design.runtime.value(
+                "mono_font_size" if mono else "body_font_size", self.design.family()
+            )
+        elif not font_resolved and self.design is not None and size == TITLE_SIZE:
+            size = self.design.runtime.value("title_font_size", self.design.family())
+        imgui.push_font(
+            self.numeric_font if mono else self.bold if bold else self.body, size * self.s
+        )
         width = imgui.calc_text_size(self.translate(text) if translate else text).x
         imgui.pop_font()
         return width
 
     def line(self, x, y, w):
-        self.draw.add_line((x, y), (x + w, y), color(LINE), self.s)
+        thickness = self.metric("separator", "thickness", 1) * self.s
+        inset = min(w / 2, self.metric("separator", "margin", 0) * self.s)
+        self.draw.add_line((x + inset, y), (x + w - inset, y), color(LINE), thickness)
+        if self.design is not None:
+            self.design.record(
+                f"separator/{x:g}/{y:g}",
+                ("separator",),
+                (x + inset, y, max(0, w - 2 * inset), thickness),
+                "separator",
+            )
 
-    def rect(self, x, y, w, h, c, r=CONTROL_RADIUS):
-        self.draw.add_rect_filled((x, y), (x + w, y + h), color(c), r * self.s)
+    def rect(self, x, y, w, h, c, r=CONTROL_RADIUS, *, draw=None):
+        if w <= 0 or h <= 0:
+            return
+        draw = self.draw if draw is None else draw
+        if self.design is not None:
+            c = self.design.runtime.ink(c)
+            if r == CONTROL_RADIUS and not self.design.runtime.paint_context.paint_depth:
+                r = DESIGN.control_radius
+            if self.design.runtime.spec["native"]["g3"] and r > 0:
+                rgba = (
+                    *tuple(channel / 255 for channel in c[:3]),
+                    c[3] / 255 * imgui.get_style().alpha,
+                )
+                if r * self.s >= min(w, h) / 2 - 1e-6:
+                    from mojive.geometry2d.curves import smooth_capsule_points
+
+                    ImguiDraw2D(draw).convex_fill(
+                        smooth_capsule_points(
+                            x, y, w, h, self.design.runtime.spec["native"]["g3_capsule_smoothing"]
+                        ),
+                        rgba,
+                    )
+                    return
+                ImguiDraw2D(draw).rect_filled(
+                    (x, y),
+                    (x + w, y + h),
+                    rgba,
+                    rounding=r * self.s,
+                    smoothing=self.design.runtime.spec["native"]["g3_smoothing"],
+                )
+                return
+        draw.add_rect_filled((x, y), (x + w, y + h), color(c), r * self.s)
 
     def icon(self, name, x, y, size=16, c=MUTED, draw=None):
+        if self.design is not None:
+            c = self.design.runtime.ink(c)
         draw_icon(draw or self.draw, name, x, y, size, c, self.s)
 
     def role_icon(
@@ -161,10 +256,36 @@ class UI(_NumericFields):
         align="center",
         background=True,
         translate=True,
+        width_limit=None,
     ):
         s = self.s
         icon_role = icon_role or ("inline" if label else "toolbar")
+        if self.design is not None:
+            return self.design.button(
+                key,
+                x,
+                y,
+                w,
+                h,
+                icon=icon,
+                label=label,
+                active=active,
+                filled=filled,
+                enabled=enabled,
+                tooltip=tooltip,
+                text_color=text_color,
+                icon_color=icon_color,
+                solid=solid,
+                icon_size=icon_size,
+                icon_role=icon_role,
+                align=align,
+                background=background,
+                translate=translate,
+                width_limit=width_limit,
+            )
         w *= s
+        if width_limit is not None:
+            w = min(w, max(0, width_limit))
         h *= s
         imgui.set_cursor_screen_pos((x, y))
         original_alpha = imgui.get_style().alpha
@@ -178,15 +299,17 @@ class UI(_NumericFields):
         held = imgui.is_item_active()
         self.hits[key] = (x, y, w, h)
         if background and held:
-            self.rect(x, y, w, h, (130, 164, 116, 255) if active and solid else (156, 191, 141, 55))
+            self.rect(
+                x, y, w, h, rgba8("primary_dim") if active and solid else rgba8("primary", 55)
+            )
         elif background and active:
-            self.rect(x, y, w, h, SAGE if solid else (156, 191, 141, 42 if hovered else 30))
+            self.rect(x, y, w, h, ACCENT if solid else rgba8("primary", 42 if hovered else 30))
         elif background and hovered:
             self.rect(x, y, w, h, (255, 255, 255, 12))
         elif background and filled:
             self.rect(x, y, w, h, INPUT)
         c = text_color or (
-            (30, 40, 27, 255) if active and solid else SAGE if active else TEXT if label else MUTED
+            rgba8("child") if active and solid else ACCENT if active else TEXT if label else MUTED
         )
         shown = ""
         translated_label = self.translate(label) if translate else label
@@ -266,6 +389,172 @@ class UI(_NumericFields):
         imgui.end_disabled()
         return hit
 
+    def input_text(
+        self,
+        key,
+        x,
+        y,
+        w,
+        value,
+        *,
+        flags=0,
+        hint="",
+        enabled=True,
+        parts="input_text",
+        icon=None,
+        mono=False,
+    ):
+        """Use the same field painter for settings, inspectors and source text."""
+        if self.design is not None:
+            painter = self.design.primitives
+            painter.family = self.design.family()
+            style = self.component_style(parts)
+            margin = style.edges("margin", self.s)
+            height = (
+                painter.field_height(parts, DESIGN.control_height) * self.s + margin[1] + margin[3]
+            )
+            result = painter.input_text(
+                key,
+                Rect(x, y, w, height),
+                value,
+                flags=flags,
+                hint=hint,
+                enabled=enabled,
+                parts=parts,
+                icon=icon,
+                mono=mono,
+            )
+            return result.changed, result.value
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.set_next_item_width(max(1, w))
+        if mono:
+            imgui.push_font(self.numeric_font, (self.typography.numeric.size or MONO_SIZE) * self.s)
+        changed, out = imgui.input_text(key, value, flags)
+        if mono:
+            imgui.pop_font()
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        return changed, out
+
+    def search(self, key, x, y, w, value, *, hint=""):
+        if self.design is not None:
+            return self.input_text(
+                key, x, y, w, value, hint=hint, parts=("input_text", "search"), icon="search"
+            )
+        from mojive.ui.controls import search_input
+
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.set_next_item_width(w)
+        result = search_input(key, value, hint=hint)
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        return result
+
+    def begin_combo(self, key, x, y, w, preview, *, flags=0, enabled=True, popup_width=0):
+        if self.design is not None:
+            painter = self.design.primitives
+            painter.family = self.design.family()
+            style = self.component_style("select")
+            margin = style.edges("margin", self.s)
+            height = (
+                painter.field_height("select", DESIGN.control_height) * self.s
+                + margin[1]
+                + margin[3]
+            )
+            opened, _ = painter.begin_combo(
+                key,
+                Rect(x, y, w, height),
+                preview,
+                flags=flags,
+                enabled=enabled,
+                popup_width=popup_width,
+            )
+            return opened
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.set_next_item_width(max(1, w))
+        if not enabled:
+            imgui.begin_disabled()
+        opened = imgui.begin_combo(key if key.startswith("##") else "##" + key, preview, flags)
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        if not enabled:
+            if opened:
+                imgui.close_current_popup()
+                imgui.end_combo()
+                opened = False
+            imgui.end_disabled()
+        return opened
+
+    def combo(self, key, x, y, w, index, labels, *, flags=0, preview=None):
+        selected = max(0, min(index, len(labels) - 1)) if labels else 0
+        popup_width = 0
+        if self.design is not None:
+            from mojive.ui.workspace.popup_style import menu_choice_width
+
+            popup_width = menu_choice_width(self, labels, index)
+        opened = self.begin_combo(
+            key,
+            x,
+            y,
+            w,
+            (labels[selected] if labels else "") if preview is None else preview,
+            flags=flags,
+            popup_width=popup_width,
+        )
+        chosen = index
+        if opened:
+            if self.design is not None:
+                from mojive.ui.workspace.menu_item import Item
+                from mojive.ui.workspace.menu_rows import advance_menu_row, paint_menu_row
+                from mojive.ui.workspace.popup_style import menu_popup_content
+
+                with menu_popup_content(self, key, part="select_popup") as content:
+                    for n, label in enumerate(labels):
+                        row = paint_menu_row(
+                            self,
+                            Item(str(label), checked=n == index),
+                            f"{key}/choice/{n}",
+                            content_right=content.content.right,
+                            part="select_option",
+                        )
+                        if row.activated:
+                            chosen = n
+                        advance_menu_row(self, row, part="select_popup")
+            else:
+                for n, label in enumerate(labels):
+                    if imgui.selectable(self.translate(str(label)), n == index)[0]:
+                        chosen = n
+            imgui.end_combo()
+        return chosen != index, chosen
+
+    def checkbox(self, key, x, y, value, *, enabled=True, label="", width=None):
+        if self.design is not None:
+            painter = self.design.primitives
+            painter.family = self.design.family()
+            result = painter.checkbox(key, x, y, value, enabled=enabled, label=label, width=width)
+            return result.changed, result.value
+        imgui.set_cursor_screen_pos((x, y))
+        padding_y = max(0, (DESIGN.checkbox_size * self.s - imgui.get_font_size()) / 2)
+        imgui.push_style_var(imgui.StyleVar_.frame_padding, (2 * self.s, padding_y))
+        imgui.begin_disabled(not enabled)
+        changed, value = imgui.checkbox(label + "###" + key if label else key, value)
+        imgui.end_disabled()
+        imgui.pop_style_var()
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        return changed, value
+
+    def segment_height(self):
+        style = self.component_style("segment")
+        margin, padding = style.edges("margin", self.s), style.edges("padding", self.s)
+        return (
+            max(DESIGN.control_height, DESIGN.body_size) * self.s
+            + margin[1]
+            + margin[3]
+            + padding[1]
+            + padding[3]
+        )
+
     def segmented(
         self,
         key,
@@ -298,28 +587,93 @@ class UI(_NumericFields):
             if tooltips is not None and imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
                 self.tooltip(tooltips[index])
 
-        imgui.push_font(self.body, BODY_SIZE * self.s)
-        padding_y = max(0, (28 * self.s - imgui.get_font_size()) / 2)
-        padding_x = (6 if layout == "content" else 8) * self.s
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, (padding_x, padding_y))
-        imgui.push_style_var(imgui.StyleVar_.frame_rounding, CONTROL_RADIUS * self.s)
-        imgui.set_cursor_screen_pos((x, y))
+        style = self.component_style("segment")
+        font_size = DESIGN.body_size
+        height = max(DESIGN.control_height, font_size)
+        radius = DESIGN.control_radius
+        margin, padding = style.edges("margin", self.s), style.edges("padding", self.s)
+        box = self.component_box(
+            "segment",
+            x,
+            y,
+            w * self.s,
+            height * self.s + margin[1] + margin[3] + padding[1] + padding[3],
+            key=key + "-container",
+            observe=False,
+        )
+        imgui.push_font(self.body, font_size * self.s)
+        padding_y = max(0, (height * self.s - imgui.get_font_size()) / 2)
+        imgui.push_style_var(
+            imgui.StyleVar_.frame_padding, ((6 if layout == "content" else 8) * self.s, padding_y)
+        )
+        imgui.push_style_var(imgui.StyleVar_.frame_rounding, radius * self.s)
+        content_width = box.content.width
+        left = box.content.x
+        if layout == "content" and style.explicit("align"):
+            from mojive.ui.controls import segmented_control_width
+
+            natural = segmented_control_width(
+                tuple(self.translate(label) for label in labels),
+                icons=icons,
+                show_labels=show_labels,
+                layout=layout,
+            )
+            if natural < content_width:
+                factor = (
+                    0.5
+                    if style.get("align") == "center"
+                    else 1
+                    if style.get("align") == "end"
+                    else 0
+                )
+                left += (content_width - natural) * factor
+                content_width = natural
+        imgui.set_cursor_screen_pos((box.outer.x, box.outer.y))
+        imgui.begin_group()
+        imgui.set_cursor_screen_pos((left, box.content.y))
         imgui.begin_disabled(not enabled)
         chosen = segmented_control(
             key,
             tuple(self.translate(label) for label in labels),
             selected,
-            width=w * self.s,
+            width=content_width,
             theme=CONTROL_THEME,
             icons=icons,
             icon_label_drawer=self._segment_label,
             on_item=record,
             layout=layout,
             show_labels=show_labels,
+            gap=style.get("columnGap", 0) * self.s,
+        )
+        self.record_component_box(
+            "segment",
+            box,
+            key=key + "-container",
+            layout=layout,
+            fields=[
+                list(self.hits[keys[i] if keys is not None else f"{key}-{i}"])
+                for i in range(len(labels))
+            ],
         )
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
         imgui.end_disabled()
+        bottom = hi.y + box.padding[3] + box.margin[3]
+        imgui.set_cursor_screen_pos((box.outer.x, box.outer.y))
+        imgui.dummy((box.outer.width, max(self.s, bottom - box.outer.y)))
+        imgui.end_group()
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        if self.design is not None:
+            self.design.record(
+                key,
+                ("segment",),
+                self.hits[key],
+                "segment",
+                layout=layout,
+                content=list(box.content.tuple()),
+                padding=list(box.padding),
+                margin=list(box.margin),
+            )
         imgui.pop_style_var(2)
         imgui.pop_font()
         return chosen
@@ -340,59 +694,120 @@ class UI(_NumericFields):
         if label:
             self.text(
                 x + icon_width + 5 * self.s,
-                center_y - BODY_SIZE * self.s / 2,
+                center_y - imgui.get_font_size() / 2,
                 label,
                 rgba,
+                imgui.get_font_size() / self.s,
                 translate=False,
+                font_resolved=True,
             )
 
+    def section_offset(self, baseline):
+        style = self.component_style("section_header")
+        margin = style.edges("margin")
+        padding = style.edges("padding")
+        height = max(style.get("height", 30), style.line_height() + padding[1] + padding[3])
+        return baseline + height - 30 + margin[1] + margin[3]
+
     def section(self, label, x, y, w, open=None):
-        self.line(x, y, w)
-        hit = False
-        s = self.s
-        item_id = None
+        """Paint every section from the same measured header and text box."""
+        s, style = self.s, self.component_style("section_header")
+        padding = style.edges("padding")
+        height = max(style.get("height", 30), style.line_height() + padding[1] + padding[3])
+        margin = style.edges("margin", s)
+        box = (
+            self.design.primitives.field_box(
+                style,
+                Rect(x, y + 4 * s, w, height * s + margin[1] + margin[3]),
+                (2, 0, 2, 0),
+                baseline=30,
+            )
+            if self.design is not None
+            else self.component_box(
+                "section_header",
+                x,
+                y + 4 * s,
+                w,
+                height * s + margin[1] + margin[3],
+                key="section-" + label + "-container",
+                padding=(2 * s, 0, 2 * s, 0),
+            )
+        )
+        self.line(box.frame.x, y, box.frame.width)
+        hit, item_id = False, None
         if open is not None:
-            imgui.set_cursor_screen_pos((x, y + 4 * s))
+            imgui.set_cursor_screen_pos((box.frame.x, box.frame.y))
             imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
             hit = imgui.invisible_button(
-                "section-" + label, (w, 30 * s), imgui.ButtonFlags_.enable_nav
+                "section-" + label,
+                (max(s, box.frame.width), max(s, box.frame.height)),
+                imgui.ButtonFlags_.enable_nav,
             )
             imgui.pop_style_color()
             item_id = imgui.get_item_id()
-            self.hits["section-" + label] = (x, y + 4 * s, w, 30 * s)
+            self.hits["section-" + label] = box.frame.tuple()
             if imgui.is_item_hovered():
-                self.rect(x, y + 4 * s, w, 30 * s, (255, 255, 255, 7))
+                self.rect(*box.frame.tuple(), (255, 255, 255, 7))
+        icon_size = (
+            min(box.content.height / s, style.get("iconSize", 12)) if open is not None else 0
+        )
+        gap = style.get("columnGap", 8) * s if open is not None else 0
+        label_rect = box.content.inset(0, 0, icon_size * s + gap, 0)
+        font = style.get("fontSize", DESIGN.body_size)
+        self.component_text(
+            "section_header",
+            label_rect,
+            label,
+            MUTED,
+            size=font,
+            bold=True,
+        )
+        if open is not None:
+            icon_rect = style.align_rect(
+                box.content,
+                icon_size * s,
+                icon_size * s,
+                horizontal="end",
+                vertical=style.get("alignItems", "center"),
+            )
             self.role_icon(
                 "down" if open else "right",
-                x + w - 16 * s,
-                y + 13 * s,
-                12 * s,
-                12 * s,
+                icon_rect.x,
+                icon_rect.y,
+                icon_rect.width,
+                icon_rect.height,
                 DIM,
                 role="status",
             )
-        self.draw.push_clip_rect((x, y + 4 * s), (x + max(0, w - 22 * s), y + 34 * s), True)
-        self.text(
-            x + 2 * s,
-            y + (4 + (30 - BODY_SIZE) / 2) * s,
-            label,
-            MUTED,
-            BODY_SIZE,
-            bold=True,
-            max_width=max(0, w - 24 * s),
-        )
-        self.draw.pop_clip_rect()
+        if self.design is not None:
+            self.design.record(
+                "section-" + label,
+                ("section_header",),
+                box.frame.tuple(),
+                "section_header",
+                content=list(box.content.tuple()),
+                outer=list(box.outer.tuple()),
+                labelRect=list(label_rect.tuple()),
+                iconRect=list(icon_rect.tuple()) if open is not None else None,
+                gap=gap,
+                fontSize=font,
+                iconSize=icon_size,
+                margin=list(margin),
+                padding=list(box.padding),
+            )
         if item_id is not None:
             draw_focus_frame(
-                imgui.ImVec2(x, y + 4 * s),
-                imgui.ImVec2(x + w, y + 34 * s),
+                imgui.ImVec2(box.frame.x, box.frame.y),
+                imgui.ImVec2(box.frame.right, box.frame.bottom),
                 rounding=CONTROL_RADIUS * s,
                 item_id=item_id,
             )
         return hit
 
-    def switch(self, key, x, y, on):
+    def switch(self, key, x, y, on, *, width=None):
         s = self.s
+        if self.design is not None:
+            return self.design.switch(key, x, y, on, width=width)
         imgui.set_cursor_screen_pos((x, y))
         imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
         hit = imgui.invisible_button(
@@ -400,25 +815,22 @@ class UI(_NumericFields):
         )
         imgui.pop_style_color()
         item_id = imgui.get_item_id()
-        hovered, held = imgui.is_item_hovered(), imgui.is_item_active()
-        tint = (
-            (105, 128, 93, 255)
-            if on and hovered
-            else (88, 108, 78, 255)
-            if on
-            else ((70, 78, 86, 255) if hovered else (55, 62, 68, 255))
-        )
-        self.rect(x + 2 * s, y + 5 * s, 32 * s, 18 * s, tint, 9)
-        self.draw.add_circle_filled(
-            (x + (25 if on else 11) * s, y + 14 * s),
-            (6 if held else 7) * s,
-            color(SAGE if on else MUTED),
-            num_segments=32,
+        paint = ItemPaint.capture(imgui)
+        track_width, track_height = DESIGN.switch_track_width, DESIGN.switch_track_height
+        draw_switch(
+            self,
+            x,
+            y + (SWITCH_HEIGHT - track_height) * s / 2,
+            track_width * s,
+            track_height * s,
+            DESIGN.switch_thumb_size * s,
+            not on if hit else on,
+            paint,
         )
         draw_focus_frame(
             imgui.ImVec2(x, y),
             imgui.ImVec2(x + SWITCH_WIDTH * s, y + SWITCH_HEIGHT * s),
-            rounding=9 * s,
+            rounding=track_height * s / 2,
             item_id=item_id,
         )
         self.hits[key] = (x, y, SWITCH_WIDTH * s, SWITCH_HEIGHT * s)

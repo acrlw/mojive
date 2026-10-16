@@ -14,15 +14,14 @@ from typing import Literal
 from imgui_bundle import imgui
 
 from mojive.geometry2d.curves import smooth_capsule_points
+from mojive.ui.compound_fields import draw_focus_frame
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.paint_protocol import Draw2D
+from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import fit_text
-
-from .compound_fields import draw_focus_frame
-from .input_bindings import DEFAULT_INPUT_BINDINGS
-from .pointer_bindings import PointerAction
-from .theme import THEME, Theme
-from .viewport_widgets import draw_projection_label
+from mojive.ui.theme import THEME, Theme, mix_color
+from mojive.ui.viewport_widgets import draw_projection_label
 
 IconLabelDrawer = Callable[
     [
@@ -41,7 +40,7 @@ IconLabelDrawer = Callable[
 def _production_control_icon(draw, center, size: float, kind: str, color) -> None:
     # Import lazily because the icon library reuses viewport's low-level rotate,
     # snap, and mouse geometry while controls are imported by viewport panels.
-    from .icons import draw_control_icon
+    from mojive.ui.icons import draw_control_icon
 
     draw_control_icon(draw, center, size, kind, color)
 
@@ -434,6 +433,7 @@ def segmented_control(
     draw: Draw2D | None = None,
     on_item: Callable[[int], None] | None = None,
     layout: Literal["equal", "content"] = "equal",
+    gap: float = 0.0,
 ) -> int:
     """Choose one of N segments in one rounded frame.
 
@@ -449,12 +449,14 @@ def segmented_control(
         return 0
     style = imgui.get_style()
     available = max(1.0, float(width if width > 0 else imgui.get_content_region_avail().x))
+    gap = max(0.0, min(float(gap), available / max(1, len(labels))))
+    usable = max(1.0, available - gap * (len(labels) - 1))
     glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
     icons = tuple(icons[i] if icons and i < len(icons) else "" for i in range(len(labels)))
     minimum_width = segmented_control_width(
         labels, icons=icons, show_labels=show_labels, layout=layout
     )
-    inline = minimum_width <= available
+    inline = minimum_width <= usable
     minimum_widths = (
         _segment_widths(
             imgui.get_font(),
@@ -468,7 +470,7 @@ def segmented_control(
         if inline and layout == "content"
         else ()
     )
-    extra = (available - minimum_width) / len(labels)
+    extra = (usable - minimum_width) / len(labels)
     offset = 0.0
     selected = min(max(-1, int(selected)), len(labels) - 1)
     result = selected
@@ -480,7 +482,12 @@ def segmented_control(
     height = imgui.get_frame_height()
     dl.add_rect_filled(
         origin,
-        (origin.x + available, origin.y + height * (1 if inline else len(labels))),
+        (
+            origin.x + available,
+            origin.y
+            + height * (1 if inline else len(labels))
+            + (0 if inline else gap * (len(labels) - 1)),
+        ),
         imgui.get_color_u32(imgui.ImVec4(*theme.bg_frame)),
         style.frame_rounding,
     )
@@ -493,18 +500,18 @@ def segmented_control(
     for index, (label, icon) in enumerate(zip(labels, icons, strict=True)):
         # Derive each edge from the group origin so rounding cannot accumulate.
         if minimum_widths:
-            start = round(offset)
+            start = round(offset) + index * gap
             offset += minimum_widths[index] + extra
-            end = round(offset) if index < len(labels) - 1 else available
+            end = round(offset) + index * gap if index < len(labels) - 1 else available
         else:
-            start = round(available * index / len(labels)) if inline else 0
+            start = round(usable * index / len(labels)) + index * gap if inline else 0
             end = (
-                round(available * (index + 1) / len(labels))
+                round(usable * (index + 1) / len(labels)) + index * gap
                 if inline and index < len(labels) - 1
                 else available
             )
         imgui.set_cursor_screen_pos(
-            (origin.x + start, origin.y + (0 if inline else index * height))
+            (origin.x + start, origin.y + (0 if inline else index * (height + gap)))
         )
         item_width = end - start
         is_selected = index == selected
@@ -518,14 +525,17 @@ def segmented_control(
             on_item(index)
         imgui.pop_style_color(2)
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        hovered, pressed = imgui.is_item_hovered(), imgui.is_item_active()
         fill = (
-            theme.bg_frame_active
-            if is_selected or imgui.is_item_active()
+            mix_color(theme.bg_frame_active, theme.primary, 0.4 if pressed else 0.2)
+            if is_selected and (pressed or hovered)
+            else theme.bg_frame_active
+            if is_selected or pressed
             else theme.bg_frame_hovered
-            if imgui.is_item_hovered()
+            if hovered
             else theme.bg_frame
         )
-        if len(labels) == 1:
+        if len(labels) == 1 or gap:
             corners = imgui.ImDrawFlags_.round_corners_all
         elif index == 0:
             corners = (
@@ -629,6 +639,8 @@ def clearable_combo(
     has_value: bool,
     clear_tooltip: str = "Clear",
     tooltip: str = "",
+    begin=None,
+    frame_rect=None,
 ):
     """Yield (open, cleared) for a native combo with an inset clear action.
 
@@ -638,6 +650,9 @@ def clearable_combo(
     """
     width, height = max(1.0, imgui.calc_item_width()), imgui.get_frame_height()
     start = imgui.get_cursor_screen_pos()
+    if frame_rect is not None:
+        x, y, width, height = frame_rect
+        start = imgui.ImVec2(x, y)
     padding = imgui.get_style().frame_padding.x
     slot = min(height, max(0.0, (width - height) * 0.5)) if has_value else 0.0
     draw_list = imgui.get_window_draw_list()
@@ -655,7 +670,7 @@ def clearable_combo(
     splitter.set_current_channel(draw_list, 0)
     shown = fit_text(ImguiDraw2D(), preview, max(1.0, width - height - slot - 2 * padding))
     imgui.set_next_item_width(width)
-    opened = imgui.begin_combo(str_id, shown)
+    opened = imgui.begin_combo(str_id, shown) if begin is None else begin(shown)
     splitter.merge(draw_list)
     if not opened and tooltip and not clear_hovered:
         imgui.set_item_tooltip(tooltip)

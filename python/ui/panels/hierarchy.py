@@ -8,24 +8,23 @@ from functools import lru_cache
 
 from imgui_bundle import imgui
 
+from mojive import commands as cmd
+from mojive.adapters.base import FrameNeeds, NodeType, SceneNode
 from mojive.geometry2d.curves import CORNER_SMOOTHING, smooth_polygon_corners
 from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.text_layout import text_line_y
-from mojive.ui.world_selection import WorldSelectionControl
-
-from ... import commands as cmd
-from ...adapters.base import FrameNeeds, NodeType, SceneNode
-from ..pointer_bindings import PointerAction
-from ..theme import ROW_PADDING_X, ROW_PADDING_Y
-from . import (
+from mojive.ui.panels import (
     Panel,
     PanelContext,
     pointer_pressed,
     publish_focus_item_hint,
     search_input,
 )
-from .filters import filter_pills, node_filter_color
+from mojive.ui.panels.filters import filter_pills, node_filter_color
+from mojive.ui.pointer_bindings import PointerAction
+from mojive.ui.text_layout import text_line_y
+from mojive.ui.theme import ROW_PADDING_X, ROW_PADDING_Y
+from mojive.ui.world_selection import WorldSelectionControl
 
 _LARGE_SCENE_NODES = 2_000
 _TYPE_FILTERS = (
@@ -361,7 +360,7 @@ class HierarchyPanel(Panel):
             text_y - self._text_line_offset,
         )
         if not leaf:
-            from ..icons import draw_icon
+            from mojive.ui.icons import draw_icon
 
             draw_icon(
                 draw,
@@ -483,9 +482,23 @@ class HierarchyPanel(Panel):
         return tuple(roots)
 
     @staticmethod
-    def _model_create_menu(ctx: PanelContext, node: SceneNode) -> None:
-        if not imgui.begin_menu(ctx.tr("Add Child"), ctx.session.adapter.caps.topology_editing):
+    def _model_create_menu(ctx: PanelContext, node: SceneNode, *, presentation=None) -> None:
+        enabled = ctx.session.adapter.caps.topology_editing
+        if presentation is not None:
+            with presentation.local_submenu(
+                "Add Child", key="scene-add-child", enabled=enabled
+            ) as opened:
+                if opened:
+                    HierarchyPanel._model_create_items(ctx, node, presentation)
             return
+        if imgui.begin_menu(ctx.tr("Add Child"), enabled):
+            try:
+                HierarchyPanel._model_create_items(ctx, node)
+            finally:
+                imgui.end_menu()
+
+    @staticmethod
+    def _model_create_items(ctx, node, presentation=None):
         entries = [
             ("Body", "body"),
             ("Box Geometry", "geom:box"),
@@ -505,7 +518,11 @@ class HierarchyPanel(Panel):
             entries = [entry for entry in entries if not entry[1].startswith("joint:")]
         names = {item.name for item in ctx.session.nodes}
         for label, element_type in entries:
-            clicked, _ = imgui.menu_item(ctx.tr(label), "", False)
+            clicked, _ = (
+                imgui.menu_item(ctx.tr(label), "", False)
+                if presentation is None
+                else presentation.local_item(label, key="scene-add-child-" + element_type)
+            )
             if clicked:
                 base = element_type.split(":", 1)[0]
                 index = 1
@@ -514,7 +531,6 @@ class HierarchyPanel(Panel):
                     index += 1
                     name = f"{base}{index}"
                 ctx.submit(cmd.AddModelElement(node.node_id, element_type, name))
-        imgui.end_menu()
 
     def _visibility_toggle(
         self,
@@ -542,7 +558,7 @@ class HierarchyPanel(Panel):
         alpha = 1.0 if hovered else 0.58
         color = (*base[:3], alpha)
         draw = ctx.painter()
-        from ..icons import draw_icon
+        from mojive.ui.icons import draw_icon
 
         draw_icon(
             draw,

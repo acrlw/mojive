@@ -9,7 +9,9 @@ from mojive.ui.controls import segmented_control, segmented_control_width
 from mojive.ui.theme import THEME
 
 
-def draw_geometry_view(backend, translate, *, compact=False, theme=THEME, node=None, submit=None):
+def draw_geometry_view(
+    backend, translate, *, compact=False, theme=THEME, node=None, submit=None, combo=None
+):
     """Choose the scene preset or override the inspected link's own geometry."""
     t = translate
     views = tuple(GeometryView)
@@ -22,11 +24,7 @@ def draw_geometry_view(backend, translate, *, compact=False, theme=THEME, node=N
     available = imgui.get_content_region_avail().x
     if compact and available < segmented_control_width(labels):
         imgui.set_next_item_width(-1)
-        if imgui.begin_combo("##geometry_view", labels[selected]):
-            for i, label in enumerate(labels):
-                if imgui.selectable(label, selected == i)[0]:
-                    selected = i
-            imgui.end_combo()
+        _, selected = (combo or imgui.combo)("##geometry_view", selected, labels)
     else:
         selected = segmented_control("geometry_view", labels, selected, theme=theme)
     if views[selected] != current:

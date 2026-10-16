@@ -25,6 +25,14 @@ LANGUAGE_LABELS: dict[Language, str] = {
 
 
 _ZH_CN = {
+    "Typography": "字体",
+    "Font": "字体",
+    "Font size": "字号",
+    "Design default": "设计默认值",
+    "Numeric input": "数值输入",
+    "Output messages": "输出消息",
+    "Scrollbar hide delay": "滚动条隐藏延迟",
+    "° / rad": "° / rad",
     "Edit color": "编辑颜色",
     "Local replay": "本地回放",
     "Replay frame": "回放帧",

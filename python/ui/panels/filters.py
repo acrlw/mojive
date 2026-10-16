@@ -5,11 +5,10 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.panels import PanelContext, button_row_layout
 from mojive.ui.severity_icons import severity_icon
 from mojive.ui.severity_icons import severity_meshes as severity_meshes
 from mojive.ui.text_layout import text_line_y
-
-from . import PanelContext, button_row_layout
 
 
 def severity_group(level: str) -> str:

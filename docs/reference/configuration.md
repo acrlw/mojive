@@ -71,14 +71,42 @@ Scene selection supports Ctrl/Cmd toggle and Shift ranges in the visible hierarc
 presentations use the same Session commands, editor transactions and renderer contracts. Their
 default docking files are separate; an explicit `LayoutConfig.path` still chooses an exact file.
 
-Native workspace dimensions are defined in `mojive.ui.workspace.design`. They use logical points:
+Native workspace defaults are stored in `mojive.design.resources/design-spec.json` and resolved
+per viewer by `DesignRuntime`. The component painters use `mojive.ui.workspace.design` for
+shared dimensions. They use logical points:
 14-point body and numeric text, 16-point titles, 28-point controls, 6-point control corners,
 12/10-point panel padding, 4-point numeric field gaps and 8-point row spacing. The application bar
 is 46 points tall; timeline lanes are 36 points tall. Drawing and input geometry use the same
 dimensions and receive the platform UI scale once.
 
-Run `make ui-design-native ARGS=--interactive` to review the production workspace. Without
-`--interactive`, it captures the production panels and menus under `output/ui_design/native/`.
+Run `make ui-native-design` to open the native parameter editor alongside the production
+workspace. The editor provides component samples, shared typography and spacing, module
+overrides, and workspace layout parameters. Alt-click a production component to select its
+parameters; the overlay shows its painted bounds and spacing. Edits update the production
+widgets immediately. Save, undo and redo operate on the specification independently of scene
+editing. The header switches between separate and embedded editor windows.
+Alt-click the bottom runtime status text or dot to select `status_context`, the parent group
+for runtime status, recording actions and operation hints. Its padding and margins move the
+group together; `status_hints` controls spacing within the hint list. Runtime metrics retain
+their separate group on the right.
+
+`make ui-design-native` is a compatibility alias for the same interactive editor.
+Run `make ui-native-capture` to capture production panels and menus under
+`output/ui_design/native/<backend>/` and exit. The underlying
+`python -m mojive.tools.native_workspace` command opens a production workspace by default;
+`--capture` selects the automated gallery.
+
+The editor defaults to `output/design-workbench/current-spec.json`; its adjacent `live-spec.json`
+contains the current draft. Normal native viewers use the newest valid saved specification or
+draft at the same location. `MOJIVE_DESIGN_SPEC=/absolute/path/spec.json` selects another
+specification for a viewer process, and `make ui-native-design ARGS='--spec /absolute/path/spec.json'`
+selects it for the editor. With no saved file, viewers use the bundled defaults. Paths are resolved
+from the working directory; use an absolute path when sharing a specification across launchers.
+
+Use `BACKEND=bgfx` to run the editor with the native backend. For reproducible capture, use
+`MOJIVE_UI_SCALE=1 make ui-native-design ARGS='--hidden --frames 8 --capture output/workbench'`.
+Set `MOJIVE_UI_SCALE=2` for a 2× UI, and supply matching window dimensions when passing
+explicit `--width` and `--height` values.
 
 | Use case | Entry point | What is constructed |
 |---|---|---|

@@ -696,7 +696,7 @@ def test_layout_settings_path_honors_config_directory(monkeypatch, tmp_path) -> 
     assert layout_settings_path() == tmp_path / "imgui.ini"
 
 
-def test_reset_layout_rebuilds_and_persists_immediately(monkeypatch, tmp_path) -> None:
+def test_reset_layout_waits_for_native_rebuild_before_persisting(monkeypatch, tmp_path) -> None:
     target = tmp_path / "nested" / "imgui.ini"
     events: list[object] = []
     fake_imgui = SimpleNamespace(
@@ -707,14 +707,21 @@ def test_reset_layout_rebuilds_and_persists_immediately(monkeypatch, tmp_path) -
 
     window = Window.__new__(Window)
     window.config = SimpleNamespace(docking=True, ini_path=str(target))
-    window.dockspace_id = 42
+    window._initialize_layout_state()
     window._ini_existed = True
     window._layout_done = True
-    window._build_default_layout = lambda: events.append("build")
-
     window.reset_layout()
-
-    assert events == [("load", ""), "build", ("save", str(target))]
+    assert window.layout_reset_pending
+    window._finish_layout_frame()
+    assert events == []
+    # The next native frame loads the empty layout and submits the rebuilt docks.
+    window._layout_reset_pending = False
+    window._layout_rebuild_pending = True
+    window._finish_layout_frame()
+    assert events == []
+    window._layout_rebuild_pending = False
+    window._finish_layout_frame()
+    assert events == [("save", str(target))]
     assert target.parent.is_dir()
     assert window._ini_existed is True
 

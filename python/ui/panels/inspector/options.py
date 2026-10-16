@@ -8,10 +8,13 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.ui.panels import PanelContext
-
-from .fields import (
+from mojive.ui.panels.inspector.fields import (
     _begin_property_table,
+    _end_property_table,
+    _property_begin_combo,
+    _property_choice,
     _property_control_row,
+    _property_end_combo,
     _property_section,
     _property_text,
     _property_toggle,
@@ -71,6 +74,7 @@ class _Options:
                     ctx.tr(field.label),
                     tooltip=ctx.tr(field.description) if field.description else field.key,
                     toggle=field.kind == "bool",
+                    control_part="select" if field.kind == "choice" else "input_text",
                 )
                 item_id = f"##physics-{field.key}"
                 if field.kind == "bool":
@@ -82,14 +86,14 @@ class _Options:
                         (label for label, value in field.choices if value == field.value),
                         str(field.value),
                     )
-                    if imgui.begin_combo(item_id, preview):
+                    if _property_begin_combo(ctx, item_id, preview):
                         for label, value in field.choices:
                             if (
-                                imgui.selectable(label, field.value == value)[0]
+                                _property_choice(ctx, label, field.value == value)[0]
                                 and value != field.value
                             ):
                                 changes[field.key] = value
-                        imgui.end_combo()
+                        _property_end_combo(ctx)
                 else:
                     text = self._physics_text.get(field.key, _format(field.value))
                     entered, text = _property_text(
@@ -113,7 +117,7 @@ class _Options:
                             invalid = True
                     elif not imgui.is_item_active():
                         self._physics_text.pop(field.key, None)
-            imgui.end_table()
+            _end_property_table(ctx)
         if changes and not invalid:
             result = ctx.submit(cmd.SetPhysicsOptions(changes))
             self._physics_error = "" if result.ok else result.message

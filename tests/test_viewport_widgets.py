@@ -878,7 +878,7 @@ def test_status_places_simulation_state_before_selection():
     assert draw.lines[0][0][3] == pytest.approx(1.0)
     assert draw.lines[0][0][0][1] == pytest.approx(0.5)
     assert draw.lines[0][0][1][1] == pytest.approx(0.5)
-    assert draw.circles[0][0][0][1] == pytest.approx(14.5)
+    assert draw.circles[0][0][0][1] == pytest.approx(14.0)
     x_by_text = {text: position[0] for position, text in draw.text_positions}
     assert x_by_text["01_revolute"] < x_by_text["OpenGL"]
     assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]

@@ -6,6 +6,7 @@ import math
 import os
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -356,9 +357,39 @@ class Window:
         self._applied_style_scale = self._style_scale
         self._load_fonts(io)
 
+        self._initialize_layout_state()
+        self.latch = ResizeLatch()
+
+    def _finish_layout_frame(self) -> None:
+        if (
+            self._layout_persist_pending
+            and not self._layout_reset_pending
+            and not self._layout_rebuild_pending
+            and not self._default_tabs_frame
+        ):
+            self._layout_persist_pending = False
+            self._save_layout_settings()
+
+    def _initialize_layout_state(self) -> None:
         self.dockspace_id = 0
         self._layout_done = False
-        self.latch = ResizeLatch()
+        self._layout_builder: Callable[[bool], None] | None = None
+        self._layout_reset_pending = False
+        self._layout_rebuild_pending = False
+        self._layout_persist_pending = False
+        self._default_tabs_frame = 0
+
+    def hide(self) -> None:
+        glfw.hide_window(self._window)
+        self._shown = False
+
+    @property
+    def layout_reset_pending(self) -> bool:
+        return self._layout_reset_pending
+
+    def set_layout_builder(self, builder: Callable[[bool], None]) -> None:
+        """Let a frontend own its dock tree at the common BeginDockSpace boundary."""
+        self._layout_builder = builder
 
     def _load_fonts(self, io) -> None:
         self._font_atlas_scale = self._style_scale
@@ -550,6 +581,13 @@ class Window:
         self._refresh_scales()
         self._sync_style_scale()
         self._input.process_inputs()
+        if self._layout_reset_pending:
+            imgui.load_ini_settings_from_memory("")
+            self._ini_existed = False
+            self._layout_done = False
+            self._default_tabs_frame = 0
+            self._layout_reset_pending = False
+            self._layout_rebuild_pending = True
         # NewFrame may dismiss a popup. Its closing event still belongs to UI.
         self.popup_owned_frame = bool(self._imgui_context.open_popup_stack)
         imgui.new_frame()
@@ -562,7 +600,13 @@ class Window:
                 imgui.get_main_viewport(),
                 imgui.DockNodeFlags_.passthru_central_node,
             )
-            self._build_default_layout()
+            if not self._layout_reset_pending:
+                if self._layout_builder is None:
+                    self._build_default_layout()
+                else:
+                    self._layout_builder(self._layout_rebuild_pending)
+                    self._layout_done = True
+                self._layout_rebuild_pending = False
             if self._default_tabs_frame and imgui.get_frame_count() >= self._default_tabs_frame:
                 self._default_tabs_frame = 0
                 for name in ("Joints", "Keyframes"):
@@ -573,20 +617,16 @@ class Window:
                             tabs.next_selected_tab_id = window.tab_id
                         imgui.internal.focus_window(window)
 
-    def reset_layout(self) -> None:
-        """Discard the active docking arrangement and rebuild the product default."""
+    def reset_layout(self, *, persist: bool = True) -> None:
+        """Queue a default-layout rebuild for the next native frame boundary."""
 
         if not self.config.docking:
             return
-        imgui.load_ini_settings_from_memory("")
-        self._ini_existed = False
-        self._layout_done = False
-        if self.dockspace_id:
-            self._build_default_layout()
-            self._save_layout_settings()
+        self._layout_reset_pending = True
+        self._layout_persist_pending = persist
 
     def _save_layout_settings(self) -> None:
-        """Persist an explicit layout reset without waiting for a later ImGui frame."""
+        """Persist a completed layout after its native windows have been submitted."""
 
         ini = self.config.ini_path or ""
         if not ini:
@@ -608,55 +648,50 @@ class Window:
     def _build_default_layout(self) -> None:
         if self._layout_done:
             return
-        self._layout_done = True
         if self._ini_existed:
+            self._layout_done = True
             return
+        if not imgui.get_current_context().within_frame_scope or not self.dockspace_id:
+            raise RuntimeError("The default dock layout requires an active dock-space frame")
 
-        try:
-            ii = imgui.internal
-            root = self.dockspace_id
-            ii.dock_builder_remove_node(root)
+        ii = imgui.internal
+        root = self.dockspace_id
+        ii.dock_builder_remove_node(root)
 
-            ii.dock_builder_add_node(root, imgui.internal.DockNodeFlagsPrivate_.dock_space)
-            # Startup has no previous work area. Later resets may run from the
-            # menu before this frame's status bar, so use the committed insets.
-            viewport = imgui.get_current_context().viewports[0]
-            work = (
-                viewport.get_build_work_rect()
-                if imgui.get_frame_count() == 1
-                else viewport.get_work_rect()
-            )
-            ii.dock_builder_set_node_size(root, work.get_size())
+        ii.dock_builder_add_node(root, imgui.internal.DockNodeFlagsPrivate_.dock_space)
+        viewport = imgui.get_current_context().viewports[0]
+        work = viewport.get_build_work_rect()
+        ii.dock_builder_set_node_size(root, work.get_size())
 
-            # Keep the right inspector column full-height. The timeline spans
-            # both Hierarchy and Viewport, with ratios independent of UI scale.
-            _, right, rest = ii.dock_builder_split_node_py(root, imgui.Dir.right, 0.23)
-            _, bottom, top = ii.dock_builder_split_node_py(rest, imgui.Dir.down, 0.28)
-            _, left, center = ii.dock_builder_split_node_py(top, imgui.Dir.left, 0.23)
-            _, right_bottom, right_top = ii.dock_builder_split_node_py(
-                right,
-                imgui.Dir.down,
-                0.52,
-            )
+        # Keep the right inspector column full-height. The timeline spans
+        # both Hierarchy and Viewport, with ratios independent of UI scale.
+        _, right, rest = ii.dock_builder_split_node_py(root, imgui.Dir.right, 0.23)
+        _, bottom, top = ii.dock_builder_split_node_py(rest, imgui.Dir.down, 0.28)
+        _, left, center = ii.dock_builder_split_node_py(top, imgui.Dir.left, 0.23)
+        _, right_bottom, right_top = ii.dock_builder_split_node_py(
+            right,
+            imgui.Dir.down,
+            0.52,
+        )
 
-            ii.dock_builder_dock_window("Viewport", center)
-            for name in self._LAYOUT_LEFT:
-                ii.dock_builder_dock_window(name, left)
-            for name in self._LAYOUT_RIGHT_TOP:
-                ii.dock_builder_dock_window(name, right_top)
-            for name in self._LAYOUT_RIGHT_BOTTOM:
-                ii.dock_builder_dock_window(name, right_bottom)
-            for name in self._LAYOUT_BOTTOM:
-                ii.dock_builder_dock_window(name, bottom)
-            ii.dock_builder_finish(root)
-            # Native auto-selection runs while the first panel windows appear.
-            # Apply the default tabs once those windows and tab bars exist.
-            self._default_tabs_frame = imgui.get_frame_count() + 1
-        except Exception as e:
-            log.error("Default dock layout failed; panels will float: {}", e)
+        ii.dock_builder_dock_window("Viewport", center)
+        for name in self._LAYOUT_LEFT:
+            ii.dock_builder_dock_window(name, left)
+        for name in self._LAYOUT_RIGHT_TOP:
+            ii.dock_builder_dock_window(name, right_top)
+        for name in self._LAYOUT_RIGHT_BOTTOM:
+            ii.dock_builder_dock_window(name, right_bottom)
+        for name in self._LAYOUT_BOTTOM:
+            ii.dock_builder_dock_window(name, bottom)
+        ii.dock_builder_finish(root)
+        # Native auto-selection runs while the first panel windows appear.
+        # Apply the default tabs once those windows and tab bars exist.
+        self._default_tabs_frame = imgui.get_frame_count() + 1
+        self._layout_done = True
 
     def end_frame(self, *, readback: bool = False) -> np.ndarray | None:
         imgui.set_current_context(self._imgui_context)
+        self._finish_layout_frame()
         imgui.render()
         draw_data = imgui.get_draw_data()
         fb_w, fb_h = self.size_pixels

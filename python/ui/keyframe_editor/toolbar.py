@@ -11,17 +11,16 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.adapters.base import SceneModelInfo
-from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.panels import PanelContext, button_row_layout, segmented_control
-from mojive.ui.text_layout import fit_text
-
-from ..controls import IconLabelDrawer, clear_button, padded_selectable, segmented_control_width
-from ..icons import draw_icon_label
-from ..timeline import (
-    nearest_take_frame,
+from mojive.ui.controls import (
+    IconLabelDrawer,
+    clear_button,
+    padded_selectable,
+    segmented_control_width,
 )
-from .controller import TimelineEditor
-from .controls import (
+from mojive.ui.icons import draw_icon_label
+from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.keyframe_editor.controller import TimelineEditor
+from mojive.ui.keyframe_editor.controls import (
     _COMMAND_HEIGHT_PT,
     FOLLOW_MODE_TOOLTIPS,
     CommandIconDrawer,
@@ -30,6 +29,11 @@ from .controls import (
     _draw_command_icon,
     _toolbar_status,
     unique_keyframe_name,
+)
+from mojive.ui.panels import PanelContext, button_row_layout, segmented_control
+from mojive.ui.text_layout import fit_text
+from mojive.ui.timeline import (
+    nearest_take_frame,
 )
 
 _FOLLOW_ICONS = ("key-follow-off", "key-follow-page", "key-follow-locked")
@@ -615,11 +619,16 @@ def draw_model_header(
         draw=ctx.painter(),
         icon_drawer=icon_drawer,
     ):
-        existing = (
-            ctx.model_keyframe_names(editor.model_id)
-            if ctx.model_keyframe_names is not None
-            else {key.name for key in editor.keyframes(ctx)[0]}
-        )
-        name = unique_keyframe_name(existing)
-        editor.edit_lane = "model"
-        ctx.submit_model_edit(cmd.AddModelKeyframe(editor.model_id, name), editor.snapshot_created)
+        add_model_keyframe(editor, ctx)
+
+
+def add_model_keyframe(editor: TimelineEditor, ctx):
+    """Create one uniquely named keyframe through the existing model edit boundary."""
+    existing = (
+        ctx.model_keyframe_names(editor.model_id)
+        if ctx.model_keyframe_names is not None
+        else {key.name for key in editor.keyframes(ctx)[0]}
+    )
+    name = unique_keyframe_name(existing)
+    editor.edit_lane = "model"
+    ctx.submit_model_edit(cmd.AddModelKeyframe(editor.model_id, name), editor.snapshot_created)

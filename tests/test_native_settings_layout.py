@@ -6,7 +6,6 @@ import pytest
 from imgui_bundle import imgui
 
 from mojive.render.backend import NullBackend, RenderFlag
-from mojive.ui.panels.settings_pages import rendering, visuals
 from mojive.ui.theme import THEME
 from mojive.ui.workspace.design import DESIGN
 from mojive.ui.workspace.property_style import property_controls
@@ -36,7 +35,7 @@ def test_visual_group_and_flag_checkboxes_keep_the_same_size(scale, monkeypatch)
         theme=THEME,
     )
     bounds = {}
-    checkbox = rendering.themed_checkbox
+    checkbox = panel._checkbox
 
     def capture(key, value, theme):
         result = checkbox(key, value, theme)
@@ -44,8 +43,7 @@ def test_visual_group_and_flag_checkboxes_keep_the_same_size(scale, monkeypatch)
         bounds[key] = (hi.x - lo.x, hi.y - lo.y)
         return result
 
-    monkeypatch.setattr(rendering, "themed_checkbox", capture)
-    monkeypatch.setattr(visuals, "themed_checkbox", capture)
+    monkeypatch.setattr(panel, "_checkbox", capture)
     try:
         for _ in range(3):
             imgui.new_frame()

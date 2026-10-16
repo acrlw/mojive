@@ -13,9 +13,8 @@ from mojive.ui.gizmo import (
 )
 from mojive.ui.panels import (
     PanelContext,
-    segmented_control,
-    themed_checkbox,
 )
+from mojive.ui.panels.settings_pages import bindings
 from mojive.ui.perturb import DEFAULT_PERTURB_SCALE, MAX_PERTURB_SCALE, OUTLINE_CORNER_RADIUS_PT
 from mojive.ui.viewcube import (
     DEFAULT_SELECTION_PADDING,
@@ -29,8 +28,6 @@ from mojive.ui.viewport_widgets import (
     MIN_VIEWPORT_CAPSULE_SCALE,
     MIN_VIEWPORT_OVERLAY_SCALE,
 )
-
-from . import bindings
 
 
 def draw(panel, ctx: PanelContext) -> None:
@@ -57,13 +54,13 @@ def gizmo_settings(panel, ctx: PanelContext) -> None:
     panel._group_heading(t("Gizmo"))
     if not panel._begin_properties("settings_interaction_gizmo"):
         return
-    panel._property(t("Style"))
-    style = segmented_control(
+    panel._property(t("Style"), control_part="segment")
+    style = panel._segmented(
         "gizmo-style", ("2D", "3D"), 1 if ctx.gizmo.style == "3d" else 0, theme=ctx.theme
     )
     ctx.gizmo.set_style("3d" if style == 1 else "2d")
-    panel._property(t("Orientation"))
-    frame = segmented_control(
+    panel._property(t("Orientation"), control_part="segment")
+    frame = panel._segmented(
         "gizmo-frame",
         (t("Body"), t("World")),
         1 if ctx.gizmo.space == "world" else 0,
@@ -85,7 +82,7 @@ def gizmo_settings(panel, ctx: PanelContext) -> None:
         ctx.apply_setting(ctx.set_viewport_overlay_scale, value, persist=committed)
     if ctx.viewport_overlays is not None:
         capsule_settings(panel, ctx)
-    imgui.end_table()
+    panel._end_properties()
 
 
 def capsule_settings(panel, ctx: PanelContext) -> None:
@@ -113,8 +110,8 @@ def capsule_settings(panel, ctx: PanelContext) -> None:
         overlays = replace(overlays, status_duration=duration)
     if (changed or committed) and ctx.set_viewport_overlays is not None:
         ctx.apply_setting(ctx.set_viewport_overlays, overlays, persist=committed)
-    panel._property(ctx.tr("Movable capsules"))
-    changed, movable = themed_checkbox(
+    panel._property(ctx.tr("Movable capsules"), control_part="checkbox")
+    changed, movable = panel._checkbox(
         "##viewport_capsules_movable", bool(overlays.movable), ctx.theme
     )
     if changed and ctx.set_viewport_overlays is not None:
@@ -125,8 +122,8 @@ def precise_input_settings(panel, ctx: PanelContext) -> None:
     panel._group_heading(ctx.tr("Input"))
     if not panel._begin_properties("settings_interaction_input"):
         return
-    panel._property(ctx.tr("Keep mode/unit"))
-    changed, remember = themed_checkbox(
+    panel._property(ctx.tr("Keep mode/unit"), control_part="checkbox")
+    changed, remember = panel._checkbox(
         "##remember_precise_input_choices",
         bool(ctx.gizmo.remember_precise_input_choices),
         ctx.theme,
@@ -139,7 +136,7 @@ def precise_input_settings(panel, ctx: PanelContext) -> None:
             ctx.apply_setting(ctx.set_precise_input_memory, remember)
         else:
             ctx.gizmo.remember_precise_input_choices = remember
-    imgui.end_table()
+    panel._end_properties()
 
 
 def snap_settings(panel, ctx: PanelContext) -> None:
@@ -191,7 +188,7 @@ def snap_settings(panel, ctx: PanelContext) -> None:
         )
         if changed:
             setattr(ctx.gizmo, attribute, value)
-    imgui.end_table()
+    panel._end_properties()
 
 
 def view_settings(panel, ctx: PanelContext) -> None:
@@ -215,7 +212,7 @@ def view_settings(panel, ctx: PanelContext) -> None:
             ctx.apply_setting(ctx.set_view_selection_padding, value, persist=committed)
         elif changed:
             ctx.view_cube.selection_padding = value
-    imgui.end_table()
+    panel._end_properties()
 
 
 def perturb_settings(panel, ctx: PanelContext) -> None:
@@ -261,28 +258,28 @@ def perturb_settings(panel, ctx: PanelContext) -> None:
     )
     if changed:
         ctx.perturb.outline_corner_radius_pt = value
-    imgui.end_table()
+    panel._end_properties()
 
 
 def helper_settings(panel, ctx: PanelContext) -> None:
     panel._group_heading(ctx.tr("Helpers"))
     if not panel._begin_properties("settings_interaction_helpers"):
         return
-    panel._property(ctx.tr("Camera & light icons"))
-    changed, visible = themed_checkbox(
+    panel._property(ctx.tr("Camera & light icons"), control_part="checkbox")
+    changed, visible = panel._checkbox(
         "##scene_entity_helpers", ctx.scene_entities.visible, ctx.theme
     )
     if changed:
         ctx.scene_entities.visible = visible
-    panel._property(ctx.tr("Selected frustum / light range"))
+    panel._property(ctx.tr("Selected frustum / light range"), control_part="checkbox")
     imgui.begin_disabled(not ctx.scene_entities.visible)
-    changed, influence = themed_checkbox(
+    changed, influence = panel._checkbox(
         "##selected_influence_volumes", ctx.scene_entities.show_influence, ctx.theme
     )
     imgui.end_disabled()
     if changed:
         ctx.scene_entities.show_influence = influence
-    imgui.end_table()
+    panel._end_properties()
 
 
 def interaction_policy(panel, ctx: PanelContext) -> None:
@@ -363,12 +360,12 @@ def interaction_policy(panel, ctx: PanelContext) -> None:
         if attribute == "perturb" and not ctx.session.adapter.caps.perturb:
             continue
         imgui.table_next_column()
-        changed, value = themed_checkbox(
+        changed, value = panel._checkbox(
             f"{t(label)}###interaction_{attribute}", current, ctx.theme
         )
         if changed:
             callback(attribute, value)
-    imgui.end_table()
+    panel._end_properties()
 
 
 def selection_presentation(panel, ctx: PanelContext) -> None:
@@ -389,7 +386,7 @@ def selection_presentation(panel, ctx: PanelContext) -> None:
         return
     for attribute, label in rows:
         imgui.table_next_column()
-        changed, value = themed_checkbox(
+        changed, value = panel._checkbox(
             f"{t(label)}###selection_{attribute}", getattr(style, attribute), ctx.theme
         )
         if changed:
@@ -397,4 +394,4 @@ def selection_presentation(panel, ctx: PanelContext) -> None:
             ctx.selection_style = style
             if ctx.set_selection_style is not None:
                 ctx.apply_setting(ctx.set_selection_style, style)
-    imgui.end_table()
+    panel._end_properties()

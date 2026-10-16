@@ -18,17 +18,23 @@ from mojive.ui.panels import (
     button_width,
     copyable_name_item,
 )
-
-from .fields import (
+from mojive.ui.panels.inspector.fields import (
+    _end_property_table,
+    _property_begin_combo,
+    _property_button,
+    _property_choice,
+    _property_end_combo,
+    _property_input_text,
     _property_section,
     _vector_fields,
 )
-from .support import (
+from mojive.ui.panels.inspector.support import (
     _MODEL_COMPONENT_CATEGORIES,
     _MULTILINE_COMPONENT_FIELDS,
     _component_value_editor,
     _matching_path_preset,
     _path_preset_label,
+    _property_input_text_multiline,
     _unique_component_name,
 )
 
@@ -67,7 +73,7 @@ class _Model:
         if not placement_active:
             if not can_edit:
                 imgui.begin_disabled()
-            begin_placement = imgui.button(ctx.tr("Edit Placement"))
+            begin_placement = _property_button(ctx, ctx.tr("Edit Placement"))
             if not can_edit:
                 imgui.end_disabled()
                 imgui.set_item_tooltip(ctx.tr("Locked to avoid accidental model rebuilds."))
@@ -108,12 +114,12 @@ class _Model:
         if placement_active and gizmo is not None:
             if not ctx.live_model_updates:
                 return
-            apply = imgui.button(ctx.tr("Apply Placement"))
+            apply = _property_button(ctx, ctx.tr("Apply Placement"))
             imgui.set_item_tooltip(
                 ctx.tr("Preview only; applying rebuilds the composed model once.")
             )
             imgui.same_line()
-            cancel = imgui.button(f"{ctx.tr('Cancel')}##model-placement")
+            cancel = _property_button(ctx, f"{ctx.tr('Cancel')}##model-placement")
             if apply:
                 result = gizmo.apply_model_placement(ctx.session)
                 if not result.ok:
@@ -127,13 +133,13 @@ class _Model:
                     ctx.report(result.message, level="error")
             return
 
-        if info.removable and imgui.button(ctx.tr("Remove Model")):
+        if info.removable and _property_button(ctx, ctx.tr("Remove Model")):
             ctx.submit(cmd.RemoveSceneModel(info.model_id))
         if ctx.session.adapter.caps.supports("mujoco.mjcf"):
             imgui.same_line()
             if not ctx.session.paused:
                 imgui.begin_disabled()
-            edit_source = imgui.button(ctx.tr("Edit MJCF Source..."))
+            edit_source = _property_button(ctx, ctx.tr("Edit MJCF Source..."))
             if not ctx.session.paused:
                 imgui.end_disabled()
             if edit_source:
@@ -169,48 +175,66 @@ class _Model:
             if category not in self._component_cache:
                 self._component_cache[category] = ctx.session.model_components(model_id, category)
             components = self._component_cache[category]
-            flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_saved_settings
-            if not imgui.begin_table(f"components-{category}", 3, flags):
-                continue
-            imgui.table_setup_column("Name", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_setup_column(
-                "Edit", imgui.TableColumnFlags_.width_fixed, button_width(ctx.tr("Edit"))
-            )
-            imgui.table_setup_column(
-                "Delete", imgui.TableColumnFlags_.width_fixed, button_width(ctx.tr("Delete"))
-            )
-            clipper = imgui.ListClipper()
-            clipper.begin(len(components))
-            while clipper.step():
-                for index in range(clipper.display_start, clipper.display_end):
-                    component = components[index]
-                    imgui.push_id(f"{category}-{component.component_id}")
-                    imgui.table_next_row()
-                    imgui.table_next_column()
-                    imgui.align_text_to_frame_padding()
+            presentation = getattr(ctx, "inspector_presentation", None)
+            if presentation is not None:
+                for component in components:
                     label = f"{component.name}  ({component.subtype})"
-                    imgui.text(label)
-                    imgui.set_item_tooltip(label)
-                    imgui.table_next_column()
-                    if not editable:
-                        imgui.begin_disabled()
-                    if imgui.button(ctx.tr("Edit")):
+                    edit, remove = presentation.component_actions(
+                        "component_list",
+                        f"component-{category}-{component.component_id}",
+                        label,
+                        (ctx.tr("Edit"), ctx.tr("Delete")),
+                        (editable, editable),
+                    )
+                    if edit:
                         self._begin_component_edit(component)
-                    imgui.table_next_column()
-                    if imgui.button(ctx.tr("Delete")):
+                    if remove:
                         ctx.submit_model_edit(
                             cmd.RemoveModelComponent(model_id, category, component.component_id)
                         )
-                    if not editable:
-                        imgui.end_disabled()
-                    imgui.pop_id()
-            clipper.end()
-            imgui.end_table()
+            else:
+                flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.no_saved_settings
+                if not imgui.begin_table(f"components-{category}", 3, flags):
+                    continue
+                imgui.table_setup_column("Name", imgui.TableColumnFlags_.width_stretch)
+                imgui.table_setup_column(
+                    "Edit", imgui.TableColumnFlags_.width_fixed, button_width(ctx.tr("Edit"))
+                )
+                imgui.table_setup_column(
+                    "Delete", imgui.TableColumnFlags_.width_fixed, button_width(ctx.tr("Delete"))
+                )
+                clipper = imgui.ListClipper()
+                clipper.begin(len(components))
+                while clipper.step():
+                    for index in range(clipper.display_start, clipper.display_end):
+                        component = components[index]
+                        imgui.push_id(f"{category}-{component.component_id}")
+                        imgui.table_next_row()
+                        imgui.table_next_column()
+                        imgui.align_text_to_frame_padding()
+                        label = f"{component.name}  ({component.subtype})"
+                        imgui.text(label)
+                        imgui.set_item_tooltip(label)
+                        imgui.table_next_column()
+                        if not editable:
+                            imgui.begin_disabled()
+                        if _property_button(ctx, ctx.tr("Edit")):
+                            self._begin_component_edit(component)
+                        imgui.table_next_column()
+                        if _property_button(ctx, ctx.tr("Delete")):
+                            ctx.submit_model_edit(
+                                cmd.RemoveModelComponent(model_id, category, component.component_id)
+                            )
+                        if not editable:
+                            imgui.end_disabled()
+                        imgui.pop_id()
+                clipper.end()
+                _end_property_table(ctx)
 
         if not editable:
             imgui.begin_disabled()
-        if imgui.begin_combo(
-            f"{ctx.tr('Add Component...')}##model-component", ctx.tr("select type")
+        if _property_begin_combo(
+            ctx, f"{ctx.tr('Add Component...')}##model-component", ctx.tr("select type")
         ):
             if not self._component_presets:
                 self._component_presets = {
@@ -221,7 +245,9 @@ class _Model:
                 imgui.text_disabled(ctx.tr("Add the referenced model elements first"))
             for category, subtypes in self._component_presets.items():
                 for subtype in subtypes:
-                    selected, _ = imgui.selectable(f"{category.capitalize()} / {subtype}", False)
+                    selected, _ = _property_choice(
+                        ctx, f"{category.capitalize()} / {subtype}", False
+                    )
                     if selected:
                         if category not in self._component_cache:
                             self._component_cache[category] = ctx.session.model_components(
@@ -232,7 +258,7 @@ class _Model:
                         ctx.submit_model_edit(
                             cmd.AddModelComponent(model_id, category, subtype, name)
                         )
-            imgui.end_combo()
+            _property_end_combo(ctx)
         if not editable:
             imgui.end_disabled()
             imgui.set_item_tooltip(ctx.tr("Pause the simulation before editing model components"))
@@ -295,8 +321,8 @@ class _Model:
             imgui.text_disabled(ctx.tr("name"))
             imgui.table_next_column()
             imgui.set_next_item_width(-1.0)
-            _changed, self._component_name = imgui.input_text(
-                "##component-name", self._component_name
+            _changed, self._component_name = _property_input_text(
+                ctx, "##component-name", self._component_name
             )
             for index, field in enumerate(self._component_fields):
                 imgui.table_next_row()
@@ -311,7 +337,7 @@ class _Model:
                     choices.get(field[0], ()),
                     multiline=field[0] in _MULTILINE_COMPONENT_FIELDS or len(field[1]) > 72,
                 )
-            imgui.end_table()
+            _end_property_table(ctx)
         if self._component_path:
             imgui.separator()
             imgui.text_disabled(ctx.tr("Path"))
@@ -319,21 +345,31 @@ class _Model:
             imgui.push_id(f"path-{path_index}")
             object_type = next((value for name, value in fields if name == "objtype"), "")
             suffix = f" · {object_type}" if object_type else ""
-            imgui.text_disabled(f"{path_index + 1}. {element_type}{suffix}")
-            imgui.same_line()
-            if path_index == 0:
-                imgui.begin_disabled()
-            move_up = imgui.button(ctx.tr("Up"))
-            if path_index == 0:
-                imgui.end_disabled()
-            imgui.same_line()
-            if path_index + 1 == len(self._component_path):
-                imgui.begin_disabled()
-            move_down = imgui.button(ctx.tr("Down"))
-            if path_index + 1 == len(self._component_path):
-                imgui.end_disabled()
-            imgui.same_line()
-            remove = imgui.button(ctx.tr("Remove"))
+            presentation = getattr(ctx, "inspector_presentation", None)
+            if presentation is not None:
+                move_up, move_down, remove = presentation.component_actions(
+                    "component_path",
+                    f"component-path-{path_index}",
+                    f"{path_index + 1}. {element_type}{suffix}",
+                    (ctx.tr("Up"), ctx.tr("Down"), ctx.tr("Remove")),
+                    (path_index > 0, path_index + 1 < len(self._component_path), True),
+                )
+            else:
+                imgui.text_disabled(f"{path_index + 1}. {element_type}{suffix}")
+                imgui.same_line()
+                if path_index == 0:
+                    imgui.begin_disabled()
+                move_up = _property_button(ctx, ctx.tr("Up"))
+                if path_index == 0:
+                    imgui.end_disabled()
+                imgui.same_line()
+                if path_index + 1 == len(self._component_path):
+                    imgui.begin_disabled()
+                move_down = _property_button(ctx, ctx.tr("Down"))
+                if path_index + 1 == len(self._component_path):
+                    imgui.end_disabled()
+                imgui.same_line()
+                remove = _property_button(ctx, ctx.tr("Remove"))
             if begin_kv_table(f"component_path_fields_{path_index}"):
                 imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
                 imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
@@ -377,7 +413,7 @@ class _Model:
                                 if candidate[0] == "objname":
                                     candidate[1] = default_name
                                     break
-                imgui.end_table()
+                _end_property_table(ctx)
             imgui.pop_id()
             if move_up:
                 self._component_path[path_index - 1 : path_index + 1] = reversed(
@@ -399,11 +435,11 @@ class _Model:
                 self._component_path.pop(path_index)
                 self._component_path_choices.pop(path_index)
                 break
-        if self._component_path_presets and imgui.begin_combo(
-            ctx.tr("Add path item"), ctx.tr("select type")
+        if self._component_path_presets and _property_begin_combo(
+            ctx, ctx.tr("Add path item"), ctx.tr("select type")
         ):
             for preset in self._component_path_presets:
-                selected, _ = imgui.selectable(_path_preset_label(preset), False)
+                selected, _ = _property_choice(ctx, _path_preset_label(preset), False)
                 if selected:
                     self._component_path.append(
                         (
@@ -414,12 +450,12 @@ class _Model:
                     self._component_path_choices.append(
                         {field.name: field.choices for field in preset.fields}
                     )
-            imgui.end_combo()
+            _property_end_combo(ctx)
         if self._component_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##component"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##component"):
                 imgui.set_clipboard_text(self._component_error)
-        if imgui.button(ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if _property_button(ctx, ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             ctx.submit_model_edit(
                 cmd.UpdateModelComponent(
                     component.model_id,
@@ -436,7 +472,7 @@ class _Model:
             )
             imgui.close_current_popup()
         imgui.same_line()
-        if imgui.button(ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if _property_button(ctx, ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             self._component_edit = None
             imgui.close_current_popup()
         imgui.end_popup()
@@ -465,7 +501,8 @@ class _Model:
         visible, _ = imgui.begin_popup_modal(popup_title)
         if not visible:
             return
-        _changed, self._source_text = imgui.input_text_multiline(
+        _changed, self._source_text = _property_input_text_multiline(
+            ctx,
             "##mjcf_source",
             self._source_text,
             imgui.ImVec2(-1.0, -70.0 * ctx.style_scale),
@@ -476,16 +513,16 @@ class _Model:
         )
         if self._source_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
-            if imgui.button(f"{ctx.tr('Copy error')}##source"):
+            if _property_button(ctx, f"{ctx.tr('Copy error')}##source"):
                 imgui.set_clipboard_text(self._source_error)
-        if imgui.button(ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if _property_button(ctx, ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             ctx.submit_model_edit(
                 cmd.SetModelSource(self._source_model_id, self._source_text),
                 self._source_edit_completed,
             )
             imgui.close_current_popup()
         imgui.same_line()
-        if imgui.button(ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
+        if _property_button(ctx, ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
             imgui.close_current_popup()
         imgui.end_popup()
 

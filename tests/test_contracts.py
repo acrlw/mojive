@@ -366,20 +366,25 @@ def test_render_flags_cover_the_reference_renderer_feature_switches():
     assert {"segment", "idcolor"}.issubset(view.value for view in DebugView)
 
 
-def test_debug_view_combo_lists_every_enum_member():
+def test_debug_view_combo_lists_every_enum_member(monkeypatch):
+    from types import SimpleNamespace
 
-    import ast
-    import inspect
-    import textwrap
-
+    from mojive.render.backend import DebugView, NullBackend
+    from mojive.ui.panels.settings import SettingsPanel
     from mojive.ui.panels.settings_pages import rendering
 
-    src = textwrap.dedent(inspect.getsource(rendering.debug_view))
-    tree = ast.parse(src)
-    loops = [n for n in ast.walk(tree) if isinstance(n, ast.For)]
-    assert loops
-    iterated = {ast.unparse(n.iter) for n in loops}
-    assert "DebugView" in iterated
+    panel, backend = SettingsPanel(), NullBackend()
+    choices = []
+
+    def choose(key, current, labels, **options):
+        choices.extend(labels)
+        assert options["enabled"] == tuple(view in backend.caps.debug_views for view in DebugView)
+        return False, current
+
+    monkeypatch.setattr(panel, "_choice_list", choose)
+    monkeypatch.setattr(rendering.imgui, "set_next_item_width", lambda value: None)
+    rendering.debug_view(panel, SimpleNamespace(backend=backend, tr=str))
+    assert choices == [view.value for view in DebugView]
 
 
 def test_settings_panel_reads_the_debug_view_from_the_backend():

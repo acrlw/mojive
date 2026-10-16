@@ -15,6 +15,7 @@ from mojive.ui.keyframe_editor.controls import unique_keyframe_name as unique_ke
 from mojive.ui.keyframe_editor.properties import draw_selected
 from mojive.ui.keyframe_editor.toolbar import TimelineToolbar
 from mojive.ui.keyframe_editor.track import draw_dope_sheet
+from mojive.ui.panels import Panel, PanelContext
 from mojive.ui.replay_controls import ReplayControls
 from mojive.ui.timeline import (
     decimated_marker_ids as decimated_marker_ids,
@@ -49,8 +50,6 @@ from mojive.ui.timeline import (
 from mojive.ui.timeline import (
     zoom_timeline_range as zoom_timeline_range,
 )
-
-from . import Panel, PanelContext
 
 
 class KeyframesPanel(Panel):

@@ -9,13 +9,10 @@ from importlib import import_module
 import numpy as np
 from imgui_bundle import imgui
 
+from mojive.adapters.base import FrameNeeds
+from mojive.config import PanelConfig
 from mojive.interaction.input import physical_ctrl_super
-from mojive.ui.imgui_draw import ImguiDraw2D as ImguiDraw2D
-from mojive.ui.paint_protocol import Draw2D as Draw2D
-
-from ...adapters.base import FrameNeeds
-from ...config import PanelConfig
-from ..controls import (
+from mojive.ui.controls import (
     button_row_layout,
     button_width,
     padded_selectable,
@@ -27,12 +24,14 @@ from ..controls import (
     sort_order_tooltip,
     themed_checkbox,
 )
-from ..input_bindings import DEFAULT_INPUT_BINDINGS
-from ..pointer_bindings import PointerAction
-from ..theme import THEME as THEME
-from ..theme import Theme as Theme
-from ..viewport_widgets import ToolHint, pointer_tool_hint
-from .context import PanelContext as PanelContext
+from mojive.ui.imgui_draw import ImguiDraw2D as ImguiDraw2D
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
+from mojive.ui.paint_protocol import Draw2D as Draw2D
+from mojive.ui.panels.context import PanelContext as PanelContext
+from mojive.ui.pointer_bindings import PointerAction
+from mojive.ui.theme import THEME as THEME
+from mojive.ui.theme import Theme as Theme
+from mojive.ui.viewport_widgets import ToolHint, pointer_tool_hint
 
 
 class Panel:
@@ -254,12 +253,6 @@ def value_edit(
             _EXPANDED.add(label)
         out.expanded = label in _EXPANDED
 
-    tooltip = f"{bindings.pointer_label(PointerAction.VALUE_COPY)}: copy"
-    if initial is not None:
-        tooltip = f"{bindings.pointer_label(PointerAction.VALUE_RESET)}: reset · " + tooltip
-    if more_hint:
-        tooltip += f" · {bindings.pointer_label(PointerAction.VALUE_EXPAND)}: {more_hint}"
-    imgui.set_item_tooltip(tooltip)
     return out
 
 

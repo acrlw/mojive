@@ -168,7 +168,7 @@ def test_settings_checkbox_and_timeline_stay_inside_windows(workspace):
     assert timeline.size.x == pytest.approx(viewport.size.x, abs=1)
 
 
-def test_timeline_flows_sequentially_and_all_lanes_fit(workspace):
+def test_timeline_flows_sequentially_and_all_lanes_are_reachable(workspace):
     from mojive.ui.workspace.design import DESIGN
 
     viewer, shell = workspace, workspace.app.workspace
@@ -213,14 +213,19 @@ def test_timeline_flows_sequentially_and_all_lanes_fit(workspace):
     assert time[0] - (last_step[0] + last_step[2]) == pytest.approx(
         DESIGN.timeline_column_gap * shell.s, abs=1
     )
-    # Three complete lanes must fit at the default panel height, including at 2x.
+    # Preserve tuned lane sizes; short panels scroll to the remaining lanes.
     body = next(
         child
         for child in imgui.get_current_context().windows
         if child.active and "Timeline body" in child.name
     )
     for index in range(3):
-        x, y, w, h = hits[f"timeline-lane-label-{index}"]
+        x, y, w, h = shell.ui.hits[f"timeline-lane-label-{index}"]
+        if y + h > body.inner_clip_rect.max.y + 1:
+            assert body.scroll_max.y > 0
+            imgui.internal.set_scroll_y(body, body.scroll_max.y)
+            viewer.frame()
+            x, y, w, h = shell.ui.hits[f"timeline-lane-label-{index}"]
         assert body.inner_clip_rect.min.y - 1 <= y < y + h <= body.inner_clip_rect.max.y + 1
 
 
@@ -325,13 +330,11 @@ def test_common_xyz_values_share_one_row_and_precision_reflows(workspace):
                 DESIGN.numeric_gap * shell.s, abs=1
             )
     # Long precision reserves enough text width; narrow rows remain usable by stacking.
-    assert shell.ui.vector_layout(296 * shell.s, format="%.7f").columns == 1
-    assert (
-        shell.ui.vector_layout(
-            296 * shell.s, format="%.6g", values=(0.0533713, 0.0533713, 0.00288568)
-        ).columns
-        == 1
-    )
+    assert shell.ui.vector_layout(296 * shell.s, format="%.12f").columns == 1
+    values = (0.0533713, 0.0533713, 0.00288568)
+    layout = shell.ui.vector_layout(296 * shell.s, format="%.6g", values=values)
+    minimum = shell.ui.numeric_minimum(format="%.6g", values=values)
+    assert all(field[2] >= minimum for field in layout.fields)
     assert shell.ui.vector_layout(180 * shell.s, format="%.3g").columns == 1
 
 
@@ -451,14 +454,13 @@ def test_camera_sections_rails_units_and_native_spacing(workspace):
         assert rail[1] == pytest.approx(value[1], abs=1)
         assert unit[1] == pytest.approx(value[1], abs=1)
         assert value[0] - rail[0] - rail[2] == pytest.approx(DESIGN.row_gap * scale, abs=1)
-        assert unit[0] == pytest.approx(value[0] + value[2], abs=1)
-        assert unit[2] == pytest.approx(DESIGN.rail_unit_width * scale, abs=1)
+        assert value[0] <= unit[0] < unit[0] + unit[2] <= value[0] + value[2]
         assert value[2] == pytest.approx(DESIGN.rail_entry_width * scale, abs=1)
         assert rail[2] >= DESIGN.rail_minimum_track_width * scale
         if previous is not None and name in ("pitch", "distance"):
             heading = hits["camera-label-" + tr(name)]
             assert heading[1] - previous[1] - previous[3] == pytest.approx(
-                (DESIGN.row_gap + 3) * scale, abs=1
+                DESIGN.row_gap * scale, abs=1
             )
         previous = rail
     original = (viewer.app.camera.yaw, viewer.app.camera.pitch, viewer.app.camera.fov_y_deg)
@@ -761,7 +763,8 @@ def test_camera_narrow_rails_stack_and_model_source_preserves_editor_camera(work
         unit = hits["##camera-" + name + "-unit"]
         assert value[1] - rail[1] - rail[3] == pytest.approx(DESIGN.row_gap * scale, abs=1)
         assert value[0] == pytest.approx(rail[0], abs=1)
-        assert value[0] + value[2] + unit[2] == pytest.approx(rail[0] + rail[2], abs=1)
+        assert value[0] + value[2] == pytest.approx(rail[0] + rail[2], abs=1)
+        assert value[0] <= unit[0] < unit[0] + unit[2] <= value[0] + value[2]
         assert window.pos.x <= rail[0] < rail[0] + rail[2] <= window.pos.x + window.size.x
     original = (viewer.app.camera.yaw, viewer.app.camera.pitch, viewer.app.camera.distance)
     model_camera = viewer.session.cameras[0]

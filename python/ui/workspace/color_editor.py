@@ -7,8 +7,7 @@ import re
 
 from imgui_bundle import imgui
 
-from .design import BODY_SIZE, DESIGN, MONO_SIZE
-from .widgets import DIM
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN
 
 
 class ColorField:
@@ -20,19 +19,25 @@ class ColorField:
         self.open = False
         self.committed = False
 
-    def draw(self, ui, key, values):
+    def draw(self, ui, key, values, *, width=None):
         self.committed = False
         pos = imgui.get_cursor_screen_pos()
-        width = imgui.calc_item_width()
+        width = imgui.calc_item_width() if width is None else width
         rgba = tuple(values) if len(values) == 4 else (*values, 1)
+        swatch_width = min(DESIGN.control_height * ui.s, max(0, width))
+        ui.draw.push_clip_rect(
+            (pos.x, pos.y), (pos.x + max(0, width), pos.y + DESIGN.control_height * ui.s), True
+        )
+        imgui.begin_disabled(swatch_width <= 0)
         clicked = imgui.color_button(
             key + "-swatch",
             rgba,
             imgui.ColorEditFlags_.no_tooltip,
-            (DESIGN.control_height * ui.s, DESIGN.control_height * ui.s),
+            (max(1, swatch_width), DESIGN.control_height * ui.s),
         )
+        imgui.end_disabled()
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        ui.hits[key + "-swatch"] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        ui.hits[key + "-swatch"] = (lo.x, lo.y, swatch_width, hi.y - lo.y)
         ui.text(
             hi.x + DESIGN.numeric_gap * ui.s,
             pos.y + DESIGN.control_padding_y(BODY_SIZE) * ui.s,
@@ -41,6 +46,7 @@ class ColorField:
             max_width=max(0, width - hi.x + pos.x),
             translate=False,
         )
+        ui.draw.pop_clip_rect()
         popup = key + "-color"
         if clicked:
             self.before = tuple(values)
@@ -147,8 +153,13 @@ class ColorEditor:
         if not self.defaults or len(self.defaults) != len(out):
             self.begin(out)
         origin = imgui.get_cursor_screen_pos()
-        gap = 6 * s
-        half = (width - gap) / 2
+        editor_style = ui.component_style("color_editor")
+        margins = editor_style.edges("margin", s)
+        width = max(s, width - margins[0] - margins[2])
+        origin = imgui.ImVec2(origin.x + margins[0], origin.y + margins[1])
+        gap = editor_style.get("columnGap", 6) * s
+        row_gap = editor_style.get("rowGap", 8) * s
+        half = max(s, (width - gap) / 2)
         if ui.button(key + "-copy", origin.x, origin.y, half / s, icon="copy", label="Copy"):
             imgui.set_clipboard_text(format_color(out, self.mode))
         if ui.button(
@@ -164,10 +175,27 @@ class ColorEditor:
                 self.hex_text = format_color(out)
             except ValueError as error:
                 self.error = str(error)
-        imgui.set_cursor_screen_pos((origin.x, origin.y + 36 * s))
+        picker_y = origin.y + max(28 * s, ui.hits[key + "-copy"][3]) + row_gap
+        imgui.set_cursor_screen_pos((origin.x, picker_y))
         # Keep room for explicit entry and actions on short, high-DPI viewports.
         picker_width = min(width, max(110 * s, imgui.get_main_viewport().work_size.y - 254 * s))
-        imgui.set_cursor_screen_pos((origin.x + (width - picker_width) / 2, origin.y + 36 * s))
+        if editor_style.explicit("pickerHeight"):
+            picker_width = min(width, editor_style.get("pickerHeight", 260) * s)
+        if editor_style.explicit("pickerShare"):
+            picker_width = min(picker_width, width * editor_style.get("pickerShare", 100) / 100)
+        picker_style = ui.component_style("color_picker")
+        if picker_style.explicit("height"):
+            picker_width = min(width, picker_style.get("height", 260) * s)
+        picker_box = ui.component_box(
+            "color_picker",
+            origin.x + (width - picker_width) / 2,
+            picker_y,
+            picker_width,
+            picker_width,
+            key=key + "-picker-container",
+        )
+        imgui.set_cursor_screen_pos((picker_box.content.x, picker_box.content.y))
+        picker_width = picker_box.content.width
         imgui.set_next_item_width(picker_width)
         flags = (
             imgui.ColorEditFlags_.no_side_preview
@@ -182,9 +210,14 @@ class ColorEditor:
         edited, picked = picker(key + "-picker", out, flags)
         lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         ui.hits[key + "-picker"] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        picker_bottom = hi.y + picker_box.margin[3] + picker_box.padding[3]
         if edited:
             changed, out, self.error = True, list(picked), ""
             self.hex_text = format_color(out)
+        p = imgui.get_cursor_screen_pos()
+        imgui.set_cursor_screen_pos(
+            (origin.x, hi.y + row_gap + picker_box.margin[3] + picker_box.padding[3])
+        )
         p = imgui.get_cursor_screen_pos()
         mode = ui.segmented(
             key + "-format", origin.x, p.y, width / s, ("Hex", "RGBA 255", "RGBA 1"), self.mode
@@ -193,25 +226,23 @@ class ColorEditor:
             self.mode, self.error = mode, ""
             self.hex_text = format_color(out)
         _, format_y, _, format_height = ui.hits[key + "-format"]
-        y = format_y + format_height + 8 * s
+        channel_gap = ui.metric("color_channels", "rowGap", 8) * s
+        y = format_y + format_height + channel_gap
         if self.mode == 0:
-            imgui.set_cursor_screen_pos((origin.x, y))
-            imgui.set_next_item_width(width)
-            imgui.push_font(ui.mono, MONO_SIZE * s)
-            imgui.push_style_var(
-                imgui.StyleVar_.frame_padding, (8 * s, DESIGN.control_padding_y(MONO_SIZE) * s)
-            )
-            submitted, self.hex_text = imgui.input_text(
-                "##" + key + "-hex",
+            submitted, self.hex_text = ui.input_text(
+                key + "-hex",
+                origin.x,
+                y,
+                width,
                 self.hex_text,
-                imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all,
+                flags=imgui.InputTextFlags_.enter_returns_true
+                | imgui.InputTextFlags_.auto_select_all,
+                mono=True,
             )
             submitted |= imgui.is_item_deactivated_after_edit()
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             ui.hits[key + "-hex"] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
             active = imgui.is_item_active()
-            imgui.pop_style_var()
-            imgui.pop_font()
             if submitted:
                 try:
                     parsed = parse_color(self.hex_text)
@@ -223,7 +254,13 @@ class ColorEditor:
                 self.hex_text = format_color(out)
             bottom = hi.y
         else:
-            layout = ui.numeric_layout(width, len(out), column_options=(len(out), 2, 1))
+            layout = ui.numeric_layout(
+                width,
+                len(out),
+                column_options=(len(out), 2, 1),
+                parts="rgba",
+                minimum=ui.color_channel_minimum(),
+            )
             factor = 255 if self.mode == 1 else 1
             for index, axis in enumerate("RGBA"[: len(out)]):
                 dx, dy, field_width, _ = layout.fields[index]
@@ -243,20 +280,50 @@ class ColorEditor:
                 if edited and math.isfinite(value):
                     out[index], changed, self.error = value / factor, True, ""
             bottom = y + layout.height
-        imgui.set_cursor_screen_pos((origin.x, bottom + 8 * s))
+            ui.record_numeric_group(key + "-channels", origin.x, y, width, layout, parts="rgba")
+            if ui.design is not None:
+                ui.design.record(
+                    key + "-channel-list",
+                    ("color_channels",),
+                    (origin.x, format_y + format_height, width, channel_gap + layout.height),
+                    "color_channels",
+                    rowGap=channel_gap / s,
+                    fieldRegions={
+                        name: [origin.x, format_y + format_height, width, channel_gap]
+                        for name in ("gap", "rowGap")
+                    },
+                )
+        imgui.set_cursor_screen_pos((origin.x, bottom + channel_gap))
         if self.error:
             imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + width)
             imgui.text_colored((0.94, 0.49, 0.49, 1), ui.translate(self.error))
             imgui.pop_text_wrap_pos()
-        else:
-            ui.text(
-                origin.x,
-                bottom + 8 * s,
-                "0–255" if self.mode == 1 else "0–1" if self.mode == 2 else "#RRGGBB / #RRGGBBAA",
-                DIM,
-                11,
-                translate=False,
-                max_width=width,
+        bottom = max(imgui.get_cursor_screen_pos().y, imgui.get_item_rect_max().y) + margins[3]
+        if ui.design is not None:
+            ui.design.record(
+                key + "-editor",
+                ("color_editor",),
+                (
+                    origin.x - margins[0],
+                    origin.y - margins[1],
+                    width + margins[0] + margins[2],
+                    bottom - origin.y + margins[1],
+                ),
+                "color_editor",
+                fieldRegions={
+                    "columnGap": [origin.x + half, origin.y, gap, ui.hits[key + "-copy"][3]],
+                    "rowGap": [
+                        [origin.x, picker_y - row_gap, width, row_gap],
+                        [origin.x, picker_bottom, width, row_gap],
+                    ],
+                    "gap": [
+                        [origin.x + half, origin.y, gap, ui.hits[key + "-copy"][3]],
+                        [origin.x, picker_y - row_gap, width, row_gap],
+                    ],
+                },
+                rowGap=row_gap / s,
+                columnGap=gap / s,
+                pickerWidth=picker_width / s,
             )
-            imgui.dummy((width, 14 * s))
+        imgui.set_cursor_screen_pos((origin.x, bottom))
         return changed, out

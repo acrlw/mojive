@@ -1,10 +1,12 @@
 """Native numeric editing, responsive field layout and value rails."""
 
+import math
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
+from mojive.design.native.geometry import NativePartStyle, Rect, budget_margins, part_scope
 from mojive.ui.compound_fields import (
     borderless_numeric_input,
     draw_focus_frame,
@@ -12,12 +14,8 @@ from mojive.ui.compound_fields import (
 )
 from mojive.ui.panels.value_cards import value_rail
 from mojive.ui.theme import THEME, mix_color
-
-from .design import BODY_SIZE, CONTROL_RADIUS, DESIGN, MONO_SIZE
-from .widget_style import (
-    FORM_LABEL_COLUMN_GAP,
-    FORM_LABEL_COLUMN_MINIMUM,
-    FORM_LABEL_COLUMN_WIDTH,
+from mojive.ui.workspace.design import BODY_SIZE, CONTROL_RADIUS, DESIGN, MONO_SIZE, rail_style
+from mojive.ui.workspace.widget_style import (
     MUTED,
     TEXT,
 )
@@ -44,6 +42,14 @@ class NumericGroupLayout:
     height: float
     label_above: bool = False
     label_width: float = 0.0
+    label_x: float = 0.0
+    label_y: float = 0.0
+    label_height: float = 0.0
+    label_line_height: float = 0.0
+    minimum_content_height: float = 0.0
+    width: float = 0.0
+    group_margin: tuple[float, float, float, float] = (0, 0, 0, 0)
+    row_margin: tuple[float, float, float, float] = (0, 0, 0, 0)
 
 
 class _NumericFields:
@@ -63,16 +69,35 @@ class _NumericFields:
         hi=0.0,
         format="%.3f",
         reset_value=0.0,
+        integer=False,
+        flags=0,
     ):
         """Draw a native drag field; callers own command transactions and cancellation."""
         s = self.s
+        if self.design is not None:
+            result = self.design.number(
+                key,
+                x,
+                y,
+                w,
+                value,
+                axis=axis,
+                speed=speed,
+                lo=lo,
+                hi=hi,
+                format=format,
+                reset_value=reset_value,
+                integer=integer,
+                flags=flags,
+            )
+            return result.changed, result.value
         badge = min(18 * s, max(0, w * 0.35)) if axis else 0
         draw_list = self.draw
         splitter = None
         reset = False
         badge_active = badge_hovered = badge_activated = badge_deactivated = False
         badge_id = None
-        imgui.push_font(self.mono, MONO_SIZE * s)
+        imgui.push_font(self.numeric_font, (self.typography.numeric.size or DESIGN.mono_size) * s)
         imgui.push_style_var(
             imgui.StyleVar_.frame_padding, (8 * s, DESIGN.control_padding_y(MONO_SIZE) * s)
         )
@@ -138,14 +163,16 @@ class _NumericFields:
             imgui.push_style_color(imgui.Col_.text, (0, 0, 0, 0))
         draw_list.push_clip_rect((x + badge, y), (x + w, y + imgui.get_frame_height()), True)
         with borderless_numeric_input():
-            changed, edited = imgui.drag_float(
+            drag = imgui.drag_int if integer else imgui.drag_float
+            numeric = int if integer else float
+            changed, edited = drag(
                 item_label,
-                float(value),
+                numeric(value),
                 speed,
-                lo,
-                hi,
+                numeric(lo),
+                numeric(hi),
                 format,
-                imgui.SliderFlags_.always_clamp if lo < hi else 0,
+                flags | (imgui.SliderFlags_.always_clamp if lo < hi else 0),
             )
         draw_list.pop_clip_rect()
         if not native_text:
@@ -280,13 +307,21 @@ class _NumericFields:
             if format
             else ("0.0041472", "0.00288568", "-0.000123")
         )
-        font_key = (id(self.mono), s, imgui.get_io().display_framebuffer_scale.x, samples)
+        style = self.component_style(("input_number", "axis_input") if axis else "input_number")
+        font_size = style.get("fontSize", DESIGN.mono_size)
+        font_key = (
+            id(self.numeric_font),
+            font_size,
+            s,
+            imgui.get_io().display_framebuffer_scale.x,
+            samples,
+        )
         measured = getattr(self, "_numeric_measurements", None)
         if measured is None:
             measured = self._numeric_measurements = OrderedDict()
         text_width = measured.get(font_key)
         if text_width is None:
-            imgui.push_font(self.mono, MONO_SIZE * s)
+            imgui.push_font(self.numeric_font, font_size * s)
             text_width = max(imgui.calc_text_size(value).x for value in samples)
             imgui.pop_font()
             if len(measured) >= 64:
@@ -294,40 +329,171 @@ class _NumericFields:
             measured[font_key] = text_width
         else:
             measured.move_to_end(font_key)
-        return text_width + (34 if axis else 16) * s
+        padding = style.edges(
+            "padding", s, (3, 0, 3, 0) if axis and self.design is not None else (8, 0, 8, 0)
+        )
+        return (
+            text_width + padding[0] + padding[2] + (style.get("axisWidth", 18) * s if axis else 0)
+        )
 
-    def numeric_layout(self, width, count, *, axis=True, column_options=None, minimum=None):
-        """Keep common precision readable before placing equal-width numeric fields."""
+    def color_channel_minimum(self):
+        """Keep normalized color channels compact while preserving axis and padding."""
+        style = self.component_style(("input_number", "axis_input"))
+        font_size = style.get("fontSize", DESIGN.mono_size)
+        imgui.push_font(self.numeric_font, font_size * self.s)
+        try:
+            text_width = imgui.calc_text_size("0.5").x
+        finally:
+            imgui.pop_font()
+        pad = style.edges("padding", self.s, (3, 0, 3, 0))
+        return text_width + pad[0] + pad[2] + style.get("axisWidth", 18) * self.s
+
+    def numeric_layout(
+        self,
+        width,
+        count,
+        *,
+        axis=True,
+        column_options=None,
+        minimum=None,
+        parts="vector_group",
+        minimum_height=None,
+        field_part=None,
+    ):
+        """Budget group margins and every child frame before placing equal columns."""
         if not count:
             return NumericGroupLayout((), 0, 0)
         s = self.s
-        minimum = self.numeric_minimum(axis=axis) if minimum is None else minimum
-        gap = DESIGN.numeric_gap * s
-        field_height = DESIGN.control_height * s
-        row_stride = (DESIGN.control_height + DESIGN.row_gap) * s
+        automatic_minimum = minimum is None
+        minimum = self.numeric_minimum(axis=axis) if automatic_minimum else minimum
+        if axis and automatic_minimum:
+            # Axis rows keep equal compact columns. Full precision remains
+            # available in native editing and the clipped-value tooltip.
+            minimum = min(minimum, self.numeric_minimum(axis=True, format="%.1f"))
+        runtime = self.design.runtime if self.design is not None else None
+        group = NativePartStyle(runtime, parts, authored_defaults=True) if runtime else None
+        field = (
+            NativePartStyle(
+                runtime,
+                field_part or (("input_number", "axis_input") if axis else "input_number"),
+                authored_defaults=True,
+            )
+            if runtime
+            else None
+        )
+        margin = (
+            budget_margins(group.edges("margin", s), width, math.inf) if group else (0, 0, 0, 0)
+        )
+        field_margin = field.edges("margin", s) if field else (0, 0, 0, 0)
+        content_width = max(0, width - margin[0] - margin[2])
+        gap = group.get("columnGap", DESIGN.numeric_gap) * s if group else DESIGN.numeric_gap * s
+        row_gap = group.get("rowGap", DESIGN.row_gap) * s if group else DESIGN.row_gap * s
+        field_height = (
+            self.design.primitives.field_height(field.part_ids, DESIGN.control_height) * s
+            if field
+            else DESIGN.control_height * s
+        )
+        if minimum_height is not None:
+            field_height = max(field_height, minimum_height - field_margin[1] - field_margin[3])
+        field_minimum = minimum + field_margin[0] + field_margin[2]
+        if field and field.get("widthMode", "auto") == "fixed":
+            field_minimum = field.get("width", minimum / s) * s + field_margin[0] + field_margin[2]
         if column_options is None:
             column_options = (count, 2, 1) if count == 4 else (count, 1)
+        requested = group.get("columns", count) if group else count
+        if requested != count:
+            column_options = (min(count, max(1, int(requested))), 1)
         column_options = tuple(min(count, columns) for columns in column_options)
         columns = next(
             (
                 columns
                 for columns in column_options
-                if width >= columns * minimum + (columns - 1) * gap
+                if content_width >= columns * field_minimum + (columns - 1) * gap
             ),
             1,
         )
-        field_width = (width - (columns - 1) * gap) / columns
+        cell_width = max(0, (content_width - (columns - 1) * gap) / columns)
+        field_width = cell_width
+        row_height = field_height + field_margin[1] + field_margin[3]
         fields = tuple(
             (
-                (index % columns) * (field_width + gap),
-                (index // columns) * row_stride,
+                margin[0] + (index % columns) * (cell_width + gap),
+                margin[1] + (index // columns) * (row_height + row_gap),
                 field_width,
                 field_height,
             )
             for index in range(count)
         )
-        height = fields[-1][1] + field_height
-        return NumericGroupLayout(fields, columns, height)
+        height = fields[-1][1] + row_height + margin[3]
+        return NumericGroupLayout(fields, columns, height, width=width, group_margin=margin)
+
+    def record_numeric_group(self, key, x, y, width, layout, *, parts="vector_group"):
+        """Expose the same complete group bounds used by rows and color popups."""
+        self.hits[key] = (x, y, width, layout.height)
+        if self.design is not None:
+            self.design.record(
+                key,
+                (parts,),
+                self.hits[key],
+                "numeric_group",
+                columns=layout.columns,
+                fields=[[x + dx, y + dy, w, h] for dx, dy, w, h in layout.fields],
+            )
+
+    def record_form_group(self, key, x, y, layout):
+        if not layout.fields:
+            return
+        margin = layout.group_margin
+        field = self.component_style(("input_number", "axis_input"))
+        field_margin = field.edges("margin", self.s)
+        left = min(item[0] for item in layout.fields) - margin[0]
+        top = min(item[1] for item in layout.fields) - margin[1]
+        width = max(item[0] + item[2] for item in layout.fields) + margin[2] - left
+        height = (
+            max(item[1] + item[3] for item in layout.fields)
+            + field_margin[1]
+            + field_margin[3]
+            + margin[3]
+            - top
+        )
+        relative = replace(
+            layout,
+            fields=tuple((dx - left, dy - top, w, h) for dx, dy, w, h in layout.fields),
+            height=height,
+        )
+        self.record_numeric_group(key + "/controls", x + left, y + top, width, relative)
+        if self.design is not None:
+            row_margin = layout.row_margin
+            right = (
+                max(
+                    layout.label_x + layout.label_width,
+                    max(dx + field_width for dx, _, field_width, _ in layout.fields),
+                )
+                + row_margin[2]
+            )
+            self.design.record(
+                key + "/row",
+                ("form_row", "vector_row"),
+                [x, y, right, layout.height],
+                "vector_row",
+                layout="top" if layout.label_above else "left",
+                minContentHeight=layout.minimum_content_height,
+                fields=[
+                    [
+                        x + layout.label_x,
+                        y + layout.label_y,
+                        layout.label_width,
+                        layout.label_height,
+                    ],
+                    *[[x + dx, y + dy, fw, fh] for dx, dy, fw, fh in layout.fields],
+                ],
+                labelRect=[
+                    x + layout.label_x,
+                    y + layout.label_y,
+                    layout.label_width,
+                    layout.label_height,
+                ],
+            )
 
     def form_layout(
         self,
@@ -338,27 +504,110 @@ class _NumericFields:
         minimum=0,
         label_above=None,
         label_width=None,
+        label_gap=None,
         field_minimum=None,
+        vector=False,
+        minimum_height=None,
+        field_part=None,
     ):
-        """Give controls their minimum width before reserving a label column."""
+        """Reserve one label column and a measured child grid inside row margins."""
         s = self.s
+        runtime = self.design.runtime if self.design is not None else None
+        row = (
+            NativePartStyle(
+                runtime,
+                ("form_row", "vector_row") if vector else "form_row",
+                authored_defaults=True,
+            )
+            if runtime
+            else None
+        )
+        margins = budget_margins(row.edges("margin", s), width, math.inf) if row else (0, 0, 0, 0)
+        available = max(0, width - margins[0] - margins[2])
+        layout_mode = (
+            row.get("layout", "row") if vector and row and row.explicit("layout") else None
+        )
+        force_left = layout_mode in ("left", "row", "inline")
         if label_width is None:
-            label_width = min(FORM_LABEL_COLUMN_WIDTH * s, width * 0.28)
+            label_width = (
+                row.get("labelWidth", DESIGN.label_width) if row else DESIGN.label_width
+            ) * s
+            if not (force_left and row.explicit("labelWidth")):
+                label_width = min(label_width, available * 0.28)
+        if label_gap is None:
+            label_gap = (
+                row.get("columnGap", row.get("labelGap", DESIGN.label_gap))
+                if row
+                else DESIGN.label_gap
+            ) * s
         field_minimum = self.numeric_minimum(axis=axis) if field_minimum is None else field_minimum
-        required = count * max(minimum, field_minimum) + (count - 1) * DESIGN.numeric_gap * s
-        label_width = min(label_width, max(0, width - required - FORM_LABEL_COLUMN_GAP * s))
-        above = label_width < FORM_LABEL_COLUMN_MINIMUM * s if label_above is None else label_above
-        heading_width = width if above else label_width
-        field_x, field_y = (0, 24 * s) if above else (heading_width + FORM_LABEL_COLUMN_GAP * s, 0)
-        layout = self.numeric_layout(width - field_x, count, axis=axis, minimum=field_minimum)
+        # A left label shares the row with at least one field. The numeric grid
+        # owns XYZ reflow; reserving every axis before that pass erases the label.
+        required_count = 1 if force_left else count
+        required = (
+            required_count * max(minimum, field_minimum)
+            + (required_count - 1) * DESIGN.numeric_gap * s
+        )
+        label_width = min(label_width, max(0, available - required - label_gap))
+        above = label_width < DESIGN.label_minimum * s if label_above is None else label_above
+        if layout_mode is not None:
+            above = layout_mode in ("top", "column", "stack") or label_width < 24 * s
+        heading_width = available if above else label_width
+        row_height = (
+            row.get("height", DESIGN.control_height) if row else DESIGN.control_height
+        ) * s
+        label_line = (
+            row.line_height(DESIGN.body_size * 1.4) * s if row else DESIGN.body_size * 1.4 * s
+        )
+        if runtime is not None:
+            label_style = NativePartStyle(runtime, "form_label", authored_defaults=True)
+            label_margin = label_style.edges("margin", s)
+            label_line = max(
+                label_line, label_style.line_height() * s + label_margin[1] + label_margin[3]
+            )
+        row_height = max(row_height, label_line)
+        label_height = max(24 * s, label_line)
+        if above and row and row.explicit("rowGap"):
+            label_height = (
+                row.line_height(DESIGN.body_size * 1.4) * s
+                + row.get("rowGap", DESIGN.label_gap) * s
+            )
+        field_x, field_y = (
+            (0, label_height) if above else (min(available, heading_width + label_gap), 0)
+        )
+        layout = self.numeric_layout(
+            available - field_x,
+            count,
+            axis=axis,
+            minimum=field_minimum,
+            minimum_height=minimum_height,
+            field_part=field_part,
+            parts=() if field_part == "switch" else "vector_group",
+        )
+        valign = row.get("alignItems", "center") if row else "center"
+        cross = max(row_height, layout.height)
+        align_y = max(0, cross - layout.height) * (
+            0.5 if valign == "center" else 1 if valign == "end" else 0
+        )
         return replace(
             layout,
-            fields=tuple((x + field_x, y + field_y, w, h) for x, y, w, h in layout.fields),
-            height=layout.height + field_y,
+            fields=tuple(
+                (x + field_x + margins[0], y + field_y + margins[1] + align_y, w, h)
+                for x, y, w, h in layout.fields
+            ),
+            height=cross + field_y + margins[1] + margins[3],
             label_above=above,
             label_width=heading_width,
+            label_x=margins[0],
+            label_y=margins[1],
+            label_height=label_height if above else cross,
+            label_line_height=label_line,
+            minimum_content_height=max(label_line, layout.height),
+            width=width,
+            row_margin=margins,
         )
 
+    @part_scope("vector_row")
     def vector_layout(
         self,
         width,
@@ -372,7 +621,15 @@ class _NumericFields:
     ):
         """Share the control-first label column and XYZ grid across each group."""
         cache = self.__dict__.setdefault("_vector_layouts", {})
-        geometry = (width, self.s, id(self.mono), label_above, label_width, format)
+        geometry = (
+            width,
+            self.s,
+            id(self.numeric_font),
+            label_above,
+            label_width,
+            format,
+            self.design.runtime.revision if self.design else 0,
+        )
         previous = cache.get(key) if key is not None else None
         # The active drag owns stable field rectangles until its gesture finishes.
         if previous is not None and previous[0] == geometry and imgui.is_any_item_active():
@@ -381,6 +638,7 @@ class _NumericFields:
             width,
             3,
             axis=True,
+            vector=True,
             label_above=label_above,
             label_width=label_width,
             field_minimum=self.numeric_minimum(format=format, values=values)
@@ -393,6 +651,7 @@ class _NumericFields:
             cache[key] = (geometry, layout)
         return layout
 
+    @part_scope("vector_row")
     def vector(
         self,
         key,
@@ -417,18 +676,25 @@ class _NumericFields:
             if layout is None
             else layout
         )
-        self.text(
-            x,
-            y + (3 if layout.label_above else DESIGN.control_padding_y(BODY_SIZE)) * s,
-            heading,
-            MUTED,
-            max_width=layout.label_width,
-        )
-        self.hits[key + "-label"] = (x, y, layout.label_width, 24 * s)
+        rect = Rect(x + layout.label_x, y + layout.label_y, layout.label_width, layout.label_height)
+        if self.design is not None:
+            with self.component_scope("vector_row"):
+                self.design.primitives.family = self.design.family()
+                self.design.primitives.label(key + "-label", rect, label, unit=unit, color=MUTED)
+        else:
+            self.text(
+                rect.x,
+                rect.y + max(0, (rect.height - BODY_SIZE * s) / 2),
+                heading,
+                MUTED,
+                max_width=layout.label_width,
+                translate=False,
+            )
+        self.hits[key + "-label"] = rect.tuple()
         if (
             self.measure(heading) > layout.label_width
             and imgui.is_window_hovered()
-            and imgui.is_mouse_hovering_rect((x, y), (x + layout.label_width, y + 24 * s))
+            and imgui.is_mouse_hovering_rect((rect.x, rect.y), (rect.right, rect.bottom))
         ):
             self.tooltip(heading, translate=False)
         changed = False
@@ -458,22 +724,114 @@ class _NumericFields:
             canceled=any(state.canceled for state in states),
             reset=any(state.reset for state in states),
         )
+        self.record_form_group(key, x, y, layout)
         return changed, out
+
+    def rail_height(self, *, unit=True):
+        if self.design is None:
+            return DESIGN.control_height * self.s
+        painter = self.design.primitives
+        painter.family = self.design.family()
+        return max(painter.shell_height(unit=unit), self.metric("range", "height", 28)) * self.s
+
+    def rail_extent(self, width, *, bounded=True, unit=True, show_reset=False):
+        """Measure the same inline/stacked budget used by value_rail."""
+        scale = self.s
+        style = self.component_style("range_number")
+        margin = style.edges("margin", scale)
+        inner = max(scale, width - margin[0] - margin[2])
+        gap = style.get("columnGap", style.get("gap", DESIGN.row_gap)) * scale
+        entry = self.rail_height(unit=unit)
+        track = (
+            max(
+                self.metric("input_number", "fontSize", DESIGN.mono_size),
+                self.metric("range", "height", DESIGN.control_height),
+            )
+            * scale
+        )
+        rail = rail_style()
+        reset_space = entry + gap if show_reset else 0
+        number_width = min(rail.entry_width * scale, max(scale, inner - reset_space))
+        stacked = (
+            bounded and inner < number_width + reset_space + gap + rail.minimum_track_width * scale
+        )
+        height = (
+            track + DESIGN.row_gap * scale + entry
+            if stacked
+            else max(track, entry)
+            if bounded
+            else entry
+        )
+        return height + margin[1] + margin[3]
 
     def rail(self, key, x, y, w, value, bounds, **options):
         """One native slider, numeric entry and optional attached unit control."""
         s = self.s
+        outer_x, outer_y, outer_width = x, y, w
+        wrapper = None
+        if self.design is not None:
+            wrapper = self.design.box("range_number", (x, y, w, DESIGN.control_height * s))
+            x, y = wrapper.content.x, wrapper.content.y
+            w = max(s, w - wrapper.margin[0] - wrapper.margin[2])
         imgui.set_cursor_screen_pos((x, y))
-        imgui.push_font(self.mono, MONO_SIZE * s)
+        self.value_context.rail_style = rail_style()
+        font_size = self.metric("input_number", "fontSize", DESIGN.mono_size)
+        height = (
+            self.rail_height(unit=bool(options.get("unit")) and options.get("show_unit", True)) / s
+        )
+        imgui.push_font(self.numeric_font, font_size * s)
         imgui.push_style_var(
             imgui.StyleVar_.frame_padding,
-            (DESIGN.frame_padding_x * s, DESIGN.control_padding_y(MONO_SIZE) * s),
+            (
+                self.metric("input_number", "paddingX", DESIGN.frame_padding_x) * s,
+                max(0, (height - font_size) / 2) * s,
+            ),
         )
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, (DESIGN.row_gap * s, DESIGN.row_gap * s))
+        gap = self.metric("range_number", "columnGap", DESIGN.row_gap)
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap * s, DESIGN.row_gap * s))
+        entry_painter = None
+        if self.design is not None:
+            from mojive.ui.panels import value_edit
+
+            def entry_painter(
+                ctx, label, value, bounds, initial, fmt, width, unit, toggle, hits, _font, _frame
+            ):
+                pos = imgui.get_cursor_screen_pos()
+                painter = self.design.primitives
+                painter.family = self.design.family()
+                low, high = bounds if bounds is not None else (0.0, 0.0)
+                result = painter.number_shell(
+                    label + "-value",
+                    Rect(pos.x, pos.y, width, height * s),
+                    value,
+                    unit,
+                    toggle_unit=toggle,
+                    format=fmt,
+                    lo=low,
+                    hi=high,
+                    reset_value=initial if initial is not None else 0.0,
+                )
+                hits[label + "-value"] = result.box.frame.tuple()
+                if unit:
+                    hits[label + "-unit"] = self.hits[label + "-value-unit"]
+                edit = value_edit(
+                    label,
+                    value,
+                    result.changed,
+                    result.value,
+                    initial=initial,
+                    fmt=fmt,
+                    bindings=ctx.input_bindings,
+                )
+                edit.activated |= result.activated
+                return edit
+
         for part in ("track", "value", "unit"):
             self.hits.pop(key + "-" + part, None)
         item_id = key if key.startswith("##") else "##" + key
+        imgui.set_cursor_screen_pos((outer_x, outer_y))
         imgui.begin_group()
+        imgui.set_cursor_screen_pos((x, y))
         imgui.set_next_item_width(max(s, w))
         try:
             edit = value_rail(
@@ -483,8 +841,23 @@ class _NumericFields:
                 bounds,
                 hit_bounds=self.hits,
                 unit_font=self.body,
+                entry_painter=entry_painter,
+                track_height=self.metric("range", "height", 28) * s,
+                align_items=self.metric("range_number", "alignItems", "center"),
+                frame_draw=lambda lo, hi, fill: self.rect(
+                    lo.x,
+                    lo.y,
+                    hi.x - lo.x,
+                    hi.y - lo.y,
+                    tuple(round(channel * 255) for channel in fill),
+                    r=DESIGN.control_radius,
+                ),
                 **options,
             )
+            if wrapper is not None and any(wrapper.margin):
+                bottom = max(imgui.get_item_rect_max().y, y + height * s) + wrapper.margin[3]
+                imgui.set_cursor_screen_pos((outer_x, outer_y))
+                imgui.dummy((outer_width, max(s, bottom - outer_y)))
         finally:
             imgui.end_group()
             imgui.pop_style_var(2)
@@ -496,6 +869,23 @@ class _NumericFields:
                 if bounds is not None:
                     self.hits[key + "-" + part] = bounds
         self.hits[key] = (a.x, a.y, b.x - a.x, b.y - a.y)
+        if self.design is not None:
+            self.design.record(
+                key,
+                ("range_number",),
+                self.hits[key],
+                "range_number",
+                fields=[
+                    self.hits[key + "-" + suffix]
+                    for suffix in ("track", "value")
+                    if key + "-" + suffix in self.hits
+                ],
+            )
+            for suffix, parts in (("track", ("range",)), ("value", ("input_number",))):
+                if key + "-" + suffix in self.hits:
+                    self.design.record(
+                        key + "-" + suffix, parts, self.hits[key + "-" + suffix], suffix
+                    )
         return edit
 
     def slider(self, key, x, y, w, value, lo, hi, format="%.2f"):

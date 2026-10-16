@@ -3,7 +3,8 @@
 The native design is now the default production Mojive workspace. `mojive view`,
 `mojive editor`, and public viewer builders use `python/ui/workspace/`, with
 Session commands and the existing ViewerApp frame pipeline retaining scene and
-application ownership. `make ui-design-native` opens or captures that production UI.
+application ownership. `make ui-native-design` opens the native parameter editor
+alongside that production UI. `make ui-design-native` is a compatibility alias.
 
 The standalone source in this directory remains a comparison fixture for icon,
 typography and prototype-workbench experiments. Use `make ui-design-reference`
@@ -12,11 +13,19 @@ for those galleries; the production runtime imports no example or output code.
 Run from the repository root after `make setup`:
 
 ```sh
-make ui-design-native ARGS=--interactive
-make ui-design-native BACKEND=bgfx ARGS=--interactive
-make ui-design-native ARGS='--interactive --panel Cameras'
+make ui-native-design
+make ui-native-design BACKEND=bgfx
+make ui-native-design ARGS='--part statusbar'
 ```
 
+Alt-click a production component, including the bottom status bar, to select its
+parameters. Edits update its painted geometry and picking bounds. The header
+switches between separate and embedded editor windows.
+The inspection gesture owns the left mouse button until release, including when
+Alt is released first. Buttons retain their normal actions on ordinary clicks.
+Alt-click the runtime status text or dot to select the status and operation parent group.
+Its margins and padding position the status, recording actions and hints together. The hint
+subgroup retains its own item spacing; telemetry remains in the right-hand metrics group.
 Close the window to end the interactive run. bgfx requires the
 [native runtime and shaders](../../docs/how-to/native-viewer.md).
 On an existing checkout, install the new development dependency without replacing
@@ -28,8 +37,8 @@ and `uv.lock`.
 
 ```sh
 # Capture production panels, menus and the RGBA color editor.
-make ui-design-native
-make ui-design-native BACKEND=bgfx
+make ui-native-capture
+make ui-native-capture BACKEND=bgfx
 # Capture reference typography and icon specimens.
 make ui-design-reference ARGS=--menus
 make ui-design-reference ARGS=--icons
@@ -43,12 +52,33 @@ make ui-design-gizmos BACKEND=bgfx
 # Verify scaled panels, scene selection, numeric edits, undo and document actions.
 make ui-design-runtime
 make ui-design-runtime BACKEND=bgfx
+# Audit every catalog field through native editor input and production draw data.
+make ui-native-audit
+make ui-native-audit BACKEND=bgfx UI_AUDIT_SCALE=2
+# Verify selection and parent groups on every visible production instance.
+make ui-native-pick-check
+make ui-native-pick-check BACKEND=bgfx UI_AUDIT_SCALE=2
 ```
 
+Parameter audits write per-field results, restoration checks and failure captures to
+`output/design-parameter-audit/<backend>-<scale>x/`. Picking results are stored in
+`output/design-picking-audit/<backend>-<scale>x/`. These commands create isolated
+scene, settings and specification files. `ARGS='--resume'` resumes an interrupted
+parameter audit; `ARGS='--cases switch.columnGap,transport.marginLeft'` selects
+specific checks. `--retry` accepts comma-separated result statuses.
+
+The audit opens production panels, menus and dialogs, edits and resets each field
+through the native input queue, and compares submitted geometry and draw vertices.
+Explicit child overrides are temporarily reset when testing parent inheritance;
+the report records those supporting conditions and restores the original preset.
+Conditional fields retain their actual applicability, such as icon gaps on rows
+that have icons and vertical spacing on groups that wrap to multiple rows.
+
 Screenshots, reports, saved scenes and layout files go to
-`output/ui_design/native/<backend>/`. Direct module invocation also defaults to
-`output/ui_design/native/`. `ARGS='--output output/my_review'` selects another
-output directory. Production sources and icon data live under `python/ui/workspace/`;
+`output/ui_design/native/<backend>/`. Direct gallery invocation uses
+`python -m mojive.tools.native_workspace --capture` and defaults to
+`output/native-workspace/`. `make ui-native-capture ARGS='--output output/my_review'`
+selects another output directory. Production sources and icon data live under `python/ui/workspace/`;
 no file in `output/` is required at startup.
 
 ## Production module boundaries

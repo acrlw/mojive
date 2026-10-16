@@ -2,18 +2,35 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from dataclasses import dataclass
+
 from imgui_bundle import imgui
 
+from mojive.adapters.base import FrameNeeds
+from mojive.ui.files import message_path, reveal_path
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.messages import OutputMessage
+from mojive.ui.panels import Panel, PanelContext, button_width, pointer_pressed, search_input
+from mojive.ui.panels.filters import filter_pills, severity_color, severity_group, severity_icon
+from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import fit_text, text_line_y
+from mojive.ui.theme import ROW_PADDING_X, ROW_PADDING_Y
 
-from ...adapters.base import FrameNeeds
-from ..files import message_path, reveal_path
-from ..messages import OutputMessage
-from ..pointer_bindings import PointerAction
-from ..theme import ROW_PADDING_X, ROW_PADDING_Y
-from . import Panel, PanelContext, button_width, pointer_pressed, search_input
-from .filters import filter_pills, severity_color, severity_group, severity_icon
+
+@dataclass(frozen=True)
+class OutputRowStyle:
+    """Physical row geometry supplied by a host without replacing log interaction."""
+
+    height: float
+    line_height: float
+    icon_size: float
+    gap: float
+    padding: tuple[float, float, float, float]
+    margin: tuple[float, float, float, float] = (0, 0, 0, 0)
+    text_align: str = "start"
+    align_items: str = "center"
+
 
 _LEVEL_RANKS = {
     "debug": 10,
@@ -144,7 +161,7 @@ class OutputPanel(Panel):
             self.collapsed = False
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         # Rotate the shared chevron without changing its cached geometry.
-        from ..viewport_widgets import expand_glyph_path
+        from mojive.ui.viewport_widgets import expand_glyph_path
 
         center = ((a.x + b.x) / 2, (a.y + b.y) / 2)
         draw = ImguiDraw2D()
@@ -224,7 +241,7 @@ class OutputPanel(Panel):
             imgui.same_line()
         if imgui.button("##output-collapse", (imgui.get_frame_height(), imgui.get_frame_height())):
             self.collapsed = True
-        from ..viewport_widgets import draw_expand_glyph
+        from mojive.ui.viewport_widgets import draw_expand_glyph
 
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
         draw_expand_glyph(
@@ -250,27 +267,58 @@ class OutputPanel(Panel):
             self._selected_sequences.intersection_update(entry.sequence for entry in all_entries)
         return self._filtered_entries
 
+    def row_style(self, ctx):
+        scale = ctx.style_scale
+        return OutputRowStyle(
+            imgui.get_font_size() + 2 * ROW_PADDING_Y * scale,
+            imgui.get_font_size(),
+            imgui.get_font_size(),
+            6 * scale,
+            (
+                ROW_PADDING_X * scale,
+                ROW_PADDING_Y * scale,
+                ROW_PADDING_X * scale,
+                ROW_PADDING_Y * scale,
+            ),
+        )
+
+    def record_row(self, sequence, outer, frame, content, **geometry):
+        """Expose real row geometry to an optional host design audit."""
+
+    def _draw_separator(self, ctx):
+        imgui.separator()
+
     def _draw_entries(self, ctx, entries, filtering):
         output = ctx.output
-        imgui.separator()
+        self._draw_separator(ctx)
         imgui.begin_child("output_messages", imgui.ImVec2(0.0, 0.0), 0)
-        row_height = imgui.get_font_size() + 2.0 * ROW_PADDING_Y * ctx.style_scale
-        text_offset = text_line_y(ImguiDraw2D(), row_height * 0.5)
-        padding_x = ROW_PADDING_X * ctx.style_scale
+        geometry = self.row_style(ctx)
+        self._active_row_style = geometry
+        ml, mt, mr, mb = geometry.margin
+        pl, pt, pr, pb = geometry.padding
+        row_height = (
+            max(geometry.height, max(geometry.line_height, geometry.icon_size) + pt + pb) + mt + mb
+        )
+        text_offset = text_line_y(ImguiDraw2D(), (row_height - mt - mb) * 0.5)
+        padding_x = pl + ml
         if self.multiline:
             width = imgui.get_content_region_avail().x
-            wrap_width = max(
-                1.0, width - 2 * padding_x - imgui.get_font_size() - 6 * ctx.style_scale
+            wrap_width = max(1.0, width - ml - mr - pl - pr - geometry.icon_size - geometry.gap)
+            key = (
+                entries,
+                wrap_width,
+                imgui.get_font_size(),
+                ctx.style_scale,
+                ctx.language,
+                geometry,
             )
-            key = (entries, wrap_width, imgui.get_font_size(), ctx.style_scale)
             if key != self._row_layout_key:
                 self._wrapped_rows = tuple(
                     (
-                        row := f"{entry.timestamp}  {entry.text}",
+                        row := f"{entry.timestamp}  {ctx.tr(entry.text)}",
                         max(
                             row_height,
-                            imgui.calc_text_size(row, wrap_width=wrap_width).y
-                            + 2 * ROW_PADDING_Y * ctx.style_scale,
+                            imgui.calc_text_size(row, wrap_width=wrap_width).y + pt + pb + mt + mb,
                         ),
                     )
                     for entry in entries
@@ -298,7 +346,7 @@ class OutputPanel(Panel):
             while clipper.step():
                 for index in range(clipper.display_start, clipper.display_end):
                     entry = entries[index]
-                    row = f"{entry.timestamp}  {entry.text.replace(chr(10), '  ↵  ')}"
+                    row = f"{entry.timestamp}  {ctx.tr(entry.text).replace(chr(10), '  ↵  ')}"
                     self._draw_entry(
                         ctx,
                         entries,
@@ -331,6 +379,18 @@ class OutputPanel(Panel):
             imgui.set_scroll_here_y(1.0)
         self._last_sequence = newest_visible
         imgui.end_child()
+
+    @contextmanager
+    def _context_popup(self, key):
+        opened = imgui.begin_popup(key)
+        try:
+            yield opened
+        finally:
+            if opened:
+                imgui.end_popup()
+
+    def _context_item(self, label, shortcut="", checked=False, enabled=True, *, key):
+        return imgui.menu_item(label + "###" + key, shortcut, checked, enabled)
 
     def _draw_file_actions(self, ctx, entry) -> None:
         """Allow a host to add file actions to the shared row context menu."""
@@ -382,28 +442,47 @@ class OutputPanel(Panel):
                 self._selection_anchor = entry.sequence
         if hovered and pointer_pressed(ctx, PointerAction.OUTPUT_CONTEXT):
             imgui.open_popup(f"##output-context-{entry.sequence}")
-        if imgui.begin_popup(f"##output-context-{entry.sequence}"):
-            if entry.sequence not in self._selected_sequences:
-                self._selected_sequences = {entry.sequence}
-                self._selection_anchor = entry.sequence
-            selected = tuple(item for item in entries if item.sequence in self._selected_sequences)
-            copy_message, _ = imgui.menu_item(ctx.tr("Copy message"), "Ctrl+C", False)
-            copy_full, _ = imgui.menu_item(ctx.tr("Copy full entry"), "Ctrl+Shift+C", False)
-            if entry.copy_text is not None:
-                copy_path, _ = imgui.menu_item(ctx.tr("Copy path"), "", False)
-                if copy_path:
-                    imgui.set_clipboard_text(entry.copy_text)
-            self._draw_file_actions(ctx, entry)
-            imgui.separator()
-            copy_scope = "Copy shown" if filtering else "Copy all"
-            copy_scope, _ = imgui.menu_item(ctx.tr(copy_scope), "", False)
-            if copy_message:
-                imgui.set_clipboard_text(output.copy_message_text(selected))
-            if copy_full:
-                imgui.set_clipboard_text(output.copy_text(selected))
-            if copy_scope:
-                imgui.set_clipboard_text(output.copy_text(entries))
-            imgui.end_popup()
+        with self._context_popup(f"##output-context-{entry.sequence}") as opened:
+            if opened:
+                if entry.sequence not in self._selected_sequences:
+                    self._selected_sequences = {entry.sequence}
+                    self._selection_anchor = entry.sequence
+                selected = tuple(
+                    item for item in entries if item.sequence in self._selected_sequences
+                )
+                copy_message, _ = self._context_item(
+                    ctx.tr("Copy message"), "Ctrl+C", key="output-context-copy-message"
+                )
+                copy_full, _ = self._context_item(
+                    ctx.tr("Copy full entry"), "Ctrl+Shift+C", key="output-context-copy-full"
+                )
+                if entry.copy_text is not None:
+                    copy_path, _ = self._context_item(
+                        ctx.tr("Copy path"), key="output-context-copy-path"
+                    )
+                    if copy_path:
+                        imgui.set_clipboard_text(entry.copy_text)
+                self._draw_file_actions(ctx, entry)
+                imgui.separator()
+                copy_scope = "Copy shown" if filtering else "Copy all"
+                copy_scope, _ = self._context_item(
+                    ctx.tr(copy_scope), key="output-context-copy-scope"
+                )
+                if copy_message:
+                    imgui.set_clipboard_text(output.copy_message_text(selected))
+                if copy_full:
+                    imgui.set_clipboard_text(output.copy_text(selected))
+                if copy_scope:
+                    imgui.set_clipboard_text(output.copy_text(entries))
+        geometry = self._active_row_style
+        ml, mt, mr, mb = geometry.margin
+        pl, pt, pr, pb = geometry.padding
+        frame_lo = imgui.ImVec2(start.x + ml, start.y + mt)
+        frame_hi = imgui.ImVec2(max(frame_lo.x, row_hi.x - mr), max(frame_lo.y, row_hi.y - mb))
+        content_lo = imgui.ImVec2(frame_lo.x + pl, frame_lo.y + pt)
+        content_hi = imgui.ImVec2(
+            max(content_lo.x, frame_hi.x - pr), max(content_lo.y, frame_hi.y - pb)
+        )
         if hovered or entry.sequence in self._selected_sequences:
             color = (
                 ctx.theme.bg_header
@@ -411,28 +490,52 @@ class OutputPanel(Panel):
                 else ctx.theme.bg_frame_hovered
             )
             imgui.get_window_draw_list().add_rect_filled(
-                row_lo,
-                row_hi,
+                frame_lo,
+                frame_hi,
                 imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
                 imgui.get_style().frame_rounding,
             )
         color = ctx.theme.text
-        icon_size = imgui.get_font_size()
+        icon_size = geometry.icon_size
+        imgui.push_clip_rect(
+            content_lo,
+            content_hi,
+            True,
+        )
+        content_width = max(0, content_hi.x - content_lo.x - icon_size - geometry.gap)
+        text_width = min(content_width, imgui.calc_text_size(row, wrap_width=wrap_width).x)
+        horizontal = (
+            0.5
+            if geometry.text_align == "center"
+            else 1
+            if geometry.text_align in ("end", "right")
+            else 0
+        )
+        vertical = (
+            0.5
+            if geometry.align_items == "center"
+            else 1
+            if geometry.align_items in ("end", "flex-end")
+            else 0
+        )
+        text_height = imgui.calc_text_size(row, wrap_width=wrap_width).y
+        first_line = max(geometry.line_height, icon_size)
+        block_height = max(text_height, geometry.line_height) + first_line - geometry.line_height
+        block_y = content_lo.y + max(0, content_hi.y - content_lo.y - block_height) * vertical
+        text_y = block_y + max(0, first_line - imgui.get_font_size()) / 2
         severity_icon(
             ImguiDraw2D(),
-            (start.x + padding_x + icon_size * 0.5, start.y + first_line_height * 0.5),
+            (content_lo.x + icon_size * 0.5, block_y + first_line * 0.5),
             icon_size,
             severity_group(entry.level),
             severity_color(ctx.theme, entry.level),
         )
-        imgui.push_clip_rect(
-            (row_lo.x + padding_x, row_lo.y),
-            (max(row_lo.x + padding_x, row_hi.x - padding_x), row_hi.y),
-            True,
-        )
         text_position = imgui.ImVec2(
-            start.x + padding_x + icon_size + 6.0 * ctx.style_scale,
-            round(start.y + text_offset),
+            content_lo.x
+            + icon_size
+            + geometry.gap
+            + max(0, content_width - text_width) * horizontal,
+            round(text_y),
         )
         text_color = imgui.color_convert_float4_to_u32(imgui.ImVec4(*color))
         if wrap_width:
@@ -447,3 +550,13 @@ class OutputPanel(Panel):
         else:
             imgui.get_window_draw_list().add_text(text_position, text_color, row)
         imgui.pop_clip_rect()
+        self.record_row(
+            entry.sequence,
+            (row_lo.x, row_lo.y, row_hi.x - row_lo.x, row_hi.y - row_lo.y),
+            (frame_lo.x, frame_lo.y, frame_hi.x - frame_lo.x, frame_hi.y - frame_lo.y),
+            (content_lo.x, content_lo.y, content_hi.x - content_lo.x, content_hi.y - content_lo.y),
+            fields=[
+                [content_lo.x, block_y, icon_size, first_line],
+                [text_position.x, block_y, text_width, block_height],
+            ],
+        )

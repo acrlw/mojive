@@ -152,6 +152,8 @@ class PanelContext:
     set_shadow_quality: PreferenceSetter[ShadowQuality | str] | None = None
     set_geometry_style: PreferenceSetter[GeometryStyle] | None = None
     set_contact_style: PreferenceSetter[ContactStyle] | None = None
+    scrollbar_hide_delay: float = 1.0
+    set_scrollbar_hide_delay: PreferenceSetter[float] | None = None
     interactions: InteractionConfig | None = None
     set_interactions: PreferenceSetter[InteractionConfig] | None = None
     selection_style: SelectionStyle | None = None

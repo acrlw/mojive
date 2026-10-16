@@ -5,14 +5,12 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
-from .design import BODY_SIZE, DESIGN, TITLE_SIZE
-from .inspector_components import draw_component
-from .property_style import property_toggle
-from .widgets import (
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.inspector_components import draw_component
+from mojive.ui.workspace.property_style import property_toggle, switch_form_layout
+from mojive.ui.workspace.widgets import (
     MUTED,
-    SAGE,
     TEXT,
-    color,
 )
 
 
@@ -27,102 +25,28 @@ def inspector(workspace, x, y, w, h):
     if workspace.pinned and e is None:
         workspace.pinned = None
         e = workspace.app.entity
-    imgui.set_cursor_screen_pos((x, y))
-    imgui.invisible_button("inspector-header", (max(s, w - 60 * s), 30 * s))
-    u.hits["inspector-header"] = (x, y, max(s, w - 60 * s), 30 * s)
-    if imgui.is_item_active() and imgui.is_mouse_dragging(0):
-        window = imgui.internal.get_current_window()
-        if window.dock_node is not None:
-            imgui.internal.dock_context_queue_undock_window(imgui.get_current_context(), window)
-        else:
-            imgui.internal.start_mouse_moving_window(window)
-    u.role_icon(
-        e["icon"] if e else "inspect",
-        x,
-        y,
-        20 * s,
-        30 * s,
-        role="title",
-        c=e["icon_color"] if e else MUTED,
-    )
-    imgui.push_clip_rect((x, y), (x + w - 64 * s, y + 30 * s), True)
-    u.text(
-        x + 28 * s,
-        y + (30 - TITLE_SIZE) * s / 2,
-        e["name"] if e else "Inspector",
-        TEXT,
-        TITLE_SIZE,
-        bold=True,
-        max_width=max(0, w - 92 * s),
-        translate=e is None,
-    )
-    imgui.pop_clip_rect()
-    if (
-        e
-        and u.measure(e["name"], TITLE_SIZE, translate=False) > max(0, w - 92 * s)
-        and imgui.is_item_hovered()
-    ):
-        u.tooltip(e["name"], translate=False)
-    if u.button(
-        "pin",
-        x + w - 56 * s,
-        y + s,
-        26,
-        28,
-        icon="pin",
-        icon_role="subtle",
-        active=bool(workspace.pinned),
-        enabled=e is not None,
-        tooltip="Pin Inspector",
-    ):
-        workspace.pinned = None if workspace.pinned else e["identity"]
-    if u.button(
-        "inspector-close",
-        x + w - 26 * s,
-        y + s,
-        26,
-        28,
-        icon="close",
-        icon_role="subtle",
-        tooltip="Close",
-    ):
-        workspace.open["Inspector"] = False
+    from mojive.ui.workspace.inspector_heading import draw_heading
+
+    body_y = draw_heading(workspace, e, x, y, w)
+    body_y += u.metric("panel", "rowGap", 0) * s
     if not e:
-        u.text(x, y + 44 * s, "Select an entity to inspect.", MUTED)
-        imgui.set_cursor_screen_pos((x, y + 44 * s))
+        u.component_text("empty", (x, body_y, w, 28 * s), "Select an entity to inspect.", MUTED)
+        imgui.set_cursor_screen_pos((x, body_y))
         imgui.dummy((0, 28 * s))
         return
-    tabs = ["Properties", "Physics", "Material", "Joint"]
-    tab_icons = ("inspect", "body", "shading", "pose")
-    tab_minimums = [u.measure(u.translate(tab)) + 12 * s for tab in tabs]
-    compact_tabs = w < sum(tab_minimums)
-    tab_x = x
-    for n, t in enumerate(tabs):
-        tw = w / 4 if compact_tabs else tab_minimums[n] + (w - sum(tab_minimums)) / 4
-        tx = tab_x
-        if u.button(
-            "tab-" + t,
-            tx,
-            y + 38 * s,
-            tw / s,
-            32,
-            label="" if compact_tabs else t,
-            icon=tab_icons[n] if compact_tabs else None,
-            tooltip=t if compact_tabs else None,
-            align="center",
-            text_color=SAGE if workspace.inspector_tab == t else MUTED,
-            icon_color=SAGE if workspace.inspector_tab == t else MUTED,
-        ):
-            workspace.inspector_tab = t
-        if workspace.inspector_tab == t:
-            u.draw.add_line(
-                (tx + 8 * s, y + 70 * s), (tx + tw - 8 * s, y + 70 * s), color(SAGE), 2 * s
-            )
-        tab_x += tw
-    body_y = y + 82 * s
+    body = u.component_box(
+        "panel_body", x, body_y, w, max(s, h - (body_y - y)), key="panel-body-Inspector"
+    )
+    x, body_y, w, body_h = body.content.tuple()
     imgui.set_cursor_screen_pos((x, body_y))
     imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-    imgui.begin_child("Inspector content", (w, max(s, h - 82 * s)))
+    # Reserve the gutter even when reflow removes overflow; otherwise the same
+    # panel width can retain either stacked or inline XYZ after a resize.
+    imgui.begin_child(
+        "Inspector content",
+        (w, max(s, body_h)),
+        window_flags=imgui.WindowFlags_.always_vertical_scrollbar,
+    )
     imgui.pop_style_var()
     p = imgui.get_cursor_screen_pos()
     bx, yy = p.x, p.y
@@ -156,7 +80,7 @@ def inspector(workspace, x, y, w, h):
                 values=(*e["position"], *e["rotation"], *e["scale"]),
                 key=f"transform-{e['node_id']}",
             )
-            row_y = yy + 42 * s
+            row_y = yy + u.section_offset(42) * s
             for key, label, unit in (
                 ("position", "Position", "m"),
                 ("rotation", "Rotation", "°"),
@@ -195,21 +119,24 @@ def inspector(workspace, x, y, w, h):
                 row_y += layout.height + DESIGN.row_gap * s
             yy = row_y + 16 * s
         else:
-            yy += 40 * s
+            yy += u.section_offset(40) * s
         if u.section("DISPLAY", bx, yy, bw, workspace.expanded["DISPLAY"]):
             workspace.expanded["DISPLAY"] = not workspace.expanded["DISPLAY"]
         if workspace.expanded["DISPLAY"]:
-            imgui.set_cursor_screen_pos((bx, yy + 38 * s))
-            e["hidden"] = not property_toggle(u, "entity-visible", "Visible", not e["hidden"])
+            imgui.set_cursor_screen_pos((bx, yy + u.section_offset(38) * s))
+            label_width = switch_form_layout(u, bw, "Transform handles").label_width
+            e["hidden"] = not property_toggle(
+                u, "entity-visible", "Visible", not e["hidden"], label_width=label_width
+            )
             workspace.app.gizmos = property_toggle(
-                u, "gizmos", "Transform handles", workspace.app.gizmos
+                u, "gizmos", "Transform handles", workspace.app.gizmos, label_width=label_width
             )
             yy = imgui.get_cursor_screen_pos().y
         else:
-            yy += 40 * s
+            yy += u.section_offset(40) * s
         if u.section("IDENTITY", bx, yy, bw, workspace.expanded["IDENTITY"]):
             workspace.expanded["IDENTITY"] = not workspace.expanded["IDENTITY"]
-        yy += 42 * s
+        yy += u.section_offset(42) * s
         if workspace.expanded["IDENTITY"]:
             u.text(bx, yy, "Object ID", MUTED, BODY_SIZE)
             u.text(bx + 100 * s, yy, str(e["object_id"]), TEXT, BODY_SIZE)

@@ -14,16 +14,14 @@ from mojive.ui.panels import (
     PanelContext,
     pointer_hint,
     pointer_pressed,
-    themed_checkbox,
 )
+from mojive.ui.panels.settings_pages.rendering import flag_groups
 from mojive.ui.pointer_bindings import PointerAction
-
-from .rendering import flag_groups
 
 
 def draw(panel, ctx: PanelContext) -> None:
     imgui.text(ctx.tr("Geometry view"))
-    draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme)
+    draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme, combo=panel._combo)
     geometry_style(panel, ctx)
     contact_style(panel, ctx)
     panel._visual_groups(ctx)
@@ -50,21 +48,24 @@ def contact_style(panel, ctx: PanelContext) -> None:
     style = ctx.backend.get_contact_style()
     committed = False
     if panel._begin_properties("contact_style_properties"):
-        panel._property(t("Show contact points"))
-        changed, enabled = themed_checkbox(
+        panel._property(t("Show contact points"), control_part="checkbox")
+        changed, enabled = panel._checkbox(
             "##contact_enabled", ctx.backend.get_flag(RenderFlag.CONTACTPOINT), ctx.theme
         )
         if changed:
             ctx.backend.set_flag(RenderFlag.CONTACTPOINT, enabled)
-        panel._property(t("Shape"))
-        if imgui.begin_combo("##contact_shape", t(style.shape.title())):
-            for shape in ("cylinder", "sphere", "point"):
-                if imgui.selectable(t(shape.title()), style.shape == shape)[0]:
-                    style = replace(style, shape=shape)
-                    committed = True
-            imgui.end_combo()
-        panel._property(t("Use model color"))
-        changed, use_model_color = themed_checkbox(
+        panel._property(t("Shape"), control_part="select")
+        shapes = ("cylinder", "sphere", "point")
+        changed, selected = panel._combo(
+            "##contact_shape",
+            shapes.index(style.shape),
+            tuple(t(shape.title()) for shape in shapes),
+        )
+        if changed:
+            style = replace(style, shape=shapes[selected])
+            committed = True
+        panel._property(t("Use model color"), control_part="checkbox")
+        changed, use_model_color = panel._checkbox(
             "##contact_model_color", style.use_model_color, ctx.theme
         )
         if changed:
@@ -88,8 +89,8 @@ def contact_style(panel, ctx: PanelContext) -> None:
                 style = replace(style, scale=scale)
             except ValueError as error:
                 ctx.report(str(error))
-        imgui.end_table()
-    if imgui.button(t("Reset contact style")):
+        panel._end_properties()
+    if panel._button(t("Reset contact style")):
         style = ContactStyle()
         committed = True
     if committed or style != ctx.backend.get_contact_style():
@@ -123,7 +124,7 @@ def geometry_style(panel, ctx: PanelContext) -> None:
             committed |= panel._value_committed()
             if changed:
                 style = replace(style, **{name: opacity})
-        imgui.end_table()
+        panel._end_properties()
     if committed or style != ctx.backend.get_geometry_style():
         if ctx.set_geometry_style is not None:
             ctx.apply_setting(ctx.set_geometry_style, style, persist=committed)
@@ -176,12 +177,12 @@ def visual_groups(panel, ctx: PanelContext) -> None:
                     imgui.set_cursor_pos_x(
                         imgui.get_cursor_pos_x() + max(0.0, (available - checkbox_size) * 0.5)
                     )
-                    changed, value = themed_checkbox(
+                    changed, value = panel._checkbox(
                         f"##visual_group_{family.category}_{i}", visible, ctx.theme
                     )
                     if changed:
                         ctx.submit(cmd.SetVisualGroup(family.category, i, value))
-            imgui.end_table()
+            panel._end_properties()
     imgui.separator()
 
 
@@ -199,5 +200,5 @@ def bvh_depth(panel, ctx: PanelContext) -> None:
             imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
         if changed:
             backend.set_bvh_depth(depth)
-        imgui.end_table()
+        panel._end_properties()
     imgui.separator()

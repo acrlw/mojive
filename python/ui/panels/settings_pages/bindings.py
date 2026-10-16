@@ -24,10 +24,10 @@ def draw(panel, ctx: PanelContext) -> None:
     for action in InputAction:
         if action is InputAction.PERTURB and not ctx.session.adapter.caps.perturb:
             continue
-        panel._property(t(input_action_name(action)))
+        panel._property(t(input_action_name(action)), control_part="select")
         current = ctx.input_bindings.key_id(action)
         index = identifiers.index(current)
-        changed, index = imgui.combo(
+        changed, index = panel._combo(
             f"##shortcut_{action.value}",
             index,
             labels,
@@ -39,12 +39,12 @@ def draw(panel, ctx: PanelContext) -> None:
                 panel._pointer_error = ""
             except ValueError as error:
                 panel._pointer_error = str(error)
-    panel._property("")
-    if imgui.button(t("Reset shortcuts")) and ctx.reset_input_bindings is not None:
+    panel._property("", control_part="button")
+    if panel._button(t("Reset shortcuts")) and ctx.reset_input_bindings is not None:
         ctx.apply_setting(
             ctx.reset_input_bindings,
         )
-    imgui.end_table()
+    panel._end_properties()
     mouse_shortcuts(panel, ctx)
 
 
@@ -60,28 +60,24 @@ def mouse_shortcuts(panel, ctx: PanelContext) -> None:
             for action in PointerAction
         }
     if panel._begin_properties("settings_navigation_preset"):
-        panel._property(t("Navigation preset"))
-        if imgui.begin_combo("##navigation_preset", t("Choose preset...")):
-            for name in NAVIGATION_PRESETS:
-                if imgui.selectable(name, False)[0] and ctx.set_navigation_preset is not None:
-                    try:
-                        ctx.apply_setting(ctx.set_navigation_preset, name)
-                        panel._pointer_error = ""
-                    except ValueError as error:
-                        panel._pointer_error = str(error)
-            imgui.end_combo()
-        imgui.end_table()
-    imgui.text_wrapped(
-        t(
-            "Separate alternatives with ;. Example: alt+left; middle. Add :double for a double-click. Press Enter to apply; empty unbinds."
+        panel._property(t("Navigation preset"), control_part="select")
+        names = tuple(NAVIGATION_PRESETS)
+        changed, selected = panel._choice_list(
+            "##navigation_preset", -1, names, preview=t("Choose preset...")
         )
-    )
+        if changed and ctx.set_navigation_preset is not None:
+            try:
+                ctx.apply_setting(ctx.set_navigation_preset, names[selected])
+                panel._pointer_error = ""
+            except ValueError as error:
+                panel._pointer_error = str(error)
+        panel._end_properties()
     if panel._begin_properties("settings_mouse_gestures"):
         for action in PointerAction:
             if action.value.startswith("perturb.") and not ctx.session.adapter.caps.perturb:
                 continue
-            panel._property(t(POINTER_ACTION_NAMES[action]))
-            submitted, value = imgui.input_text(
+            panel._property(t(POINTER_ACTION_NAMES[action]), control_part="input_text")
+            submitted, value = panel._input_text(
                 f"##mouse_{action.value}",
                 panel._pointer_text[action],
                 imgui.InputTextFlags_.enter_returns_true,
@@ -97,6 +93,6 @@ def mouse_shortcuts(panel, ctx: PanelContext) -> None:
                     panel._pointer_error = ""
                 except ValueError as error:
                     panel._pointer_error = str(error)
-        imgui.end_table()
+        panel._end_properties()
     if panel._pointer_error:
         imgui.text_wrapped(panel._pointer_error)

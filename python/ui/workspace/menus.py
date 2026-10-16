@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from math import ceil, floor
+from contextlib import contextmanager, nullcontext
+from math import ceil
 
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
-from mojive.ui.imgui_draw import ImguiDraw2D
-
-from . import menu_actions, menu_catalog, menu_color, menu_dialogs
-from .color_editor import ColorEditor
-from .design import BODY_SIZE, CONTROL_RADIUS, DESIGN
-from .menu_item import Item as Item
-from .widgets import DIM, MUTED, SAGE, TEXT, color
+from mojive.ui.workspace import menu_actions, menu_catalog, menu_color, menu_dialogs
+from mojive.ui.workspace.color_editor import ColorEditor
+from mojive.ui.workspace.component_layout import control_frame_size
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.menu_item import Item as Item
+from mojive.ui.workspace.widgets import color
 
 MENU_BG = (39, 45, 53, 255)
 DISABLED = (126, 136, 149, 255)
@@ -22,6 +21,8 @@ TOP_MENUS = ("File", "Edit", "Add", "View", "Simulate", "Window", "Help")
 
 
 class Menus:
+    top_menus = TOP_MENUS
+
     def __init__(self, workspace, panels):
         self.workspace = workspace
         self.panels = panels
@@ -42,6 +43,8 @@ class Menus:
         self.visible_menus = TOP_MENUS
         self.overflow_menus = ()
         self.actions = []
+        self._popup_widths = {}
+        self._local_measurements = None
 
     def apply_actions(self):
         if self.actions:
@@ -49,69 +52,42 @@ class Menus:
             for action in actions:
                 self.dispatch(action)
 
-    @contextmanager
-    def style(self, controls=False):
-        s = self.s
-        # The native selectable fills the adopted row; layout owns the gap between rows.
-        row_gap = (round(DESIGN.menu_item_height * s) - BODY_SIZE * s) / s
-        values = [
-            (imgui.StyleVar_.window_padding, ((16, 14) if controls else (12, 6 + row_gap / 2))),
-            (imgui.StyleVar_.window_min_size, (0, 0)),
-            (imgui.StyleVar_.item_spacing, ((8, 8) if controls else (12, row_gap))),
-            (imgui.StyleVar_.frame_padding, (8, 6)),
-        ]
-        for key, value in values:
-            imgui.push_style_var(key, tuple(v * s for v in value))
-        imgui.push_style_var(imgui.StyleVar_.popup_rounding, 8 * s)
-        imgui.push_style_var(imgui.StyleVar_.menu_item_rounding, CONTROL_RADIUS * s)
-        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, 6 * s)
-        colors = [
-            (imgui.Col_.popup_bg, MENU_BG),
-            (imgui.Col_.border, (76, 86, 99, 150)),
-            (imgui.Col_.header, (156, 191, 141, 24)),
-            (imgui.Col_.header_hovered, (255, 255, 255, 13)),
-            (imgui.Col_.header_active, (255, 255, 255, 18)),
-        ]
-        for key, value in colors:
-            imgui.push_style_color(key, imgui.ImVec4(*(v / 255 for v in value)))
-        imgui.push_font(self.ui.body, BODY_SIZE * s)
-        try:
-            yield
-        finally:
-            imgui.pop_font()
-            imgui.pop_style_color(len(colors))
-            imgui.pop_style_var(len(values) + 3)
+    def style(self, controls=False, *, choices=False):
+        from mojive.ui.workspace.popup_style import menu_popup_style
+
+        return menu_popup_style(
+            self.ui, controls, part="select_popup" if choices else "dialog" if controls else "menu"
+        )
 
     def items(self, name):
         return menu_catalog.items(self, name)
 
     def limits(self, name):
-        rows = self.items(name)
-        measured = max(
-            (
-                self.ui.measure(r.label)
-                + (self.ui.measure(r.shortcut) + 16 * self.s if r.shortcut else 0)
-                for r in rows
-                if r
-            ),
-            default=0,
+        from mojive.ui.workspace.menu_rows import menu_row_size
+
+        rows, ui, scale = self.items(name), self.ui, self.s
+        style = ui.component_style("menu")
+        padding = style.edges("padding", scale, (12, 6, 12, 6))
+        dimensions = [menu_row_size(ui, row) for row in rows if row]
+        width = max(
+            224 * scale, max((size[0] for size in dimensions), default=0) + padding[0] + padding[2]
         )
-        width = max(224 * self.s, measured + 88 * self.s)
+        if style.get("widthMode", "auto") == "fixed":
+            width = style.get("width", 240) * scale
+        height = padding[1] + padding[3] + sum(size[1] for size in dimensions)
+        height += sum(
+            style.get("rowGap", DESIGN.menu_row_gap) * scale if row else 10 * scale for row in rows
+        )
+        if style.get("heightMode", "auto") == "fixed":
+            height = style.get("height", 300) * scale
         available = imgui.get_main_viewport().size
-        return min(width, available.x - 16 * self.s), min(
-            12 * self.s
-            + sum(
-                round((DESIGN.menu_item_height + DESIGN.menu_row_gap if r else 10) * self.s)
-                for r in rows
-            ),
-            available.y - 16 * self.s,
-        )
+        return min(width, available.x - 16 * scale), min(height, available.y - 16 * scale)
 
     def constrain(self, name):
-        width, _ = self.limits(name)
-        imgui.set_next_window_size_constraints(
-            (width, 0), (width, imgui.get_main_viewport().size.y - 16 * self.s)
-        )
+        from mojive.ui.workspace.popup_style import prepare_menu_popup
+
+        width, _height = self.limits(name)
+        prepare_menu_popup(self.ui, auto_minimum_width=width)
 
     def reveal(self, path):
         if tuple(path) == self.requested_path[: len(path)] and not imgui.is_popup_open(path[-1]):
@@ -136,13 +112,35 @@ class Menus:
                 imgui.internal.close_popup_to_level(0, True)
             self.reset_pending = False
 
+    def trigger_size(self, name):
+        parts = (
+            self.ui.design.button_parts("menu-" + name, name)
+            if self.ui.design
+            else ("menu_trigger",)
+        )
+        style = self.ui.component_style(parts)
+        padding = style.edges("padding", fallback=(8, 0, 8, 0))
+        margin = style.edges("margin")
+        width = (
+            self.ui.measure(name, style.get("fontSize", BODY_SIZE), font_resolved=True) / self.s
+            + padding[0]
+            + padding[2]
+        )
+        if style.get("widthMode", "auto") == "fixed":
+            width = style.get("width", width)
+        height = max(
+            style.get("height", 28),
+            style.line_height(style.get("fontSize", BODY_SIZE) * 1.4) + padding[1] + padding[3],
+        )
+        return width + margin[0] + margin[2], height + margin[1] + margin[3]
+
     def bar_layout(self, width):
-        """Reserve a native More menu before selecting the visible menu prefix."""
-        spacing = imgui.get_style().item_spacing.x * 2
-        widths = [ceil(self.ui.measure(name) + spacing) for name in TOP_MENUS]
+        """Reserve a More menu before selecting the measured visible prefix."""
+        gap = self.ui.metric("menu_bar", "columnGap", self.ui.metric("menu_bar", "gap", 0)) * self.s
+        widths = [ceil(self.trigger_size(name)[0] * self.s + gap) for name in TOP_MENUS]
         if sum(widths) <= width:
             return TOP_MENUS, ()
-        available = width - ceil(self.ui.measure("More") + spacing)
+        available = width - ceil(self.trigger_size("More")[0] * self.s + gap)
         count = 0
         for item_width in widths:
             if item_width > available:
@@ -158,82 +156,131 @@ class Menus:
         return rect
 
     def bar_menu(self, name):
-        self.reveal((name,))
-        self.constrain(name)
-        opened = imgui.begin_menu(self.ui.translate(name) + "###" + name)
-        self.record_menu(name)
-        if opened:
-            self.content(name, (name,))
-            imgui.end_menu()
+        position = imgui.get_cursor_screen_pos()
+        width, height = self.trigger_size(name)
+        frame = control_frame_size(
+            self.ui, "menu-" + name, width * self.s, height * self.s, label=name
+        )
+        clicked = self.ui.button(
+            "menu-" + name,
+            position.x,
+            position.y,
+            *frame,
+            label=name,
+            active=imgui.is_popup_open(name),
+            align="center",
+            width_limit=frame[0] * self.s,
+        )
+        self.menu_rects[name] = self.ui.hits["menu-" + name]
+        self.popup(name, self.menu_rects[name], clicked)
+        gap = self.ui.metric("menu_bar", "columnGap", self.ui.metric("menu_bar", "gap", 0)) * self.s
+        imgui.set_cursor_screen_pos((position.x + width * self.s + gap, position.y))
 
-    def bar(self, right_edge=None):
-        """Fit menus before the first reserved header control's screen-space x coordinate."""
+    def bar(self, right_edge=None, *, region=None):
+        """Place shared menu triggers before reserved document and title actions."""
         for name in (*TOP_MENUS, "More"):
             self.ui.hits.pop("menu-" + name, None)
         self.menu_rects.clear()
         if not imgui.begin_menu_bar():
             return
         imgui.set_cursor_pos_x(44 * self.s)
-        with self.style():
-            p = imgui.get_cursor_screen_pos()
-            window = imgui.internal.get_current_window()
-            ink = ImguiDraw2D().text_ink_bounds("H")
-            # Native RenderText floors its pen position; match its cap center exactly.
-            self.menu_center_y = floor(p.y + window.dc.curr_line_text_base_offset) + (
-                (ink[1] + ink[3]) / 2 if ink else imgui.get_font_size() / 2
+        position = imgui.get_cursor_screen_pos()
+        height = self.trigger_size("File")[1]
+        title = self.ui.component_style("titlebar")
+        if region is not None:
+            position.x = region.x + (26 + title.get("columnGap", title.get("gap", 10))) * self.s
+            position.y = title.align_rect(region, 0, height * self.s, horizontal="start").y
+        else:
+            padding = title.edges("padding", self.s)
+            content_height = DESIGN.application_height * self.s - padding[1] - padding[3]
+            position.y = (
+                imgui.get_window_pos().y
+                + padding[1]
+                + max(0, (content_height - height * self.s) / 2)
             )
-            if right_edge is None:
-                reserved = 57
-                right_edge = imgui.get_window_pos().x + imgui.get_window_width() - reserved * self.s
-            available = max(0, right_edge - 8 * self.s - p.x)
-            self.visible_menus, self.overflow_menus = self.bar_layout(available)
-            for name in self.visible_menus:
-                self.bar_menu(name)
-            if self.overflow_menus:
-                if (
-                    self.requested_path
-                    and self.requested_path[0] in self.overflow_menus
-                    and not imgui.is_popup_open("More")
-                ):
-                    imgui.open_popup("More")
-                width = max(
-                    160 * self.s,
-                    max(self.ui.measure(name) for name in self.overflow_menus) + 60 * self.s,
-                )
+        imgui.set_cursor_screen_pos(position)
+        self.menu_center_y = position.y + height * self.s / 2
+        if right_edge is None:
+            right_edge = imgui.get_window_pos().x + imgui.get_window_width() - 57 * self.s
+        self.visible_menus, self.overflow_menus = self.bar_layout(
+            max(0, right_edge - 8 * self.s - position.x)
+        )
+        for name in self.visible_menus:
+            self.bar_menu(name)
+        if self.overflow_menus:
+            p = imgui.get_cursor_screen_pos()
+            width, trigger_height = self.trigger_size("More")
+            frame = control_frame_size(
+                self.ui,
+                "menu-More",
+                min(width * self.s, max(0, right_edge - p.x)),
+                trigger_height * self.s,
+                label="More",
+            )
+            clicked = self.ui.button(
+                "menu-More",
+                p.x,
+                p.y,
+                *frame,
+                label="More",
+                active=imgui.is_popup_open("More"),
+                align="center",
+                width_limit=frame[0] * self.s,
+            )
+            self.menu_rects["More"] = self.ui.hits["menu-More"]
+            if clicked or (self.requested_path and self.requested_path[0] in self.overflow_menus):
+                imgui.open_popup("More")
+            with self.style():
                 imgui.set_next_window_size_constraints(
-                    (width, 0), (width, imgui.get_main_viewport().size.y - 16 * self.s)
+                    (160 * self.s, 0),
+                    (240 * self.s, imgui.get_main_viewport().size.y - 16 * self.s),
                 )
-                opened = imgui.begin_menu(self.ui.translate("More") + "###More")
-                self.record_menu("More")
-                if opened:
+                if imgui.begin_popup("More"):
                     self.shadow_and_record("More", ("More",))
                     for name in self.overflow_menus:
-                        self.bar_menu(name)
-                    imgui.end_menu()
-            first = self.menu_rects.get(self.visible_menus[0] if self.visible_menus else "More")
-            self.menu_height = first[3] if first else 0.0
+                        self.reveal((name,))
+                        self.constrain(name)
+                        if imgui.begin_menu(self.ui.translate(name) + "###" + name):
+                            self.content(name, (name,))
+                            imgui.end_menu()
+                    imgui.end_popup()
+        first = self.menu_rects.get(self.visible_menus[0] if self.visible_menus else "More")
+        self.menu_height = first[3] if first else 0.0
+        from mojive.ui.workspace.component_layout import record_group
+
+        record_group(self.ui, "menu_bar", "application-menu-bar", self.menu_rects.values())
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (0, 0))
+        imgui.dummy((0, 0))
+        imgui.pop_style_var()
         imgui.end_menu_bar()
 
     def popup(self, name, anchor, clicked=False):
+        if clicked:
+            imgui.open_popup(name)
+        self.reveal((name,))
+        if not imgui.is_popup_open(name):
+            return
         with self.style():
-            if clicked:
-                imgui.open_popup(name)
-            self.reveal((name,))
             width, height = self.limits(name)
             vp = imgui.get_main_viewport()
             x, y, _w, h = anchor
+            margins = self.ui.component_style("menu").edges("margin", self.s)
+            x, y = x + margins[0] - margins[2], y + margins[1] - margins[3]
             px = min(max(vp.pos.x + 8 * self.s, x), vp.pos.x + vp.size.x - width - 8 * self.s)
             py = y + h + 4 * self.s
             if py + height > vp.pos.y + vp.size.y - 8 * self.s:
                 py = max(vp.pos.y + 8 * self.s, y - height - 4 * self.s)
             imgui.set_next_window_pos((px, py))
-            self.constrain(name)
+            from mojive.ui.workspace.popup_style import prepare_menu_popup
+
+            prepare_menu_popup(self.ui, auto_minimum_width=width)
             if imgui.begin_popup(name):
                 self.content(name, (name,))
                 imgui.end_popup()
 
     def shadow_and_record(self, name, path):
         p, size = imgui.get_window_pos(), imgui.get_window_size()
+        radius = self.ui.component_style("dialog" if name == "Dialog" else "menu").get("radius", 8)
         dl = imgui.get_window_draw_list()
         dl.push_clip_rect_full_screen()
         for outset, alpha in ((7, 4), (5, 8), (3, 14), (1.5, 20)):
@@ -242,7 +289,7 @@ class Menus:
                 (p.x - d, p.y - d + self.s),
                 (p.x + size.x + d, p.y + size.y + d + self.s),
                 color((0, 0, 0, alpha)),
-                rounding=(8 + outset) * self.s,
+                rounding=(radius + outset) * self.s,
                 thickness=2 * self.s,
             )
         dl.pop_clip_rect()
@@ -258,109 +305,204 @@ class Menus:
 
     def content(self, name, path):
         record = self.shadow_and_record(name, path)
-        for row in self.items(name):
-            if row is None:
-                p = imgui.get_cursor_screen_pos()
-                height = round(10 * self.s)
-                gap = imgui.get_style().item_spacing.y
-                self.ui.line(p.x, p.y - gap / 2 + height / 2, imgui.get_content_region_avail().x)
-                imgui.push_style_var(imgui.StyleVar_.item_spacing, (12 * self.s, 0))
-                imgui.dummy((1, height))
-                imgui.pop_style_var()
-                continue
-            self.item(row, path, record)
+        ui, scale = self.ui, self.s
+        position, size = imgui.get_window_pos(), imgui.get_window_size()
+        box = ui.component_box(
+            "menu",
+            position.x,
+            position.y,
+            size.x,
+            size.y,
+            key="menu-container-" + "/".join(path),
+            padding=(12 * scale, 6 * scale, 12 * scale, 6 * scale),
+        )
+        previous = getattr(self, "_content_right", None)
+        self._content_right = box.content.right
+        imgui.set_cursor_screen_pos((box.content.x, box.content.y))
+        imgui.push_clip_rect(
+            (box.content.x, box.content.y), (box.content.right, box.content.bottom), True
+        )
+        try:
+            with ui.component_scope("menu"):
+                for row in self.items(name):
+                    if row is None:
+                        p = imgui.get_cursor_screen_pos()
+                        height = round(10 * scale)
+                        self.ui.line(p.x, p.y + height / 2, max(0, box.content.right - p.x))
+                        imgui.set_cursor_screen_pos((p.x, p.y + height))
+                        continue
+                    self.item(row, path, record)
+        finally:
+            imgui.pop_clip_rect()
+            self._content_right = previous
+            p = imgui.get_cursor_screen_pos()
+            imgui.set_cursor_screen_pos((position.x, p.y + box.padding[3] + box.margin[3]))
+            imgui.dummy((1, 0))
 
-    def item(self, row, path, record):
-        u, s = self.ui, self.s
-        p = imgui.get_cursor_screen_pos()
-        text_y = p.y + (DESIGN.menu_item_height - BODY_SIZE) * s / 2
-        imgui.set_cursor_screen_pos((p.x, text_y))
-        dl = imgui.get_window_draw_list()
-        right = p.x + imgui.get_content_region_avail().x
+    def item(self, row, path, record, *, dispatch=True, key=None, width=None, minimum_height=0):
+        from mojive.ui.workspace.menu_rows import advance_menu_row, paint_menu_row
+
+        key = key or "menu-item-" + "/".join(path) + "/" + row.label
+        submenu = None
         if row.submenu:
             self.reveal((*path, row.submenu))
             self.constrain(row.submenu)
-        # MenuItemEx/BeginMenuEx retain native navigation, hover corridors and popup ownership.
-        imgui.push_style_color(imgui.Col_.text, (0, 0, 0, 0))
-        imgui.push_style_color(imgui.Col_.text_disabled, (0, 0, 0, 0))
-        if row.submenu:
-            activated = imgui.internal.begin_menu_ex(row.label, "     ", row.enabled)
-        else:
-            activated = imgui.internal.menu_item_ex(
-                row.label, "     ", row.shortcut, row.checked, row.enabled
-            )
-        imgui.pop_style_color(2)
-        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        visible = imgui.is_item_visible()
-        c = TEXT if row.enabled else DISABLED
-        icon_x = p.x + DESIGN.menu_padding_x * s
-        text_x = icon_x + (28 * s if row.icon else 0)
-        tail_x = right - 12 * s
-        if visible:
-            if row.icon:
-                u.role_icon(
-                    row.icon,
-                    icon_x,
-                    p.y,
-                    16 * s,
-                    28 * s,
-                    role="toolbar",
-                    c=MUTED if row.enabled else DISABLED,
-                    draw=dl,
-                )
-            u.text(text_x, text_y, row.label, c, draw=dl)
-            if row.shortcut:
-                width = u.measure(row.shortcut, BODY_SIZE)
-                tail_x = right - 24 * s - width
-                u.text(
-                    tail_x,
-                    text_y,
-                    row.shortcut,
-                    DIM if row.enabled else DISABLED,
-                    BODY_SIZE,
-                    draw=dl,
-                )
-            if row.submenu or row.checked:
-                u.role_icon(
-                    "right" if row.submenu else "check",
-                    right - 12 * s,
-                    text_y,
-                    12 * s,
-                    14 * s,
-                    role="inline",
-                    c=DIM if row.submenu else SAGE,
-                    draw=dl,
-                )
+
+            def submenu(_native_label):
+                return imgui.internal.begin_menu_ex(row.label, "     ", row.enabled)
+
+        content_right = getattr(self, "_content_right", None)
+        if width is not None:
+            content_right = imgui.get_cursor_screen_pos().x + width
+        result = paint_menu_row(
+            self.ui,
+            row,
+            key,
+            content_right=content_right,
+            open_submenu=submenu,
+            minimum_height=minimum_height,
+            part="select_option" if getattr(self, "_choice_rows", False) else "menu_item",
+        )
+        if self._local_measurements is not None:
+            self._local_measurements.append(result.minimum_width)
         record["rows"].append(
             {
                 "label": row.label,
+                "icon": row.icon,
                 "enabled": row.enabled,
                 "checked": row.checked,
-                "rect": [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y],
-                "label_rect": [text_x, text_y, u.measure(row.label), BODY_SIZE * s],
-                "tail_x": tail_x,
-                "visible": visible,
+                "rect": list(result.native_rect),
+                "label_rect": list(result.label_rect.tuple()),
+                "tail_x": result.tail_x,
+                "visible": result.visible,
             }
         )
-        if (
-            not row.enabled
-            and row.reason
-            and imgui.is_item_hovered(
-                imgui.HoveredFlags_.allow_when_disabled | imgui.HoveredFlags_.delay_normal
-            )
-        ):
-            u.tooltip(row.reason)
-        if row.submenu and activated:
+        if row.submenu and result.activated:
             self.content(row.submenu, (*path, row.submenu))
             imgui.end_menu()
-        elif activated:
+        elif result.activated and dispatch:
             self.actions.append(row.action)
-        imgui.set_cursor_screen_pos(
-            (p.x, p.y + (DESIGN.menu_item_height + DESIGN.menu_row_gap) * s)
+        advance_menu_row(
+            self.ui, result, part="select_popup" if getattr(self, "_choice_rows", False) else "menu"
         )
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, (0, 0))
-        imgui.dummy((0, 0))
-        imgui.pop_style_var()
+        return result.activated
+
+    def local_item(
+        self,
+        label,
+        shortcut="",
+        checked=False,
+        enabled=True,
+        *,
+        key,
+        icon="",
+        width=None,
+        minimum_height=0,
+    ):
+        """Return native item signals without routing an application command."""
+        path = getattr(self, "_local_path", None) or (
+            imgui.get_current_context().current_window.name,
+        )
+        record = self.observed.setdefault("/".join(path), {"path": list(path), "rows": []})
+        clicked = self.item(
+            Item(label, icon=icon, shortcut=shortcut, checked=checked, enabled=enabled),
+            path,
+            record,
+            dispatch=False,
+            key=key,
+            width=width,
+            minimum_height=minimum_height,
+        )
+        return clicked, bool(checked) != clicked
+
+    @contextmanager
+    def local_submenu(self, label, *, key, enabled=True, icon="", content=True):
+        """Use the same row painter while retaining native nested-menu navigation."""
+        from mojive.ui.workspace.menu_rows import advance_menu_row, paint_menu_row
+
+        row = Item(label, icon=icon, enabled=enabled, submenu=key)
+
+        def begin(native_label):
+            return imgui.internal.begin_menu_ex(native_label, "     ", enabled)
+
+        result = paint_menu_row(
+            self.ui,
+            row,
+            key,
+            content_right=getattr(self, "_content_right", None),
+            open_submenu=begin,
+        )
+        if self._local_measurements is not None:
+            self._local_measurements.append(result.minimum_width)
+        if result.activated:
+            try:
+                with self.local_content(key) if content else nullcontext():
+                    yield True
+            finally:
+                imgui.end_menu()
+        else:
+            yield False
+        advance_menu_row(self.ui, result)
+
+    @contextmanager
+    def local_content(self, key, *, choices=False):
+        from mojive.ui.workspace.popup_style import menu_popup_content
+
+        previous_right = getattr(self, "_content_right", None)
+        previous_path = getattr(self, "_local_path", None)
+        previous_measurements = self._local_measurements
+        previous_choices = getattr(self, "_choice_rows", False)
+        self._choice_rows = choices
+        self._local_measurements = []
+        part = "select_popup" if choices else "menu"
+        with menu_popup_content(self.ui, key, part=part) as box:
+            self._content_right, self._local_path = box.content.right, (key,)
+            self.observed[key] = {"path": [key], "rect": list(box.frame.tuple()), "rows": []}
+            try:
+                yield box
+            finally:
+                style = self.ui.component_style(part)
+                padding, margin = style.edges("padding", self.s), style.edges("margin", self.s)
+                self._popup_widths[key] = max(
+                    224 * self.s,
+                    max(self._local_measurements, default=0)
+                    + padding[0]
+                    + padding[2]
+                    + margin[0]
+                    + margin[2],
+                )
+                self._local_measurements = previous_measurements
+                self._choice_rows = previous_choices
+                self._content_right, self._local_path = previous_right, previous_path
+
+    @contextmanager
+    def local_popup(self, key, *, context_item=False):
+        """Own a local popup's style and native lifetime; callers own its actions."""
+        if context_item:
+            imgui.open_popup_on_item_click(key, imgui.PopupFlags_.mouse_button_right)
+        if not imgui.is_popup_open(key):
+            yield False
+            return
+        with self.style():
+            from mojive.ui.workspace.popup_style import prepare_menu_popup
+
+            style = self.ui.component_style("menu")
+            padding, margin = style.edges("padding", self.s), style.edges("margin", self.s)
+            prepare_menu_popup(
+                self.ui,
+                auto_minimum_width=self._popup_widths.get(
+                    key, 224 * self.s + padding[0] + padding[2] + margin[0] + margin[2]
+                ),
+            )
+            opened = imgui.begin_popup(key)
+            if opened:
+                try:
+                    with self.local_content(key):
+                        yield True
+                finally:
+                    imgui.end_popup()
+            else:
+                yield False
 
     def dispatch(self, action):
         return menu_actions.dispatch(self, action)

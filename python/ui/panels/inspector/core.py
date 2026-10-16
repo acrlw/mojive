@@ -27,14 +27,14 @@ from mojive.ui.panels import (
     pointer_pressed,
 )
 from mojive.ui.panels.filters import _tint, node_filter_color
+from mojive.ui.panels.inspector.environment import _Environment
+from mojive.ui.panels.inspector.fields import _property_input_text
+from mojive.ui.panels.inspector.geometry import _Geometry
+from mojive.ui.panels.inspector.model import _Model
+from mojive.ui.panels.inspector.options import _Options
+from mojive.ui.panels.inspector.physics import _Physics
+from mojive.ui.panels.inspector.transform import _Transform
 from mojive.ui.pointer_bindings import PointerAction
-
-from .environment import _Environment
-from .geometry import _Geometry
-from .model import _Model
-from .options import _Options
-from .physics import _Physics
-from .transform import _Transform
 
 
 class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Options, Panel):
@@ -173,7 +173,13 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
                 ctx.tr("Geometry view" if node.type is NodeType.GEOM else "Link geometry")
             )
             draw_geometry_view(
-                ctx.backend, ctx.tr, compact=True, theme=ctx.theme, node=node, submit=ctx.submit
+                ctx.backend,
+                ctx.tr,
+                compact=True,
+                theme=ctx.theme,
+                node=node,
+                submit=ctx.submit,
+                combo=ctx.inspector_presentation.combo if ctx.inspector_presentation else None,
             )
         if node.type is NodeType.MODEL:
             self._model(ctx, node)
@@ -268,7 +274,8 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
             imgui.push_style_var(imgui.StyleVar_.frame_border_size, 0.0)
             imgui.push_style_color(imgui.Col_.border, imgui.ImVec4(0, 0, 0, 0))
             imgui.push_style_color(imgui.Col_.nav_cursor, imgui.ImVec4(0, 0, 0, 0))
-            entered, self._model_name = imgui.input_text(
+            entered, self._model_name = _property_input_text(
+                ctx,
                 "##entity_name",
                 self._model_name,
                 imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all,
@@ -277,7 +284,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
             blur = imgui.is_item_deactivated() or (self._rename_active and not active)
             self._rename_active = active
             cancel = active and imgui.is_key_pressed(imgui.Key.escape, False)
-            imgui.pop_style_color(2)
+            imgui.pop_style_color(3)
             imgui.pop_style_var()
             if entered or blur or cancel:
                 self._finish_name_edit(ctx, cancel=cancel)

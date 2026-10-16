@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from imgui_bundle import imgui
 
-from ...adapters.base import FrameNeeds
-from ...render.backend import DebugView, RenderFlag
-from ..localization import LANGUAGE_LABELS, Language, parse_language
-from ..pointer_bindings import PointerAction
-from . import (
+from mojive.adapters.base import FrameNeeds
+from mojive.render.backend import DebugView, RenderFlag
+from mojive.ui.localization import LANGUAGE_LABELS, Language, parse_language
+from mojive.ui.panels import (
     Panel,
     PanelContext,
     padded_selectable,
@@ -18,22 +17,24 @@ from . import (
     segmented_control,
     themed_checkbox,
 )
-from .settings_pages import camera, interaction, recording, rendering, visuals
-from .settings_pages.catalog import (
+from mojive.ui.panels.settings_pages import camera, interaction, recording, rendering, visuals
+from mojive.ui.panels.settings_pages.catalog import (
     _CATEGORIES,
     _CATEGORY_WIDTH_PT,
     settings_category_matches,
     settings_uses_stacked_layout,
 )
-from .settings_pages.rendering import (
+from mojive.ui.panels.settings_pages.rendering import (
     flag_groups as flag_groups,
 )
-from .settings_pages.rendering import (
+from mojive.ui.panels.settings_pages.rendering import (
     render_flag_label as render_flag_label,
 )
-from .settings_pages.rendering import (
+from mojive.ui.panels.settings_pages.rendering import (
     responsive_flag_groups as responsive_flag_groups,
 )
+from mojive.ui.pointer_bindings import PointerAction
+from mojive.ui.scrollbar_visibility import DEFAULT_HIDE_DELAY, MAX_HIDE_DELAY, MIN_HIDE_DELAY
 
 
 class SettingsPanel(Panel):
@@ -67,18 +68,16 @@ class SettingsPanel(Panel):
         )
         if stacked:
             imgui.set_next_item_width(-1.0)
-            if imgui.begin_combo("##settings_category", ctx.tr(self._category)):
-                for category in _CATEGORIES:
-                    matched = settings_category_matches(category, self._search)
-                    imgui.begin_disabled(not matched)
-                    selected, _ = padded_selectable(
-                        f"{ctx.tr(category)}##settings_{category}",
-                        self._category == category,
-                    )
-                    if selected:
-                        self._category = category
-                    imgui.end_disabled()
-                imgui.end_combo()
+            changed, selected = self._choice_list(
+                "##settings_category",
+                _CATEGORIES.index(self._category),
+                tuple(ctx.tr(category) for category in _CATEGORIES),
+                enabled=tuple(
+                    settings_category_matches(category, self._search) for category in _CATEGORIES
+                ),
+            )
+            if changed:
+                self._category = _CATEGORIES[selected]
             imgui.spacing()
         else:
             self._draw_category_rail(ctx, scale)
@@ -156,13 +155,13 @@ class SettingsPanel(Panel):
         labels = [LANGUAGE_LABELS[language] for language in languages]
         if not self._begin_properties("settings_general"):
             return
-        self._property(t("Language"))
-        changed, index = imgui.combo("##ui_language", languages.index(current), labels)
+        self._property(t("Language"), control_part="select")
+        changed, index = self._combo("##ui_language", languages.index(current), labels)
         if changed and ctx.set_language is not None:
             ctx.apply_setting(ctx.set_language, languages[index].value)
-        self._property(t("Model updates"))
+        self._property(t("Model updates"), control_part="segment")
         selected = int(not ctx.live_model_updates)
-        value = segmented_control(
+        value = self._segmented(
             "model-updates",
             (t("Realtime"), t("Deferred")),
             selected,
@@ -173,12 +172,26 @@ class SettingsPanel(Panel):
         imgui.set_item_tooltip(
             t("Realtime applies each edit. Deferred edits wait for Apply in the viewport.")
         )
+        if ctx.set_scrollbar_hide_delay is not None:
+            changed, delay, committed = self._number_setting(
+                ctx,
+                "##scrollbar_hide_delay",
+                "Scrollbar hide delay",
+                ctx.scrollbar_hide_delay,
+                speed=0.1,
+                low=MIN_HIDE_DELAY,
+                high=MAX_HIDE_DELAY,
+                fmt="%.1f s",
+                default=DEFAULT_HIDE_DELAY,
+                clamp=True,
+                show_reset_hint=False,
+            )
+            if changed or committed:
+                ctx.apply_setting(ctx.set_scrollbar_hide_delay, delay, persist=committed)
         if ctx.font_report is not None:
-            self._property(t("UI font"))
-            imgui.text_disabled(ctx.font_report.mono)
-            self._property(t("CJK font"))
-            imgui.text_disabled(ctx.font_report.cjk or ctx.tr("none"))
-        imgui.end_table()
+            self._readonly_value(t("UI font"), ctx.font_report.mono)
+            self._readonly_value(t("CJK font"), ctx.font_report.cjk or ctx.tr("none"))
+        self._end_properties()
         if ctx.panels is not None:
             self._group_heading(t("Panels"))
             panels = tuple(
@@ -189,12 +202,12 @@ class SettingsPanel(Panel):
             if self._begin_toggle_grid("settings_panels", tuple(t(panel.name) for panel in panels)):
                 for panel in panels:
                     imgui.table_next_column()
-                    changed, is_open = themed_checkbox(
+                    changed, is_open = self._checkbox(
                         f"{t(panel.name)}###panel_open_{panel.id}", panel.open, ctx.theme
                     )
                     if changed:
                         ctx.panels.set_open(panel.id, is_open)
-                imgui.end_table()
+                self._end_properties()
 
     def show_category(self, category: str) -> None:
         if category in _CATEGORIES:
@@ -227,6 +240,7 @@ class SettingsPanel(Panel):
         default: float,
         tooltip: str = "",
         clamp: bool = False,
+        show_reset_hint: bool = True,
     ) -> tuple[bool, float, bool]:
         """Return preview and commit phases without owning or saving the setting."""
         self._property(ctx.tr(label))
@@ -244,7 +258,7 @@ class SettingsPanel(Panel):
         reset = hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET)
         if reset:
             changed, edited = True, default
-        if hovered:
+        if hovered and (tooltip or show_reset_hint):
             imgui.set_tooltip(
                 ctx.tr(tooltip)
                 if tooltip
@@ -268,6 +282,10 @@ class SettingsPanel(Panel):
         return imgui.begin_table(str_id, columns, imgui.TableFlags_.sizing_stretch_same)
 
     @staticmethod
+    def _end_properties():
+        imgui.end_table()
+
+    @staticmethod
     def _begin_properties(str_id: str) -> bool:
         flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
         compact = imgui.get_content_region_avail().x < 24.0 * imgui.get_font_size()
@@ -284,17 +302,24 @@ class SettingsPanel(Panel):
         imgui.text_disabled(title)
         imgui.separator()
 
+    def _readonly_value(self, label: str, value: str, *, muted=True) -> None:
+        self._property(label)
+        imgui.align_text_to_frame_padding()
+        if muted:
+            imgui.push_style_color(
+                imgui.Col_.text, imgui.get_style_color_vec4(imgui.Col_.text_disabled)
+            )
+        imgui.text_wrapped(str(value))
+        if muted:
+            imgui.pop_style_color()
+
     @staticmethod
-    def _property(label: str) -> None:
+    def _property(label: str, *, control_part: str = "input_number") -> None:
         imgui.table_next_row()
         imgui.table_next_column()
         compact = imgui.table_get_column_count() == 1
         if not compact:
             imgui.align_text_to_frame_padding()
-        width = imgui.get_content_region_avail().x
-        text_width = imgui.calc_text_size(label).x
-        if not compact:
-            imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + max(0.0, width - text_width))
         imgui.text(label)
         imgui.table_next_column()
         imgui.set_next_item_width(-1.0)
@@ -321,6 +346,53 @@ class SettingsPanel(Panel):
     def current_view(self, backend) -> DebugView:
         getter = getattr(backend, "get_debug_view", None)
         return getter() if callable(getter) else self._view
+
+    @staticmethod
+    def _combo(*args, **kwargs):
+        return imgui.combo(*args, **kwargs)
+
+    def _choice_list(self, key, index, labels, *, preview=None, enabled=None, tooltips=None):
+        """Present optional disabled choices while retaining the panel's setting ownership."""
+        preview = labels[index] if preview is None and index >= 0 else preview or ""
+        selected = index
+        if self._begin_combo(key, preview):
+            for option, label in enumerate(labels):
+                available = enabled is None or enabled[option]
+                imgui.begin_disabled(not available)
+                clicked, _ = padded_selectable(label, option == index)
+                imgui.end_disabled()
+                if clicked and available:
+                    selected = option
+                if (
+                    tooltips
+                    and tooltips[option]
+                    and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
+                ):
+                    imgui.set_tooltip(tooltips[option])
+            imgui.end_combo()
+        return selected != index, selected
+
+    @staticmethod
+    def _begin_combo(*args, **kwargs):
+        return imgui.begin_combo(*args, **kwargs)
+
+    @staticmethod
+    def _input_text(*args, **kwargs):
+        return imgui.input_text(*args, **kwargs)
+
+    @staticmethod
+    def _checkbox(key, value, theme=None):
+        from mojive.ui.theme import THEME
+
+        return themed_checkbox(key, value, theme or THEME)
+
+    @staticmethod
+    def _button(*args, **kwargs):
+        return imgui.button(*args, **kwargs)
+
+    @staticmethod
+    def _segmented(*args, **kwargs):
+        return segmented_control(*args, **kwargs)
 
     @staticmethod
     def _collapsing_header(*args, **kwargs):

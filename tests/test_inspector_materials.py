@@ -38,7 +38,7 @@ class _MaterialInputs:
         self.combo = label
         return not self.disabled and label in self.choices
 
-    def selectable(self, label, selected):
+    def selectable(self, label, selected, flags=0):
         return self.choices.get(self.combo) == label, selected
 
     def button_row(self, _ctx, _label, labels):

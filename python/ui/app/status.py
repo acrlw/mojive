@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from imgui_bundle import imgui
@@ -48,6 +49,15 @@ class _Status:
         imgui.pop_style_var()
 
     def _draw_application_status_bar(self, *, loading: bool = False) -> None:
+        visibility = getattr(self, "scrollbar_visibility", None)
+        with (
+            visibility.panel_scope("Statusbar", window_name="Status###application_status")
+            if visibility is not None
+            else nullcontext()
+        ):
+            self._paint_application_status_bar(loading=loading)
+
+    def _paint_application_status_bar(self, *, loading: bool = False) -> None:
         """Draw persistent selection, simulation, backend, and frame-rate status."""
 
         viewport = imgui.get_main_viewport()
@@ -55,7 +65,44 @@ class _Status:
         # One shared text baseline aligns every status group. A small
         # vertical gutter separates the single-line groups without inflating
         # their internal geometry.
-        height = APPLICATION_STATUS_HEIGHT_PT * scale
+        workspace = getattr(self, "workspace", None)
+        ui = workspace.ui if workspace is not None else None
+        bar_style = ui.component_style("statusbar") if ui is not None else None
+        margins = bar_style.edges("margin", scale) if bar_style is not None else (0, 0, 0, 0)
+        badge, status_groups, bar_gap = None, None, 0
+        frame_height = APPLICATION_STATUS_HEIGHT_PT * scale
+        if ui is not None:
+            from mojive.ui.workspace.status_components import StatusBadge, StatusGroups
+
+            badge = StatusBadge(ui)
+            status_groups = StatusGroups(ui)
+            application_height = ui.metric(
+                "application", "statusHeight", APPLICATION_STATUS_HEIGHT_PT
+            )
+            requested_height = (
+                bar_style.get("height", APPLICATION_STATUS_HEIGHT_PT)
+                if bar_style.explicit("height")
+                else application_height
+            )
+            padding = bar_style.edges("padding", scale, (10, 0, 10, 0))
+            font = bar_style.get("fontSize", 14)
+            line = bar_style.line_height(font * 1.4) * scale
+            frame_height = max(
+                requested_height * scale,
+                status_groups.minimum_height(
+                    max(
+                        font * scale,
+                        line,
+                        badge.size("Esc")[1],
+                        24 * scale,
+                        bar_style.get("iconSize", 7) * scale,
+                    )
+                )
+                + padding[1]
+                + padding[3],
+            )
+            bar_gap = ui.metric("application", "rowGap", 0) * scale
+        height = frame_height + margins[1] + margins[3] + bar_gap
         flags = (
             imgui.WindowFlags_.no_decoration.value
             | imgui.WindowFlags_.no_docking.value
@@ -75,6 +122,9 @@ class _Status:
             flags,
         )
         if visible:
+            visibility = getattr(self, "scrollbar_visibility", None)
+            if visibility is not None:
+                visibility.bind_current_window()
             origin = imgui.get_window_pos()
             size = imgui.get_window_size()
             if loading:
@@ -105,11 +155,28 @@ class _Status:
                 sim_step = int(self.session.frame.step)
             recording = self.recording
             panel = self.panels.get(self._status_panel) if not loading else None
+            workbench = getattr(getattr(self, "design", None), "workbench", None)
+            picking = workbench is not None and workbench.pick and imgui.get_io().key_alt
+            box = None
+            if ui is not None:
+                from mojive.design.native.geometry import Box, Rect
+
+                outer = Rect(origin.x, origin.y + bar_gap, size.x, size.y - bar_gap)
+                frame = Rect(
+                    outer.x + margins[0],
+                    outer.y + margins[1],
+                    max(0, outer.width - margins[0] - margins[2]),
+                    frame_height,
+                )
+                box = Box(outer, frame, frame.inset(*padding), padding, margins)
+            content = box.content if box is not None else None
+            if ui is not None:
+                imgui.push_font(ui.body, bar_style.get("fontSize", 14) * scale)
             status_layout = draw_status(
                 self.window.painter(),
-                (origin.x, origin.y),
-                size.x,
-                size.y,
+                (content.x, content.y) if content is not None else (origin.x, origin.y),
+                content.width if content is not None else size.x,
+                content.height if content is not None else size.y,
                 self.theme,
                 scale,
                 selected="",
@@ -136,7 +203,58 @@ class _Status:
                 tool_hints=self._status_tool_hints(loading=loading),
                 labels=self._viewport_labels,
                 pixel_size=self.window.pixels_to_points(1.0),
+                group_gap=bar_style.get("columnGap", bar_style.get("gap", 24)) * scale
+                if bar_style is not None
+                else None,
+                hints_gap=ui.metric(
+                    "status_hints", "columnGap", ui.metric("status_hints", "gap", 24)
+                )
+                * scale
+                if ui is not None
+                else None,
+                icon_size=bar_style.get("iconSize", 7) * scale if bar_style is not None else None,
+                line_height=bar_style.line_height(bar_style.get("fontSize", 14) * 1.4) * scale
+                if bar_style is not None
+                else None,
+                align_items=bar_style.get("alignItems", "center")
+                if bar_style is not None
+                else "center",
+                keycap=badge,
+                separator_width=ui.metric("separator", "thickness", 1) * scale
+                if ui is not None
+                else None,
+                separator_margin=ui.metric("separator", "margin", 5) * scale
+                if ui is not None
+                else None,
+                presentation=status_groups,
             )
+            if ui is not None:
+                imgui.pop_font()
+                if ui.design is not None:
+                    ui.record_component_box(
+                        "statusbar",
+                        box,
+                        key="application-statusbar",
+                        fields=status_groups.fields,
+                        fieldRegions=dict.fromkeys(("gap", "columnGap"), status_groups.gaps),
+                    )
+                    ui.design.record(
+                        "application-status",
+                        ("application",),
+                        box.frame.tuple(),
+                        "application",
+                        content=list(box.content.tuple()),
+                        layoutRect=[origin.x, origin.y, size.x, size.y],
+                        consumedFields={
+                            "application": [
+                                "fontSize",
+                                "lineHeightMode",
+                                "lineHeight",
+                                "statusHeight",
+                                "rowGap",
+                            ]
+                        },
+                    )
             if status_layout.passive_rect is not None:
                 x0, y0, x1, y1 = status_layout.passive_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
@@ -149,9 +267,12 @@ class _Status:
             if status_layout.metric_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.metric_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
-                if imgui.invisible_button(
-                    "##status_simulation_metric",
-                    imgui.ImVec2(x1 - x0, y1 - y0),
+                if (
+                    imgui.invisible_button(
+                        "##status_simulation_metric",
+                        imgui.ImVec2(x1 - x0, y1 - y0),
+                    )
+                    and not picking
                 ):
                     self._toggle_status_metric()
                 hovered = imgui.is_item_hovered()
@@ -169,8 +290,11 @@ class _Status:
             if status_layout.recording_pause_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_pause_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
-                if imgui.invisible_button(
-                    "##status_recording_pause", imgui.ImVec2(x1 - x0, y1 - y0)
+                if (
+                    imgui.invisible_button(
+                        "##status_recording_pause", imgui.ImVec2(x1 - x0, y1 - y0)
+                    )
+                    and not picking
                 ):
                     if recording.phase is RecordingPhase.PAUSED:
                         self.resume_recording()
@@ -187,8 +311,11 @@ class _Status:
             if status_layout.recording_stop_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_stop_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
-                if imgui.invisible_button(
-                    "##status_recording_stop", imgui.ImVec2(x1 - x0, y1 - y0)
+                if (
+                    imgui.invisible_button(
+                        "##status_recording_stop", imgui.ImVec2(x1 - x0, y1 - y0)
+                    )
+                    and not picking
                 ):
                     self._request_recording_stop()
                 if imgui.is_item_hovered():

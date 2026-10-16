@@ -136,8 +136,7 @@ class NativeWindow(Window):
         self._applied_style_scale = self._style_scale
         self._load_fonts(io)
 
-        self.dockspace_id = 0
-        self._layout_done = False
+        self._initialize_layout_state()
         self.latch = ResizeLatch()
 
         from .native_backend import NativeImguiBackend
@@ -183,6 +182,7 @@ class NativeWindow(Window):
 
     def end_frame(self, *, readback=False):
         imgui.set_current_context(self._imgui_context)
+        self._finish_layout_frame()
         imgui.render()
         draw = imgui.get_draw_data()
         size = self.size_pixels
