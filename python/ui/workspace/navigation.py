@@ -667,6 +667,7 @@ class Navigation:
             w,
             joints=joints,
             select_joint=self.select_joint,
+            initial_qpos=self.joints._initial_qpos,
             show_names=node_id is None or len(joints) > 1,
             joint_color=node_accent(ctx.theme, "joint"),
         )

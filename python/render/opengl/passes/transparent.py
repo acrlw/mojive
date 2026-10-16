@@ -35,7 +35,7 @@ class TransparentPass(BasePass):
         if target.id_layout is IdLayout.SHARED:
             target.fbo.color_mask = (_MASK_ON, _MASK_OFF)
 
-        if ctx.debug_view is DebugView.OVERDRAW:
+        if ctx.debug_view is DebugView.OVERDRAW and not ctx.flag(RenderFlag.WIREFRAME, False):
             state_overdraw(gl)
         else:
             state_transparent(gl, additive=ctx.flag(RenderFlag.ADDITIVE, False))

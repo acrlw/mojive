@@ -571,6 +571,7 @@ class _Capture:
                         "document": {
                             "id": self.session.document_id,
                             "revision": self.session.document_revision,
+                            "structure_revision": self.session.structure_generation,
                         },
                         "structure_generation": self.session.structure_generation,
                         "step": self.session.frame.step,

@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import numpy as np
 import pytest
 from imgui_bundle import imgui
 
 from mojive import build
 from mojive import commands as cmd
+from mojive.config import ViewerConfig
 from mojive.scene.assets import resolve
 from mojive.ui.panels.keyframes import timeline_status_hints
+
+# Classic dock windows and ImGui controls are the contracts exercised in this module.
+build = partial(build, config=ViewerConfig(ui="classic"))
 
 pytestmark = pytest.mark.gpu
 
@@ -329,12 +335,19 @@ def test_escape_dismisses_menu_without_clearing_selection(viewer):
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
 def test_main_menu_actions_create_undo_redo_and_open_panels(tmp_path, monkeypatch, language):
-    from mojive import Scene, build_scene
+    from mojive import Scene, ViewerConfig, build_scene
     from mojive.tools.ui_runtime import _click, _item_center, _open_main_menu, _settle
 
     monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
-    with build_scene(Scene(), width=1280, height=900, vsync=False, show_window=False) as viewer:
+    with build_scene(
+        Scene(),
+        width=1280,
+        height=900,
+        vsync=False,
+        show_window=False,
+        config=ViewerConfig(ui="classic"),
+    ) as viewer:
         viewer.app.set_language(language)
         _settle(viewer, 6)
         tr = viewer.app.localizer.text

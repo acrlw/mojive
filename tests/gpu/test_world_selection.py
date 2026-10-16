@@ -130,6 +130,7 @@ def test_local_rollout_playback_buttons_scrubbing_shortcuts_and_manual_sync(
 
     import numpy as np
 
+    from mojive import ViewerConfig
     from mojive import commands as cmd
     from mojive.adapters.rollout_replay import RolloutReplayAdapter
     from mojive.app.composition import build_from_adapter
@@ -156,7 +157,13 @@ def test_local_rollout_playback_buttons_scrubbing_shortcuts_and_manual_sync(
             window_frames=32,
         )
         with build_from_adapter(
-            adapter, width=960, height=720, vsync=False, show_window=False, renderer=backend_name
+            adapter,
+            width=960,
+            height=720,
+            vsync=False,
+            show_window=False,
+            renderer=backend_name,
+            config=ViewerConfig(ui="classic"),
         ) as viewer:
             viewer.app.set_language(language)
             t = viewer.app.localizer.text

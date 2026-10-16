@@ -103,6 +103,7 @@ def pose(request):
                     size.x,
                     joints=state.session.joints,
                     select_joint=lambda *args, **kwargs: None,
+                    initial_qpos=state.session.source.initial_qpos,
                 )
                 - pos.y
             )

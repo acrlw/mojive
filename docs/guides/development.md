@@ -416,15 +416,32 @@ API pages are generated from current Python definitions through `python/tools/do
 
 ### README media
 
-Run `make readme-media` to capture the production UI and renderer at 1920 × 1200. It uses
-isolated settings and a hidden OpenGL window, records a short take in the bundled `joint_types`
-scene, and places Keyframes across the space below Hierarchy and the viewport, with Joints
-above Inspector on the right. Output stays collapsed and both viewport capsules remain visible.
-The physical UI scale is 1.3; the logical scale is adjusted for display density (0.65 on a 2×
-Retina display). The manifest records both values. The third image renders the bundled showcase
-at the same size. No image is cropped or composited after capture.
+`make readme-media` captures the production workspace and renderer at 1920 × 1200. It reads
+the saved UI design specification, uses isolated desktop settings, and records a short take in
+the bundled `joint_types` scene. The images show Scene, Inspector and Timeline; Pose with the
+rotation gizmo; and the rendered showcase. Images come directly from OpenGL captures.
 
-Inspect the three images and `manifest.json` in `output/readme-media/`; copies used by the
-documentation are in `docs/images/readme/`. Check panel alignment, readable labels, actual joint
-controls, full capsules and timeline content before committing updated media. The capture script does not
-change the production default layout or the user's saved settings.
+For manual layout and camera adjustments:
+
+```bash
+make readme-media ARGS='--interactive'
+```
+
+The first view prepares `hero.png`. Adjust panel widths, scroll positions and the camera, then
+press `F8`. The second view prepares `joint-authoring.png`; adjust it and press `F8` again.
+The command then renders `rendering.png` automatically and publishes all three images to
+`docs/images/readme/`. Closing the viewer before both captures cancels publication.
+Keep the window at its initial size so all images retain the requested dimensions.
+
+Save parameter changes in `make ui-native-design` before capture. The capture uses
+`MOJIVE_DESIGN_SPEC` or its default `output/design-workbench/current-spec.json`. A separate
+specification, image size or physical UI scale can be selected explicitly:
+
+```bash
+make readme-media ARGS='--interactive --spec output/design-workbench/current-spec.json --width 1920 --height 1200 --ui-scale 1'
+```
+
+Omit `--interactive` for unattended captures with the prepared layouts. The default physical UI
+scale is 1; the logical scale is adjusted for display density. Inspect all three images and
+`manifest.json` under `output/readme-media/` before committing: labels, panel alignment,
+viewport overlays and timeline content must remain readable and contained.

@@ -3,6 +3,7 @@
 import math
 import time
 from dataclasses import replace
+from functools import partial
 
 import numpy as np
 import pytest
@@ -17,6 +18,10 @@ from mojive.tools.ui_runtime import _activate_panel, _click, _item_center, _item
 
 pytestmark = pytest.mark.gpu
 
+# These acceptance checks exercise the classic timeline transport; native
+# transport geometry is covered by the workspace timeline tests.
+build = partial(build, config=ViewerConfig(ui="classic"))
+
 
 @pytest.fixture
 def viewer(tmp_path, monkeypatch):
@@ -28,7 +33,7 @@ def viewer(tmp_path, monkeypatch):
         vsync=False,
         width=1280,
         height=800,
-        config=ViewerConfig(recording=RecordingConfig(countdown=60, end_hold=0.2)),
+        config=ViewerConfig(ui="classic", recording=RecordingConfig(countdown=60, end_hold=0.2)),
     ) as viewer:
         populate_take(viewer, 12)
         show_timeline(viewer)

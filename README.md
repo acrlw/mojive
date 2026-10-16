@@ -1,6 +1,6 @@
 # Mojive
 
-![Mojive with a jointed scene, joint controls, Inspector and Keyframes](docs/images/readme/hero.png)
+![Mojive with Scene, viewport tools, Inspector and Timeline](docs/images/readme/hero.png)
 
 **A backend-neutral 3D viewer, editor, and renderer for robotics and simulation.**
 
@@ -36,8 +36,8 @@ make setup
 uv run --no-sync mojive view joint_types
 ```
 
-The viewer starts paused. Select a body in **Hierarchy** to inspect its properties in
-**Inspector** or adjust its joints in **Joints**. Panels can be opened from the Window menu
+The viewer starts paused. Select a body in **Scene** to inspect its properties in
+**Inspector** or adjust its joints in **Pose**. Panels can be opened from the Window menu
 and docked by dragging their tabs.
 
 ```bash
@@ -205,6 +205,12 @@ make docs-check        # Documentation checks and strict site build
 make readme-media      # Refresh the README screenshots
 make help              # Examples, backend checks and performance targets
 ```
+
+Use `make readme-media ARGS='--interactive'` to adjust the workspace and camera before each
+editor capture. Press `F8` to capture the main workspace, then again for the joint controls;
+the rendering image is generated automatically. The command uses the saved UI design specification
+and updates `docs/images/readme/`. See [README media](docs/guides/development.md#readme-media)
+for image dimensions and specification options.
 
 Generated captures, recordings, reports, and the documentation site are written to `output/`.
 

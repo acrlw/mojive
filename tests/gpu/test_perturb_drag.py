@@ -3,7 +3,6 @@
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -22,18 +21,7 @@ pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 def _edit_strength(viewer, label, value):
     from mojive.tools.ui_runtime import _click, _item_center
 
-    native = imgui.drag_float
-
-    def scroll_to_field(item_label, *args, **kwargs):
-        result = native(item_label, *args, **kwargs)
-        if item_label == label:
-            imgui.set_scroll_here_y(0.45)
-        return result
-
-    with patch.object(imgui, "drag_float", scroll_to_field):
-        for _ in range(4):
-            viewer.sync()
-    center = _item_center(viewer, "drag_float", label)
+    center = _item_center(viewer, "drag_float", label, reveal=True)
     io = imgui.get_io()
     modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
     io.add_key_event(modifier, True)

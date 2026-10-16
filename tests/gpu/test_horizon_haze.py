@@ -198,6 +198,25 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
         # Sample a full-height strip between the tool and playback hosts,
         # including the horizon haze without either UI overlay.
         # Host bounds include placement, per-widget scale, and AA padding.
+        workspace = getattr(viewer.app, "workspace", None)
+        if workspace is not None:
+            viewport_rect = viewer.app._viewport_rect
+            point_to_pixel = target.shape[1] / viewport_rect[2]
+            visible = np.ones(target.shape[:2], dtype=bool)
+            for ox, oy, ow, oh in workspace.rects.get("overlays", ()):
+                lx0 = max(0, round((ox - viewport_rect[0]) * point_to_pixel))
+                ly0 = max(0, round((oy - viewport_rect[1]) * point_to_pixel))
+                lx1 = min(target.shape[1], round((ox + ow - viewport_rect[0]) * point_to_pixel))
+                ly1 = min(target.shape[0], round((oy + oh - viewport_rect[1]) * point_to_pixel))
+                visible[ly0:ly1, lx0:lx1] = False
+            difference = np.max(np.abs(target[..., :3].astype(int) - clear), axis=2)
+            assert np.count_nonzero(difference[visible] > 5) > 100
+            delta = np.max(
+                np.abs(viewport.astype(np.int16) - target[..., :3].astype(np.int16)), axis=2
+            )
+            assert np.count_nonzero(delta[visible] > 5) < 1_000
+            return
+
         style_scale = viewer.window.style_scale
         point_to_pixel = target.shape[1] / viewer.app._viewport_rect[2]
         playback = imgui.internal.find_window_by_name("Playback###viewport_playback")

@@ -60,7 +60,9 @@ def viewer(tmp_path, monkeypatch, request):
         height=800,
         show_window=False,
         vsync=False,
-        config=ViewerConfig(recording=RecordingConfig(countdown=0, run_simulation=True)),
+        config=ViewerConfig(
+            ui="classic", recording=RecordingConfig(countdown=0, run_simulation=True)
+        ),
     ) as viewer:
         viewer.app.passive_mode = True
         # Dock tabs and clipped value rows become available after layout settles.
@@ -93,7 +95,9 @@ def test_passive_toolbar_records_without_starting_or_stopping_physics(
     assert output.stat().st_size > 0
     assert viewer.session.frame.time == before
     show_settings(viewer)
-    _click(viewer, _item_center(viewer, "checkbox", "##recording_run_simulation"))
+    for _ in range(3):
+        viewer.sync()
+    _click(viewer, _item_center(viewer, "invisible_button", "##recording_run_simulation"))
     assert viewer.app.recording_config.run_simulation  # Disabled, not silently persisted off.
 
 

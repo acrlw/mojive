@@ -8,7 +8,7 @@ import numpy as np
 from .... import math3d
 from ....log import get_logger
 from ....types import MeshShape
-from ...backend import RenderFlag
+from ...backend import DebugView, RenderFlag
 from ...dependencies import camera_key, flags_key, lifecycle_key, lights_key
 from ...environment import reflection_plane
 from ..registry import register_pass
@@ -161,7 +161,11 @@ class ReflectPass(OpaquePass):
         self._groups = ()
         self.cache_status = "off"
         self._pending_key = None
-        if not ctx.flag(RenderFlag.REFLECTION):
+        if (
+            not ctx.flag(RenderFlag.REFLECTION)
+            or ctx.debug_view is DebugView.WIREFRAME
+            or ctx.flag(RenderFlag.WIREFRAME, False)
+        ):
             self._build_reflection_info(ctx.scene, ())
             return
         eye = np.asarray(ctx.camera.eye, np.float64)

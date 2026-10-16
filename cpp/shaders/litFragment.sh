@@ -51,10 +51,5 @@ void main()
     lit = mix(lit, u_options.y > .5 ? u_fogColor.rgb : srgbToLinear(u_fogColor.rgb), fog);
     lit = mix(lit, u_options.y > .5 ? u_hazeColor.rgb : srgbToLinear(u_hazeColor.rgb), haze);
     vec3 rgb=u_reflectionConfig.x>.5?lit:u_options.y>.5?clamp(lit,0,1):finishColor(lit);
-#ifdef WIREFRAME
-    float distanceToEdge=min(v_bary.x,min(v_bary.y,v_bary.z));
-    float width=max(fwidth(distanceToEdge),1e-6)*1.2;
-    rgb=mix(vec3(.1,.1,.12),rgb,smoothstep(0.0,width,distanceToEdge));
-#endif
     gl_FragColor=vec4(rgb,alpha);
 }

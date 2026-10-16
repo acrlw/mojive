@@ -13,75 +13,38 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
-from mojive import CameraView, ViewerConfig, build
+from mojive import CameraView, InputClaim, ViewerConfig
 from mojive import commands as cmd
+from mojive.app.composition import build_workspace
 from mojive.config import LayoutConfig, ViewportLayers
 from mojive.scene.assets import resolve
 
 from ._harness import OffscreenHarness
 from .keyframe_timeline import populate_take
 from .showcase import _add_debug_layers
-from .ui_runtime import _activate_panel, _park_cursor, _save, _settle
+from .ui_runtime import _park_cursor, _save, _settle
 
 
-def _build_layout(viewer) -> None:
-    """Build docking nodes inside the window's active ImGui frame."""
-    root = viewer.window.dockspace_id
-    dock = imgui.internal
-    dock.dock_builder_remove_node(root)
-    dock.dock_builder_add_node(root, dock.DockNodeFlagsPrivate_.dock_space)
-    dock.dock_builder_set_node_size(root, imgui.get_main_viewport().work_size)
-    left_share, right_share = 0.205, 0.235
-    _, right, rest = dock.dock_builder_split_node_py(root, imgui.Dir.right, right_share)
-    _, bottom, upper = dock.dock_builder_split_node_py(rest, imgui.Dir.down, 0.24)
-    _, left, center = dock.dock_builder_split_node_py(
-        upper, imgui.Dir.left, left_share / (1.0 - right_share)
-    )
-    _, inspector, joints = dock.dock_builder_split_node_py(right, imgui.Dir.down, 0.48)
-    for name, node in {
-        "Hierarchy": left,
-        "Assets": left,
-        "Viewport": center,
-        "Keyframes": bottom,
-        "Joints": joints,
-        "Inspector": inspector,
-    }.items():
-        dock.dock_builder_dock_window(name, node)
-    dock.dock_builder_finish(root)
-
-
-def _layout(viewer) -> None:
-    """Keep the real panels docked, with Output reduced to its status strip."""
-    for panel in viewer.panels:
-        panel.open = panel.name in {"Hierarchy", "Joints", "Inspector", "Keyframes", "Output"}
-    original = viewer.window._build_default_layout
-    viewer.window._build_default_layout = lambda: _build_layout(viewer)
-    try:
-        viewer.sync()
-    finally:
-        viewer.window._build_default_layout = original
-    viewer.panels.get("Output").collapsed = True
-    _settle(viewer)
-    for name in ("Hierarchy", "Joints", "Inspector", "Keyframes"):
-        _activate_panel(viewer, name)
-
-
-def _capture_editor(output: Path, width: int, height: int) -> dict:
+def _capture_editor(
+    output: Path, width: int, height: int, *, interactive=False, ui_scale=1.0
+) -> dict:
     config = ViewerConfig(
         layout=LayoutConfig(persistence=False),
         layers=ViewportLayers(helpers=False),
         threaded_physics=False,
     )
-    with build(
+    with build_workspace(
         resolve("joint_types"),
         config=config,
         renderer="opengl",
         paused=True,
-        vsync=False,
+        vsync=interactive,
         width=width,
         height=height,
         show_window=False,
     ) as viewer:
+        if interactive:
+            viewer.set_input_handler(lambda _context: InputClaim(keys=frozenset({"f8"})))
         _settle(viewer)
         # GLFW window units can differ from framebuffer pixels on HiDPI displays.
         import glfw
@@ -89,7 +52,7 @@ def _capture_editor(output: Path, width: int, height: int) -> dict:
         pixel_width, pixel_height = viewer.window.size_pixels
         logical_width, logical_height = glfw.get_window_size(viewer.window._window)
         # Keep the same physical font and control sizes across display densities.
-        viewer.window._scale_override = 1.3 * logical_width / pixel_width
+        viewer.window._scale_override = ui_scale * logical_width / pixel_width
         glfw.set_window_size(
             viewer.window._window,
             round(logical_width * width / pixel_width),
@@ -97,7 +60,11 @@ def _capture_editor(output: Path, width: int, height: int) -> dict:
         )
         viewer.app.set_language("en")
         _settle(viewer)
-        _layout(viewer)
+        workspace = viewer.app.workspace
+        workspace.needs_layout = True
+        workspace.activate("Scene")
+        workspace.activate("Timeline")
+        _settle(viewer)
         session = viewer.session
         joints = {joint.name: joint for joint in session.joints}
         for name, value in (("hinge_limited", -0.55), ("chain_0", 0.4), ("chain_1", -0.7)):
@@ -132,8 +99,15 @@ def _capture_editor(output: Path, width: int, height: int) -> dict:
         )
         _park_cursor(viewer)
         _settle(viewer)
+        viewer.app.output.active_status(float("inf"))
+        _settle(viewer)
+        if interactive:
+            viewer.window.show()
+            _wait_for_capture(viewer, "hero.png")
         layout = _layout_report(viewer)
         _save(viewer, output / "hero.png")
+        workspace.activate("Pose")
+        workspace.inspector_tab = "Properties"
         viewer.set_camera(
             CameraView(
                 eye=np.array([2.2, -2.7, 1.9]),
@@ -142,6 +116,9 @@ def _capture_editor(output: Path, width: int, height: int) -> dict:
             )
         )
         _settle(viewer)
+        if interactive:
+            _wait_for_capture(viewer, "joint-authoring.png")
+        _layout_report(viewer, sidebar="Pose")
         _save(viewer, output / "joint-authoring.png")
         return {
             "scene": "joint_types",
@@ -149,28 +126,38 @@ def _capture_editor(output: Path, width: int, height: int) -> dict:
             "visible_joint_filter": "all",
             "selected_node": selected.name,
             "keyframes": ["Start", "Reach", "Hold", "Return"],
-            "output_collapsed": viewer.panels.get("Output").collapsed,
             "logical_ui_scale": viewer.window.style_scale,
             "physical_ui_scale": viewer.window.ui_scale,
             "layout": layout,
         }
 
 
-def _layout_report(viewer) -> dict:
-    """Reject hidden panels or clipped capsules before publishing a capture."""
-    names = ("Hierarchy", "Viewport", "Joints", "Inspector", "Keyframes")
+def _layout_report(viewer, *, sidebar="Scene") -> dict:
+    """Verify production panels and viewport overlays before publication."""
+    names = (sidebar, "Viewport", "Inspector", "Timeline")
     bounds = {}
-    for name in (*names, "Playback###viewport_playback", "Tools###viewport_tools"):
+    for name in names:
         window = imgui.internal.find_window_by_name(name)
-        if window is None or not window.active:
+        if window is None or not window.active or window.hidden:
             raise RuntimeError(f"Required screenshot panel is not visible: {name}")
         bounds[name] = [window.pos.x, window.pos.y, window.size.x, window.size.y]
-    x, y, width, height = viewer.app._viewport_rect
-    for name in ("Playback###viewport_playback", "Tools###viewport_tools"):
-        left, top, w, h = bounds[name]
-        if left < x or top < y or left + w > x + width or top + h > y + height:
-            raise RuntimeError(f"Screenshot capsule is clipped: {name}")
+    workspace = viewer.app.workspace
+    x, y, width, height = workspace.rects["viewport_content"]
+    for left, top, w, h in workspace.rects["overlays"]:
+        if left < x - 1 or top < y - 1 or left + w > x + width + 1 or top + h > y + height + 1:
+            raise RuntimeError("A production viewport overlay is clipped")
     return bounds
+
+
+def _wait_for_capture(viewer, name):
+    print(f"Adjust the layout and camera for {name}; press F8 to capture and continue.", flush=True)
+    while viewer.is_running():
+        viewer.sync()
+        if imgui.is_key_pressed(imgui.Key.f8, False):
+            _park_cursor(viewer)
+            _settle(viewer)
+            return
+    raise SystemExit("Capture cancelled; README images were not published.")
 
 
 def _capture_rendering(output: Path, width: int, height: int) -> None:
@@ -198,14 +185,33 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1200)
+    parser.add_argument("--ui-scale", type=float, default=1.0)
+    parser.add_argument("--spec", type=Path, help="Use a saved UI design specification")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Adjust each editor view, then press F8 to capture",
+    )
     args = parser.parse_args(argv)
+    if args.width <= 0 or args.height <= 0 or not 0.5 <= args.ui_scale <= 4:
+        parser.error("Image dimensions must be positive; UI scale must be between 0.5 and 4")
+    if args.spec:
+        if not args.spec.is_file():
+            parser.error(f"Design specification does not exist: {args.spec}")
+        os.environ["MOJIVE_DESIGN_SPEC"] = str(args.spec.resolve())
     args.output.mkdir(parents=True, exist_ok=True)
-    # A capture must not read or overwrite the user's persisted desktop settings.
+    # Keep capture settings separate while reading the user's saved design specification.
     with tempfile.TemporaryDirectory(prefix="settings-", dir=args.output) as settings:
         os.environ["MOJIVE_SETTINGS"] = str(Path(settings) / "settings.json")
-        os.environ["MOJIVE_UI_SCALE"] = "0.6"
+        os.environ["MOJIVE_UI_SCALE"] = "1"
         os.environ["MOJIVE_RENDERER"] = "opengl"
-        report = _capture_editor(args.output, args.width, args.height)
+        report = _capture_editor(
+            args.output,
+            args.width,
+            args.height,
+            interactive=args.interactive,
+            ui_scale=args.ui_scale,
+        )
         _capture_rendering(args.output, args.width, args.height)
     names = ("hero.png", "joint-authoring.png", "rendering.png")
     for name in names:

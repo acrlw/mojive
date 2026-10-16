@@ -321,7 +321,8 @@ class DesignRuntime:
             )
         )
         if signature != self._layout_signature:
-            shell.needs_layout = True
+            if self._layout_signature is not None:
+                shell.needs_layout = True
             self._layout_signature = signature
         from mojive.design.native.geometry import part_scope
 

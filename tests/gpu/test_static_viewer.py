@@ -166,7 +166,8 @@ def test_status_bar_uses_the_comfortable_application_height(canvas):
 
     assert status is not None and status.active
     assert status.size.y == pytest.approx(
-        APPLICATION_STATUS_HEIGHT_PT * viewer.window.style_scale,
+        (30 if hasattr(viewer.app, "workspace") else APPLICATION_STATUS_HEIGHT_PT)
+        * viewer.window.style_scale,
         abs=1.0,
     )
 
@@ -205,8 +206,8 @@ def test_status_text_vertices_remain_centered_at_fractional_coordinates(canvas, 
             **(kwargs | {"backend": "H", "tool_hints": (ToolHint("key", "H", "H"),)}),
         )
         # Compare actual ImGui glyph quads for a keycap, its label and telemetry
-        # against the center of the bar below its top divider.
-        expected = origin[1] + (height + scale) * 0.5
+        # against the center of the shared status row.
+        expected = origin[1] + height * 0.5
         return result
 
     monkeypatch.setattr(ImguiDraw2D, "text", record_text)
@@ -640,12 +641,10 @@ def test_settings_window_uses_frontend_placement(canvas):
 
 
 def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
-    from mojive.ui.panels import settings as settings_module
-
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
     assert settings is not None
-    original_checkbox = settings_module.themed_checkbox
+    original_checkbox = settings._checkbox
     toggled = []
 
     def toggle_memory(label, value, theme):
@@ -659,7 +658,7 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
         viewer.app.gizmo.remember_precise_input_choices = True
         settings._category = "Interaction"
         settings.open = True
-        monkeypatch.setattr(settings_module, "themed_checkbox", toggle_memory)
+        monkeypatch.setattr(settings, "_checkbox", toggle_memory)
         viewer.sync()
         assert toggled
         assert not viewer.app.gizmo.remember_precise_input_choices
@@ -670,12 +669,10 @@ def test_settings_controls_precise_input_choice_memory(canvas, monkeypatch):
 
 
 def test_settings_controls_and_persists_shadow_quality(canvas, monkeypatch):
-    from mojive.ui.panels import settings as settings_module
-
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
     assert settings is not None
-    original_control = settings_module.segmented_control
+    original_control = settings._segmented
     changed = []
 
     def select_high(str_id, labels, selected, **kwargs):
@@ -689,7 +686,7 @@ def test_settings_controls_and_persists_shadow_quality(canvas, monkeypatch):
         viewer.app.set_shadow_quality(ShadowQuality.BALANCED)
         settings._category = "Rendering"
         settings.open = True
-        monkeypatch.setattr(settings_module, "segmented_control", select_high)
+        monkeypatch.setattr(settings, "_segmented", select_high)
         viewer.sync()
         assert changed
         assert viewer.backend.get_shadow_quality() is ShadowQuality.HIGH
@@ -700,14 +697,13 @@ def test_settings_controls_and_persists_shadow_quality(canvas, monkeypatch):
 
 
 def test_settings_remaps_viewport_shortcuts_without_conflicts(canvas, monkeypatch):
-    from imgui_bundle import imgui
 
     from mojive.ui.input_bindings import InputAction, key_choices
 
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
     assert settings is not None
-    original_combo = imgui.combo
+    original_combo = settings._combo
     changed = []
     choice_ids = tuple(choice.identifier for choice in key_choices())
 
@@ -721,7 +717,7 @@ def test_settings_remaps_viewport_shortcuts_without_conflicts(canvas, monkeypatc
     try:
         settings._category = "Interaction"
         settings.open = True
-        monkeypatch.setattr(imgui, "combo", remap_frame)
+        monkeypatch.setattr(settings, "_combo", remap_frame)
         viewer.sync()
         assert changed
         assert viewer.app.input_bindings.key_id(InputAction.FRAME_SCENE) == "g"
@@ -732,14 +728,13 @@ def test_settings_remaps_viewport_shortcuts_without_conflicts(canvas, monkeypatc
 
 
 def test_settings_exposes_view_selection_padding(canvas, monkeypatch):
-    from imgui_bundle import imgui
 
     from mojive.ui.viewcube import DEFAULT_SELECTION_PADDING
 
     viewer, _scene = canvas
     settings = viewer.app.panels.get("Settings")
     assert settings is not None
-    original_drag = imgui.drag_float
+    original_drag = settings._drag_float
     adjusted = []
 
     def adjust_padding(label, value, *args, **kwargs):
@@ -752,7 +747,7 @@ def test_settings_exposes_view_selection_padding(canvas, monkeypatch):
     try:
         settings._category = "Interaction"
         settings.open = True
-        monkeypatch.setattr(imgui, "drag_float", adjust_padding)
+        monkeypatch.setattr(settings, "_drag_float", adjust_padding)
         viewer.sync()
         assert adjusted
         assert viewer.app.view_cube.selection_padding == pytest.approx(1.75)
@@ -860,6 +855,28 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
                 preview_y,
                 preview_x + preview_w,
                 preview_y + preview_h,
+            )
+            fov_rect = hits.get("##inspector-camera-vertical fov-value")
+            if fov_rect is None:
+                fov_rect = next(
+                    bounds
+                    for key, bounds in hits.items()
+                    if "fov" in key.lower() and "camera" in key.lower()
+                )
+            x, y, w, h = fov_rect
+            captured["##inspector-camera-vertical fov-value"] = (x, y, x + w, y + h)
+            view_rect = hits.get("View Camera")
+            if view_rect is None:
+                view_rect = next(
+                    bounds
+                    for key, bounds in hits.items()
+                    if "camera view" in key.lower() or "camera-view" in key.lower()
+                )
+            captured["View Camera"] = (
+                view_rect[0],
+                view_rect[1],
+                view_rect[0] + view_rect[2],
+                view_rect[1] + view_rect[3],
             )
         else:
             control_starts = [

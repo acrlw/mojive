@@ -218,6 +218,7 @@ def editor(request, session, monkeypatch):
                     size.x,
                     joints=(joint,),
                     select_joint=select,
+                    initial_qpos=session.source.initial_qpos,
                     show_names=state.show_names,
                 )
             state.primary_hits = dict(ui.hits)
@@ -234,6 +235,7 @@ def editor(request, session, monkeypatch):
                     size.x,
                     joints=(joint,),
                     select_joint=select,
+                    initial_qpos=session.source.initial_qpos,
                     show_names=False,
                 )
                 imgui.end()

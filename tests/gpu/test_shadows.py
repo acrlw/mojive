@@ -8,7 +8,7 @@ pytestmark = pytest.mark.gpu
 glfw = pytest.importorskip("glfw")
 moderngl = pytest.importorskip("moderngl")
 
-from mojive.render.backend import RenderFlag, ShadowQuality  # noqa: E402
+from mojive.render.backend import DebugView, RenderFlag, ShadowQuality  # noqa: E402
 from mojive.render.mesh import builtin_mesh  # noqa: E402
 from mojive.render.opengl import gl_native as G  # noqa: E402
 from mojive.render.opengl import passes as _passes  # noqa: E402
@@ -233,6 +233,23 @@ def _render(backend, camera=VIEW, shadow=True, **kw) -> np.ndarray:
     backend.set_render_scene(_scene(camera, **kw))
     backend.render()
     return backend.target.read_color(flip=True)[..., :3].astype(np.int16)
+
+
+@pytest.mark.parametrize("entry", ("debug", "flag"))
+def test_shadows_survive_wireframe_round_trip(backend, entry):
+    shaded = _render(backend)
+    if entry == "debug":
+        backend.set_debug_view(DebugView.WIREFRAME)
+    else:
+        backend.set_flag(RenderFlag.WIREFRAME, True)
+    wire = _render(backend)
+    assert backend.get_flag(RenderFlag.SHADOW)
+    assert not np.array_equal(wire, shaded)
+    backend.set_debug_view(DebugView.SHADED)
+    backend.set_flag(RenderFlag.WIREFRAME, False)
+    np.testing.assert_array_equal(_render(backend), shaded)
+    direct = _render(backend, shadow=False)
+    assert np.count_nonzero(np.max(np.abs(shaded - direct), axis=2) > 4) > 100
 
 
 def _render_spot(backend, shadow=True, cast=True, with_box=True, active=True) -> np.ndarray:

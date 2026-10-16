@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import os
 import time
+from functools import partial
 
 import numpy as np
 import pytest
@@ -13,7 +14,11 @@ pytest.importorskip("glfw")
 pytest.importorskip("mujoco")
 
 from mojive.app.composition import build, build_workspace  # noqa: E402
+from mojive.config import ViewerConfig  # noqa: E402
 from mojive.scene.assets import resolve  # noqa: E402
+
+# Classic dock windows and ImGui controls are the contracts exercised in this module.
+build = partial(build, config=ViewerConfig(ui="classic"))
 
 W, H = 1280, 800
 

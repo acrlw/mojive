@@ -4,9 +4,6 @@ void main()
     vec4 world = vec4(dot(i_data0, position), dot(i_data1, position), dot(i_data2, position), 1.0);
     gl_Position = mul(u_viewProj, world);
     v_world = world.xyz;
-#ifdef WIREFRAME
-    v_bary = a_texcoord1;
-#endif
     v_depth = -mul(u_view, world).z;
     v_color0 = i_data3;
     v_litMaterial = i_data5;

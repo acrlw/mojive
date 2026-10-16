@@ -92,7 +92,7 @@ struct GpuVertex {
     std::array<float, 2> uv = {0, 0};
 };
 struct WireVertex {
-    GpuVertex vertex;
+    std::array<float, 3> position;
     std::array<float, 3> bary;
 };
 struct GpuBatch {
@@ -338,6 +338,8 @@ class BgfxRenderer final : public Renderer {
     }
     bool renderShadows(GpuScene &scene, const CameraView &camera,
                        const ReflectionMaps &reflections) {
+        if (scene.style.wireframe || scene.style.debugView == 5)
+            return false;
         ShadowKey key{scene.geometryRevision, scene.lightingRevision, scene.style.shadowQuality,
                       scene.style.shadows,
                       std::ranges::any_of(
@@ -669,19 +671,22 @@ class BgfxRenderer final : public Renderer {
                 bgfx::setIndexBuffer(mesh.indices);
             }
             bgfx::setInstanceDataBuffer(scene.surfaceBuffer, batch.start, batch.count);
-            int texture = scene.style.textures ? batch.texture : -1;
-            bool cube = texture >= 0 && scene.source.textures[texture].cube;
-            bgfx::setTexture(0, mImageSampler,
-                             texture >= 0 && !cube ? scene.textures[texture] : mWhite);
-            bgfx::setTexture(1, mCubeSampler, cube ? scene.textures[texture] : mWhiteCube);
-            int image = scene.lighting.imageTexture;
-            bgfx::setTexture(2, mImageLightSampler,
-                             image >= 0 ? scene.textures[image] : mWhiteCube);
-            mReflections.bind(target.reflections, -1, mWhite);
-            mShadows.bind(scene.shadows, scene.style.shadowQuality);
-            mLighting.bind(
-                scene.lighting, scene.style, camera, scene.source.linearColors,
-                image >= 0 ? std::floor(std::log2(scene.source.textures[image].size.width)) : 0);
+            if (!wire) {
+                int texture = scene.style.textures ? batch.texture : -1;
+                bool cube = texture >= 0 && scene.source.textures[texture].cube;
+                bgfx::setTexture(0, mImageSampler,
+                                 texture >= 0 && !cube ? scene.textures[texture] : mWhite);
+                bgfx::setTexture(1, mCubeSampler, cube ? scene.textures[texture] : mWhiteCube);
+                int image = scene.lighting.imageTexture;
+                bgfx::setTexture(2, mImageLightSampler,
+                                 image >= 0 ? scene.textures[image] : mWhiteCube);
+                mReflections.bind(target.reflections, -1, mWhite);
+                mShadows.bind(scene.shadows, scene.style.shadowQuality);
+                mLighting.bind(scene.lighting, scene.style, camera, scene.source.linearColors,
+                               image >= 0
+                                   ? std::floor(std::log2(scene.source.textures[image].size.width))
+                                   : 0);
+            }
             uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS;
             if (scene.style.cullFace)
                 state |= BGFX_STATE_CULL_CW;
@@ -697,7 +702,7 @@ class BgfxRenderer final : public Renderer {
                                    BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE);
             else
                 state |= BGFX_STATE_WRITE_Z;
-            if (scene.style.debugView == 4)
+            if (scene.style.debugView == 4 && !wire)
                 state = (state & (BGFX_STATE_CULL_MASK | BGFX_STATE_MSAA)) | BGFX_STATE_WRITE_RGB |
                         BGFX_STATE_BLEND_ADD;
             bgfx::setState(state);
@@ -819,9 +824,7 @@ class BgfxRenderer final : public Renderer {
         std::vector<WireVertex> expanded(mesh.indices.size());
         for (size_t i = 0; i < expanded.size(); ++i) {
             auto vertex = mesh.indices[i];
-            expanded[i].vertex = {vertices[vertex], mesh.texcoords.empty()
-                                                        ? std::array<float, 2>{0, 0}
-                                                        : mesh.texcoords[vertex]};
+            expanded[i].position = vertices[vertex].position;
             expanded[i].bary = {0, 0, 0};
             expanded[i].bary[i % 3] = 1;
         }
@@ -1093,8 +1096,6 @@ class BgfxRenderer final : public Renderer {
             .end();
         mWireVertices.begin()
             .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord1, 3, bgfx::AttribType::Float)
             .end();
         mUiPass = std::make_unique<UiPass>();
@@ -2024,8 +2025,8 @@ class BgfxRenderer final : public Renderer {
             if (!count)
                 return;
             bool wire = !pass && (current.style.wireframe || current.style.debugView == 5);
-            bool lit = !pass && (current.lighting.enabled || wire);
-            uint16_t stride = (lit ? 32 : 20) * sizeof(float);
+            bool lit = !pass && current.lighting.enabled;
+            uint16_t stride = (wire ? 16 : lit ? 32 : 20) * sizeof(float);
             auto *buffer = mInstances.allocate(count, stride).data();
             for (size_t i = 0; i < count; ++i) {
                 auto *destination = buffer + i * stride;
@@ -2040,9 +2041,25 @@ class BgfxRenderer final : public Renderer {
                 } else {
                     std::memcpy(destination + 12 * sizeof(float), source.data() + 16,
                                 4 * sizeof(float));
-                    std::memcpy(destination + 16 * sizeof(float), source.data() + 28,
-                                (lit ? 12 : 4) * sizeof(float));
-                    if (lit) {
+                    if (wire) {
+                        if (current.style.selectionFill && current.style.selectedId != 0 &&
+                            current.source.instances[indices[i]].objectId ==
+                                current.style.selectedId) {
+                            // Keep wire instance attributes contiguous across graphics APIs.
+                            constexpr std::array<float, 3> highlight{1, .82f, .45f};
+                            for (size_t component = 0; component < highlight.size(); ++component) {
+                                float color;
+                                auto *field = destination + (12 + component) * sizeof(float);
+                                std::memcpy(&color, field, sizeof(color));
+                                color += (highlight[component] - color) * .35f;
+                                std::memcpy(field, &color, sizeof(color));
+                            }
+                        }
+                    } else {
+                        std::memcpy(destination + 16 * sizeof(float), source.data() + 28,
+                                    (lit ? 12 : 4) * sizeof(float));
+                    }
+                    if (lit && !wire) {
                         float info[4] = {
                             current.style.selectionFill && current.style.selectedId != 0 &&
                                     current.source.instances[indices[i]].objectId ==
@@ -2083,34 +2100,37 @@ class BgfxRenderer final : public Renderer {
             if (!pass && t.samples > 1 && current.style.msaa)
                 state |= BGFX_STATE_MSAA;
             if (!pass) {
-                const auto material = current.source.materials.empty()
-                                          ? Material{-1, 0, 0, 0}
-                                          : current.source.materials[materialIndex];
-                const bool textureOn = current.style.textures && material.texture >= 0;
-                const bool cube = textureOn && current.source.textures[material.texture].cube;
-                bgfx::setTexture(0, mImageSampler,
-                                 textureOn && !cube ? current.textures[material.texture] : mWhite);
-                if (lit) {
-                    bgfx::setTexture(1, mCubeSampler,
-                                     cube ? current.textures[material.texture] : mWhiteCube);
-                    int image = current.lighting.imageTexture;
-                    bool validImage = image >= 0 && size_t(image) < current.textures.size() &&
-                                      current.source.textures[image].cube;
-                    bgfx::setTexture(2, mImageLightSampler,
-                                     validImage ? current.textures[image] : mWhiteCube);
-                    mReflections.bind(t.reflections, reflectionLayer, mWhite);
-                    mShadows.bind(current.shadows, current.style.shadowQuality);
-                    mLighting.bind(
-                        current.lighting, current.style, drawCamera, current.source.linearColors,
-                        validImage
-                            ? std::floor(std::log2(current.source.textures[image].size.width))
-                            : 0,
-                        &camera);
-                } else {
-                    const float values[4] = {material.emission, material.specular,
-                                             material.shininess,
-                                             current.source.linearColors ? 1.f : 0.f};
-                    bgfx::setUniform(mMaterial, values);
+                if (!wire) {
+                    const auto material = current.source.materials.empty()
+                                              ? Material{-1, 0, 0, 0}
+                                              : current.source.materials[materialIndex];
+                    const bool textureOn = current.style.textures && material.texture >= 0;
+                    const bool cube = textureOn && current.source.textures[material.texture].cube;
+                    bgfx::setTexture(0, mImageSampler,
+                                     textureOn && !cube ? current.textures[material.texture]
+                                                        : mWhite);
+                    if (lit) {
+                        bgfx::setTexture(1, mCubeSampler,
+                                         cube ? current.textures[material.texture] : mWhiteCube);
+                        int image = current.lighting.imageTexture;
+                        bool validImage = image >= 0 && size_t(image) < current.textures.size() &&
+                                          current.source.textures[image].cube;
+                        bgfx::setTexture(2, mImageLightSampler,
+                                         validImage ? current.textures[image] : mWhiteCube);
+                        mReflections.bind(t.reflections, reflectionLayer, mWhite);
+                        mShadows.bind(current.shadows, current.style.shadowQuality);
+                        mLighting.bind(current.lighting, current.style, drawCamera,
+                                       current.source.linearColors,
+                                       validImage ? std::floor(std::log2(
+                                                        current.source.textures[image].size.width))
+                                                  : 0,
+                                       &camera);
+                    } else {
+                        const float values[4] = {material.emission, material.specular,
+                                                 material.shininess,
+                                                 current.source.linearColors ? 1.f : 0.f};
+                        bgfx::setUniform(mMaterial, values);
+                    }
                 }
                 if (transparent)
                     state |= current.style.additive
@@ -2120,7 +2140,7 @@ class BgfxRenderer final : public Renderer {
                                  : BGFX_STATE_BLEND_FUNC_SEPARATE(
                                        BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
                                        BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE);
-                if (current.style.debugView == 4)
+                if (current.style.debugView == 4 && !wire)
                     state = (state & (BGFX_STATE_CULL_MASK | BGFX_STATE_MSAA)) |
                             BGFX_STATE_WRITE_RGB | BGFX_STATE_BLEND_ADD;
             }
@@ -2273,7 +2293,8 @@ class BgfxRenderer final : public Renderer {
             stats.reflectionRendered = renderColor && reflectionDirty;
             stats.reflectionReused = !stats.reflectionRendered;
         }
-        if (request.color && !identityColor && current.style.shadows) {
+        if (request.color && !identityColor && current.style.shadows && !current.style.wireframe &&
+            current.style.debugView != 5) {
             stats.shadowRendered = shadowRendered;
             stats.shadowReused = !shadowRendered;
         }

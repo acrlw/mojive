@@ -108,6 +108,25 @@ def test_memory_capture_does_not_touch_clipboard_but_file_capture_does(app, tmp_
     assert not (tmp_path / "canceled.png").exists()
 
 
+@pytest.mark.parametrize("surface", ("scene", "viewport", "window"))
+@pytest.mark.parametrize("memory", (False, True))
+def test_async_capture_reports_the_presented_document_structure(app, tmp_path, surface, memory):
+    from mojive.control.operations import document_state
+    from mojive.control.schema import DOCUMENT, Validator
+
+    capture = app.request_capture_async(
+        None if memory else tmp_path / "capture.png", surface=surface, memory=memory
+    )
+    app.session.document_revision = 3
+    app.session.structure_generation = 5
+    app._finish_capture_and_recording(None, 0)
+
+    result = capture.result()
+    Validator(DOCUMENT).validate(result["document"])
+    assert result["document"] == document_state(app.session)
+    assert result["document"]["structure_revision"] == result["structure_generation"]
+
+
 def test_opt_out_preserves_save_without_copy(app, tmp_path):
     app.recording_config = RecordingConfig(copy_to_clipboard=False)
     app.request_capture(tmp_path / "capture.png")

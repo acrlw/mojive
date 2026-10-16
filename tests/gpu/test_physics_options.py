@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from imgui_bundle import imgui
 
-from mojive import build
+from mojive import ViewerConfig, build
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
 from mojive.tools.ui_runtime import (
@@ -72,6 +72,7 @@ def test_menu_and_live_physics_controls(tmp_path, monkeypatch, scale, language):
     </mujoco>""")
     with build(
         model,
+        config=ViewerConfig(ui="classic"),
         paused=True,
         vsync=False,
         width=round(1440 * scale),

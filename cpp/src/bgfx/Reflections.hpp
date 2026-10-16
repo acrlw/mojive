@@ -37,7 +37,8 @@ struct ReflectionMaps {
         groups.clear();
         excluded.clear();
         instanceLayers.assign(instances.size(), 0);
-        if (!style.reflections || source.planarKinds.empty())
+        if (!style.reflections || style.wireframe || style.debugView == 5 ||
+            source.planarKinds.empty())
             return;
         std::vector<uint32_t> candidates;
         for (uint32_t i = 0; i < instances.size(); ++i)

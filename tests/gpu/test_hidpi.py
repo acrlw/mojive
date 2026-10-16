@@ -10,6 +10,7 @@ pytest.importorskip("glfw")
 
 from mojive import commands as cmd  # noqa: E402
 from mojive.app.composition import build, build_scene  # noqa: E402
+from mojive.config import ViewerConfig  # noqa: E402
 from mojive.scene import Scene  # noqa: E402
 from mojive.scene.assets import resolve  # noqa: E402
 from mojive.ui import viewcube  # noqa: E402
@@ -53,7 +54,7 @@ def test_relative_fonts_follow_live_scale_changes_once(initial_scale, tmp_path, 
     monkeypatch.setattr(imgui, "text", observe_text)
     with build_scene(
         scene,
-        config=ViewerConfig(layout=LayoutConfig(persistence=False)),
+        config=ViewerConfig(ui="classic", layout=LayoutConfig(persistence=False)),
         vsync=False,
         show_window=False,
         width=1600,
@@ -93,7 +94,9 @@ def test_view_gizmo_and_font_share_the_explicit_ui_scale(monkeypatch):
         assert imgui.get_style().font_scale_dpi == pytest.approx(1.0)
         radii = {ball.radius for ball in viewer.app.view_cube.balls}
         assert len(radii) == 1
-        assert next(iter(radii)) == pytest.approx(viewcube.BALL_PT * scale)
+        assert next(iter(radii)) == pytest.approx(
+            viewcube.BALL_PT * viewer.app.view_cube.reference_scale
+        )
     finally:
         viewer.release()
 
@@ -110,6 +113,7 @@ def test_hidpi_capsule_hosts_are_clipped_and_modal_width_tracks_layout_scale(mon
         width=1180,
         height=1400,
         show_window=False,
+        config=ViewerConfig(ui="classic"),
     )
     io = imgui.get_io()
     try:
@@ -179,6 +183,7 @@ def test_hidpi_viewport_overlays_keep_a_hard_clip_after_splitter_collapse(monkey
         width=1180,
         height=1000,
         show_window=False,
+        config=ViewerConfig(ui="classic"),
     )
     io = imgui.get_io()
     clip_rects = []

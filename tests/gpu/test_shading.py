@@ -594,23 +594,40 @@ def test_overdraw_clears_to_zero_and_counts_layers(rig):
     assert round(int(Rig.center(img)[0]) / 16) == 2
 
 
-def test_wireframe_is_another_program_and_still_shades(rig):
+@pytest.mark.parametrize("entry", ("debug", "flag"))
+def test_wireframe_draws_only_unlit_edges_and_keeps_solid_picking(rig, entry):
 
     if DebugView.WIREFRAME not in rig.backend.caps.debug_views:
         pytest.skip("wireframe debug view unsupported by this backend")
-    quad = (np.array([0.7, 0.7, 0.7, 1.0], np.float32), (0.0, 0.0, 0.5), 2.0, 0.0)
+    rgba = np.array([0.7, 0.2, 0.1, 1.0], np.float32)
+    quad = (rgba, (0.0, 0.0, 0.5), 2.0, 0.0)
     inside = (HEIGHT // 4, WIDTH // 2)
+    flags = {
+        flag: rig.backend.get_flag(flag) for flag in (RenderFlag.SHADOW, RenderFlag.REFLECTION)
+    }
 
     shaded = rig.draw([quad], ambient=[0.35] * 3)
-    rig.backend.set_debug_view(DebugView.WIREFRAME)
+    if entry == "debug":
+        rig.backend.set_debug_view(DebugView.WIREFRAME)
+    else:
+        assert rig.backend.set_flag(RenderFlag.WIREFRAME, True)
     wire = rig.draw([quad], ambient=[0.35] * 3)
+    dark = rig.draw([quad], ambient=[0] * 3)
+    assert np.array_equal(wire, dark), "Lighting must not shade wireframe edges or faces"
+    want = color.to_u8(color.gamma_encode(rgba[:3])).astype(np.int32)
+    assert np.abs(Rig.center(wire)[:3] - want).max() <= 1
+    assert rig.backend.pick(WIDTH // 2, HEIGHT // 4) == 1
+    ids = rig.backend.target.read_ids()
+    assert ids[HEIGHT // 4, WIDTH // 2] == 1
+    selected = rig.draw([quad], ambient=[0.35] * 3, selected=1)
+    assert not np.array_equal(wire, selected), "Selection must highlight the real mesh edges"
+    assert np.array_equal(selected[inside], wire[inside])
     rig.backend.set_debug_view(DebugView.SHADED)
+    assert rig.backend.set_flag(RenderFlag.WIREFRAME, False)
     back = rig.draw([quad], ambient=[0.35] * 3)
 
     assert np.array_equal(Rig.center(shaded), Rig.center(back))
-    assert np.abs(wire[inside].astype(int) - shaded[inside].astype(int)).max() <= 2
-
-    face = int(Rig.center(shaded)[0])
-    line = int(Rig.center(wire)[0])
-    assert face > 20
-    assert line < face * 0.75
+    assert {flag: rig.backend.get_flag(flag) for flag in flags} == flags
+    assert np.max(shaded[inside][:3]) > 20
+    assert np.array_equal(wire[inside], Rig.corner(wire)), "The face must reveal the background"
+    assert np.max(Rig.center(wire)[:3]) > np.max(Rig.corner(wire)[:3]) + 20

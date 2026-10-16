@@ -241,7 +241,7 @@ class RenderStats:
     cpu_ms: dict[str, float] = field(default_factory=dict)
     gpu_ms: dict[str, float] = field(default_factory=dict)
     frame_cpu_ms: float = 0.0
-    notes: dict[str, str] = field(default_factory=dict)
+    notes: dict[str, str | int] = field(default_factory=dict)
 
 
 class ReadbackTarget(Protocol):

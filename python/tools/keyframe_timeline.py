@@ -46,19 +46,24 @@ def show_timeline(viewer) -> None:
     for _ in range(4):
         viewer.sync()
     _activate_panel(viewer, "Keyframes")
-    window = imgui.internal.find_window_by_name("Keyframes")
+    name = viewer.panels.get("Keyframes").name
+    window = imgui.internal.find_window_by_name(name)
     if window.dock_node is not None:
         imgui.internal.dock_context_process_undock_window(imgui.get_current_context(), window, True)
-    begin = viewer.panels._begin_panel_window
+    workspace = getattr(viewer.app, "workspace", None)
+    begin = workspace.panel if workspace is not None else viewer.panels._begin_panel_window
 
     def place(panel, *args, **kwargs):
-        if panel.name == "Keyframes":
+        if (panel if isinstance(panel, str) else panel.name) == name:
             size = imgui.get_main_viewport().work_size
             imgui.set_next_window_pos((20, 160))
             imgui.set_next_window_size((size.x - 40, min(650, size.y - 185)))
         return begin(panel, *args, **kwargs)
 
-    viewer.panels._begin_panel_window = place
+    if workspace is not None:
+        workspace.panel = place
+    else:
+        viewer.panels._begin_panel_window = place
     imgui.internal.focus_window(window)
     for _ in range(4):
         viewer.sync()
@@ -70,6 +75,17 @@ def timeline_point(viewer, time: float, row: str = "ruler") -> tuple[float, floa
     scale = viewer.window.style_scale
     left = lo[0] + timeline_channel_width(hi[0] - lo[0], scale)
     panel = viewer.panels.get("Keyframes")
+    workspace = getattr(viewer.app, "workspace", None)
+    if workspace is not None:
+        layout = workspace.timeline_panel.last_layout
+        left, right = layout.time_bounds
+        x = timeline_time_to_x(time, panel.editor.view_start, panel.editor.view_end, left, right)
+        y = (
+            layout.lo[1] + layout.ruler_height / 2
+            if row == "ruler"
+            else layout.lane_y({"model": 0, "take": 1, "snapshots": 2}[row])
+        )
+        return round(x), round(y)
     x = timeline_time_to_x(
         time,
         panel.editor.view_start,

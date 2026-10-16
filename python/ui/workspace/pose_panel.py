@@ -72,8 +72,22 @@ class NativePoseEditor:
         self._failed_gestures = set()
         self._active_joint = None
 
-    def draw(self, ctx, x, y, w, *, joints, select_joint, show_names=True, joint_color=None):
+    def draw(
+        self,
+        ctx,
+        x,
+        y,
+        w,
+        *,
+        joints,
+        select_joint,
+        initial_qpos=None,
+        show_names=True,
+        joint_color=None,
+    ):
         u, s = self.workspace.ui, self.workspace.s
+        if initial_qpos is None:
+            initial_qpos = getattr(ctx.session.source, "initial_qpos", ())
         generation = (ctx.session.document_id, ctx.session.structure_generation)
         if self._generation != generation:
             self._generation = generation
@@ -178,7 +192,7 @@ class NativePoseEditor:
                         "joint", (bx, y, bw, field_height), "qpos not produced this frame", MUTED
                     )
                 elif joint.type in ("hinge", "slide"):
-                    self._scalar(ctx, joint, node, select_joint, bx, y, bw, enabled)
+                    self._scalar(ctx, joint, node, select_joint, bx, y, bw, enabled, initial_qpos)
                 else:
                     self._pose(
                         ctx, joint, node, select_joint, bx, y, bw, enabled, vector_layout, gap
@@ -217,7 +231,7 @@ class NativePoseEditor:
             select_joint(ctx, joint, node, focused=focused)
         copyable_name_item(ctx, joint.name, w)
 
-    def _scalar(self, ctx, joint, node, select_joint, x, y, w, enabled):
+    def _scalar(self, ctx, joint, node, select_joint, x, y, w, enabled, initial_qpos):
         u = self.workspace.ui
         angular = joint.type == "hinge"
         lo, hi = joint.range if joint.limited else (0, 0)
@@ -231,7 +245,9 @@ class NativePoseEditor:
             w,
             float(ctx.session.frame.qpos[joint.qpos_adr]),
             (lo, hi) if joint.limited else None,
-            initial=None,
+            initial=float(initial_qpos[joint.qpos_adr])
+            if len(initial_qpos) > joint.qpos_adr
+            else float(ctx.session.frame.qpos[joint.qpos_adr]),
             fmt="%.1f" if angular else "%.3f",
             show_reset=False,
             unit="rad" if angular else "m",

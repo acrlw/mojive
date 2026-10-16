@@ -129,7 +129,7 @@ def test_remapped_joint_slider_reset_uses_only_the_configured_button(viewer):
     assert viewer.session.submit(cmd.SetQpos(address, initial + 0.3))
     viewer.sync()
     viewer.configure_pointer_binding("value.reset", ("middle",))
-    x, y = _item_center(viewer, "slider_float", f"##joint-qpos-{address}")
+    x, y = _item_center(viewer, "slider_float", f"##pose-joint-{joint.joint_id}")
     io = imgui.get_io()
     io.add_mouse_pos_event(x, y)
     viewer.sync()
@@ -150,7 +150,7 @@ def test_remapped_panel_focus_keeps_the_same_selection(viewer):
         viewer.sync()
     _activate_panel(viewer, "Joints")
     joint = viewer.session.joints[0]
-    label = f"##joint-select-{joint.joint_id}"
+    label = f"pose-joint-{joint.joint_id}"
     x, y = _item_center(viewer, "invisible_button", label)
     viewer.configure_pointer_binding("panel.focus", ("middle",))
     io = imgui.get_io()

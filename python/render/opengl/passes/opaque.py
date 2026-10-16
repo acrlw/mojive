@@ -45,7 +45,6 @@ HIGHLIGHT_MIX = 0.35
 HIGHLIGHT_EMISSION = 0.16
 
 
-WIRE_COLOR = (0.10, 0.10, 0.12)
 WIRE_WIDTH = 1.2
 
 TEX_ALBEDO = 0
@@ -63,7 +62,8 @@ _MASK_OFF = (False, False, False, False)
 
 def draw_buckets(ctx: PassContext, buckets) -> None:
     scene, store = ctx.scene, ctx.instances
-    textured = ctx.flag(RenderFlag.TEXTURE)
+    wireframe = ctx.debug_view is DebugView.WIREFRAME or ctx.flag(RenderFlag.WIREFRAME, False)
+    textured = ctx.flag(RenderFlag.TEXTURE) and not wireframe
     white = ctx.textures.white
     white_cube = ctx.textures.white_cube
     for b in buckets:
@@ -71,8 +71,9 @@ def draw_buckets(ctx: PassContext, buckets) -> None:
         mat = scene.materials[key[1]] if key[1] < len(scene.materials) else None
         tex = ctx.textures.get(mat.texture) if (textured and mat is not None) else None
 
-        (tex if isinstance(tex, moderngl.Texture) else white).use(TEX_ALBEDO)
-        (tex if isinstance(tex, moderngl.TextureCube) else white_cube).use(TEX_CUBE_ALBEDO)
+        if not wireframe:
+            (tex if isinstance(tex, moderngl.Texture) else white).use(TEX_ALBEDO)
+            (tex if isinstance(tex, moderngl.TextureCube) else white_cube).use(TEX_CUBE_ALBEDO)
         drawn = store.draw(b)
         if drawn:
             ctx.instance_count += drawn
@@ -116,16 +117,20 @@ class OpaquePass(BasePass):
         return view is DebugView.WIREFRAME or bool(flag)
 
     def _spec(self, view: DebugView, wireframe: bool, use_shadow: bool) -> ProgramSpec:
-        defines: dict[str, object] = {"DEBUG_VIEW": DEBUG_DEFINE.get(view, 0)}
         if wireframe:
-            defines["WIREFRAME"] = 1
+            return ProgramSpec(
+                name="wireframe",
+                vertex="wireframe.vert",
+                fragment="wireframe.frag",
+                geometry="wireframe.geom",
+            )
+        defines: dict[str, object] = {"DEBUG_VIEW": DEBUG_DEFINE.get(view, 0)}
         if use_shadow:
             defines["USE_SHADOW"] = 1
         return ProgramSpec(
             name="scene",
             vertex="scene.vert",
             fragment="scene_shadow.frag" if use_shadow else "scene.frag",
-            geometry="wireframe.geom" if wireframe else None,
             defines=defines,
         )
 
@@ -200,6 +205,12 @@ class OpaquePass(BasePass):
         self._set_direct(prog, "u_camera_pos", tuple(float(x) for x in eye))
         self._set_direct(prog, "u_camera_dir", tuple(float(v) for v in cam.forward()))
         u.set("u_selected_id", int(ctx.selected_id))
+        u.set("u_highlight_color", HIGHLIGHT_COLOR)
+        u.set("u_highlight", (HIGHLIGHT_MIX, HIGHLIGHT_EMISSION))
+        self._set_direct(prog, "u_clip_plane", self.clip_plane(ctx))
+        if wireframe:
+            u.set("u_wire_width", WIRE_WIDTH)
+            return
         u.set("u_texture", TEX_ALBEDO)
         u.set("u_cube_texture", TEX_CUBE_ALBEDO)
         u.set(
@@ -209,15 +220,8 @@ class OpaquePass(BasePass):
         u.set("u_exposure", color.EXPOSURE)
         u.set("u_tonemap", 1 if ctx.flag(RenderFlag.TONEMAP) else 0)
         u.set("u_depth_range", (float(cam.near), float(cam.far)))
-        u.set("u_highlight_color", HIGHLIGHT_COLOR)
-        u.set("u_highlight", (HIGHLIGHT_MIX, HIGHLIGHT_EMISSION))
-        self._set_direct(prog, "u_clip_plane", self.clip_plane(ctx))
         self._set_direct(prog, "u_linear_out", 1 if self.linear_out else 0)
         self.reflection_uniforms(ctx, prog)
-        if wireframe:
-            u.set("u_wire_color", WIRE_COLOR)
-            u.set("u_wire_width", WIRE_WIDTH)
-
         self._light_uniforms(ctx, prog, u, ctx.scene.lights)
         self._atmosphere_uniforms(ctx, u, ctx.scene.lights)
         if use_shadow:
@@ -352,7 +356,9 @@ class OpaquePass(BasePass):
 
     def execute(self, ctx: PassContext) -> None:
         target, gl = ctx.target, ctx.ctx
-        overdraw = ctx.debug_view is DebugView.OVERDRAW
+        overdraw = ctx.debug_view is DebugView.OVERDRAW and not self._wireframe_on(
+            ctx.debug_view, ctx.flag(RenderFlag.WIREFRAME, False)
+        )
 
         target.use_main()
         target.clear_main(OVERDRAW_CLEAR if overdraw else ctx.background)

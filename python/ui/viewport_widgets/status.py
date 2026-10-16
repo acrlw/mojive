@@ -448,6 +448,21 @@ def draw_status(
         cursor, recording_pause_rect, recording_stop_rect = _draw_recording_status(
             draw, cursor, context_cy, theme, scale, recording_phase, recording_layout
         )
+        right_edge = x + width
+        if recording_pause_rect is not None:
+            recording_pause_rect = (
+                recording_pause_rect[0],
+                recording_pause_rect[1],
+                min(recording_pause_rect[2], right_edge),
+                recording_pause_rect[3],
+            )
+        if recording_stop_rect is not None:
+            recording_stop_rect = (
+                recording_stop_rect[0],
+                recording_stop_rect[1],
+                min(recording_stop_rect[2], right_edge),
+                recording_stop_rect[3],
+            )
         record("recording", (recording_x, context_cy - line / 2, cursor - recording_x, line))
 
     metric_text = ""

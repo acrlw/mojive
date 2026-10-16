@@ -83,7 +83,7 @@ def test_navigation_settings_edit_save_restore_and_override(
             assert getattr(viewer.app.camera.navigation, name) == pytest.approx(value)
         for name, label in (("focus_easing", "Smootherstep"), ("zoom_mode", "Linear")):
             _click(viewer, _item_center(viewer, "begin_combo", f"##camera_{name}"))
-            _click(viewer, _item_center(viewer, "selectable", label))
+            _click(viewer, _item_center(viewer, "selectable", viewer.app.localizer.text(label)))
         expected = viewer.app.camera.navigation
         assert expected.focus_easing == "smootherstep" and expected.zoom_mode == "linear"
         assert (
@@ -101,7 +101,8 @@ def test_navigation_settings_edit_save_restore_and_override(
         viewer.panels.open_panel("Camera")
         for _ in range(3):
             viewer.sync()
-        imgui.internal.focus_window(imgui.internal.find_window_by_name("Camera"))
+        camera_window = viewer.panels.get("Camera").name
+        imgui.internal.focus_window(imgui.internal.find_window_by_name(camera_window))
         viewer.sync()
         low, high = _item_rect(viewer, "slider_float", "##camera-distance")
         # Clicking the existing grab preserves its offset; acquire away from it first.
@@ -113,7 +114,7 @@ def test_navigation_settings_edit_save_restore_and_override(
         _park_cursor(viewer)
         for _ in range(3):
             viewer.sync()
-        _save_window_crop(viewer, "Camera", output / "camera-distance.png")
+        _save_window_crop(viewer, camera_window, output / "camera-distance.png")
         show_settings(viewer, "Camera")
         _enter_number(viewer, "focus_duration", 0)
         node = viewer.session.node_by_object_id(box.object_id)

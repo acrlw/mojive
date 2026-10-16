@@ -188,7 +188,7 @@ def test_renderer_rejects_data_from_another_model():
         renderer.update_scene(mujoco.MjData(other))
 
 
-def test_renderer_wireframe_geometry_shader():
+def test_renderer_wireframe_is_pure_edges():
     model = _model()
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)

@@ -284,7 +284,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
             blur = imgui.is_item_deactivated() or (self._rename_active and not active)
             self._rename_active = active
             cancel = active and imgui.is_key_pressed(imgui.Key.escape, False)
-            imgui.pop_style_color(3)
+            imgui.pop_style_color(2)
             imgui.pop_style_var()
             if entered or blur or cancel:
                 self._finish_name_edit(ctx, cancel=cancel)

@@ -135,7 +135,7 @@ def test_contact_settings_persist_and_override(
         _click(viewer, _item_center(viewer, "invisible_button", "##contact_enabled"))
         assert viewer.backend.get_flag(RenderFlag.CONTACTPOINT)
         _click(viewer, _item_center(viewer, "begin_combo", "##contact_shape"))
-        _click(viewer, _item_center(viewer, "selectable", "Sphere"))
+        _click(viewer, _item_center(viewer, "selectable", viewer.app.localizer.text("Sphere")))
         assert viewer.contact_style.shape == "sphere"
         low, high = _item_rect(viewer, "slider_float", "##contact_scale")
         _click(viewer, ((low[0] + high[0]) / 2, (low[1] + high[1]) / 2))
@@ -143,12 +143,10 @@ def test_contact_settings_persist_and_override(
         _click(viewer, _item_center(viewer, "invisible_button", "##contact_model_color"))
         assert viewer.contact_style.use_model_color
         _click(viewer, _item_center(viewer, "invisible_button", "##contact_model_color"))
+        _click(viewer, _item_center(viewer, "color_button", "##contact_color-swatch"))
+        _click(viewer, _item_center(viewer, "button", "##contact_color-format-1"))
         for channel, value in enumerate((32, 204, 242)):
-            low, high = _item_rect(viewer, "color_edit4", "##contact_color")
-            fields_width = (
-                high[0] - low[0] - imgui.get_frame_height() - imgui.get_style().item_inner_spacing.x
-            )
-            point = (low[0] + fields_width * (channel + 0.5) / 4, (low[1] + high[1]) / 2)
+            point = _item_center(viewer, "drag_float", "##contact_color" + "RGB"[channel])
             _click(viewer, point)
             _click(viewer, point)
             io = imgui.get_io()
@@ -165,6 +163,7 @@ def test_contact_settings_persist_and_override(
             io.add_key_event(imgui.Key.enter, False)
             viewer.sync()
             assert viewer.contact_style.color[channel] == pytest.approx(value / 255)
+        _click(viewer, _item_center(viewer, "button", "##contact_color-done"))
         expected = viewer.contact_style
         assert ContactStyle(**json.loads(settings.read_text())["contact_style"]) == expected
         _park_cursor(viewer)

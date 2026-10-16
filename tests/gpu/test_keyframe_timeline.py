@@ -1,5 +1,7 @@
 """Ruler and loop gestures restore real take poses and leave camera navigation alone."""
 
+from functools import partial
+
 import numpy as np
 import pytest
 from imgui_bundle import imgui
@@ -21,6 +23,10 @@ from mojive.tools.ui_runtime import _click, _item_center, _item_rect, _right_cli
 from mojive.ui.panels.keyframes import nearest_take_frame
 
 pytestmark = pytest.mark.gpu
+
+# This module asserts the legacy docked timeline contract. Native timeline
+# behavior is covered by the dedicated native workspace suites.
+build = partial(build, config=ViewerConfig(ui="classic"))
 
 
 def test_load_only_keyframes_accept_double_click_and_load_button(tmp_path, monkeypatch):
@@ -105,7 +111,7 @@ def test_timeline_recovers_from_qacc_at_high_ui_scale(tmp_path, monkeypatch, lan
     monkeypatch.setenv("MOJIVE_UI_SCALE", "2.5")
     with build_workspace(
         resolve("joint_gizmo"),
-        config=ViewerConfig(threaded_physics=False),
+        config=ViewerConfig(ui="native", threaded_physics=False),
         paused=True,
         show_window=False,
         vsync=False,
@@ -186,7 +192,9 @@ def viewer(tmp_path, monkeypatch, request):
     with builder(
         resolve("joint_types"),
         paused=True,
-        config=ViewerConfig(threaded_physics=False),
+        config=ViewerConfig(
+            ui="native" if builder is build_workspace else "classic", threaded_physics=False
+        ),
         vsync=False,
         width=1600,
         height=1000,
@@ -562,7 +570,7 @@ def test_selected_range_navigation_and_repeat_button_remain_independent(
     monkeypatch.setattr(keyframes, "_command_button", observe)
     with build(
         resolve("joint_types"),
-        config=ViewerConfig(threaded_physics=False),
+        config=ViewerConfig(ui="classic", threaded_physics=False),
         paused=True,
         show_window=False,
         vsync=False,
@@ -930,8 +938,7 @@ def test_model_switch_fits_new_model_keys_in_the_selection_frame(
         viewer.sync()
         assert panel.editor.view_end < 1000
         _click(viewer, _item_center(viewer, "combo", "##keyframe-model"))
-        _key(viewer, imgui.Key.down_arrow)
-        _key(viewer, imgui.Key.enter)
+        _click(viewer, _item_center(viewer, "selectable", "late"))
         assert panel.editor.model_id == models[1].model_id
         assert panel.editor.view_start <= 1000 <= panel.editor.view_end
         assert all(key.model_id == models[1].model_id for key in panel.editor.keyframe_cache)

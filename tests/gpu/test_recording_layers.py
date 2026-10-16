@@ -23,6 +23,7 @@ def test_layers_acceptance_scrolls_controls_and_records_visible_changes(
     monkeypatch.setenv("MOJIVE_LANGUAGE", language)
     monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
     config = ViewerConfig(
+        ui="classic",
         panels={"layers": PanelConfig(open=True), "inspector": PanelConfig(open=False)},
         recording=RecordingConfig(copy_to_clipboard=False),
     )

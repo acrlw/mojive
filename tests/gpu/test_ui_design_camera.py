@@ -74,7 +74,7 @@ def test_camera_preview_toggle_presents_peer_pixels_and_shared_pin_lock(runtime,
     px, py, end_x, end_y = app.camera_preview.bounds
     assert (x - px, end_x - right, end_y - bottom) == pytest.approx((6 * study.s,) * 3, abs=0.001)
     assert y - py == pytest.approx(30 * study.s)
-    assert (right - x) / (bottom - y) == pytest.approx(16 / 9)
+    assert (right - x) / (bottom - y) == pytest.approx(peer.shape[1] / peer.shape[0])
     rendered = Image.fromarray(peer).resize(
         (round(right) - round(x), round(bottom) - round(y)), Image.Resampling.BILINEAR
     )

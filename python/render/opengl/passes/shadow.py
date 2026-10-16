@@ -10,7 +10,7 @@ import numpy as np
 from .... import math3d as M
 from ....log import get_logger
 from ....types import Light, LightType, ShadingModel
-from ...backend import RenderFlag, ShadowQuality
+from ...backend import DebugView, RenderFlag, ShadowQuality
 from ...dependencies import lifecycle_key, lights_key, shadow_camera_key
 from ...scene import RenderScene
 from .. import gl_native as G
@@ -179,6 +179,8 @@ class ShadowPass(BasePass):
         self._pending_key = None
         s = ctx.shadow
         self._reset(s)
+        if ctx.debug_view is DebugView.WIREFRAME or ctx.flag(RenderFlag.WIREFRAME, False):
+            return False
         self._ensure_atlas_fallback(ctx)
         self._ensure_local_fallback(ctx)
         s.atlas = self._atlas_fallback

@@ -592,12 +592,18 @@ def _settle(viewer, frames: int = 7) -> None:
 
 def _capture_gesture_ownership(output: Path) -> None:
     """Exercise held native input through the same overlay boundary for both tools."""
-    from mojive.config import ViewportOverlayConfig
+    from mojive.config import ViewerConfig, ViewportOverlayConfig
     from mojive.interaction.input import add_physical_mouse_button_event
     from mojive.ui.gestures import Claim
 
     with build(
-        resolve("gizmo"), paused=True, vsync=False, width=1280, height=900, show_window=False
+        resolve("gizmo"),
+        paused=True,
+        vsync=False,
+        width=1280,
+        height=900,
+        show_window=False,
+        config=ViewerConfig(ui="classic"),
     ) as viewer:
         viewer.configure_viewport_overlays(ViewportOverlayConfig(movable=True))
         _settle(viewer)
@@ -737,22 +743,134 @@ def _item_rect(
     *,
     reveal: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
-    workspace = getattr(viewer.app, "workspace", None)
-    if workspace is not None and function_name in ("button", "combo"):
+    workspace = getattr(getattr(viewer, "app", None), "workspace", None)
+    if workspace is not None and not reveal:
+        viewer.sync()
+        key = (
+            "section-" + label.split("##", 1)[0] if function_name == "collapsing_header" else label
+        )
+        if function_name in ("slider_float", "slider_int"):
+            key += "-track"
+        rect = workspace.ui.hits.get(key)
+        if rect is None and function_name == "text":
+            rect = next(
+                (
+                    bounds
+                    for key, bounds in workspace.ui.hits.items()
+                    if key.endswith("-label-" + label)
+                ),
+                None,
+            )
+        if rect is not None:
+            x, y, w, h = rect
+            return (x, y), (x + w, y + h)
+        if function_name == "invisible_button":
+            legacy = {
+                "##take-first": "timeline-first",
+                "##take-previous": "timeline-previous",
+                "##take-play-pause": "timeline-play-pause",
+                "##take-next": "timeline-next",
+                "##take-last": "timeline-last",
+                "##take-record": "timeline-record",
+                "##take-video": "timeline-video",
+                "##capture-snapshot": "timeline-snapshot",
+                "##timeline-options": "timeline-settings",
+                "##key-view": "timeline-fit",
+                "##timeline-loop": "timeline-loop",
+                "##add-model-keyframe": "timeline-add-key",
+            }
+            rect = workspace.ui.hits.get(legacy.get(label, ""))
+            if rect is None and label.endswith("-unit"):
+                rect = workspace.ui.hits.get(label)
+            if rect is None and label.startswith("##remove-take-"):
+                rect = workspace.ui.hits.get(
+                    "timeline-remove-take-" + label.removeprefix("##remove-take-")
+                )
+            if rect is not None:
+                x, y, w, h = rect
+                return (x, y), (x + w, y + h)
+        if function_name == "button":
+            rect = workspace.ui.hits.get(
+                {
+                    "Load": "timeline-detail-load",
+                    "Delete": "timeline-detail-delete",
+                    "Apply": "timeline-detail-apply",
+                }.get(label, "")
+            )
+            if rect is not None:
+                x, y, w, h = rect
+                return (x, y), (x + w, y + h)
+        if function_name in ("combo", "begin_combo") and label == "##keyframe-model":
+            rect = workspace.ui.hits.get("timeline-model")
+            if rect is not None:
+                x, y, w, h = rect
+                return (x, y), (x + w, y + h)
+        if function_name in ("selectable", "menu_item"):
+            choice_caption = label.split("##", 1)[0]
+            if choice_caption == "New Take" or label.endswith("##new-take"):
+                rect = workspace.ui.hits.get("menu-timeline-new-take")
+            else:
+                rect = None
+            rect = rect or next(
+                (
+                    bounds
+                    for key, bounds in workspace.ui.hits.items()
+                    if key.endswith("-" + label)
+                    or key.endswith("-" + choice_caption)
+                    or key == label
+                ),
+                None,
+            )
+            if rect is None:
+                rect = next(
+                    (
+                        row["rect"]
+                        for menu in workspace.menus.observed.values()
+                        for row in menu.get("rows", ())
+                        if row.get("visible")
+                        and row.get("label")
+                        in (
+                            label,
+                            choice_caption,
+                            "New Take" if label.endswith("##new-take") else "",
+                        )
+                    ),
+                    None,
+                )
+            if rect is not None:
+                x, y, w, h = rect
+                return (x, y), (x + w, y + h)
+    native_method = {
+        "button": "button",
+        "combo": "combo",
+        "begin_combo": "begin_combo",
+        "drag_float": "input",
+        "drag_int": "input",
+        "input_float": "input",
+        "input_int": "input",
+        "slider_float": "rail",
+        "slider_int": "rail",
+        "checkbox": "checkbox",
+    }.get(function_name)
+    if workspace is not None and native_method is not None:
         ui = workspace.ui
-        draw_control = getattr(ui, function_name)
+        draw_control = getattr(ui, native_method)
         measured = []
         scroll_to_control = reveal
 
         def native_control(key, *args, **kwargs):
             result = draw_control(key, *args, **kwargs)
             if key in (label, "property-button/" + label) and key in ui.hits:
-                measured.append(ui.hits[key])
+                measured.append(
+                    ui.hits.get(key + "-track", ui.hits[key])
+                    if native_method == "rail"
+                    else ui.hits[key]
+                )
                 if scroll_to_control:
                     imgui.set_scroll_here_y(0.5)
             return result
 
-        setattr(ui, function_name, native_control)
+        setattr(ui, native_method, native_control)
         try:
             viewer.sync()
             if reveal and measured:
@@ -761,7 +879,7 @@ def _item_rect(
                 viewer.sync()
                 viewer.sync()
         finally:
-            setattr(ui, function_name, draw_control)
+            setattr(ui, native_method, draw_control)
         if measured:
             x, y, w, h = measured[-1]
             return (x, y), (x + w, y + h)
@@ -777,7 +895,15 @@ def _item_rect(
             return (x, y), (x + w, y + h)
     if workspace is not None and function_name in ("begin_menu", "menu_item"):
         viewer.sync()
-        rect = workspace.ui.hits.get("menu-" + label)
+        rect = next(
+            (
+                bounds
+                for key, bounds in workspace.ui.hits.items()
+                if key.startswith("menu-")
+                and label in (key[5:], viewer.app.localizer.text(key[5:]))
+            ),
+            None,
+        )
         if rect is None:
             rect = next(
                 (
@@ -798,7 +924,15 @@ def _item_rect(
 
     def spy(item_label, *args, **kwargs):
         result = original(item_label, *args, **kwargs)
-        if item_label == label:
+        caption = label.split("##", 1)[0]
+        actual_caption = item_label.split("##", 1)[0].split("###", 1)[0]
+        normalized_label = label.lstrip("#")
+        normalized_item = item_label.lstrip("#")
+        if (
+            item_label == label
+            or normalized_item == normalized_label
+            or (caption and actual_caption == caption)
+        ):
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             found.append(((lo.x, lo.y), (hi.x, hi.y)))
             if scroll_to_item:
@@ -923,6 +1057,12 @@ def _capture_viewport_layout(viewer, output: Path) -> None:
 
 
 def _activate_panel(viewer, name: str) -> None:
+    workspace = getattr(viewer.app, "workspace", None)
+    if workspace is not None:
+        panel = viewer.panels.get(name)
+        workspace.activate(panel.name)
+        _settle(viewer, 3)
+        return
     panel = imgui.internal.find_window_by_name(name)
     if panel is None or panel.dock_node is None or panel.dock_node.tab_bar is None:
         return

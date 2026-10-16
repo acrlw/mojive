@@ -13,7 +13,6 @@ from mojive.ui.viewcube import (
     ORIGIN_GAP_PT,
     ORIGIN_RADIUS_PT,
     ViewCube,
-    widget_center,
 )
 from mojive.ui.window import WindowConfig
 
@@ -114,7 +113,7 @@ def origin_viewer(backend_name, tmp_path, monkeypatch, request):
             viewer.sync()
         viewer.app.camera.look_from(-135.0, 25.0, viewer.app.camera_out, animate=False)
         viewer.sync()
-        center = widget_center(viewer.app._viewport_rect, viewer.window.style_scale)
+        center = viewer.app.view_cube._center
         yield viewer, imgui.get_io(), center
 
 

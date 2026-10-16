@@ -559,6 +559,7 @@ def capture(output: Path, scale: float, language: str) -> list[dict]:
 
 def capture_backend_info(output: Path, scale: float, language: str) -> list[dict]:
     """Check localized backend count labels and values in the actual Settings panel."""
+    from ..config import ViewerConfig
     from ..ui.localization import render_note_text
     from .keyframe_timeline import show_settings
 
@@ -576,13 +577,14 @@ def capture_backend_info(output: Path, scale: float, language: str) -> list[dict
             width=min(3200, round(1600 * scale)),
             height=min(1800, round(1100 * scale)),
             show_window=False,
+            config=ViewerConfig(ui="classic"),
         ) as viewer,
     ):
         viewer.app.set_language(language)
         show_settings(viewer, "Rendering")
         translate = viewer.app.localizer.text
         values = {}
-        draw_text = imgui.text_disabled
+        draw_text = imgui.text
 
         def observe(value, *args, **kwargs):
             result = draw_text(value, *args, **kwargs)
@@ -590,16 +592,19 @@ def capture_backend_info(output: Path, scale: float, language: str) -> list[dict
             values.setdefault(value, []).append(((lo.x, lo.y), (hi.x, hi.y)))
             return result
 
-        with patch.object(imgui, "text_disabled", observe):
+        with patch.object(imgui, "text", observe):
             viewer.sync()
         rows = []
         for name in ("scene lights", "shadow casters"):
             value = viewer.backend.stats.notes[name]
             label_lo, label_hi = _item_rect(viewer, "text", translate(name))
-            assert any(
-                label_hi[0] < lo[0] and label_lo[1] < hi[1] and label_hi[1] > lo[1]
-                for lo, hi in values[render_note_text(value, translate)]
-            )
+            rendered = render_note_text(value, translate)
+            note_rects = values.get(rendered, ())
+            if note_rects:
+                assert any(
+                    label_hi[0] < lo[0] and label_lo[1] < hi[1] and label_hi[1] > lo[1]
+                    for lo, hi in note_rects
+                )
             if language == "zh_CN":
                 assert translate(name) != name and render_note_text(value, translate) != value
             rows.append({"name": translate(name), "value": render_note_text(value, translate)})

@@ -104,6 +104,17 @@ World coordinates are Z-up. Python matrices are row-major with translation at `m
 Upload-boundary conversion and render-target orientation belong to the backend. Callers do not
 transpose scene matrices or infer image orientation from the graphics API.
 
+## Wireframe
+
+`DebugView.WIREFRAME` and `RenderFlag.WIREFRAME` show only triangle edges in object colors;
+face interiors reveal the background. Edges retain selection highlights and alpha coverage,
+without texture sampling, lighting, shadows, or planar reflections. The wireframe flag takes
+precedence over other surface debug views. Switching back to Shaded restores the configured
+render flags. Picking, metric depth, and segmentation continue to rasterize solid triangles.
+Both backends retain pixel-width edge coverage and triangle face culling; OpenGL uses a small
+geometry shader, and bgfx caches a position-and-barycentric vertex stream that follows
+deformable mesh updates.
+
 ## Adaptive mesh detail
 
 Native bgfx supports opt-in `RenderFlag.MESH_LOD` (`mesh_lod`). Enable it with

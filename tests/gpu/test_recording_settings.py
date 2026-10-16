@@ -46,6 +46,7 @@ def test_encoding_controls_switch_modes_and_persist_without_losing_values(
             _item_rect(viewer, "slider_int", "##recording_crf")
         lo, hi = _item_rect(viewer, "input_float", "##recording_bitrate")
         _click(viewer, (lo[0] + 20 * scale, (lo[1] + hi[1]) * 0.5))
+        _click(viewer, (lo[0] + 20 * scale, (lo[1] + hi[1]) * 0.5))
         io = imgui.get_io()
         modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
         io.add_key_event(modifier, True)

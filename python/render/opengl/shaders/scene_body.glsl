@@ -21,11 +21,6 @@ in VertexData {
     float selected;
 } v;
 
-#ifdef WIREFRAME
-in vec3 v_bary;
-uniform vec3 u_wire_color;
-uniform float u_wire_width;   // Pixels
-#endif
 
 layout(location = 0) out vec4 o_color;
 
@@ -145,11 +140,6 @@ void main() {
         : (u_classic_lighting != 0
             ? clamp(lit * u_exposure, 0.0, 1.0)
             : finish_color(lit, u_exposure, u_tonemap != 0));
-  #ifdef WIREFRAME
-    float d = min(v_bary.x, min(v_bary.y, v_bary.z));
-    float w = max(fwidth(d), 1e-6) * max(u_wire_width, 0.1);
-    rgb = mix(u_wire_color, rgb, smoothstep(0.0, w, d));
-  #endif
     o_color = vec4(rgb, alpha);
 #endif
 }

@@ -15,7 +15,7 @@ class ReplayControls:
         self._token = None
         self._window_frames = 128
 
-    def draw(self, ctx):
+    def draw(self, ctx, *, combo=None):
         """Seek on slider release; ordinary playback and typing need no network traffic."""
         info = ctx.session.replay_info
         if info is None:
@@ -80,7 +80,16 @@ class ReplayControls:
         imgui.same_line()
         imgui.set_next_item_width(150 * ctx.style_scale)
         speeds = (0.25, 0.5, 1.0, 2.0, 4.0)
-        if imgui.begin_combo("##replay_speed", f"{info.speed:g}x"):
+        if combo is not None:
+            changed, index = combo(
+                "##replay_speed",
+                min(range(len(speeds)), key=lambda index: abs(speeds[index] - info.speed)),
+                tuple(t("{speed:g}×").format(speed=speed) for speed in speeds),
+                preview=f"{info.speed:g}x",
+            )
+            if changed:
+                ctx.submit(cmd.SetReplayPlayback(speed=speeds[index]))
+        elif imgui.begin_combo("##replay_speed", f"{info.speed:g}x"):
             for speed in speeds:
                 if imgui.selectable(t("{speed:g}×").format(speed=speed), speed == info.speed)[0]:
                     ctx.submit(cmd.SetReplayPlayback(speed=speed))
