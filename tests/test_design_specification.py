@@ -239,6 +239,64 @@ def test_store_distinguishes_bundled_defaults_from_a_saved_design_spec(tmp_path)
     assert store.latest()["source"] == "design-spec.json"
 
 
+def test_unchanged_runtime_poll_reuses_validated_snapshots_without_copying(store, monkeypatch):
+    from mojive.design import store as store_module
+
+    runtime = DesignRuntime(store)
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("Unchanged runtime polling must not read, validate or copy the spec")
+
+    monkeypatch.setattr(store_module.json, "load", unexpected)
+    monkeypatch.setattr(store_module, "_validate_loaded_spec", unexpected)
+    monkeypatch.setattr(store_module, "deepcopy", unexpected)
+    assert not runtime.poll(force=True)
+
+
+def test_cached_snapshots_keep_return_values_and_saved_state_independent(store):
+    first = store.latest()
+    first["spec"]["parts"]["button"]["height"] = 40
+    first["savedSpec"]["parts"]["button"]["height"] = 44
+    first["errors"].append({"source": "external", "error": "caller-owned"})
+    second = store.latest()
+    assert second["spec"] == second["savedSpec"] == DEFAULT
+    assert not second["errors"]
+
+
+def test_invalid_snapshot_is_cached_and_revalidated_after_repair(store, monkeypatch):
+    from mojive.design import store as store_module
+
+    store.live_path.write_text("{broken")
+    load, reads = store_module.json.load, []
+
+    def count_reads(stream):
+        reads.append(stream.name)
+        return load(stream)
+
+    monkeypatch.setattr(store_module.json, "load", count_reads)
+    first = store.latest()
+    assert first["errors"]
+    assert store.latest()["errors"] == first["errors"]
+    assert len(reads) == 1
+    value = deepcopy(DEFAULT)
+    value["parts"]["button"]["height"] = 40
+    store.write(value)
+    assert store.latest()["spec"] == value
+    assert not store.latest()["errors"]
+    assert len(reads) == 2
+
+
+def test_revision_first_runtime_poll_still_observes_draft_errors_and_recovery(store):
+    runtime = DesignRuntime(store)
+    revision = runtime.revision
+    store.live_path.write_text("{broken")
+    assert not runtime.poll(force=True)
+    assert runtime.error and runtime.revision == revision
+    store.live_path.unlink()
+    assert not runtime.poll(force=True)
+    assert not runtime.error and runtime.revision == revision
+
+
 @pytest.mark.parametrize("operation", ("change", "save"))
 @pytest.mark.parametrize("unavailable", ("invalid", "missing"))
 def test_editor_refuses_to_merge_into_unreadable_files_and_can_resume_after_repair(

@@ -189,9 +189,7 @@ class ViewerApp(
         # Kept as a direct public alias for callers that only customize hints.
         self.tool_hints = self.viewport_chrome.tool_hints
         self.output = OutputBuffer()
-        self.panels = PanelManager(
-            config=dict(viewer_config.panels), builtin_ids=viewer_config.builtin_panels
-        )
+        self.panels = self._create_panel_manager(viewer_config)
         if os.environ.get("MOJIVE_OPEN_SETTINGS") == "1":
             self.panels.open_panel("Settings")
         self._started = False
@@ -308,6 +306,9 @@ class ViewerApp(
         self._overlay_drag_kind = ""
         self._overlay_drag_offset = (0.0, 0.0)
         self._viewport_overlay_scale = editor_preferences.viewport_overlay_scale
+
+    def _create_panel_manager(self, config: ViewerConfig) -> PanelManager:
+        return PanelManager(config=dict(config.panels), builtin_ids=config.builtin_panels)
 
     def set_language(self, language: str) -> None:
         self.localizer.set_language(language, persist=False)

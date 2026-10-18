@@ -1,5 +1,6 @@
 """Compile the browser's SVG masters to shared-grid contours; no runtime dependency."""
 
+import hashlib
 import json
 import math
 import re
@@ -13,6 +14,7 @@ from fontTools.svgLib.path import parse_path
 ROOT = Path(__file__).parent
 COMPILED_ICONS = ROOT.parents[2] / "python/ui/workspace/icons.json"
 SCENE_ICONS = ROOT.parents[2] / "python/interaction/resources/scene_icons.json"
+COMPILED_MESHES = COMPILED_ICONS.with_name("icon_meshes.json")
 
 
 def library_masters():
@@ -259,13 +261,31 @@ def main():
             result[name] = compile_svg(svg)
         except ValueError as error:
             raise ValueError(f"{name}: {error}") from error
-    (ROOT / "icons-source.json").write_text(json.dumps(sources, separators=(",", ":")))
+    source_payload = json.dumps(sources, separators=(",", ":"))
     compiled = json.dumps(result, separators=(",", ":"))
-    COMPILED_ICONS.write_text(compiled)
-    SCENE_ICONS.parent.mkdir(parents=True, exist_ok=True)
-    SCENE_ICONS.write_text(
-        json.dumps({name: result[name] for name in ("camera", "light")}, separators=(",", ":"))
+    # Fixed union geometry belongs to resource generation. Only the AA fringe
+    # depends on the runtime size; defer neither startup nor first-use clicks.
+    from mojive.geometry2d.icon_mesh import compile_icon_layers
+
+    mesh_payload = json.dumps(
+        {
+            "version": 1,
+            "source_sha256": hashlib.sha256(compiled.encode()).hexdigest(),
+            "icons": {
+                name: compile_icon_layers(glyph["contours"]) for name, glyph in result.items()
+            },
+        },
+        separators=(",", ":"),
     )
+    scene_payload = json.dumps(
+        {name: result[name] for name in ("camera", "light")}, separators=(",", ":")
+    )
+    # Validation/compilation failures must leave the previous resource set intact.
+    (ROOT / "icons-source.json").write_text(source_payload)
+    COMPILED_ICONS.write_text(compiled)
+    COMPILED_MESHES.write_text(mesh_payload)
+    SCENE_ICONS.parent.mkdir(parents=True, exist_ok=True)
+    SCENE_ICONS.write_text(scene_payload)
     print("Compiled and checked", len(result), "shared SVG masters")
 
 

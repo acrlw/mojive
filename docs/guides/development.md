@@ -185,6 +185,17 @@ tables, checkbox grids and raw text use the same body bounds. Restore the parent
 scope exit and do not accumulate indentation between sibling sections. Icon-bearing joint
 rows align their body with the leading content icon; the name retains its intentional icon gap.
 
+Keep startup and frame work separate. Native composition resolves font sources once and installs
+one final atlas; it constructs only the selected panel implementation. Fixed icon stroke unions
+are generated with the packaged resources, while runtime painting handles scale-dependent AA.
+An unobserved control must not assemble diagnostic geometry. Reuse validated design snapshots
+until their file identity changes, and bound caches keyed by entity or bookmark identities.
+
+Use `make startup-profile` for fresh-process first presentation and `make inspector-profile` for
+real tab/section interactions followed by recovery to the idle state. Collect timing separately
+from tracing and other CPU/GPU checks. Compare the same design digest, fonts, scale, viewport
+and renderer; verify pixels and hit rectangles before accepting a frame-cost improvement.
+
 ## Public control operations
 
 Keep pure calculations and reusable workflow helpers in ordinary Python modules. Register an
@@ -466,11 +477,11 @@ The command then renders `rendering.png` automatically and publishes all three i
 Keep the window at its initial size so all images retain the requested dimensions.
 
 Save parameter changes in `make ui-native-design` before capture. The capture uses
-`MOJIVE_DESIGN_SPEC` or its default `output/design-workbench/current-spec.json`. A separate
+`MOJIVE_DESIGN_SPEC` or the default `design-spec.json` beside the user's editor settings. A separate
 specification, image size or physical UI scale can be selected explicitly:
 
 ```bash
-make readme-media ARGS='--interactive --spec output/design-workbench/current-spec.json --width 1920 --height 1200 --ui-scale 1'
+make readme-media ARGS='--interactive --spec /absolute/path/design-spec.json --width 1920 --height 1200 --ui-scale 1'
 ```
 
 Omit `--interactive` for unattended captures with the prepared layouts. The default physical UI

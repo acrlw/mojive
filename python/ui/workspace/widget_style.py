@@ -64,7 +64,12 @@ def install_fonts(window, *, portable=False, clear=True, cache=None):
         if report.cjk_path
         else None
     )
-    sources = resolve_fonts(portable=portable, cjk=cjk)
+    numeric = (
+        FontSource(report.mono_path, report.mono_index, report.mono)
+        if getattr(report, "mono_path", "")
+        else None
+    )
+    sources = resolve_fonts(portable=portable, cjk=cjk, numeric=numeric)
     # MiSans already contains Latin and Chinese; merging another CJK family can
     # accidentally supply punctuation or headings from an unrelated face.
     if portable:

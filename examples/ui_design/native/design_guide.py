@@ -654,6 +654,7 @@ def main(argv=None):
             docking=False,
             ini_path="",
             show_on_start=False,
+            load_default_fonts=False,
         ),
         args.backend,
     ) as window:

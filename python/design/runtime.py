@@ -126,7 +126,7 @@ class DesignRuntime:
         if not force and time.monotonic() - self._poll_at < 0.12:
             return False
         self._poll_at = time.monotonic()
-        envelope = self.store.latest()
+        envelope = self.store.latest(after_revision=self._stamp)
         self.error = "; ".join(error["error"] for error in envelope["errors"])
         if envelope["source"] is None and (envelope["errors"] or self.spec != DEFAULT):
             self.error = self.error or "The saved specification and draft are missing"

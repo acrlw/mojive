@@ -12,9 +12,22 @@ import time
 from pathlib import Path
 
 
+def _trace_completion(owner, method, event, label):
+    import functools
+
+    original = getattr(owner, method)
+
+    @functools.wraps(original)
+    def measured(*args, **kwargs):
+        result = original(*args, **kwargs)
+        event(label)
+        return result
+
+    setattr(owner, method, measured)
+
+
 def _measure(args) -> None:
     import cProfile
-    import functools
     import pstats
     import shutil
 
@@ -33,6 +46,8 @@ def _measure(args) -> None:
     from mojive.session import Session
     from mojive.ui.app import ViewerApp
     from mojive.ui.window import Window, layout_settings_path
+    from mojive.ui.workspace import widgets
+    from mojive.ui.workspace.app import WorkspaceApp
 
     event("imports_ready")
     if args.dynamic_icons:
@@ -47,21 +62,12 @@ def _measure(args) -> None:
         shutil.copyfile(layout, probe_layout)
     composition._viewer_layout_path = lambda *_a, **_kw: str(probe_layout)
 
-    def trace(owner, method, label):
-        original = getattr(owner, method)
-
-        @functools.wraps(original)
-        def measured(*a, **kw):
-            result = original(*a, **kw)
-            event(label)
-            return result
-
-        setattr(owner, method, measured)
-
-    trace(Window, "_load_fonts", "fonts_ready")
-    trace(Window, "show", "window_shown")
-    trace(Session, "__init__", "session_ready")
-    trace(ViewerApp, "__init__", "app_ready")
+    _trace_completion(Window, "_load_fonts", event, "font_sources_ready")
+    _trace_completion(widgets, "install_fonts", event, "fonts_ready")
+    _trace_completion(Window, "show", event, "window_shown")
+    _trace_completion(Session, "__init__", event, "session_ready")
+    _trace_completion(ViewerApp, "__init__", event, "base_app_ready")
+    _trace_completion(WorkspaceApp, "__init__", event, "app_ready")
     original_frame = ViewerApp.frame
 
     def frame(app):
@@ -75,7 +81,7 @@ def _measure(args) -> None:
     original_run = composition.Viewer.run
 
     def run(viewer):
-        trace(viewer.window, "end_frame", "frame_presented")
+        _trace_completion(viewer.window, "end_frame", event, "frame_presented")
         original_run(viewer, max_frames=4)
         # Readback and image encoding are outside every startup timing interval.
         from PIL import Image

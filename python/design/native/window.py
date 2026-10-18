@@ -40,6 +40,7 @@ class WorkbenchWindow:
                 docking=False,
                 ini_path="",
                 show_on_start=visible and detached,
+                load_default_fonts=False,
                 # The preview owns frame pacing for the pair of windows.
                 vsync=False,
             ),

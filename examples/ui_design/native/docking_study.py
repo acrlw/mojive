@@ -2059,6 +2059,7 @@ def main(argv=None):
         ini_path="",
         show_on_start=False,
         docking=True,
+        load_default_fonts=False,
     )
     window = create_review_window(config, args)
     study = None

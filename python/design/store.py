@@ -9,6 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from mojive.design.specification import DEFAULT, validate_spec
+from mojive.ui.preferences import settings_path
 
 _LOCK = threading.RLock()
 _SURFACE_TOKENS = ("floating_color", "popup_color")
@@ -38,11 +39,9 @@ def read_spec(path):
 
 
 def default_spec_path():
-    return (
-        Path(os.environ.get("MOJIVE_DESIGN_SPEC", "output/design-workbench/current-spec.json"))
-        .expanduser()
-        .resolve()
-    )
+    override = os.environ.get("MOJIVE_DESIGN_SPEC")
+    path = Path(override) if override else settings_path().with_name("design-spec.json")
+    return path.expanduser().resolve()
 
 
 def atomic_write(path, spec, *, durable=True):
@@ -127,36 +126,70 @@ class SpecificationStore:
         )
         self.live_path = Path(live_path or self.saved_path.with_name(draft_name)).resolve()
         self.lock_path = self.saved_path.with_name(".specification.lock")
+        self._snapshots = {}
 
-    def latest(self):
+    @staticmethod
+    def _signature(stat):
+        return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, stat.st_size
+
+    def _snapshot(self, path):
+        try:
+            signature = self._signature(path.stat())
+            cached = self._snapshots.get(path)
+            if cached is not None and cached[0] == signature:
+                return cached
+            with path.open(encoding="utf-8") as stream:
+                signature = self._signature(os.fstat(stream.fileno()))
+                try:
+                    value = _validate_loaded_spec(json.load(stream))
+                except (ValueError, TypeError, KeyError) as error:
+                    result = signature, None, str(error)
+                else:
+                    result = signature, value, None
+        except FileNotFoundError:
+            self._snapshots.pop(path, None)
+            return None
+        except OSError as error:
+            # Retry I/O failures even when the file metadata is unchanged.
+            return (0, 0, 0, 0), None, str(error)
+        self._snapshots[path] = result
+        return result
+
+    def latest(self, *, after_revision=None):
+        """Return owned snapshots, omitting spec payloads when a known revision is unchanged."""
+        with _LOCK:
+            return self._latest(after_revision)
+
+    def _latest(self, after_revision):
         candidates, errors = [], []
         for order, path in enumerate((self.saved_path, self.live_path)):
-            try:
-                with path.open(encoding="utf-8") as stream:
-                    stat = os.fstat(stream.fileno())
-                    value = _validate_loaded_spec(json.load(stream))
-                candidates.append(
-                    (stat.st_mtime_ns, order, path.name, value, stat.st_ino, stat.st_ctime_ns)
-                )
-            except FileNotFoundError:
+            snapshot = self._snapshot(path)
+            if snapshot is None:
                 continue
-            except (OSError, ValueError, TypeError, KeyError) as error:
-                errors.append({"source": path.name, "error": str(error)})
+            signature, value, error = snapshot
+            if error is not None:
+                errors.append({"source": path.name, "error": error})
+            else:
+                candidates.append((signature[0], order, path.name, value, signature))
         if candidates:
-            stamp, _, name, value, inode, changed = max(candidates, key=lambda item: item[:2])
+            stamp, _, name, value, signature = max(candidates, key=lambda item: item[:2])
         else:
-            stamp, name, value, inode, changed = 0, None, deepcopy(DEFAULT), 0, 0
-        return {
-            "spec": value,
-            "savedSpec": next((item[3] for item in candidates if item[1] == 0), None),
+            stamp, name, value, signature = 0, None, DEFAULT, (0, 0, 0, 0)
+        result = {
             "source": name,
             # Rapid atomic replacements can share a filesystem modification time.
-            # Include the replaced file identity so a new draft cannot be skipped.
-            "revision": f"{name}:{stamp}:{changed}:{inode}",
+            # Include identity, change time and size to invalidate validated snapshots.
+            "revision": f"{name}:" + ":".join(map(str, signature)),
             "mtimeNs": str(stamp),
             "modifiedAt": stamp / 1_000_000,
             "errors": errors,
         }
+        if result["revision"] != after_revision:
+            result["spec"] = deepcopy(value)
+            result["savedSpec"] = deepcopy(
+                next((item[3] for item in candidates if item[1] == 0), None)
+            )
+        return result
 
     def write(self, spec, *, save=False, expected_revision=None):
         spec = validate_spec(deepcopy(spec))

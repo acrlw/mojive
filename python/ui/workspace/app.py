@@ -49,11 +49,6 @@ class WorkspaceApp(ViewerApp):
 
             self.design = DesignRuntime()
         super().__init__(session, backend, window, **kwargs)
-        config = kwargs.get("config")
-        self.panels = WorkspacePanels(
-            config=dict(config.panels) if config else {},
-            builtin_ids=config.builtin_panels if config else None,
-        )
         self.projection = EntityProjection(self)
         self.workspace = WorkspaceShell(
             self, ui=ui, portable_fonts=self.design.spec["tokens"]["font_family"] == "portable"
@@ -75,6 +70,9 @@ class WorkspaceApp(ViewerApp):
         self.workspace.cube = self.view_cube
         self.window.set_layout_builder(self.workspace.ensure_layout)
         self.gizmo.set_style("2d")
+
+    def _create_panel_manager(self, config):
+        return WorkspacePanels(config=dict(config.panels), builtin_ids=config.builtin_panels)
 
     @property
     def entity(self):

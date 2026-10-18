@@ -33,9 +33,12 @@ def load(
     size_pt: float = BASE_SIZE_PT,
     allow_download: bool = True,
     timeout: float = DOWNLOAD_TIMEOUT_S,
+    install_atlas: bool = True,
 ) -> FontReport:
+    """Resolve renderer font metadata and optionally install the default ImGui atlas."""
     rep = FontReport(size_pt=size_pt)
-    io.fonts.clear()
+    if install_atlas:
+        io.fonts.clear()
 
     def cfg(*, merge: bool = False, index: int = 0):
         c = imgui.ImFontConfig()
@@ -56,10 +59,12 @@ def load(
         if mono is not None:
             rep.notes.append("Falling back to Inconsolata bundled with imgui")
     if mono is None:
-        io.fonts.add_font_default(cfg())
+        if install_atlas:
+            io.fonts.add_font_default(cfg())
         rep.notes.append("No monospace font is available; using the proportional built-in font")
     else:
-        io.fonts.add_font_from_file_ttf(mono[0], size_pt, cfg(index=mono[1]))
+        if install_atlas:
+            io.fonts.add_font_from_file_ttf(mono[0], size_pt, cfg(index=mono[1]))
         rep.mono = label
         rep.mono_path, rep.mono_index = mono
 
@@ -72,7 +77,8 @@ def load(
     if cjk is None:
         rep.notes.append("No CJK font is available; CJK text may render as missing glyphs")
     else:
-        io.fonts.add_font_from_file_ttf(cjk[0], size_pt, cfg(merge=True, index=cjk[1]))
+        if install_atlas:
+            io.fonts.add_font_from_file_ttf(cjk[0], size_pt, cfg(merge=True, index=cjk[1]))
         rep.cjk = label
         rep.cjk_path, rep.cjk_index = cjk
     return rep

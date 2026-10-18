@@ -758,6 +758,7 @@ def _compose(
         vsync=vsync,
         ini_path=ini,
         show_on_start=show_window,
+        load_default_fonts=interface != "native",
     )
 
     window = None

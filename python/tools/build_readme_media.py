@@ -17,6 +17,7 @@ from mojive import CameraView, InputClaim, ViewerConfig
 from mojive import commands as cmd
 from mojive.app.composition import build_workspace
 from mojive.config import LayoutConfig, ViewportLayers
+from mojive.design.store import default_spec_path
 from mojive.scene.assets import resolve
 
 from ._harness import OffscreenHarness
@@ -195,10 +196,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.width <= 0 or args.height <= 0 or not 0.5 <= args.ui_scale <= 4:
         parser.error("Image dimensions must be positive; UI scale must be between 0.5 and 4")
-    if args.spec:
-        if not args.spec.is_file():
-            parser.error(f"Design specification does not exist: {args.spec}")
-        os.environ["MOJIVE_DESIGN_SPEC"] = str(args.spec.resolve())
+    if args.spec and not args.spec.is_file():
+        parser.error(f"Design specification does not exist: {args.spec}")
+    # Resolve the user's design before isolating the capture's editor preferences.
+    os.environ["MOJIVE_DESIGN_SPEC"] = str(
+        args.spec.resolve() if args.spec else default_spec_path()
+    )
     args.output.mkdir(parents=True, exist_ok=True)
     # Keep capture settings separate while reading the user's saved design specification.
     with tempfile.TemporaryDirectory(prefix="settings-", dir=args.output) as settings:

@@ -3,11 +3,43 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+
+def verify_package_resources(package):
+    """Check installed UI resources using only their packaged masters and manifests."""
+    workspace = package / "ui/workspace"
+    source = (workspace / "icons.json").read_bytes()
+    icons = json.loads(source)
+    meshes = json.loads((workspace / "icon_meshes.json").read_text())
+    if (
+        meshes["version"] != 1
+        or meshes["source_sha256"] != hashlib.sha256(source).hexdigest()
+        or set(meshes["icons"]) != set(icons)
+    ):
+        raise ValueError("Installed icon meshes do not match their packaged masters")
+    scene = json.loads((package / "interaction/resources/scene_icons.json").read_text())
+    if scene != {name: icons[name] for name in ("camera", "light")}:
+        raise ValueError("Installed scene icons do not match their packaged masters")
+    fonts = package / "text/resources/fonts"
+    manifest = json.loads((fonts / "manifest.json").read_text())
+    for name in ("MiSans-Regular.ttf", "MiSans-Semibold.ttf"):
+        if hashlib.sha256((fonts / name).read_bytes()).hexdigest() != manifest[name]:
+            raise ValueError(f"Installed font checksum does not match: {name}")
+    for path in (
+        fonts / "MiSans-License.pdf",
+        fonts / "README.md",
+        workspace / "licenses/lucide.txt",
+        workspace / "licenses/tabler.txt",
+    ):
+        if not path.is_file():
+            raise FileNotFoundError(path)
+    return {"icons": len(icons), "scene_icons": len(scene), "font_faces": 2}
 
 
 def main():
@@ -30,6 +62,7 @@ def main():
         ],
         check=True,
     )
+    resources = verify_package_resources(destination / "mojive")
     script = """
 import sys, json
 from pathlib import Path
@@ -64,6 +97,7 @@ with SceneRenderer(scene.source, width=160, height=120, renderer='bgfx', samples
     assert (destination / "mojive/native_licenses/meshoptimizer.txt").is_file()
     assert (destination / "mojive/native_licenses/libtess2.txt").is_file()
     report = json.loads(result.stdout)
+    report["ui_resources"] = resources
     Path("output/native-wheel/installed.json").write_text(json.dumps(report, indent=2) + "\n")
     print(result.stdout.strip())
 

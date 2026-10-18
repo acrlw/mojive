@@ -96,12 +96,16 @@ Run `make ui-native-capture` to capture production panels and menus under
 `python -m mojive.tools.native_workspace` command opens a production workspace by default;
 `--capture` selects the automated gallery.
 
-The editor defaults to `output/design-workbench/current-spec.json`; its adjacent `live-spec.json`
-contains the current draft. Normal native viewers use the newest valid saved specification or
-draft at the same location. `MOJIVE_DESIGN_SPEC=/absolute/path/spec.json` selects another
+The editor saves `design-spec.json` beside the editor's `settings.json`; its adjacent
+`design-spec.live.json` contains the current draft. This is the Mojive user configuration
+directory (`~/Library/Application Support/mojive` on macOS and `$XDG_CONFIG_HOME/mojive`,
+or `~/.config/mojive`, on Linux). An explicit `MOJIVE_SETTINGS` path also determines this
+directory. Normal native viewers use the newest valid saved specification or draft there.
+`MOJIVE_DESIGN_SPEC=/absolute/path/spec.json` selects another
 specification for a viewer process, and `make ui-native-design ARGS='--spec /absolute/path/spec.json'`
 selects it for the editor. With no saved file, viewers use the bundled defaults. Paths are resolved
 from the working directory; use an absolute path when sharing a specification across launchers.
+Generated files under `output/` can be deleted without removing the saved design.
 
 Use `BACKEND=bgfx` to run the editor with the native backend. For reproducible capture, use
 `MOJIVE_UI_SCALE=1 make ui-native-design ARGS='--hidden --frames 8 --capture output/workbench'`.

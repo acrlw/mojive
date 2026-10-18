@@ -8,7 +8,11 @@ The adopted workspace family contains 120 SVG entries on a 24-unit grid, with a
 1.5-unit round stroke. Pinned Lucide sources cover general symbols;
 `examples/ui_design/native/svg/mojive/` owns the domain and transport designs.
 `examples/ui_design/native/svg/sources.json` records the source, license and stroke policy;
-`make ui-design-icons` regenerates the shared vector inventory.
+`make ui-design-icons` regenerates the shared vector inventory and packaged canonical
+stroke meshes using the native geometry compiler. Runtime painting scales those meshes and
+constructs only size-dependent antialias fringes; fixed stroke unions must not run on
+first paint or after Inspector navigation. The mesh package records its source digest,
+and a stale package fails explicitly with the regeneration command.
 
 Workspace context IDs resolve through aliases to the same master. Viewport and timeline
 playback, transform controls, activity navigation, panel headers and scene rows therefore

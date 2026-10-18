@@ -8,6 +8,7 @@ from dataclasses import replace
 import numpy as np
 from imgui_bundle import imgui
 
+from mojive.design.groups import scoped_parts
 from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.panels import pointer_pressed
 from mojive.ui.pointer_bindings import PointerAction
@@ -205,30 +206,31 @@ class NativeInspectorPresentation:
             )
             gap = row_style.get("columnGap", row_style.get("labelGap", DESIGN.label_gap)) * s
             shared_above = shared_label_width + gap + self._control_minimum * s > available
-        layout = self.ui.form_layout(
-            width,
-            1 if toggle else max(3, components) if group_vector else components,
-            axis=not toggle and (group_vector or bool(color_channels)),
-            minimum=0 if group_vector else self._control_minimum * s,
-            label_above=shared_above if shared_above is not None else False if toggle else None,
-            label_width=shared_label_width,
-            field_part="switch" if toggle else control_part,
-            minimum_height=minimum_height,
-        )
-        if components > 1 and not toggle:
-            # The caption shares the group's column, but numbers() owns the
-            # actual plain-field grid. An XYZ estimate can reserve extra rows
-            # even when all of the formatted plain numbers fit inline.
+        if not toggle:
             layout = self.ui.form_layout(
                 width,
-                1,
-                axis=False,
+                max(3, components) if group_vector else components,
+                axis=group_vector or bool(color_channels),
                 minimum=0 if group_vector else self._control_minimum * s,
-                label_above=layout.label_above,
-                label_width=layout.label_width,
+                label_above=shared_above,
+                label_width=shared_label_width,
                 field_part=control_part,
                 minimum_height=minimum_height,
             )
+            if components > 1:
+                # The caption shares the group's column, but numbers() owns the
+                # actual plain-field grid. An XYZ estimate can reserve extra rows
+                # even when all of the formatted plain numbers fit inline.
+                layout = self.ui.form_layout(
+                    width,
+                    1,
+                    axis=False,
+                    minimum=0 if group_vector else self._control_minimum * s,
+                    label_above=layout.label_above,
+                    label_width=layout.label_width,
+                    field_part=control_part,
+                    minimum_height=minimum_height,
+                )
         if toggle and group_vector:
             anchor = self.ui.form_layout(width, 3, axis=True, minimum=0)
             label_style = self.ui.component_style(("switch", "form_label"))
@@ -250,9 +252,8 @@ class NativeInspectorPresentation:
                 label_above=shared_above,
             )
         above = layout.label_above
-        switch_style = self.ui.component_style("switch")
-        switch_margin = switch_style.edges("margin", s)
         if toggle and not above and self.ui.design is not None:
+            switch_margin = self.ui.component_style("switch").edges("margin", s)
             switch_height = self.ui.design.primitives.field_height("switch") * s
             row_style = self.ui.component_style("form_row")
             row_margin = row_style.edges("margin", s)
@@ -299,7 +300,8 @@ class NativeInspectorPresentation:
                 )
                 + margin[3]
             )
-        if self.ui.design is not None:
+        design = self.ui.design
+        if design is not None and design.runtime.observes(scoped_parts("form_row")):
             minimum_content_height = layout.minimum_content_height
             if group_vector and components == 1 and not toggle:
                 child_margin = self.ui.component_style(control_part).edges("margin", s)
@@ -307,7 +309,7 @@ class NativeInspectorPresentation:
                     layout.label_line_height,
                     layout.fields[0][3] + child_margin[1] + child_margin[3],
                 )
-            self.ui.design.record(
+            design.record(
                 self._table_id + "/row/" + label,
                 ("form_row",),
                 [p.x, p.y, width, published_height],
@@ -553,7 +555,6 @@ class NativeInspectorPresentation:
     def numbers(self, item_id, values, speed, lo, hi, fmt, flags):
         fmt = _number_format(fmt, self._row_unit)
         p = imgui.get_cursor_screen_pos()
-        width = imgui.get_content_region_avail().x
         count = len(values)
         width = self._field_width()
         layout = self.ui.numeric_layout(
@@ -592,9 +593,14 @@ class NativeInspectorPresentation:
         else:
             x, y = p.x, p.y
         updated = self.ui.switch(item_id, x, y, value, width=width)
-        if self.ui.design is not None and self._toggle_row is not None:
+        design = self.ui.design
+        if (
+            design is not None
+            and self._toggle_row is not None
+            and design.runtime.observes(scoped_parts("switch"))
+        ):
             row_rect, label_rect = self._toggle_row
-            self.ui.design.record(
+            design.record(
                 item_id + "/label-row",
                 ("switch",),
                 row_rect,

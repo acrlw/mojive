@@ -252,17 +252,18 @@ def test_prepared_closed_stroke_antialiases_outside_and_into_its_hole(stroke_ope
 
 
 def test_stroke_tessellation_is_cached_on_the_canonical_grid(stroke_operations, monkeypatch):
-    from mojive.ui.workspace import icon_mesh
 
-    icon_mesh._stroke_mesh.cache_clear()
-    compile_stroke = icon_mesh.compile_stroke
+    from mojive.geometry2d import icon_mesh as compiler
+
+    compiler.stroke_mesh.cache_clear()
+    compile_stroke = compiler.compile_stroke
     calls = []
 
     def compile_once(path, style, **kwargs):
         calls.append((path, style))
         return compile_stroke(path, style, **kwargs)
 
-    monkeypatch.setattr(icon_mesh, "compile_stroke", compile_once)
+    monkeypatch.setattr(compiler, "compile_stroke", compile_once)
     areas = []
     for size in (14, 16, 18, 24):
         triangles = _opaque_triangles(stroke_operations("M5 5H19V19", size=size))
@@ -307,7 +308,7 @@ def test_hinge_arm_caps_stay_inside_the_crossbar_outer_faces(stroke_operations, 
 
 
 def test_curved_stroke_mesh_discards_internal_union_primitive_vertices():
-    from mojive.ui.workspace.icon_mesh import _stroke_mesh
+    from mojive.geometry2d.icon_mesh import stroke_mesh as _stroke_mesh
     from mojive.ui.workspace.widget_icons import icon_geometry
 
     for contour, _points, paths, width in icon_geometry("settings", 24):
@@ -397,7 +398,7 @@ def test_geometry_modes_have_distinct_library_silhouettes_from_visibility_and_la
 
 
 def test_default_geometry_flag_preserves_its_opening_without_internal_aa_seams():
-    from mojive.ui.workspace.icon_mesh import _stroke_mesh
+    from mojive.geometry2d.icon_mesh import stroke_mesh as _stroke_mesh
     from mojive.ui.workspace.widget_icons import icon_geometry
 
     contour, _points, paths, width = next(iter(icon_geometry("geometry-default", 24)))

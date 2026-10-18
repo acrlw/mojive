@@ -1,8 +1,9 @@
 # Repository-managed dependencies
 
 Python package dependencies are declared in `pyproject.toml` and resolved in `uv.lock`;
-they are not copied into this source tree. Font files retain their own licenses and use the
-existing system/cache discovery policy.
+they are not copied into this source tree. MiSans Regular and Semibold are bundled under
+`python/text/resources/fonts/` with their original license and checksum manifest. Other font
+faces use the system/cache discovery policy; each font retains its own license.
 
 `dependencies.json` is the source-of-truth revision lock. Production dependencies are available
 as repository-managed source; optional comparison dependencies are checksum-locked downloads.

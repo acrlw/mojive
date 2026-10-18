@@ -90,7 +90,7 @@ def resolve_cjk_faces(source):
     return regular, FontFace(str(path), index, family + " Bold (synthesized)", True)
 
 
-def resolve_fonts(*, portable=False, cjk=None):
+def resolve_fonts(*, portable=False, cjk=None, numeric=None):
     """Return body, heading and numeric sources with their em-size conversion."""
     sans = Path("/System/Library/Fonts/SFNS.ttf")
     mono = Path("/System/Library/Fonts/SFNSMono.ttf")
@@ -102,10 +102,11 @@ def resolve_fonts(*, portable=False, cjk=None):
             (FontSource(str(mono), 2 << 16, "SF Mono Regular"), 2412 / 2048),
         )
     bundled = Path(imgui_bundle.__file__).parent / "assets/fonts"
-    try:
-        numeric = resolve_font_sources(allow_download=False)[0]
-    except FileNotFoundError:
-        numeric = FontSource(str(bundled / "Inconsolata-Medium.ttf"), 0, "Inconsolata")
+    if numeric is None:
+        try:
+            numeric = resolve_font_sources(allow_download=False)[0]
+        except FileNotFoundError:
+            numeric = FontSource(str(bundled / "Inconsolata-Medium.ttf"), 0, "Inconsolata")
     portable_fonts = Path(__file__).parents[2] / "text/resources/fonts"
     sources = (
         FontSource(str(portable_fonts / "MiSans-Regular.ttf"), 0, "MiSans Regular"),

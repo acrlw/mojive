@@ -50,7 +50,7 @@ make ui-design-guide
 make ui-design-guide ARGS='--language en'
 make ui-design-guide ARGS='--page "Group laboratory"'
 make ui-design-guide ARGS='--defaults'
-make ui-design-guide ARGS='--spec output/design-workbench/current-spec.json'
+make ui-design-guide ARGS='--spec /absolute/path/design-spec.json'
 make ui-design-guide BACKEND=bgfx
 make ui-design-guide ARGS='--capture --output output/ui_design/guide/opengl'
 MOJIVE_UI_SCALE=1.2 make ui-design-guide ARGS='--capture-alignment --output output/ui_design/alignment/opengl'

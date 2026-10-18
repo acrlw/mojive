@@ -255,6 +255,8 @@ class WindowConfig:
     font_size_pt: float = 14.0
     ui_scale: float | None = None
     context_api: str = "auto"
+    # Frontends with their own atlas still need the shared renderer font sources.
+    load_default_fonts: bool = True
 
 
 class Window:
@@ -398,6 +400,8 @@ class Window:
             imgui,
             io,
             size_pt=self.config.font_size_pt * self._font_atlas_scale,
+            allow_download=self.config.load_default_fonts,
+            install_atlas=self.config.load_default_fonts,
         )
         for note in self.font_report.notes:
             log.warning("Font fallback: {}", note)

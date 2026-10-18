@@ -60,6 +60,7 @@ path = "python/tools/build_hook.py"
 artifacts = [
     "python/ui/icon_presets.json",
     "python/ui/workspace/icons.json",
+    "python/ui/workspace/icon_meshes.json",
     "python/interaction/resources/scene_icons.json",
     "python/render/opengl/shaders/*.glsl",
 ]

@@ -17,6 +17,8 @@ from mojive.ui.workspace.menu_geometry import native_unit, popup_padding
 from mojive.ui.workspace.menu_item import Item as Item
 from mojive.ui.workspace.widgets import color
 
+_POPUP_CACHE_LIMIT = 128
+
 
 class Menus:
     top_menus = TOP_MENUS
@@ -42,6 +44,7 @@ class Menus:
         self.overflow_menus = ()
         self.actions = []
         self._popup_widths = {}
+        self._popup_rows = {}
         self._local_measurements = None
 
     def apply_actions(self):
@@ -584,10 +587,7 @@ class Menus:
                 yield box
             finally:
                 padding, margin = box.padding, box.margin
-                if not hasattr(self, "_popup_rows"):
-                    self._popup_rows = {}
                 inventory = tuple(self._local_rows)
-                self._popup_rows[key] = inventory
                 columns = menu_columns(self.ui, inventory, part=item_part)
                 measured = max(
                     (
@@ -596,8 +596,10 @@ class Menus:
                     ),
                     default=0,
                 )
-                self._popup_widths[key] = ceil(
-                    measured + padding[0] + padding[2] + margin[0] + margin[2]
+                self._remember_popup(
+                    key,
+                    inventory,
+                    ceil(measured + padding[0] + padding[2] + margin[0] + margin[2]),
                 )
                 self._local_measurements = previous_measurements
                 self._choice_rows = previous_choices
@@ -605,6 +607,17 @@ class Menus:
                 self._columns, self._local_rows = previous_columns, previous_rows
                 self._separator_state = previous_separator
                 self._last_row_bottom = previous_bottom
+
+    def _remember_popup(self, key, rows, width):
+        """Retain recent layouts without keeping deleted entities or bookmarks alive."""
+        self._popup_widths.pop(key, None)
+        self._popup_rows.pop(key, None)
+        self._popup_widths[key] = width
+        self._popup_rows[key] = rows
+        if len(self._popup_widths) > _POPUP_CACHE_LIMIT:
+            oldest = next(iter(self._popup_widths))
+            del self._popup_widths[oldest]
+            del self._popup_rows[oldest]
 
     @contextmanager
     def local_popup(self, key, *, context_item=False):
