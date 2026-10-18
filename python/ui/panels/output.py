@@ -30,6 +30,8 @@ class OutputRowStyle:
     margin: tuple[float, float, float, float] = (0, 0, 0, 0)
     text_align: str = "start"
     align_items: str = "center"
+    text_color: tuple[float, float, float, float] | None = None
+    icon_color: tuple[float, float, float, float] | None = None
 
 
 _LEVEL_RANKS = {
@@ -153,7 +155,7 @@ class OutputPanel(Panel):
             if latest is not None and imgui.is_item_hovered():
                 path = message_path(latest.text, latest.copy_text)
                 if path is not None:
-                    imgui.set_item_tooltip(ctx.tr("Ctrl+click to reveal file"))
+                    self._tooltip(ctx.tr("Ctrl+click to reveal file"))
                     if pointer_pressed(ctx, PointerAction.OUTPUT_ADD):
                         reveal_path(path)
             imgui.same_line()
@@ -172,7 +174,7 @@ class OutputPanel(Panel):
             ),
             ctx.theme.text,
         )
-        imgui.set_item_tooltip(ctx.tr("Expand Output"))
+        self._tooltip(ctx.tr("Expand Output"))
 
     def draw(self, ctx: PanelContext) -> None:
         output = ctx.output
@@ -194,6 +196,24 @@ class OutputPanel(Panel):
         self._selected_sequences.clear()
         self._selection_anchor = 0
         self._last_sequence = 0
+
+    def _reset_filters(self):
+        self._filter_text = ""
+        self._levels = {"info", "warning", "error"}
+        self._filter_cache_key = None
+        self._last_sequence = 0
+
+    def _draw_empty(self, ctx, filtered):
+        imgui.text_wrapped(ctx.tr("No matching messages" if filtered else "No messages"))
+        imgui.text_wrapped(
+            ctx.tr(
+                "Change the search or severity filters."
+                if filtered
+                else "Runtime messages appear here."
+            )
+        )
+        if filtered and imgui.button(ctx.tr("Clear filters")):
+            self._reset_filters()
 
     def _draw_toolbar(self, ctx, all_entries, newest_sequence):
         output = ctx.output
@@ -230,10 +250,12 @@ class OutputPanel(Panel):
             self._last_sequence = 0
         if inline:
             imgui.same_line()
+        imgui.begin_disabled(not all_entries)
         if imgui.button(clear_label):
             self._clear_output(output)
             all_entries = ()
             newest_sequence = 0
+        imgui.end_disabled()
         if clicked is not None:
             self._levels.symmetric_difference_update({clicked})
             self._last_sequence = 0
@@ -247,7 +269,7 @@ class OutputPanel(Panel):
         draw_expand_glyph(
             ImguiDraw2D(), ((a.x + b.x) / 2, (a.y + b.y) / 2), ctx.theme.text, ctx.style_scale
         )
-        imgui.set_item_tooltip(ctx.tr("Collapse Output"))
+        self._tooltip(ctx.tr("Collapse Output"))
         return all_entries, newest_sequence
 
     def _filter_entries(self, all_entries, newest_sequence=None):
@@ -294,6 +316,8 @@ class OutputPanel(Panel):
         imgui.begin_child("output_messages", imgui.ImVec2(0.0, 0.0), 0)
         geometry = self.row_style(ctx)
         self._active_row_style = geometry
+        if not entries:
+            self._draw_empty(ctx, bool(output.entries()) and filtering)
         ml, mt, mr, mb = geometry.margin
         pl, pt, pr, pb = geometry.padding
         row_height = (
@@ -308,6 +332,7 @@ class OutputPanel(Panel):
                 entries,
                 wrap_width,
                 imgui.get_font_size(),
+                imgui.get_font().font_id,
                 ctx.style_scale,
                 ctx.language,
                 geometry,
@@ -370,9 +395,9 @@ class OutputPanel(Panel):
             selected = tuple(
                 entry for entry in entries if entry.sequence in self._selected_sequences
             )
-            if io.key_shift:
+            if selected and io.key_shift:
                 imgui.set_clipboard_text(output.copy_text(selected))
-            else:
+            elif selected:
                 imgui.set_clipboard_text(output.copy_message_text(selected))
         newest_visible = entries[-1].sequence if entries else 0
         if self.auto_scroll and newest_visible > self._last_sequence:
@@ -389,8 +414,11 @@ class OutputPanel(Panel):
             if opened:
                 imgui.end_popup()
 
-    def _context_item(self, label, shortcut="", checked=False, enabled=True, *, key):
-        return imgui.menu_item(label + "###" + key, shortcut, checked, enabled)
+    def _context_item(self, label, shortcut="", checked=None, enabled=True, *, key):
+        return imgui.menu_item(label + "###" + key, shortcut, bool(checked), enabled)
+
+    def _context_separator(self):
+        imgui.separator()
 
     def _draw_file_actions(self, ctx, entry) -> None:
         """Allow a host to add file actions to the shared row context menu."""
@@ -422,7 +450,7 @@ class OutputPanel(Panel):
         add = hovered and pointer_pressed(ctx, PointerAction.OUTPUT_ADD)
         path = message_path(entry.text, entry.copy_text) if hovered else None
         if path is not None:
-            imgui.set_item_tooltip(ctx.tr("Ctrl+click to reveal file") + "\n" + str(path))
+            self._tooltip(ctx.tr("Ctrl+click to reveal file") + "\n" + str(path))
         if add and path is not None:
             reveal_path(path)
         elif select or extend or add:
@@ -463,7 +491,7 @@ class OutputPanel(Panel):
                     if copy_path:
                         imgui.set_clipboard_text(entry.copy_text)
                 self._draw_file_actions(ctx, entry)
-                imgui.separator()
+                self._context_separator()
                 copy_scope = "Copy shown" if filtering else "Copy all"
                 copy_scope, _ = self._context_item(
                     ctx.tr(copy_scope), key="output-context-copy-scope"
@@ -495,7 +523,7 @@ class OutputPanel(Panel):
                 imgui.color_convert_float4_to_u32(imgui.ImVec4(*color)),
                 imgui.get_style().frame_rounding,
             )
-        color = ctx.theme.text
+        color = geometry.text_color or ctx.theme.text
         icon_size = geometry.icon_size
         imgui.push_clip_rect(
             content_lo,
@@ -528,7 +556,7 @@ class OutputPanel(Panel):
             (content_lo.x + icon_size * 0.5, block_y + first_line * 0.5),
             icon_size,
             severity_group(entry.level),
-            severity_color(ctx.theme, entry.level),
+            geometry.icon_color or severity_color(ctx.theme, entry.level),
         )
         text_position = imgui.ImVec2(
             content_lo.x

@@ -4,11 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from examples.ui_design.native import fonts
 from examples.ui_design.native.typography_review import _glyph_metrics
-from examples.ui_design.native.widgets import UI, font_config
 from fontTools.ttLib import TTFont
 from imgui_bundle import imgui
+
+from mojive.ui.workspace import fonts
+from mojive.ui.workspace.design import BODY_SIZE
+from mojive.ui.workspace.widgets import UI, font_config
 
 
 def _cjk_source():
@@ -19,7 +21,9 @@ def _cjk_source():
     if len(sources) < 2:
         pytest.skip("CJK font is unavailable")
     regular, _heading = fonts.resolve_cjk_faces(sources[1])
-    if not Path(regular.path).name.startswith(("NotoSansCJK-", "NotoSansSC-", "SourceHanSansSC-")):
+    if not Path(regular.path).name.startswith(
+        ("NotoSansCJK-", "NotoSansSC-", "SourceHanSansSC-", "MiSans-")
+    ):
         pytest.skip("The installed CJK family has no declared nominal em conversion")
     return sources[1]
 
@@ -36,6 +40,23 @@ def test_proportional_face_em_ratio_matches_installed_font_metrics(portable):
 def test_numeric_font_keeps_its_compact_metrics():
     _source, ratio = fonts.resolve_fonts(portable=True)[2]
     assert ratio == 1.0
+
+
+def test_portable_fonts_have_real_bilingual_weights_and_preserved_distribution_files():
+    import hashlib
+    import json
+
+    sources = fonts.resolve_fonts(portable=True)
+    weights = []
+    for source, _ratio in sources[:2]:
+        path = Path(source.path)
+        manifest = json.loads((path.parent / "manifest.json").read_text())
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == manifest[path.name]
+        with TTFont(path) as face:
+            assert all(ord(char) in face.getBestCmap() for char in "Mojive相机导航设置材质库")
+            weights.append(face["OS/2"].usWeightClass)
+        assert (path.parent / "MiSans-License.pdf").is_file()
+    assert weights[1] > weights[0]
 
 
 def test_existing_sf_named_instances_keep_their_single_conversion(monkeypatch):
@@ -104,13 +125,13 @@ def test_body_and_heading_cjk_advance_matches_declared_em_size(typography, porta
     assert metrics["glyphs"]["H"]["ink_height_pt"] >= 9
 
 
-def test_default_measure_matches_real_13pt_bilingual_text(typography):
+def test_default_measure_matches_real_body_size_bilingual_text(typography):
     ui, frame = typography
 
     def paint():
         text = "Position 位置"
         measured = ui.measure(text)
-        imgui.push_font(ui.body, 13 * ui.s)
+        imgui.push_font(ui.body, BODY_SIZE * ui.s)
         native_width = imgui.calc_text_size(text).x
         imgui.pop_font()
         first = len(ui.draw.vtx_buffer)
@@ -152,7 +173,7 @@ def test_native_face_cap_height_is_centered_in_its_line_box(
     ui, frame = typography
 
     def paint():
-        imgui.push_font(getattr(ui, role), 13 * ui.s)
+        imgui.push_font(getattr(ui, role), BODY_SIZE * ui.s)
         imgui.text_unformatted("H 位置 0123456789")
         baked = imgui.get_font_baked()
         glyph = baked.find_glyph_no_fallback(ord("H"))

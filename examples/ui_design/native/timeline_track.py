@@ -14,8 +14,7 @@ from mojive.ui.keyframe_editor.track import TimelineLayout
 from mojive.ui.text_layout import fit_text, text_line_y
 from mojive.ui.theme import with_alpha
 from mojive.ui.timeline import nice_timeline_step, take_frame_bounds, timeline_time_to_x
-
-from .widgets import BODY_SIZE, TEXT
+from mojive.ui.workspace.widgets import BODY_SIZE, TEXT
 
 
 def measure_layout(editor, ctx, origin, available):

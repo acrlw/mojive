@@ -25,7 +25,7 @@ def draw(panel, ctx: PanelContext) -> None:
         )
         committed = panel._value_committed()
         if tooltip:
-            imgui.set_item_tooltip(ctx.tr(tooltip))
+            panel._tooltip(ctx.tr(tooltip))
         if changed:
             config = replace(config, **{attribute: value})
         if changed or committed:
@@ -46,9 +46,7 @@ def draw(panel, ctx: PanelContext) -> None:
     if panel._begin_properties("settings_recording"):
         panel._property(ctx.tr("Copy to clipboard"), control_part="checkbox")
         changed, value = panel._checkbox("##capture_clipboard", config.copy_to_clipboard)
-        imgui.set_item_tooltip(
-            ctx.tr("Copy screenshots as images and videos as files after saving.")
-        )
+        panel._tooltip(ctx.tr("Copy screenshots as images and videos as files after saving."))
         if changed:
             config = replace(config, copy_to_clipboard=value)
             ctx.apply_setting(ctx.set_recording_config, config)
@@ -60,7 +58,9 @@ def draw(panel, ctx: PanelContext) -> None:
         )
         imgui.end_disabled()
         if not clock_control and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            imgui.set_tooltip(ctx.tr("Simulation is controlled by the external application."))
+            panel._tooltip(
+                ctx.tr("Simulation is controlled by the external application."), hovered=True
+            )
         if changed:
             config = replace(config, run_simulation=value)
             ctx.apply_setting(ctx.set_recording_config, config)
@@ -85,7 +85,7 @@ def draw(panel, ctx: PanelContext) -> None:
         surfaces = tuple(CaptureSurface)
         labels = ("Scene Only", "Viewport with UI", "Entire Window")
         choice("##recording_surface", "surface", tuple(zip(surfaces, labels, strict=True)))
-        imgui.set_item_tooltip(
+        panel._tooltip(
             ctx.tr("Viewport recording follows the visibility choices in the Layers panel.")
         )
         panel._end_properties()
@@ -94,12 +94,12 @@ def draw(panel, ctx: PanelContext) -> None:
         panel._property(ctx.tr("Rate control"), control_part="select")
         modes = (("quality", "Quality priority"), ("bitrate", "Target bitrate"))
         choice("##recording_rate_control", "rate_control", modes)
-        imgui.set_item_tooltip(ctx.tr("Encoding settings apply to the next recording."))
+        panel._tooltip(ctx.tr("Encoding settings apply to the next recording."))
         if config.rate_control == "quality":
             panel._property(ctx.tr("Quality (CRF)"))
             changed, value = panel._slider_int("##recording_crf", config.crf, 0, 51)
             committed = panel._value_committed()
-            imgui.set_item_tooltip(ctx.tr("Lower CRF gives higher quality and larger files."))
+            panel._tooltip(ctx.tr("Lower CRF gives higher quality and larger files."))
             if changed:
                 config = replace(config, crf=value)
             if changed or committed:
@@ -116,7 +116,7 @@ def draw(panel, ctx: PanelContext) -> None:
         panel._property(ctx.tr("Encoding speed"), control_part="select")
         presets = (("fast", "Fast"), ("medium", "Balanced"), ("slow", "Slow"))
         choice("##recording_preset", "encoder_preset", presets)
-        imgui.set_item_tooltip(
+        panel._tooltip(
             ctx.tr(
                 "Slower encoding spends more CPU time on compression and may slow live recording."
             )
@@ -124,7 +124,7 @@ def draw(panel, ctx: PanelContext) -> None:
         panel._property(ctx.tr("Color sampling"), control_part="select")
         formats = (("yuv420p", "Compatible (4:2:0)"), ("yuv444p", "Full chroma (4:4:4)"))
         choice("##recording_pixel_format", "pixel_format", formats)
-        imgui.set_item_tooltip(
+        panel._tooltip(
             ctx.tr("4:4:4 preserves fine color detail but requires a compatible player.")
         )
         panel._end_properties()

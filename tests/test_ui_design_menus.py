@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 from examples.ui_design.native.reference_menus import TOP_MENUS, Menus
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
+
+from mojive.ui.workspace.widgets import UI
 
 
 @pytest.fixture(params=(1.0, 2.25))
@@ -23,7 +24,7 @@ def menu_bar(request, tmp_path):
         can_redo=False,
         state_take_recording=False,
         state_take_times=[],
-        adapter=SimpleNamespace(caps=SimpleNamespace(simulation=False)),
+        adapter=SimpleNamespace(caps=SimpleNamespace(simulation=False, topology_editing=False)),
     )
     study = SimpleNamespace(
         ui=ui,
@@ -161,5 +162,7 @@ def test_more_opens_a_hidden_menu_through_actual_native_mouse_input(menu_bar):
     state.click(menus.menu_rects["Window"])
     assert "Window" in menus.observed
     workspace = next(row for row in menus.observed["Window"]["rows"] if row["label"] == "Workspace")
-    state.click(workspace["rect"])
+    x, y, width, height = workspace["rect"]
+    state.io.add_mouse_pos_event(x + width / 2, y + height / 2)
+    state.frame(2)
     assert "Window/Workspace" in menus.observed

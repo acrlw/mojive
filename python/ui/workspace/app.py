@@ -36,12 +36,13 @@ class WorkspaceApp(ViewerApp):
 
         return draw_center_notice(self, overlay, message, border=border)
 
-    def _draw_file_status(self, overlay, message, path, *, padding_pt=12):
+    def _draw_file_status(self, overlay, message, path, *, padding_pt=4):
         from mojive.ui.workspace.notices import draw_file_receipt
 
         return draw_file_receipt(self, overlay, message, path, padding_pt=padding_pt)
 
     def __init__(self, session, backend, window, **kwargs):
+        ui = kwargs.pop("ui", None)
         self.design = kwargs.pop("design", None)
         if self.design is None:
             from mojive.design.runtime import DesignRuntime
@@ -54,7 +55,9 @@ class WorkspaceApp(ViewerApp):
             builtin_ids=config.builtin_panels if config else None,
         )
         self.projection = EntityProjection(self)
-        self.workspace = WorkspaceShell(self)
+        self.workspace = WorkspaceShell(
+            self, ui=ui, portable_fonts=self.design.spec["tokens"]["font_family"] == "portable"
+        )
         from mojive.ui.workspace.typography import Typography
 
         self.workspace.ui.typography = Typography.resolve(self.preferences.get("typography"))
@@ -168,6 +171,8 @@ class WorkspaceApp(ViewerApp):
         self.workspace.begin_frame()
 
     def frame(self):
+        from mojive.ui.workspace.window_chrome import floating_dock_hosts
+
         imgui.set_current_context(self.window._imgui_context)
         # DockSpace settings must be restored before ImGui starts the next frame.
         if self.workspace.restore_next:
@@ -175,18 +180,23 @@ class WorkspaceApp(ViewerApp):
             imgui.load_ini_settings_from_memory(self.workspace.saved)
             self.workspace.restore_next = False
         if self.design is None:
-            with self.scrollbar_visibility.scope():
+            with floating_dock_hosts(self.workspace), self.scrollbar_visibility.scope():
                 super().frame()
         else:
             with self.design.scope(self.workspace):
                 self.workspace.ui.design.begin_frame()
-                with self.scrollbar_visibility.scope():
+                with floating_dock_hosts(self.workspace), self.scrollbar_visibility.scope():
                     super().frame()
 
     def _present_frame(self, elapsed):
         if self.design is not None and self.design.workbench is not None:
             self.design.workbench.draw_overlay(self.workspace)
         super()._present_frame(elapsed)
+
+    def _begin_dockspace(self):
+        from mojive.ui.workspace.window_chrome import draw_dockspace
+
+        draw_dockspace(self.workspace)
 
     def _poll_application_shortcuts(self):
         # A numeric gesture owns Escape before application selection shortcuts.

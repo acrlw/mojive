@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from math import ceil, floor, trunc
 from typing import Any
 
 import numpy as np
@@ -23,6 +24,7 @@ class CameraPreview:
         self._image: ViewportImage | None = None
         self._source_generation = -1
         self._position: tuple[float, float] | None = None
+        self._drag_offset: tuple[float, float] | None = None
         self._pinned = False
         self._locked = False
         self._camera_name = ""
@@ -81,7 +83,9 @@ class CameraPreview:
         body_margin_pt: tuple[float, float, float, float] = (0, 0, 0, 0),
         row_gap_pt: float = 0.0,
         draw_frame: Any = None,
+        draw_image: Any = None,
         record_image: Any = None,
+        native_layout: bool = False,
     ) -> None:
         if not self._enabled:
             self._bounds = None
@@ -90,15 +94,22 @@ class CameraPreview:
         if image is None:
             self._bounds = None
             return
+        self.update_drag_position()
         t = translate or str
         _x, _y, width, height = viewport
         scale = window.style_scale
         header_height = header_height_pt * scale
         margin = margin_pt * scale
         left, top, right, bottom = body_margin_pt
+        available_width, available_height = max(0, width - 2 * margin), max(0, height - 2 * margin)
+        if native_layout:
+            native_left, native_top = ceil(_x + margin), ceil(_y + margin)
+            native_right, native_bottom = floor(_x + width - margin), floor(_y + height - margin)
+            available_width = max(0, native_right - native_left)
+            available_height = max(0, native_bottom - native_top)
         surface = preview_surface(
-            max(0, width - 2 * margin),
-            max(0, height - 2 * margin),
+            available_width,
+            available_height,
             maximum_width=min(
                 maximum_width_pt * scale,
                 max(180 * scale, width * 0.48) if draw_header is None else width,
@@ -117,10 +128,32 @@ class CameraPreview:
         if surface is None:
             self._bounds = None
             return
+        if native_layout:
+            # BeginChild truncates its frame. Absorb the rounding remainder in
+            # the header so the camera image retains its aspect and edge insets.
+            panel_width = floor(surface.panel_width)
+            ix, _iy, _iw, ih = surface.image_rect
+            iw = panel_width - ix - (image_padding_pt + right) * scale
+            if image_height_pt is None:
+                ih = iw / max(image.aspect, 1e-9)
+            body_height = (
+                row_gap_pt * scale + top * scale + ih + (image_padding_pt + bottom) * scale
+            )
+            panel_height = ceil(header_height + body_height)
+            header_height = panel_height - body_height
+            surface = replace(
+                surface,
+                panel_width=panel_width,
+                panel_height=panel_height,
+                image_rect=(ix, header_height + row_gap_pt * scale + top * scale, iw, ih),
+            )
         panel_width, panel_height = surface.panel_width, surface.panel_height
         px, py = preview_origin(
             viewport, (panel_width, panel_height), desired=self._position, margin=margin
         )
+        if native_layout:
+            px = min(max(trunc(px), native_left), native_right - panel_width)
+            py = min(max(trunc(py), native_top), native_bottom - panel_height)
         self._bounds = (px, py, px + panel_width, py + panel_height)
 
         imgui.set_cursor_screen_pos(imgui.ImVec2(px, py))
@@ -141,10 +174,7 @@ class CameraPreview:
                 imgui.pop_style_var(2)
             return
         if draw_header is not None:
-            dragging = draw_header(camera_name, header_height)
-            if dragging and not (self._pinned or self._locked):
-                delta = imgui.get_io().mouse_delta
-                self._position = (px + float(delta.x), py + float(delta.y))
+            self._capture_drag(draw_header(camera_name, header_height), px, py)
         else:
             self._draw_header(camera_name, t, header_height, scale, px, py)
         ix, iy, iw, ih = surface.image_rect
@@ -154,12 +184,35 @@ class CameraPreview:
         )
         dx, dy, dw, dh = destination
         imgui.set_cursor_screen_pos((dx, dy))
-        imgui.image(window.viewport_texture_ref(image), imgui.ImVec2(dw, dh), uv0, uv1)
+        texture = window.viewport_texture_ref(image)
+        if draw_image is None:
+            imgui.image(texture, imgui.ImVec2(dw, dh), uv0, uv1)
+        else:
+            draw_image(texture, destination, uv0, uv1)
         if record_image is not None:
             record_image(frame, destination, uv0, uv1)
         imgui.end_child()
         if draw_header is not None:
             imgui.pop_style_var(2)
+
+    def update_drag_position(self) -> None:
+        """Apply a captured header's absolute pointer anchor before surface layout."""
+        if self._drag_offset is None:
+            return
+        io = imgui.get_io()
+        if self._pinned or not io.mouse_down[0]:
+            self._drag_offset = None
+            return
+        self._position = (
+            float(io.mouse_pos.x) + self._drag_offset[0],
+            float(io.mouse_pos.y) + self._drag_offset[1],
+        )
+
+    def _capture_drag(self, active, x, y):
+        if active and not self._pinned and self._drag_offset is None:
+            mouse = imgui.get_io().mouse_pos
+            self._drag_offset = (x - float(mouse.x), y - float(mouse.y))
+            self._position = (x, y)
 
     def _draw_header(self, camera_name, t, header_height, scale, px, py):
         pin_label = t("Pinned" if self._pinned else "Pin")
@@ -173,13 +226,7 @@ class CameraPreview:
         )
         title = f"{t('Camera')} · {camera_name}"
         imgui.button(title, imgui.ImVec2(title_width, header_height))
-        if (
-            not (self._pinned or self._locked)
-            and imgui.is_item_active()
-            and imgui.is_mouse_dragging(0)
-        ):
-            delta = imgui.get_io().mouse_delta
-            self._position = (px + float(delta.x), py + float(delta.y))
+        self._capture_drag(imgui.is_item_active(), px, py)
         imgui.same_line()
         if imgui.button(pin_label, imgui.ImVec2(pin_width, header_height)):
             self.set_pinned(not self._pinned)
@@ -203,6 +250,7 @@ class CameraPreview:
             return
         self._image = None
         self._bounds = None
+        self._drag_offset = None
         self._pinned = False
         self._locked = False
 
@@ -222,6 +270,7 @@ class CameraPreview:
         self._pinned = bool(pinned and self._camera is not None)
         if self._pinned:
             self._locked = False
+            self._drag_offset = None
 
     def set_locked(self, locked: bool) -> None:
         self._locked = bool(locked and self._camera_id >= 0)

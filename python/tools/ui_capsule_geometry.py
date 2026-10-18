@@ -9,6 +9,7 @@ from mojive.geometry2d.curves import (
     CURVE_TOLERANCE,
     _cap_geometry,
     _fit_cap_smoothing,
+    capsule_end_padding,
     smooth_capsule_points,
 )
 from mojive.ui.theme import THEME
@@ -40,20 +41,9 @@ def end_radii(path, center, samples=181):
     return np.where((distance > 0) & (along >= 0) & (along <= 1), distance, np.inf).min(axis=1)
 
 
-@lru_cache(maxsize=128)
 def optical_end_padding(radius, smoothing):
     """Equalize mean end clearance and straight-side clearance without changing the cap."""
-    if smoothing == 0:
-        return radius
-    path = smooth_capsule_points(0, 0, radius * 8, radius * 2, smoothing, tolerance=radius / 26000)
-    lo, hi = radius, radius * 2
-    for _ in range(24):
-        middle = (lo + hi) / 2
-        if end_radii(path, (middle, radius)).mean() < radius:
-            lo = middle
-        else:
-            hi = middle
-    return (lo + hi) / 2
+    return capsule_end_padding(radius * 8, radius * 2, smoothing)
 
 
 def end_padding(geometry):

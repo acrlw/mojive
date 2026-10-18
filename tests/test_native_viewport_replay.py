@@ -41,8 +41,8 @@ def replay_controls(request, tmp_path, monkeypatch):
     workspace.menus = SimpleNamespace(popup=lambda *args: None)
     state = SimpleNamespace(session=session, ui=ui, width=700)
 
-    def shell(x, y, width, height):
-        ui.rect(x, y, width * ui.s, height * ui.s, (22, 25, 28, 230))
+    def shell(x, y, width, height, *, radius):
+        ui.rect(x, y, width * ui.s, height * ui.s, (22, 25, 28, 230), r=radius)
 
     def frame(count=1):
         for _ in range(count):

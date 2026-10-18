@@ -43,6 +43,7 @@ camera-navigation: camera-focus
 camera-focus:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_camera_tracking.py -k double_click
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_interaction.py -k double_clicking_joint_and_hierarchy
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_joint_focus_readability.py
 
 .PHONY: camera-helpers
 ## Capture double-click focus on moving and world-attached cameras and lights.
@@ -111,7 +112,10 @@ help:
 		'  make ui-icon-references compare icon outline and filled references' \
 		'  make ui-redesign       new layout feasibility capture (--interactive via ARGS)' \
 		'  make ui-native-design  live native UI parameter editor and production preview' \
+		'  make ui-native-workspace interactive production UI (--float-panel Timeline via ARGS)' \
 		'  make ui-native-capture capture production panels and menus' \
+		'  make ui-notice-review capture operation notices and file receipts' \
+		'  make ui-design-guide  browse the native design specification and panel prototypes' \
 		'  make ui-design         serve the browser design reference locally' \
 		'  make ui-gallery        deterministic UI feasibility acceptance pages' \
 		'  make readme-media      refresh unmodified production screenshots for README' \
@@ -511,6 +515,10 @@ ui-frame-profile:
 .PHONY: editor-profile
 editor-profile:
 	$(PY) -m mojive.tools.editor_profile --renderer $(BACKEND) $(ARGS)
+
+.PHONY: inspector-profile
+inspector-profile:
+	$(PY) -m mojive.tools.inspector_profile --renderer $(BACKEND) $(ARGS)
 
 .PHONY: hierarchy-benchmark
 hierarchy-benchmark:
@@ -1236,7 +1244,7 @@ canvas-2d-gallery:
 canvas-2d-test:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_canvas2d.py
 
-.PHONY: ui-design-native ui-native-design ui-native-capture ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime ui-design-reference
+.PHONY: ui-design-native ui-native-design ui-native-workspace ui-native-capture ui-notice-review ui-design-native-check ui-design-icons ui-design-gizmos ui-design-runtime ui-design-reference ui-design-profile
 
 ## Compatibility alias for the native parameter editor.
 ui-design-native: ui-native-design
@@ -1245,9 +1253,22 @@ ui-design-native: ui-native-design
 ui-native-design:
 	$(PY) -m mojive.tools.design_workbench --backend $(BACKEND) $(ARGS)
 
+## Inspect ordinary production panels in the actual native window.
+ui-native-workspace:
+	$(PY) -m mojive.tools.native_workspace --interactive --backend $(BACKEND) $(ARGS)
+
 ## Capture production panels and menus, then exit.
 ui-native-capture:
 	$(PY) -m mojive.tools.native_workspace --capture --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
+
+## Capture complete production notice surfaces and inline/stacked file actions.
+ui-notice-review:
+	$(PY) -m mojive.tools.native_notice_review --backend $(BACKEND) --output output/ui_design/notices/$(BACKEND) $(ARGS)
+
+.PHONY: ui-design-guide
+## Browse typography, palettes, spacing and independent panel-group prototypes.
+ui-design-guide:
+	$(PY) -m examples.ui_design.native.design_guide --backend $(BACKEND) $(ARGS)
 
 ## Retain the standalone design study for typography/icon galleries and the prototype workbench.
 ui-design-reference:
@@ -1262,7 +1283,10 @@ ui-design-gizmos:
 
 ## Verify scaled panels, scene selection, numeric edits, timeline and file actions.
 ui-design-runtime:
-	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py tests/gpu/test_design_workbench.py
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py tests/gpu/test_design_workbench.py tests/gpu/test_menu_bar_interaction.py tests/gpu/test_design_audit_draw.py
+
+ui-design-profile:
+	$(PY) -m mojive.tools.design_profile --backend $(BACKEND) $(ARGS)
 
 .PHONY: ui-native-audit ui-native-pick-check
 UI_AUDIT_SCALE ?= 1

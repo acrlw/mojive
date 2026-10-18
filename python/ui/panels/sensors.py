@@ -1,4 +1,4 @@
-"""Live MuJoCo sensor values sourced from Session."""
+"""Live sensor metadata and values supplied by the active scene source."""
 
 from __future__ import annotations
 
@@ -9,13 +9,41 @@ from mojive.adapters.base import FrameNeeds
 from mojive.ui.panels import (
     Panel,
     PanelContext,
-    begin_kv_table,
     button_row_layout,
     button_width,
     copy_state_vector,
-    labeled,
 )
 from mojive.ui.panels.presentation import PropertyPresentation
+
+_CARTESIAN_SENSOR_TYPES = frozenset(
+    (
+        "accelerometer",
+        "velocimeter",
+        "gyro",
+        "force",
+        "torque",
+        "magnetometer",
+        "framepos",
+        "framexaxis",
+        "frameyaxis",
+        "framezaxis",
+        "framelinvel",
+        "frameangvel",
+        "framelinacc",
+        "frameangacc",
+        "subtreecom",
+        "subtreelinvel",
+        "subtreeangmom",
+    )
+)
+
+
+def sensor_component_label(sensor_type: str, dimension: int, index: int) -> str:
+    """Name Cartesian components only when the sensor metadata defines those axes."""
+    kind = sensor_type.removeprefix("mjSENS_").lower()
+    if dimension == 3 and kind in _CARTESIAN_SENSOR_TYPES:
+        return "XYZ"[index]
+    return str(index)
 
 
 def sensor_value_preview(values, *, max_items: int = 24) -> str:
@@ -53,10 +81,10 @@ class SensorsPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         infos = ctx.session.sensor_infos
         if not infos:
-            imgui.text_disabled(ctx.tr("no sensors"))
+            self._empty(ctx)
             return
 
-        self.sensor_index = min(self.sensor_index, len(infos) - 1)
+        self.sensor_index = max(0, min(self.sensor_index, len(infos) - 1))
         names = [sensor.name for sensor in infos]
         imgui.set_next_item_width(-1)
         _changed, self.sensor_index = (
@@ -68,54 +96,76 @@ class SensorsPanel(Panel):
         values = ctx.session.frame.sensors
         value = (
             None
-            if values is None
+            if values is None or sensor.data_adr < 0 or sensor.data_adr + sensor.dim > len(values)
             else np.asarray(values[sensor.data_adr : sensor.data_adr + sensor.dim])
         )
 
-        opened = (
-            self.presentation.begin_table("sensor_kv")
-            if self.presentation
-            else begin_kv_table("sensor_kv")
+        self._metadata(ctx, sensor)
+        self._actions(ctx, value)
+        if value is None:
+            self._missing(ctx)
+        else:
+            self._values(ctx, sensor, value)
+
+    def _metadata(self, ctx, sensor):
+        kind = sensor.type.removeprefix("mjSENS_").lower()
+        imgui.text_disabled(f"{kind} · {ctx.tr('dimension')} {sensor.dim}")
+
+    def _missing(self, ctx):
+        imgui.text_wrapped(ctx.tr("not produced this frame"))
+
+    def _empty(self, ctx):
+        imgui.text_wrapped(ctx.tr("This scene source provides no sensors."))
+
+    def _open_plot(self, ctx):
+        if ctx.panels is not None:
+            panel = ctx.panels.load("Plot")
+            focus = getattr(panel, "focus_sensor", None)
+            if callable(focus):
+                focus(self.sensor_index)
+            ctx.panels.open_panel("Plot")
+
+    def _actions(self, ctx, values):
+        labels = (ctx.tr("Copy"), ctx.tr("Open in Plot"))
+        inline = button_row_layout(
+            tuple(button_width(label) for label in labels),
+            imgui.get_content_region_avail().x,
+            imgui.get_style().item_spacing.x,
         )
-        if opened:
-            if self.presentation is None:
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            display = self.presentation.labeled if self.presentation else labeled
-            display(ctx.tr("type"), sensor.type.removeprefix("mjSENS_").lower())
-            display(ctx.tr("dimension"), str(sensor.dim))
-            if value is None:
-                display(ctx.tr("value"), ctx.tr("not produced this frame"))
-            elif sensor.dim <= 6:
-                display(ctx.tr("value"), np.array2string(value, precision=6, separator=", "))
-            if self.presentation:
-                self.presentation.end_table()
-            else:
-                imgui.end_table()
-        if value is not None and sensor.dim > 6:
-            imgui.separator()
-            imgui.text_disabled(ctx.tr("value"))
-            preview = sensor_value_preview(value)
-            labels = (ctx.tr("Copy"), ctx.tr("Open in Plot"))
-            inline = button_row_layout(
-                tuple(button_width(label) for label in labels),
-                imgui.get_content_region_avail().x,
-                imgui.get_style().item_spacing.x,
-            )
-            button = self.presentation.button if self.presentation is not None else imgui.button
-            if button(labels[0]):
-                copy_state_vector(value)
-            if inline[1]:
-                imgui.same_line()
-            if button(labels[1]) and ctx.panels is not None:
-                panel = ctx.panels.load("Plot")
-                focus = getattr(panel, "focus_sensor", None)
-                if callable(focus):
-                    focus(self.sensor_index)
-                ctx.panels.open_panel("Plot")
-            height = min(150.0, 38.0 + 18.0 * max(1, preview.count("\n") + 1))
-            if imgui.begin_child(
-                "sensor_value_block", imgui.ImVec2(0.0, height * ctx.style_scale), 1
-            ):
-                imgui.text_wrapped(preview)
-            imgui.end_child()
+        button = self.presentation.button if self.presentation is not None else imgui.button
+        imgui.begin_disabled(values is None)
+        if button(labels[0]):
+            copy_state_vector(values)
+        imgui.end_disabled()
+        if inline[1]:
+            imgui.same_line()
+        imgui.begin_disabled(ctx.panels is None)
+        if button(labels[1]):
+            self._open_plot(ctx)
+        imgui.end_disabled()
+
+    def _values(self, ctx, sensor, values):
+        if sensor.dim == 1:
+            imgui.text_unformatted(f"{float(values[0]):.6g}")
+            imgui.set_item_tooltip(repr(float(values[0])))
+            return
+        flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.row_bg
+        if not imgui.begin_table("sensor_components", 2, flags):
+            return
+        try:
+            imgui.table_setup_column(ctx.tr("Component"), imgui.TableColumnFlags_.width_fixed)
+            imgui.table_setup_column(ctx.tr("value"), imgui.TableColumnFlags_.width_stretch)
+            imgui.table_headers_row()
+            clipper = imgui.ImGuiListClipper()
+            clipper.begin(len(values))
+            while clipper.step():
+                for index in range(clipper.display_start, clipper.display_end):
+                    imgui.table_next_row()
+                    imgui.table_next_column()
+                    imgui.text_unformatted(sensor_component_label(sensor.type, sensor.dim, index))
+                    imgui.table_next_column()
+                    imgui.text_unformatted(f"{float(values[index]):.6g}")
+                    imgui.set_item_tooltip(repr(float(values[index])))
+            clipper.end()
+        finally:
+            imgui.end_table()

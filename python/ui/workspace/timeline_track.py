@@ -8,13 +8,19 @@ from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.keyframe_editor.controls import _format_tick
 from mojive.ui.keyframe_editor.toolbar import add_model_keyframe
-from mojive.ui.keyframe_editor.track import TimelineLayout
+from mojive.ui.keyframe_editor.track import TimelineLayout, draw_selection_menu
 from mojive.ui.theme import with_alpha
-from mojive.ui.timeline import nice_timeline_step, take_frame_bounds, timeline_time_to_x
+from mojive.ui.timeline import (
+    nearest_take_frame,
+    nice_timeline_step,
+    take_frame_bounds,
+    timeline_time_to_x,
+    timeline_x_to_time,
+)
 from mojive.ui.workspace.component_layout import control_frame_size
 from mojive.ui.workspace.design import CONTROL_RADIUS, DESIGN
 from mojive.ui.workspace.timeline_header import model_header_layout
@@ -59,12 +65,11 @@ class NativeTimelineLayout(TimelineLayout):
 
     @property
     def time_bounds(self):
-        return self.lo[0] + self.channel_width + self.time_padding + self.left_inset, max(
-            self.lo[0] + self.channel_width + self.time_padding + self.left_inset + 1,
-            self.hi[0] - self.right_inset,
-        )
+        left = min(self.hi[0], self.track_left + self.time_padding + self.left_inset)
+        return left, max(left, self.hi[0] - self.right_inset)
 
 
+@part_scope("timeline_sheet")
 def measure_layout(editor, ctx, origin, available, *, ui=None):
     """Resolve the same track geometry for drawing and native timeline input."""
     scale = ctx.style_scale
@@ -83,6 +88,7 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
     )
     top_margin = bottom_margin = marker_offset = left_inset = 0.0
     header_gap = 0.0
+    column_gap = 12 * scale
     lo = tuple(origin)
     if ui is not None:
         sheet = ui.component_style("timeline_sheet")
@@ -110,6 +116,7 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
         )
         top_margin, bottom_margin = lane_margin[1], lane_margin[3]
         gap = sheet.get("rowGap", 0) * scale
+        column_gap = sheet.get("columnGap", 12) * scale
         channel = min(max(0, width - 2 * scale), sheet.get("labelWidth", channel / scale) * scale)
         header, _ = model_header_layout(ui, 0, 0, channel)
         header_gap = sheet.get("headerGap", 8) * scale
@@ -131,21 +138,30 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
         lane += max(0, track_height - natural_height) / 3
         lo = (origin[0] + sheet_margin[0], origin[1] + sheet_margin[1])
         width = max(scale, width - sheet_margin[0] - sheet_margin[2])
+    minimum_track = marker + 4 * scale + left_inset + right + scale
+    channel = min(channel, max(0, width - column_gap - minimum_track))
+    column_gap = min(column_gap, max(0, width - channel - minimum_track))
+    height = ruler + 3 * lane + 2 * gap
+    if ui is not None:
+        ui.hits["timeline-gutter"] = (lo[0] + channel, lo[1], column_gap, height)
         if ui.design is not None:
             ui.design.record(
                 "timeline-sheet",
                 ("timeline_sheet",),
-                (*lo, width, track_height),
+                (*lo, width, height),
                 "container",
-                content=[*lo, width, track_height],
+                content=[*lo, width, height],
                 outer=[
                     origin[0],
                     origin[1],
                     width + sheet_margin[0] + sheet_margin[2],
-                    track_height + sheet_margin[1] + sheet_margin[3],
+                    height + sheet_margin[1] + sheet_margin[3],
                 ],
                 margin=list(sheet_margin),
+                columnGap=column_gap / scale,
+                gutterRect=[lo[0] + channel, lo[1], column_gap, height],
                 fieldRegions={
+                    "columnGap": [lo[0] + channel, lo[1], column_gap, height],
                     "headerGap": [lo[0], lo[1] + ruler - header_gap, width, header_gap],
                     "rowGap": [
                         [lo[0], lo[1] + ruler + (i + 1) * lane + i * gap, width, gap]
@@ -153,7 +169,6 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
                     ],
                 },
             )
-    height = ruler + 3 * lane + 2 * gap
     return NativeTimelineLayout(
         lo,
         width,
@@ -170,6 +185,7 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
         marker_offset,
         left_inset,
         header_gap,
+        column_gap=column_gap,
     )
 
 
@@ -181,13 +197,13 @@ class NativeTimelineTrack:
         self.snapshot_source = None
         self.snapshot_by_id = {}
 
+    def draw_selection_menu(self, editor, ctx, editable):
+        draw_selection_menu(editor, ctx, editable, menus=self.workspace.menus)
+
+    @part_scope("timeline_model_group")
     def draw_header(self, editor, ctx, layout, models, editable, icon_drawer):
         ui, scale = self.workspace.ui, ctx.style_scale
-        box, group = model_header_layout(ui, *layout.lo, layout.channel_width)
-        dy = max(0, layout.header_height - box.outer.height) / 2
-        box, group = model_header_layout(
-            ui, layout.lo[0], layout.lo[1] + dy, layout.channel_width, observe=True
-        )
+        box, group = model_header_layout(ui, *layout.lo, layout.channel_width, observe=True)
         selector, add = group.rectangles
         ui.hits["timeline-model-group"] = box.outer.tuple()
         imgui.set_cursor_screen_pos((selector.x, selector.y))
@@ -238,6 +254,7 @@ class NativeTimelineTrack:
                     chosen, _ = menus.local_item(
                         label,
                         checked=slot == index,
+                        checkable=True,
                         key=f"timeline-model-choice-{index}",
                         icon="file",
                     )
@@ -248,9 +265,10 @@ class NativeTimelineTrack:
             imgui.end_combo()
         return changed, slot
 
+    @part_scope("timeline_sheet")
     def paint(self, editor, ctx, layout, projection, snapshots, hit, keyframes, take_times):
         imgui.push_font(
-            self.workspace.ui.body,
+            self.workspace.ui.resolve_font(self.workspace.ui.component_style("timeline_lane")),
             self.workspace.ui.metric("timeline_lane", "fontSize", DESIGN.timeline_lane_size)
             * ctx.style_scale,
         )
@@ -261,14 +279,31 @@ class NativeTimelineTrack:
 
     def _paint(self, editor, ctx, layout, projection, snapshots, hit, keyframes, take_times):
         draw, scale, theme = ImguiDraw2D(), ctx.style_scale, ctx.theme
-        track_left = layout.lo[0] + layout.channel_width
-        draw.rect_filled(layout.lo, layout.hi, theme.bg_window)
-        draw.rect_filled((track_left, layout.lo[1]), layout.hi, theme.bg_child, rounding=4 * scale)
+        track_left = layout.track_left
+        ui = self.workspace.ui
+        radius = ui.component_style("timeline_sheet").get("radius", 4) * scale
+        draw.rect_filled(layout.lo, layout.hi, theme.bg_window, rounding=radius)
+        draw.rect_filled((track_left, layout.lo[1]), layout.hi, theme.bg_child, rounding=radius)
+        if ui.design is not None:
+            ui.design.record(
+                "timeline-sheet-background",
+                ("timeline_sheet",),
+                (*layout.lo, layout.width, layout.height),
+                "timeline_track",
+                radius=radius,
+            )
+            ui.design.record(
+                "timeline-track-background",
+                ("timeline_sheet",),
+                (track_left, layout.lo[1], layout.hi[0] - track_left, layout.height),
+                "timeline_track",
+                radius=radius,
+            )
         lane_colors = (theme.primary, theme.primary, theme.info)
         rows = (
             ("Keyframes", "model", "diamond"),
             ("Take", "take", "record"),
-            ("Snapshots", "snapshots", "link"),
+            ("Snapshots", "snapshots", "snapshot"),
         )
         lane_boxes = []
         self._lane_text_rects = [[], [], []]
@@ -298,7 +333,7 @@ class NativeTimelineTrack:
                     "lane_label",
                     lane_box.content.x,
                     lane_box.content.y,
-                    max(0, track_left - lane_box.content.x),
+                    max(0, layout.channel_right - lane_box.content.x),
                     lane_box.content.height,
                     key=f"timeline-lane-label-{index}",
                     padding=(8 * scale, 0, 6 * scale, 0),
@@ -330,6 +365,7 @@ class NativeTimelineTrack:
                     label_box,
                     key=f"timeline-lane-label-{index}",
                     background=editor.edit_lane == lane,
+                    radius=label_style.get("radius", CONTROL_RADIUS) * scale,
                     iconRect=list(icon_rect.tuple()),
                     textRect=list(text_rect.tuple()),
                 )
@@ -339,6 +375,7 @@ class NativeTimelineTrack:
                     icon_rect.y,
                     extent / scale,
                     tuple(round(value * 255) for value in color),
+                    style=label_style,
                 )
                 ui.component_text(
                     "lane_label",
@@ -379,13 +416,18 @@ class NativeTimelineTrack:
             )
         if hit.snapshot_id >= 0:
             item = self.snapshot_by_id[hit.snapshot_id]
-            imgui.set_tooltip(f"{item.name}  {item.time:g} s\n{ctx.tr('Double-click to load')}")
+            self.workspace.ui.tooltip(
+                f"{item.name}  {item.time:g} s\n{ctx.tr('Double-click to load')}", translate=False
+            )
         elif hit.keyframe_id >= 0:
             key = keyframes[hit.keyframe_id]
-            imgui.set_tooltip(
+            self.workspace.ui.tooltip(
                 f"{key.name or ctx.tr('keyframe')}  {key.time:g} s\n"
-                f"{ctx.tr('Double-click to load')}"
+                f"{ctx.tr('Double-click to load')}",
+                translate=False,
             )
+        elif take_times:
+            self._take_tooltip(editor, ctx, layout, hit, take_times)
 
     @staticmethod
     def _x(editor, layout, time):
@@ -393,7 +435,7 @@ class NativeTimelineTrack:
 
     def _ruler(self, draw, editor, ctx, layout):
         imgui.push_font(
-            self.workspace.ui.body,
+            self.workspace.ui.resolve_font(self.workspace.ui.component_style("timeline_ruler")),
             self.workspace.ui.metric("timeline_ruler", "fontSize", DESIGN.timeline_ruler_size)
             * ctx.style_scale,
         )
@@ -402,6 +444,7 @@ class NativeTimelineTrack:
         finally:
             imgui.pop_font()
 
+    @part_scope("timeline_ruler")
     def _draw_ruler(self, draw, editor, ctx, layout):
         scale = ctx.style_scale
         left, right = layout.time_bounds
@@ -417,12 +460,15 @@ class NativeTimelineTrack:
             - sum(ui.component_style("timeline_ruler").edges("margin", scale)[n] for n in (1, 3)),
         )
         step = nice_timeline_step(editor.view_end - editor.view_start, right - left, 80 * scale)
-        tick = math.ceil(editor.view_start / (step / 5)) * (step / 5)
-        for _ in range(1000):
+        first_tick = math.ceil(editor.view_start / (step / 5))
+        label_right = left
+        for index in range(1000):
+            tick_index = first_tick + index
+            tick = tick_index * (step / 5)
             if tick > editor.view_end + step * 1e-7:
                 break
             x = self._x(editor, layout, tick)
-            major = abs(tick / step - round(tick / step)) < 1e-6
+            major = tick_index % 5 == 0
             draw.line(
                 (x, layout.ruler_bottom - (5 if major else 3) * scale),
                 (x, layout.ruler_bottom),
@@ -437,25 +483,45 @@ class NativeTimelineTrack:
                     0.5 * scale,
                 )
                 caption = _format_tick(tick, step)
-                if x + 4 * scale + draw.text_size(caption)[0] <= layout.hi[0] - 3 * scale:
-                    ui = self.workspace.ui
-                    ruler = ui.component_style("timeline_ruler")
+                ruler = ui.component_style("timeline_ruler")
+                caption_width = ui.measure(
+                    caption,
+                    ruler.get("fontSize", DESIGN.timeline_ruler_size),
+                    translate=False,
+                    font_resolved=True,
+                    style=ruler,
+                )
+                caption_left = max(left, min(x - caption_width / 2, right - caption_width))
+                caption_right = caption_left + caption_width
+                if caption_left >= label_right and caption_right <= right:
                     margin = ruler.edges("margin", scale)
                     label_top = ruler.get("labelTop", 0) * scale
+                    rect = Rect(
+                        caption_left,
+                        layout.lo[1] + margin[1] + label_top,
+                        caption_width,
+                        max(0, layout.header_height - margin[1] - margin[3]),
+                    )
                     ui.component_text(
                         "timeline_ruler",
-                        Rect(
-                            x + 4 * scale + margin[0],
-                            layout.lo[1] + margin[1] + label_top,
-                            max(0, layout.hi[0] - x - 7 * scale - margin[2]),
-                            max(0, layout.header_height - margin[1] - margin[3]),
-                        ),
+                        rect,
                         caption,
                         tuple(round(v * 255) for v in ctx.theme.text_disabled),
                         align="start",
                         translate=False,
                     )
-            tick += step / 5
+                    if ui.design is not None:
+                        ui.design.record(
+                            f"timeline-ruler-tick-{tick_index}",
+                            ("timeline_ruler",),
+                            rect.tuple(),
+                            "timeline_tick",
+                            time=tick,
+                            tickX=x,
+                            label=caption,
+                            step=step,
+                        )
+                    label_right = caption_right + 8 * scale
 
     def _range(self, draw, editor, ctx, layout, take_times):
         selection = editor.range_preview or ctx.session.state_take_range
@@ -468,18 +534,31 @@ class NativeTimelineTrack:
         draw.rect_filled(
             (first, layout.ruler_bottom), (last, layout.hi[1]), with_alpha(color, 0.045)
         )
+        endpoint_times = (take_times[selection[0]], take_times[selection[1]])
+        handles = tuple(self._x(editor, layout, time) for time in endpoint_times)
         draw.rect_filled(
-            (first, layout.ruler_bottom - 3 * scale),
-            (last, layout.ruler_bottom),
+            (handles[0], layout.ruler_bottom - 3 * scale),
+            (handles[1], layout.ruler_bottom),
             with_alpha(color, 0.7),
             rounding=scale,
         )
-        for x in (first, last):
+        for x in handles:
             draw.line(
                 (x, layout.ruler_bottom - 7 * scale),
                 (x, layout.ruler_bottom + 4 * scale),
                 color,
                 1.5 * scale,
+            )
+        ui = self.workspace.ui
+        if ui.design is not None:
+            ui.design.record(
+                "timeline-loop-range",
+                ("timeline_sheet",),
+                (first, layout.ruler_bottom, last - first, layout.hi[1] - layout.ruler_bottom),
+                "timeline_loop_range",
+                endpointTimes=list(endpoint_times),
+                handleXs=list(handles),
+                coverageXs=[first, last],
             )
 
     def _take(self, draw, editor, ctx, layout, take_times):
@@ -506,7 +585,7 @@ class NativeTimelineTrack:
         named = False
         start = max(0, bisect.bisect_left(take_times, editor.view_start) - 1)
         end = min(len(take_times), bisect.bisect_right(take_times, editor.view_end) + 1)
-        show_cells = end - start <= (right - left) / (10 * scale)
+        show_samples = end - start <= (right - left) / (10 * scale)
         first_segment = max(0, bisect.bisect_right(segments, (start, len(take_times))) - 1)
         for slot in range(first_segment, len(segments)):
             a, b = segments[slot]
@@ -533,16 +612,36 @@ class NativeTimelineTrack:
             )
             # Only recording adjacency joins cells. Zoom changes tick density;
             # deleting frames leaves their original coverage empty.
-            if show_cells:
-                for index in range(max(a + 1, start), min(b + 1, end)):
-                    x = self._x(editor, layout, cells[index][0])
+            if show_samples:
+                for index in range(max(a, start), min(b + 1, end)):
+                    # Cell edges delimit sample coverage; marks identify the
+                    # actual recorded timestamp used by seek and the playhead.
+                    x = self._x(editor, layout, take_times[index])
                     if left <= x <= right:
+                        active = index == session.state_take_cursor
+                        mark_color = ctx.theme.danger if active else color
+                        bottom = center + half
                         draw.line(
-                            (x, center - 8 * scale),
-                            (x, center + 8 * scale),
-                            with_alpha(color, 0.2),
-                            0.7 * scale,
+                            (x, bottom - (10 if active else 6) * scale),
+                            (x, bottom),
+                            with_alpha(mark_color, 0.9 if active else 0.55),
+                            scale,
                         )
+                        ui = self.workspace.ui
+                        rect = (x - 3 * scale, center - half, 6 * scale, strip_height)
+                        ui.hits[f"timeline-take-frame-{index}"] = rect
+                        if ui.design is not None:
+                            ui.design.record(
+                                f"timeline-take-frame-{index}",
+                                ("timeline_lane",),
+                                rect,
+                                "take_sample",
+                                frameIndex=index,
+                                time=take_times[index],
+                                sampleX=x,
+                                cellBounds=list(cells[index]),
+                                active=active,
+                            )
             if not named and last - first > 88 * scale:
                 self._lane_caption(
                     1,
@@ -580,6 +679,25 @@ class NativeTimelineTrack:
                 rounding=3 * scale,
             )
 
+    def _take_tooltip(self, editor, ctx, layout, hit, times):
+        if not imgui.is_window_hovered() or not hit.on_track or hit.lane != "take":
+            return
+        left, right = layout.time_bounds
+        x, y = hit.position
+        top = layout.ruler_bottom + layout.row_height + layout.lane_gap
+        if not (left <= x <= right and top <= y <= top + layout.row_height):
+            return
+        time = timeline_x_to_time(x, editor.view_start, editor.view_end, left, right)
+        index = nearest_take_frame(times, time)
+        first, last = self._sample_bounds(
+            editor, layout, times, (index, index), ctx.session.state_take_cells
+        )
+        if first <= x <= last:
+            self.workspace.ui.tooltip(
+                f"{ctx.tr('Recorded frame')} {index + 1}/{len(times)}\n{times[index]:.6f} s",
+                translate=False,
+            )
+
     def _sample_bounds(self, editor, layout, times, selection, cells):
         first, last = (
             self._x(editor, layout, time)
@@ -589,6 +707,7 @@ class NativeTimelineTrack:
             return first - layout.marker_radius, last + layout.marker_radius
         return first, last
 
+    @part_scope("timeline_key")
     def _marker(self, key, x, center, radius, icon, tint, selected):
         ui, scale = self.workspace.ui, self.workspace.s
         style = ui.component_style("timeline_key")
@@ -681,7 +800,7 @@ class NativeTimelineTrack:
                 x,
                 center,
                 radius,
-                "link",
+                "snapshot",
                 tuple(round(value * 255) for value in color),
                 selected,
             )
@@ -722,6 +841,20 @@ class NativeTimelineTrack:
         scale, x = ctx.style_scale, self._x(editor, layout, editor.playhead)
         if not layout.time_bounds[0] <= x <= layout.time_bounds[1]:
             return
+        ui = self.workspace.ui
+        rect = (x - 4 * scale, layout.lo[1], 8 * scale, layout.height)
+        ui.hits["timeline-playhead"] = rect
+        if ui.design is not None:
+            ui.design.record(
+                "timeline-playhead",
+                ("timeline_sheet",),
+                rect,
+                "timeline_playhead",
+                time=editor.playhead,
+                playheadX=x,
+                viewRange=[editor.view_start, editor.view_end],
+                timeBounds=list(layout.time_bounds),
+            )
         color = ctx.theme.danger
         draw.line((x, layout.lo[1] + 6 * scale), (x, layout.hi[1]), with_alpha(color, 0.85), scale)
         draw.convex_fill(

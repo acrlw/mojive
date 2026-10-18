@@ -8,10 +8,8 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
-from mojive.design.native.geometry import CURRENT_NATIVE_PARTS, Box, Rect
-from mojive.render.geometry import GeometryView, geometry_view, set_geometry_view
-from mojive.ui.compound_fields import draw_focus_frame
-from mojive.ui.controls import segmented_control_width
+from mojive.design.groups import scoped_parts
+from mojive.design.native.geometry import CURRENT_NATIVE_PARTS, Box, Rect, part_scope
 from mojive.ui.design_palette import rgba8
 from mojive.ui.panels import (
     activate_edit_gizmo,
@@ -24,18 +22,18 @@ from mojive.ui.panels.hierarchy import _TYPE_FILTERS
 from mojive.ui.panels.joints import filter_joints, sort_joints
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.workspace.component_layout import flow_layout
-from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.filter_chip import draw_filter_chip, filter_chip_size
+from mojive.ui.workspace.geometry_view import geometry_selector
 from mojive.ui.workspace.pose_panel import NativePoseEditor, joint_icon
-from mojive.ui.workspace.widgets import DIM, INPUT, MUTED
-
-GEOMETRY_VIEWS = (GeometryView.VISUAL, GeometryView.COLLISION, GeometryView.BOTH)
-GEOMETRY_ICONS = ("visual", "collision", "both")
+from mojive.ui.workspace.widgets import DIM, MUTED
+from mojive.ui.workspace.window_chrome import fit_native_content_width
 
 NODE_ICONS = {
     "world": "world",
     "model": "folder",
     "robot": "robot",
-    "link": "link",
+    "link": "body",
     "geom": "geom",
     "joint": "joint",
     "light": "light",
@@ -158,168 +156,63 @@ class Navigation:
             if ctx.focus_joint is not None:
                 ctx.focus_joint(joint.joint_id)
 
-    def _pill(self, key, rect, count, icon, tooltip, accent, active):
-        u, scale = self.workspace.ui, self.workspace.s
-        style = u.component_style("filter")
-        font = style.get("fontSize", BODY_SIZE)
-        extent = style.get("iconSize", 16) * scale
-        line = max(font, style.line_height(font * 1.4)) * scale
-        pads = style.edges("padding", scale, (6, 0, 6, 0))
-        box = u.component_box(
-            "filter",
-            *rect.tuple(),
-            key=key,
-            padding=(6 * scale, 0, 6 * scale, 0),
-            observe=False,
-            minimum_height=max(line, extent) + pads[1] + pads[3],
-        )
-        frame, content = box.frame, box.content
-        imgui.set_cursor_screen_pos((frame.x, frame.y))
-        clicked = imgui.invisible_button(
-            key, (max(1, frame.width), max(1, frame.height)), imgui.ButtonFlags_.enable_nav
-        )
-        hovered = imgui.is_item_hovered()
-        u.hits[key] = frame.tuple()
-        background = (*accent[:3], 40 if active else 24) if active or hovered else INPUT
-        u.rect(*frame.tuple(), background, style.get("radius", 14))
-        gap = style.get("gap", 5) * scale
-        caption_width = u.measure(str(count), font, translate=False, font_resolved=True)
-        group = style.align_rect(
-            content,
-            min(content.width, extent + gap + caption_width),
-            min(content.height, max(line, extent)),
-        )
-        u.draw.push_clip_rect((content.x, content.y), (content.right, content.bottom), True)
-        u.icon(icon, group.x, group.y + (group.height - extent) / 2, extent / scale, accent)
-        u.component_text(
-            "filter",
-            Rect(group.x + extent + gap, group.y, max(0, group.width - extent - gap), group.height),
-            str(count),
-            accent if active else MUTED,
-            translate=False,
-        )
-        u.draw.pop_clip_rect()
-        u.record_component_box(
-            "filter",
-            box,
-            key=key,
-            fields=[
-                [group.x, group.y, extent, group.height],
-                [group.x + extent + gap, group.y, caption_width, group.height],
-            ],
-        )
-        draw_focus_frame(
-            imgui.ImVec2(frame.x, frame.y),
-            imgui.ImVec2(frame.right, frame.bottom),
-            rounding=style.get("radius", 14) * scale,
-            item_id=imgui.get_item_id(),
-        )
-        if hovered:
-            u.tooltip(tooltip, translate=False)
-        return clicked
-
+    @part_scope("panel_tools", "scene_tools")
     def _scene_controls(self, ctx, x, y, w):
         u, s = self.workspace.ui, self.workspace.s
         top = y
-        tools_gap = u.metric("panel_tools", "rowGap", u.metric("panel_tools", "gap", 8)) * s
+        tools = u.component_style(("panel_tools", "scene_tools"))
+        tools_gap = tools.get("rowGap", tools.get("gap", 8)) * s
         if self.workspace.search_visible:
             _, self.workspace.query = u.search(
                 "##search", x, y, w, self.workspace.query, hint=ctx.tr("Search scene")
             )
             y = imgui.get_item_rect_max().y + tools_gap
-        labels = tuple(ctx.tr(view.value.title()) for view in GEOMETRY_VIEWS)
-        current = geometry_view(ctx.backend)
-        imgui.push_font(u.body, BODY_SIZE * s)
-        imgui.push_style_var(
-            imgui.StyleVar_.frame_padding, (6 * s, DESIGN.control_padding_y(BODY_SIZE) * s)
-        )
-        show_labels = segmented_control_width(labels, icons=GEOMETRY_ICONS, layout="content") <= w
-        imgui.pop_style_var()
-        imgui.pop_font()
-        chosen = u.segmented(
-            "scene-geometry",
-            x,
-            y,
-            w / s,
-            labels,
-            GEOMETRY_VIEWS.index(current) if current in GEOMETRY_VIEWS else -1,
-            keys=tuple("scene-geometry-" + view.value for view in GEOMETRY_VIEWS),
-            icons=GEOMETRY_ICONS,
-            show_labels=show_labels,
-            layout="content",
-            tooltips=(
-                "Show visual geometry",
-                "Show collision geometry",
-                "Show visual and collision geometry",
-            ),
-        )
-        if chosen >= 0 and GEOMETRY_VIEWS[chosen] != current:
-            set_geometry_view(ctx.backend, GEOMETRY_VIEWS[chosen])
-        y += u.hits["scene-geometry"][3] + tools_gap
-        filters = tuple(self.scene_filters(ctx))
-        filter_style = u.component_style("filter")
-        group = u.component_style("type_filters")
-        sizes = []
-        font = filter_style.get("fontSize", BODY_SIZE)
-        extent = filter_style.get("iconSize", 16) * s
-        intrinsic_height = max(extent, max(font, filter_style.line_height(font * 1.4)) * s)
-        icon_gap = filter_style.get("gap", 5) * s
-        for _, count in filters:
-            caption_width = u.measure(str(count), font, translate=False, font_resolved=True)
-            width = min(
-                w,
-                caption_width + 35 * s,
+        y += geometry_selector(u, ctx, x, y, w, key="scene-geometry") + tools_gap
+        with u.component_scope("type_filters"):
+            filters = tuple(self.scene_filters(ctx))
+            group = u.component_style("type_filters")
+            sizes = [filter_chip_size(u, count, maximum_width=w) for _, count in filters]
+            layout = flow_layout(
+                Rect(x, y, w, 0),
+                sizes,
+                column_gap=(
+                    tools.get("columnGap", 4)
+                    if tools.explicit("columnGap") or tools.explicit("gap")
+                    else group.get("columnGap", group.get("gap", 4))
+                )
+                * s,
+                row_gap=group.get("rowGap", group.get("gap", 4)) * s,
             )
-            measured = filter_style.box(
-                0,
-                0,
-                width,
-                28 * s,
-                scale=s,
-                padding=(6 * s, 0, 6 * s, 0),
-                intrinsic=(extent + icon_gap + caption_width, intrinsic_height),
-            )
-            sizes.append((measured.outer.width, measured.outer.height))
-        layout = flow_layout(
-            Rect(x, y, w, 0),
-            sizes,
-            column_gap=(
-                u.metric("panel_tools", "columnGap", 4)
-                if u.design is not None and u.design.runtime.edited("panel_tools", "columnGap")
-                else group.get("columnGap", group.get("gap", 4))
-            )
-            * s,
-            row_gap=group.get("rowGap", group.get("gap", 4)) * s,
-        )
-        for (kind, count), rect in zip(filters, layout.rectangles, strict=True):
-            if self._pill(
-                "scene-filter-" + kind,
-                rect,
-                count,
-                "tree" if kind == "all" else NODE_ICONS[kind],
-                f"{ctx.tr(kind.title())}: {count}",
-                node_accent(ctx.theme, kind),
-                self.workspace.filter.casefold() == kind,
-            ):
-                self.workspace.filter = kind.title()
-        u.hits["scene-type-filters"] = (x, y, w, layout.height)
-        from mojive.ui.workspace.component_layout import record_group
+            for (kind, count), rect in zip(filters, layout.rectangles, strict=True):
+                if draw_filter_chip(
+                    u,
+                    "scene-filter-" + kind,
+                    rect,
+                    count,
+                    "tree" if kind == "all" else NODE_ICONS[kind],
+                    f"{ctx.tr(kind.title())}: {count}",
+                    node_accent(ctx.theme, kind),
+                    self.workspace.filter.casefold() == kind,
+                ):
+                    self.workspace.filter = kind.title()
+            u.hits["scene-type-filters"] = (x, y, w, layout.height)
+            from mojive.ui.workspace.component_layout import record_group
 
-        record_group(
-            u,
-            "type_filters",
-            "scene-type-filters",
-            (u.hits["scene-filter-" + kind] for kind, _ in filters),
-        )
-        if u.design is not None:
-            u.design.record(
-                "scene-panel-tools",
-                ("panel_tools",),
-                (x, top, w, y + layout.height - top),
-                "panel_tools",
-                fields=[list(r.tuple()) for r in layout.rectangles],
-                fieldRegions={"rowGap": [x, y - tools_gap, w, tools_gap]},
+            record_group(
+                u,
+                "type_filters",
+                "scene-type-filters",
+                (u.hits["scene-filter-" + kind] for kind, _ in filters),
             )
+            if u.design is not None:
+                u.design.record(
+                    "scene-panel-tools",
+                    ("panel_tools", "scene_tools"),
+                    (x, top, w, y + layout.height - top),
+                    "scene_tools",
+                    fields=[list(r.tuple()) for r in layout.rectangles],
+                    fieldRegions={"rowGap": [x, y - tools_gap, w, tools_gap]},
+                )
         return y + layout.height + tools_gap
 
     def draw_scene(self, ctx, x, y, w, h):
@@ -337,6 +230,7 @@ class Navigation:
         imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
         imgui.begin_child("Scene entities", (w, max(s, h - (top - y))))
         imgui.pop_style_var()
+        fit_native_content_width(imgui.internal.get_current_window())
         try:
             token = (self.workspace.query.casefold(), self.workspace.filter.casefold())
             if token != self._scene_filter_token:
@@ -357,10 +251,15 @@ class Navigation:
             width = imgui.get_content_region_avail().x
             clipper = imgui.ListClipper()
             clipper.begin(len(rows), stride)
-            while clipper.step():
-                for index in range(clipper.display_start, clipper.display_end):
-                    self._scene_row(ctx, *rows[index], width)
-            clipper.end()
+            try:
+                with u.component_scope("tree_row"), u.component_font("tree_row"):
+                    while clipper.step():
+                        for index in range(clipper.display_start, clipper.display_end):
+                            self.draw_scene_row(ctx, *rows[index], width)
+            finally:
+                # Release native clipper state while its owning context is alive,
+                # even when a row fails and its traceback outlives the window.
+                clipper.end()
             if rows:
                 publish_focus_item_hint(ctx)
             else:
@@ -373,7 +272,7 @@ class Navigation:
 
         ui, scale = self.workspace.ui, self.workspace.s
         parents = CURRENT_NATIVE_PARTS.get()
-        namespace = parents if parents and parents[-1] == "tree_row" else (*parents, "tree_row")
+        namespace = tuple(dict.fromkeys((*parents, *scoped_parts("tree_row"))))
         key = (
             imgui.get_frame_count(),
             scale,
@@ -387,7 +286,7 @@ class Navigation:
             padding, margin = style.edges("padding", scale), style.edges("margin", scale)
             expander = control_size(ui, "expand-measure", 18, 28, icon="right")
             label = control_size(ui, "entity-measure", 100, 28, label="?", icon="tree")
-            visibility = control_size(ui, "visible-measure", 24, 26, icon="eye")
+            visibility = control_size(ui, "visible-measure", 24, 22, icon="eye")
         height = max(
             style.get("height", 28) * scale,
             max(
@@ -403,7 +302,7 @@ class Navigation:
         self._row_geometry = height, padding, margin, expander, label, visibility
         return self._row_geometry
 
-    def _scene_row(self, ctx, node, depth, leaf, width):
+    def draw_scene_row(self, ctx, node, depth, leaf, width):
         with self.workspace.ui.component_scope("tree_row"):
             return self._draw_scene_row(ctx, node, depth, leaf, width)
 
@@ -458,7 +357,8 @@ class Navigation:
             ):
                 self.hierarchy._open_state[node.node_id] = not opened
         label_x = content.x + indent + expander_size[0] + gap
-        label_width = max(0, content.right - visibility_size[0] - gap - label_x)
+        visibility_right = content.right - min(4 * s, max(0, content.width - visibility_size[0]))
+        label_width = max(0, visibility_right - visibility_size[0] - gap - label_x)
         lw, lh = control_frame_size(
             u,
             "entity-" + str(node.node_id),
@@ -481,6 +381,7 @@ class Navigation:
             background=False,
             translate=False,
             align="left",
+            width_limit=lw * s,
         )
         focused = imgui.is_item_hovered() and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
         clicked = imgui.is_item_clicked() or (pressed and not imgui.is_mouse_released(0))
@@ -494,6 +395,24 @@ class Navigation:
             )
         self._scene_context(ctx, node)
         vw, vh = control_frame_size(u, "visible-" + str(node.node_id), *visibility_size, icon="eye")
+        visibility_rect = Rect(
+            visibility_right - visibility_size[0],
+            content.y + (content.height - visibility_size[1]) / 2,
+            *visibility_size,
+        )
+        # Only the independently painted affordance needs an inset; the tree's
+        # expander and name keep their existing hierarchy and column origins.
+        visibility_inset = min(
+            frame.right - visibility_rect.right,
+            visibility_rect.y - frame.y,
+            frame.bottom - visibility_rect.bottom,
+        )
+        visibility_radius = max(
+            0, u.metric("tree_row", "radius", DESIGN.control_radius) - visibility_inset / s
+        )
+        visibility_style = u.component_style("icon_button")
+        if visibility_style.explicit("radius"):
+            visibility_radius = visibility_style.get("radius", visibility_radius)
         visibility_id = imgui.get_id("visible-" + str(node.node_id))
         context = imgui.get_current_context()
         show_visibility = (
@@ -507,14 +426,15 @@ class Navigation:
             and node.type not in (NodeType.MODEL, NodeType.ENVIRONMENT)
             and u.button(
                 "visible-" + str(node.node_id),
-                content.right - visibility_size[0],
-                content.y + (content.height - visibility_size[1]) / 2,
+                visibility_rect.x,
+                visibility_rect.y,
                 vw,
                 vh,
                 icon="eye" if node.visible else "eyeoff",
                 icon_role="inline",
                 tooltip=ctx.tr("hide" if node.visible else "show"),
                 background=True,
+                radius=visibility_radius,
             )
         ):
             if node.type is NodeType.LIGHT and node.light_index >= 0:
@@ -541,12 +461,20 @@ class Navigation:
                 selected=selected,
                 hovered=hovered,
                 depth=depth,
+                visibilityRect=list(visibility_rect.tuple()),
+                visibilityRadius=visibility_radius * s,
+                visibilityInset=visibility_inset,
                 layoutRect=[origin_x, origin_y, outer.width, next_y - origin_y],
                 spacingRect=[outer.x, outer.bottom, outer.width, max(0, next_y - outer.bottom)],
                 fieldRegions={
                     name: [
                         [content.x + indent + expander_size[0], content.y, gap, content.height],
-                        [content.right - visibility_size[0] - gap, content.y, gap, content.height],
+                        [
+                            visibility_right - visibility_size[0] - gap,
+                            content.y,
+                            gap,
+                            content.height,
+                        ],
                     ]
                     for name in ("gap", "columnGap")
                 },
@@ -569,7 +497,7 @@ class Navigation:
             if clicked:
                 imgui.set_clipboard_text(node.name)
             if (node.type is NodeType.MODEL and node.model_id >= 0) or node.source_editable:
-                imgui.separator()
+                self.workspace.menus.local_separator()
                 if node.type in (NodeType.MODEL, NodeType.ROBOT, NodeType.LINK):
                     self.hierarchy._model_create_menu(ctx, node, presentation=self.workspace.menus)
                 if node.type is NodeType.MODEL:
@@ -589,16 +517,16 @@ class Navigation:
                 and ctx.session.adapter.caps.scene_authoring
                 and node.type in (NodeType.LINK, NodeType.LIGHT, NodeType.CAMERA)
             ):
-                imgui.separator()
+                self.workspace.menus.local_separator()
                 self._entity_actions(ctx, node, model=False)
 
     def _entity_actions(self, ctx, node, *, model):
         enabled = not ctx.session.adapter.caps.simulation or ctx.session.paused
         duplicate, _ = self.workspace.menus.local_item(
-            "Duplicate", "Cmd/Ctrl+D", enabled=enabled, key="scene-menu-duplicate", icon="copy"
+            "Duplicate", "Cmd/Ctrl+D", enabled=enabled, key="scene-menu-duplicate", icon="duplicate"
         )
         rename, _ = self.workspace.menus.local_item(
-            "Rename", "F2", enabled=enabled, key="scene-menu-rename", icon="edit"
+            "Rename", "F2", enabled=enabled, key="scene-menu-rename", icon="keyboard"
         )
         remove, _ = self.workspace.menus.local_item(
             "Delete from Model" if model else "Delete",
@@ -660,6 +588,8 @@ class Navigation:
         if node_id is None:
             y = self._pose_controls(ctx, x, y, w)
         joints = self.pose_joints(ctx, node_id)
+        inspected = ctx.session.node(node_id) if node_id is not None else None
+        show_identity = inspected is None or inspected.type is not NodeType.JOINT
         return self.pose_editor.draw(
             ctx,
             x,
@@ -668,8 +598,11 @@ class Navigation:
             joints=joints,
             select_joint=self.select_joint,
             initial_qpos=self.joints._initial_qpos,
-            show_names=node_id is None or len(joints) > 1,
+            show_names=show_identity or len(joints) > 1,
+            show_types=inspected is not None and inspected.type is not NodeType.JOINT,
+            show_context=node_id is None,
             joint_color=node_accent(ctx.theme, "joint"),
+            collapsible_poses=node_id is None,
         )
 
     def pose_action(self, key):
@@ -687,6 +620,7 @@ class Navigation:
             key == "sort" and self.joints._sort_by_name
         )
 
+    @part_scope("panel_tools", "pose_tools")
     def _pose_controls(self, ctx, x, y, w):
         if self._pose_copy_pending:
             imgui.open_popup("Joint state")
@@ -716,8 +650,21 @@ class Navigation:
                     )
                     copy_state_vector(ctx.session.frame.qvel if state is None else state.qvel)
         if self.pose_search_visible:
-            _, self.joints._search = self.workspace.ui.search(
+            ui, scale = self.workspace.ui, self.workspace.s
+            tools = ui.component_style(("panel_tools", "pose_tools"))
+            top = y
+            _, self.joints._search = ui.search(
                 "##pose-search", x, y, w, self.joints._search, hint=ctx.tr("Search joints")
             )
-            y = imgui.get_item_rect_max().y + 10 * self.workspace.s
+            gap = tools.get("rowGap", tools.get("gap", 10)) * scale
+            y = imgui.get_item_rect_max().y + gap
+            if ui.design is not None:
+                ui.design.record(
+                    "pose-panel-tools",
+                    ("panel_tools", "pose_tools"),
+                    (x, top, w, y - top),
+                    "pose_tools",
+                    fields=[list(ui.hits["##pose-search"])],
+                    fieldRegions={"rowGap": [x, y - gap, w, gap]},
+                )
         return y

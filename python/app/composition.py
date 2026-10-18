@@ -437,6 +437,8 @@ class Viewer:
         self._released = True
         self.stop_rpc()
         try:
+            # A detached editor or another viewer may own the current GL context.
+            self.window.make_current()
             self.app.release()
         except Exception as e:
             log.warning("Failed to release viewer application: {}", e)

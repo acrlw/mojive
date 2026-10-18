@@ -23,7 +23,7 @@ def _measure(ui, key, icon, label, baseline=28):
         glyph = style.get("iconSize", 14) * scale
         gap = style.get("columnGap", style.get("gap", 6)) * scale
         width = max(
-            70,
+            40 if key.startswith("output-level-") else 70,
             (ui.measure(label, font, font_resolved=True) + glyph + gap + pads[0] + pads[2]) / scale,
         )
     return control_size(ui, key, width, 28, icon=icon, label=label)
@@ -47,6 +47,7 @@ def _popup(output, ctx, levels, labels, visible, entries, newest):
             if menus.local_item(
                 "Auto-scroll",
                 checked=output.auto_scroll,
+                checkable=True,
                 key="output-menu-auto-scroll",
                 icon="follow",
             )[0]:
@@ -56,7 +57,7 @@ def _popup(output, ctx, levels, labels, visible, entries, newest):
             )[0]:
                 output._clear_output(ctx.output)
                 entries, newest = (), 0
-            imgui.separator()
+            menus.local_separator()
             output._draw_level_menu(levels, labels)
     return entries, newest
 
@@ -132,10 +133,10 @@ def draw_output_toolbar(output, ctx, entries, newest):
         (
             "output-level-" + level,
             icon,
-            label,
+            str(output._level_counts[level]),
             {"active": level in output._levels, "icon_color": color, "tooltip": caption},
         )
-        for (level, caption, icon, color), label in zip(levels, labels, strict=True)
+        for level, caption, icon, color in levels
     ]
     severity_sizes = [_measure(ui, key, icon, label) for key, icon, label, _ in severity]
     expanded = (

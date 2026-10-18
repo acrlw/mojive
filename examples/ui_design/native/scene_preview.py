@@ -378,8 +378,9 @@ class Preview(ViewerApp):
     def bind(self, study):
         self.study = self.panels.study = study
         self._numeric_cancel_frame = -1
+        from mojive.ui.workspace.widgets import DIM, INPUT, LINE, PANEL, SAGE, TEXT
+
         from .output_panel import ReferenceOutput
-        from .widgets import DIM, INPUT, LINE, PANEL, SAGE, TEXT
 
         def normalized(value):
             return tuple(channel / 255 for channel in value)

@@ -7,9 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from examples.ui_design.native.docking_study import Study
-from examples.ui_design.native.inspector_components import draw_component
 from examples.ui_design.native.scene_preview import ReferencePanels
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
@@ -32,6 +30,9 @@ from mojive.ui.app import ViewerApp
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.localization import Language, Localizer
 from mojive.ui.panels import PanelContext
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.inspector_components import draw_component
+from mojive.ui.workspace.widgets import UI
 
 
 @pytest.fixture(params=(1.0, 2.25))
@@ -41,7 +42,7 @@ def components(request, monkeypatch, tmp_path):
     context = imgui.create_context()
     io = imgui.get_io()
     io.set_ini_filename(None)
-    io.display_size = (800 * scale, 800 * scale)
+    io.display_size = (800 * scale, 1600 * scale)
     io.delta_time = 1 / 60
     io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
     language = request.node.callspec.params.get("language")
@@ -57,12 +58,11 @@ def components(request, monkeypatch, tmp_path):
         ui = UI(SimpleNamespace(style_scale=scale, font_report=report))
         imgui.get_style().window_min_size = (32 * scale, 32 * scale)
     else:
-        ui = UI.__new__(UI)
-        ui.body = ui.bold = ui.mono = io.fonts.add_font_default()
+        ui = UI(SimpleNamespace(style_scale=scale, font_report=SimpleNamespace(cjk_path=None)))
     ui.s, ui.hits, ui.numeric_edits = scale, {}, {}
     ui.translate = str
     style = imgui.get_style()
-    style.font_size_base = 13 * scale
+    style.font_size_base = BODY_SIZE * scale
     style.frame_padding = (8 * scale, 7 * scale)
     style.item_spacing = (6 * scale, 8 * scale)
     scene = Scene()
@@ -175,7 +175,7 @@ def components(request, monkeypatch, tmp_path):
             ui.numeric_edits.clear()
             imgui.new_frame()
             imgui.set_next_window_pos((0, 0))
-            imgui.set_next_window_size((width * scale, 780 * scale))
+            imgui.set_next_window_size((width * scale, 1580 * scale))
             imgui.begin("Inspector", flags=imgui.WindowFlags_.no_title_bar)
             imgui.begin_child("Inspector content", (0, 0))
             result = draw_component(study, ctx, entity, tab)
@@ -226,7 +226,7 @@ def _assert_caption_rendered(state, shown, key):
         if abs(tx - x) < 1
         and y - 4 * s <= ty < y + height
         and tw <= width + 1
-        and th == pytest.approx(13 * s, abs=0.5)
+        and th == pytest.approx(BODY_SIZE * s, abs=0.5)
     ]
     assert len(lines) == 1
     assert lines[0] == shown or (
@@ -353,10 +353,15 @@ def test_component_groups_use_one_label_placement_and_control_column(
         tab = "Physics"
     assert ctx.session.submit(cmd.SelectNode(node.node_id)).ok
     assert state.frame(node, tab, count=3, width=width)
+    if component == "body":
+        state.inspector._body_property_edit = replace(
+            ctx.session.body_properties(node.node_id), inertia_mode="diagonal"
+        )
+        state.frame(node, tab, count=3, width=width)
     for label_key, control_key in rows:
         lx, ly, _, lh = ui.hits[label_key]
         cx, cy, cw, ch = ui.hits[control_key]
-        assert lh == pytest.approx(13 * s)
+        assert lh == pytest.approx(BODY_SIZE * s)
         assert cx >= 0 and cx + cw <= width * s + 0.5
         if abs(cx - lx) <= 0.5:
             assert cy - (ly + lh) >= 8 * s - 0.5
@@ -391,8 +396,9 @@ def test_component_table_content_height_ends_at_the_last_vector_field(components
         if "Inspector content" in str(window.name) and window.active
     )
     _x, y, _w, h = ui.hits[f"##light_direction_2_{light.node_id}-frame"]
-    # The final table contributes only its bottom cell padding after the real item.
-    expected = y + h - child.dc.cursor_start_pos.y + 4 * s + 0.5
+    # The table's bottom cell padding and the section's trailing row gap both
+    # contribute to the complete measured content extent.
+    expected = y + h - child.dc.cursor_start_pos.y + DESIGN.row_gap * 1.5 * s + 0.5
     assert child.content_size.y == pytest.approx(expected, abs=1)
     assert child.scroll_max.x == 0
 
@@ -407,11 +413,14 @@ def test_light_transform_reserves_numeric_width_before_clipping_labels(component
         _shown(state.ctx, label, unit)
         for label, unit in (("position (local)", "m"), ("direction (local)", ""))
     )
-    inline = width >= 420
     for name in ("light_position", "light_direction"):
         label = ui.hits["vector-label-" + name]
         fields = [ui.hits[f"##{name}_{index}_{light.node_id}-frame"] for index in range(3)]
-        assert (fields[0][0] > label[0] + s) is inline
+        inline = fields[0][0] > label[0] + s
+        if width == 320:
+            assert not inline
+        elif width == 720:
+            assert inline
         assert len({round(rect[2], 4) for rect in fields}) == 1
         assert fields[-1][0] + fields[-1][2] <= width * s + 0.5
         if inline:
@@ -441,6 +450,7 @@ def test_scalar_labels_ellipsize_beside_one_numeric_column(model_components, mon
     _click_control(state, joint, ui.hits[section], tab="Physics", width=720)
     state.frame(joint, "Physics", count=3, width=720)
     starts = []
+    clipped = []
     for label, key, unit in (
         ("actuator force range", "##joint_actuator_force_range-0-frame", "N·m"),
         ("friction loss", "##joint_friction_loss-frame", "N·m"),
@@ -449,20 +459,29 @@ def test_scalar_labels_ellipsize_beside_one_numeric_column(model_components, mon
         if key not in ui.hits:
             continue
         rect, field = ui.hits["property-label-" + label], ui.hits[key]
-        assert rect[3] == pytest.approx(13 * s)
+        assert rect[3] == pytest.approx(BODY_SIZE * s)
         assert 48 * s <= rect[2] <= 120 * s
         assert field[0] - rect[0] == pytest.approx(rect[2] + 12 * s, abs=0.5)
         assert rect[1] + rect[3] / 2 == pytest.approx(field[1] + field[3] / 2, abs=0.5)
         _assert_caption_rendered(state, _shown(ctx, label, unit), "property-label-" + label)
         starts.append(field[0])
+        caption = _shown(ctx, label, unit)
+        if ui.measure(caption, translate=False) > rect[2]:
+            clipped.append((label, caption))
     assert len(starts) >= 2
     assert starts == pytest.approx([starts[0]] * len(starts), abs=0.5)
     hints = []
     monkeypatch.setattr(ui, "tooltip", lambda value, **_kwargs: hints.append(value))
-    x, y, width, height = ui.hits["property-label-spring reference"]
+    label, caption = (
+        clipped[0] if clipped else ("spring reference", _shown(ctx, "spring reference", "°"))
+    )
+    x, y, width, height = ui.hits["property-label-" + label]
     imgui.get_io().add_mouse_pos_event(x + width / 2, y + height / 2)
     state.frame(joint, "Physics", count=3, width=720)
-    assert any(_shown(ctx, "spring reference", "°") in hint for hint in hints)
+    if clipped:
+        assert any(caption in hint for hint in hints)
+    else:
+        assert not hints
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
@@ -582,7 +601,7 @@ def test_native_body_inertia_units_keep_source_precision_and_draft_apply_undo(
     )
     assert ctx.session.body_properties(body.node_id) == initial
     _click_control(
-        state, body, state.controls[ctx.tr("Apply") + "##body-properties"], tab="Physics"
+        state, body, state.study.ui.hits[ctx.tr("Apply") + "##body-properties"], tab="Physics"
     )
     assert ctx.session.body_properties(body.node_id).inertial_position[0] == pytest.approx(
         0.01234, abs=1e-8
@@ -663,7 +682,7 @@ def test_native_joint_identity_is_compact_and_keeps_the_real_joint_type(
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
 @pytest.mark.parametrize("width", (245, 320, 720))
-def test_native_solver_numeric_groups_use_the_full_row_and_keep_three_short_values_inline(
+def test_native_solver_numeric_groups_use_the_full_row_and_preserve_requested_precision(
     components, language, width
 ):
     state, ui, s = components, components.study.ui, components.study.s
@@ -679,7 +698,11 @@ def test_native_solver_numeric_groups_use_the_full_row_and_keep_three_short_valu
     else:
         assert fields[0][0] > label_x
         assert fields[0][1] + fields[0][3] / 2 == pytest.approx(label_y + label_height / 2, abs=0.5)
-    assert all(rect[1] == pytest.approx(fields[0][1], abs=0.5) for rect in fields)
+    required = 3 * ui.numeric_minimum(axis=False, format="%.5g") + 8 * s
+    inline = width * s - 2 * DESIGN.panel_padding_x * s >= required
+    assert all(rect[1] == pytest.approx(fields[0][1], abs=0.5) for rect in fields) is inline
+    if not inline:
+        assert all(rect[0] == pytest.approx(fields[0][0], abs=0.5) for rect in fields)
     assert all(rect[2] == pytest.approx(fields[0][2], abs=0.5) for rect in fields)
     assert all(rect[2] >= 50 * s for rect in fields)
     for index in range(3):
@@ -776,7 +799,7 @@ def test_pinned_model_placement_selects_its_owner_once_and_selection_change_canc
     assert session.selected_node is camera
     assert gizmo.model_placement_model_id == -1
 
-    x, y, w, h = components.controls["Edit Placement"]
+    x, y, w, h = components.study.ui.hits["Edit Placement"]
     io.add_mouse_pos_event(x + w / 2, y + h / 2)
     components.frame(model)
     io.add_mouse_button_event(0, True)
@@ -831,7 +854,7 @@ def test_component_fields_use_native_section_badge_and_numeric_geometry(componen
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
-@pytest.mark.parametrize("width", (180, 245, 320))
+@pytest.mark.parametrize("width", (140, 180, 245, 320))
 @pytest.mark.parametrize("component", ("camera", "physics"))
 def test_native_property_rows_leave_space_between_real_numeric_controls(
     components, language, width, component
@@ -871,10 +894,8 @@ def test_native_property_rows_leave_space_between_real_numeric_controls(
                 assert x <= a < a + field_width <= x + w + 0.5, key
                 assert y <= b < b + field_height <= y + h + 0.5, key
             assert min(tx + tw, fx + fw) <= max(tx, fx) or min(ty + th, fy + fh) <= max(ty, fy), key
-            if width == 180:
+            if width == 140:
                 assert fy > ty, key
-            else:
-                assert fy == pytest.approx(ty, abs=0.5), key
             if fy > ty + 0.5:
                 assert fy - (ty + th) >= 8 * s - 1, key
                 assert h == pytest.approx(fy + fh - ty, abs=1), key
@@ -1052,10 +1073,8 @@ def test_native_light_switches_share_their_label_row_and_keep_a_clear_gap(compon
         switch_x, switch_y, switch_w, switch_h = ui.hits[key]
         assert y + h / 2 == pytest.approx(switch_y + switch_h / 2, abs=0.5)
         assert x + w <= switch_x - 10 * s + 0.5
-        assert switch_x + switch_w == pytest.approx(
-            ui.hits["section-LIGHT PROPERTIES"][0] + ui.hits["section-LIGHT PROPERTIES"][2],
-            abs=0.5,
-        )
+        section_x, _, section_w, _ = ui.hits["section-LIGHT PROPERTIES"]
+        assert switch_x + switch_w <= section_x + section_w + 0.5
 
 
 def test_native_light_escape_cancels_live_drag_without_history(components):

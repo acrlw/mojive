@@ -14,7 +14,6 @@ from examples.ui_design.native.navigation import (
 )
 from examples.ui_design.native.reference_menus import Menus
 from examples.ui_design.native.scene_preview import Preview, ReferencePanels
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive import Scene
@@ -32,6 +31,7 @@ from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.localization import Language, Localizer
 from mojive.ui.panels import PanelContext, PanelManager, state_vector_text
 from mojive.ui.theme import THEME
+from mojive.ui.workspace.widgets import UI
 
 
 class GeometryBackend(NullBackend):
@@ -249,7 +249,7 @@ def test_geometry_presets_preserve_source_groups_and_joint_state(navigation, lan
     monkeypatch.setattr(ui, "segmented", observe)
     assert state.session.submit(cmd.SetVisualGroup("geom", 0, False)).ok
     state.frame(3)
-    assert active[-1] == 0
+    assert active[-1] == 1
     assert geometry_view(state.ctx.backend) is GeometryView.VISUAL
     source = state.session.source
     groups, qpos = source.geom_group_visible.copy(), state.session.frame.qpos.copy()
@@ -281,12 +281,19 @@ def test_scene_geometry_segments_keep_labels_and_dispatch_keyboard_presets(
     state.frame(3)
     assert ui.hits["scene-geometry"][2] == pytest.approx((width - 24) * ui.s, abs=0.5)
     assert ui.hits["scene-geometry"][3] == pytest.approx(28 * ui.s)
-    assert "scene-geometry-default" not in ui.hits
+    assert "scene-geometry-default" in ui.hits
     rects = [ui.hits["scene-geometry-" + view.value] for view in GEOMETRY_VIEWS]
+    labels_fit = (
+        sum(
+            ui.measure(state.ctx.tr(view.value.title())) + (18 + 5 + 12) * ui.s
+            for view in GEOMETRY_VIEWS
+        )
+        <= ui.hits["scene-geometry"][2]
+    )
     for index, (x, y, w, h) in enumerate(rects):
         label = state.ctx.tr(GEOMETRY_VIEWS[index].value.title())
         icon = GEOMETRY_ICONS[index]
-        assert captions[icon] == (label if width != 140 else "")
+        assert captions[icon] == (label if labels_fit else "")
         if captions[icon]:
             assert ui.measure(label) + (18 + 5 + 12) * ui.s <= w + 0.5
         assert h == pytest.approx(28 * ui.s)
@@ -514,8 +521,9 @@ def test_inspector_pose_uses_selected_body_or_joint_and_preserves_hinge_rail(nav
     state.mode, state.node_id = "pose", body.node_id
     state.frame(3)
     assert not any(key.startswith("pose-joint-") for key in state.study.ui.hits)
-    assert "##pose-hinge-track" in state.study.ui.hits
-    x, y, w, h = state.study.ui.hits["##pose-hinge-track"]
+    key = f"##pose-joint-{joint.joint_id}-track"
+    assert key in state.study.ui.hits
+    x, y, w, h = state.study.ui.hits[key]
     before = state.session.frame.qpos[joint.qpos_adr]
     state.event("add_mouse_pos_event", x + w * 0.5, y + h * 0.5)
     state.event("add_mouse_button_event", 0, True)
@@ -531,20 +539,26 @@ def test_inspector_pose_uses_selected_body_or_joint_and_preserves_hinge_rail(nav
 def test_pose_value_activation_respects_window_clipping(navigation, width, control):
     state = navigation
     state.mode = "pose"
-    state.window_size = (width * state.study.s, 210 * state.study.s)
+    imgui.get_io().display_size = (width * state.study.s, 2000 * state.study.s)
+    state.window_size = (width * state.study.s, 2000 * state.study.s)
     state.frame(3)
     joint = next(joint for joint in state.session.joints if joint.name == "hinge_limited")
-    key = "##pose-hinge-" + control
+    key = f"##pose-joint-{joint.joint_id}-{control}"
     x, y, w, h = state.study.ui.hits[key]
+    state.window_size = (width * state.study.s, 210 * state.study.s)
+    state.frame(3)
+    assert key not in state.study.ui.hits
     assert y >= state.window_size[1]
     before = state.session.frame.qpos.copy()
     state.session.submit(cmd.Select(0))
-    state.click(key)
+    state.event("add_mouse_pos_event", x + w / 2, y + h / 2)
+    state.event("add_mouse_button_event", 0, True)
+    state.event("add_mouse_button_event", 0, False)
     assert state.session.selected_node is None
     np.testing.assert_array_equal(state.session.frame.qpos, before)
     state.frame(22)
 
-    state.window_size = (width * state.study.s, 760 * state.study.s)
+    state.window_size = (width * state.study.s, 2000 * state.study.s)
     state.frame(3)
     state.click(key)
     assert state.session.selected_node.type is NodeType.JOINT

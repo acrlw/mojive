@@ -7,12 +7,6 @@ import pytest
 from examples.ui_design.native.docking_study import PANELS, Study
 from examples.ui_design.native.reference_menus import Menus
 from examples.ui_design.native.scene_preview import ReferenceViewCube
-from examples.ui_design.native.widgets import (
-    CONTROL_THEME,
-    GLYPHS,
-    PANEL,
-    UI,
-)
 from imgui_bundle import imgui
 
 from mojive import CameraView
@@ -21,6 +15,13 @@ from mojive.ui.controls import segmented_control, segmented_control_width
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.localization import Language, Localizer
+from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.widgets import (
+    CONTROL_THEME,
+    GLYPHS,
+    PANEL,
+    UI,
+)
 
 
 @pytest.fixture(params=(1.0, 2.25))
@@ -77,27 +78,23 @@ def test_text_cap_height_is_centered_in_the_requested_line_box(controls, font):
         return vertex_center(ui.draw, first)
 
     _, center_y = frame(paint)
-    assert center_y == pytest.approx(56.5 * ui.s, abs=0.01)
+    assert center_y == pytest.approx((50 + BODY_SIZE / 2) * ui.s, abs=0.01)
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
 @pytest.mark.parametrize(
-    "axes,width,columns",
+    "axes,columns",
     (
-        ("RGBA", 110, 1),
-        ("RGBA", 180, 1),
-        ("RGBA", 198, 2),
-        ("RGBA", 320, 2),
-        ("RGBA", 400, 4),
-        ("RGB", 110, 1),
-        ("RGB", 180, 1),
-        ("RGB", 198, 2),
-        ("RGB", 320, 3),
-        ("RGB", 400, 3),
+        ("RGBA", 1),
+        ("RGBA", 2),
+        ("RGBA", 4),
+        ("RGB", 1),
+        ("RGB", 2),
+        ("RGB", 3),
     ),
 )
 def test_numeric_group_layout_keeps_rgba_precision_visible_and_fields_equal(
-    controls, monkeypatch, language, axes, width, columns
+    controls, monkeypatch, language, axes, columns
 ):
     ui, frame = controls
     painted = []
@@ -111,22 +108,28 @@ def test_numeric_group_layout_keeps_rgba_precision_visible_and_fields_equal(
     monkeypatch.setattr(ImguiDraw2D, "text", observe)
 
     def paint():
-        layout = ui.numeric_layout(width * ui.s, len(axes), column_options=(4, 2, 1))
+        # Size the real selected face for each capacity; SF Mono and portable
+        # monospace families have different advances at the same nominal size.
+        width = columns * ui.numeric_minimum() + (columns - 1) * DESIGN.numeric_gap * ui.s + ui.s
+        layout = ui.numeric_layout(width, len(axes), column_options=(4, 2, 1))
         for axis, value, (x, y, w, _) in zip(axes, values, layout.fields, strict=True):
             changed, result = ui.input(
                 "rgba-" + axis, 40 * ui.s + x, 50 * ui.s + y, w, value, axis=axis, format="%.7f"
             )
             assert not changed and result == value
-        return layout
+        return layout, width
 
-    layout = frame(paint)
+    layout, width = frame(paint)
     fields = [ui.hits["rgba-" + axis + "-frame"] for axis in axes]
     assert layout.columns == columns
     assert len({round(field[2], 4) for field in fields}) == 1
-    assert all(value in painted for value in ("0.2", "0.0041472", "0.000123", "1")[: len(axes)])
+    assert all(
+        value in painted
+        for value in ("0.2000000", "0.0041472", "0.0001230", "1.0000000")[: len(axes)]
+    )
     assert all(not value.endswith("…") for value in painted)
     for x, y, w, h in fields:
-        assert 40 * ui.s <= x and x + w <= (40 + width) * ui.s + 0.5
+        assert 40 * ui.s <= x and x + w <= 40 * ui.s + width + 0.5
         assert h == pytest.approx(28 * ui.s, abs=1)
         assert y + h <= 50 * ui.s + layout.height + 0.5
     for first, second in pairwise(fields):
@@ -155,14 +158,17 @@ def test_transform_rows_share_label_placement_field_width_and_measured_height(
     layout = frame(paint)
     first = [ui.hits["position" + axis + "-frame"] for axis in "XYZ"]
     second = [ui.hits["rotation" + axis + "-frame"] for axis in "XYZ"]
-    assert layout.label_above is (width < 360)
+    minimum = 3 * ui.numeric_minimum() + 2 * DESIGN.numeric_gap * ui.s
+    assert layout.label_above is (
+        width * ui.s < minimum + (DESIGN.label_minimum + DESIGN.label_gap) * ui.s
+    )
     assert {round(field[2], 4) for field in first + second} == {round(first[0][2], 4)}
     assert [field[0] for field in first] == [field[0] for field in second]
     assert second[0][1] - first[0][1] == pytest.approx(layout.height + 8 * ui.s)
     assert second[0][1] - first[-1][1] - first[-1][3] >= 8 * ui.s - 1
 
 
-def test_icons_center_their_complete_visible_bounds_at_control_sizes(controls):
+def test_icons_preserve_the_authored_optical_anchor_at_control_sizes(controls):
     ui, frame = controls
 
     def paint():
@@ -171,7 +177,11 @@ def test_icons_center_their_complete_visible_bounds_at_control_sizes(controls):
                 first = len(ui.draw.vtx_buffer)
                 ui.icon(name, 80 * ui.s, 100 * ui.s, size)
                 center = vertex_center(ui.draw, first)
-                expected = ((80 + size / 2) * ui.s, (100 + size / 2) * ui.s)
+                left, top, right, bottom = GLYPHS[name]["bounds"]
+                expected = (
+                    (80 + (left + right) / 2 * size / 24) * ui.s,
+                    (100 + (top + bottom) / 2 * size / 24) * ui.s,
+                )
                 assert center == pytest.approx(expected, abs=0.75 * ui.s), (name, size)
 
     frame(paint)
@@ -531,7 +541,7 @@ def viewport_controls(controls, tmp_path):
         state_take_times=[],
         can_step_back=False,
         speed=1.0,
-        adapter=SimpleNamespace(caps=SimpleNamespace(simulation=True)),
+        adapter=SimpleNamespace(caps=SimpleNamespace(simulation=True, topology_editing=False)),
         frame=SimpleNamespace(time=0.0),
     )
     app = SimpleNamespace(

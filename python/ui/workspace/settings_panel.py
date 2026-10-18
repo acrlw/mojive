@@ -17,7 +17,7 @@ from mojive.ui.workspace.property_style import (
 from mojive.ui.workspace.widgets import NumericEditState
 
 CATEGORIES = ("General", "Camera", "Interaction", "Rendering", "Recording", "MuJoCo Visuals")
-CATEGORY_ICONS = ("settings", "camera", "mouse", "shading", "video", "layers")
+CATEGORY_ICONS = ("general", "camera", "mouse", "shading", "video", "mujoco-visuals")
 _CHECKBOX_PROPERTIES = (
     "Inspector",
     "Copy to clipboard",
@@ -40,6 +40,8 @@ class WorkspaceSettings(SettingsPanel):
         self.choices = ChoicePopup(workspace.ui)
         self._number_origin = None
         self._number_committed = False
+        self._automatic_width = None
+        self._page_content_top = None
 
     def _control_padding(self, *, checkbox=False):
         # Shared settings actions size checkboxes from the current frame height.
@@ -60,6 +62,9 @@ class WorkspaceSettings(SettingsPanel):
 
     def _combo(self, key, index, labels):
         return self.fields.combo(key, index, labels)
+
+    def _tooltip(self, text, *, hovered=False):
+        self.fields.tooltip(text, hovered=hovered)
 
     def _choice_list(self, key, index, labels, *, preview=None, enabled=None, tooltips=None):
         from mojive.ui.workspace.popup_style import menu_choice_width
@@ -111,33 +116,46 @@ class WorkspaceSettings(SettingsPanel):
         self._control_padding()
         self.fields.readonly_value(label, value, muted=muted)
 
+    def _section_divider(self):
+        # Section spacing and headings group the form. The window header owns
+        # the sole rule, keeping every settings category's hierarchy consistent.
+        return False
+
     def _group_heading(self, title):
         self._control_padding()
         ui = self.workspace.ui
         p = imgui.get_cursor_screen_pos()
-        ui.section(title, p.x, p.y, imgui.get_content_region_avail().x)
+        ui.section(
+            title, p.x, p.y, imgui.get_content_region_avail().x, divider=self._section_divider()
+        )
         advance(ui, p.x, p.y + ui.section_offset(38) * ui.s)
 
     def _collapsing_header(self, label, flags=0):
         # The section painter owns its geometry. Preserve the following fields' padding.
-        return property_section(self.workspace.ui, label.split("##", 1)[0], flags, item_id=label)
+        return property_section(
+            self.workspace.ui,
+            label.split("##", 1)[0],
+            flags,
+            item_id=label,
+            divider=self._section_divider(),
+        )
 
-    def _drag_float(self, key, value, speed, low, high, fmt="%.3f", flags=0):
-        changed, result = self.fields.numeric(key, value, speed, low, high, fmt)
+    def _drag_float(self, key, value, speed, low, high, fmt="%.3f", flags=0, *, integer=False):
+        changed, result = self.fields.numeric(key, value, speed, low, high, fmt, integer=integer)
         return self._finish_number(
             key, value, changed, result, self.workspace.ui.numeric_edits[key]
         )
 
     def _drag_int(self, key, value, speed, low, high, fmt="%d", flags=0):
-        changed, result = self._drag_float(key, value, speed, low, high, "%.0f", flags)
+        changed, result = self._drag_float(key, value, speed, low, high, fmt, flags, integer=True)
         return changed, round(result)
 
     def _input_float(self, key, value, step=0, fast_step=0, fmt="%.3f", flags=0):
         return self._drag_float(key, value, step or 0.01, 0, 0, fmt)
 
-    def _slider_float(self, key, value, low, high, fmt="%.3f", flags=0):
+    def _slider_float(self, key, value, low, high, fmt="%.3f", flags=0, *, integer=False):
         edit = self.fields.value_rail(
-            key, value, (low, high), initial=None, fmt=fmt, show_reset=False
+            key, value, (low, high), initial=None, fmt=fmt, show_reset=False, integer=integer
         )
         active = imgui.is_item_active()
         deactivated = imgui.is_item_deactivated()
@@ -169,7 +187,7 @@ class WorkspaceSettings(SettingsPanel):
         return self._number_committed
 
     def _slider_int(self, key, value, low, high, fmt="%d", flags=0):
-        changed, result = self._slider_float(key, value, low, high, "%.0f", flags)
+        changed, result = self._slider_float(key, value, low, high, fmt, flags, integer=True)
         return changed, round(result)
 
     def _color_edit3(self, key, values, flags=0):
@@ -194,6 +212,21 @@ class WorkspaceSettings(SettingsPanel):
         from mojive.ui.workspace.settings_visuals import flag_table
 
         flag_table(self, ctx, table_id, flags, groups)
+
+    def _geometry_view(self, ctx):
+        from mojive.ui.workspace.geometry_view import geometry_selector
+
+        ui = self.workspace.ui
+        position = imgui.get_cursor_screen_pos()
+        height = geometry_selector(
+            ui,
+            ctx,
+            position.x,
+            position.y,
+            imgui.get_content_region_avail().x,
+            key="settings-geometry",
+        )
+        advance(ui, position.x, position.y + height + DESIGN.row_gap * ui.s)
 
     def _visual_groups(self, ctx):
         from mojive.ui.workspace.settings_visuals import visual_groups

@@ -65,6 +65,8 @@ def font_em_ratio(source: FontSource) -> float:
         return 1448 / 1000
     if name in ("Roboto-Regular.ttf", "Roboto-Bold.ttf"):
         return 2400 / 2048
+    if name.startswith("MiSans-"):
+        return 1326 / 1000
     return 1.0
 
 
@@ -78,11 +80,13 @@ def resolve_cjk_faces(source):
         "NotoSansCJK": "Noto Sans CJK SC",
         "NotoSansSC": "Noto Sans SC",
         "SourceHanSansSC": "Source Han Sans SC",
+        "MiSans": "MiSans",
     }.get(path.name.split("-", 1)[0], source.label)
     regular = FontFace(str(path), index, family + " Regular")
-    bold = path.with_name(path.name.replace("Regular", "Bold"))
+    heading_weight = "Semibold" if path.name.startswith("MiSans-") else "Bold"
+    bold = path.with_name(path.name.replace("Regular", heading_weight))
     if bold != path and bold.is_file():
-        return regular, FontFace(str(bold), index, family + " Bold")
+        return regular, FontFace(str(bold), index, family + " " + heading_weight)
     return regular, FontFace(str(path), index, family + " Bold (synthesized)", True)
 
 
@@ -102,9 +106,10 @@ def resolve_fonts(*, portable=False, cjk=None):
         numeric = resolve_font_sources(allow_download=False)[0]
     except FileNotFoundError:
         numeric = FontSource(str(bundled / "Inconsolata-Medium.ttf"), 0, "Inconsolata")
+    portable_fonts = Path(__file__).parents[2] / "text/resources/fonts"
     sources = (
-        FontSource(str(bundled / "Roboto/Roboto-Regular.ttf"), 0, "Roboto Regular"),
-        FontSource(str(bundled / "Roboto/Roboto-Bold.ttf"), 0, "Roboto Bold"),
+        FontSource(str(portable_fonts / "MiSans-Regular.ttf"), 0, "MiSans Regular"),
+        FontSource(str(portable_fonts / "MiSans-Semibold.ttf"), 0, "MiSans Semibold"),
         numeric,
     )
     if (

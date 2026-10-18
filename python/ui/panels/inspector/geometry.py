@@ -35,6 +35,7 @@ from mojive.ui.panels.inspector.fields import (
     _property_section,
     _property_solver_rows,
     _property_toggle,
+    _property_tooltip,
     _property_vector_row,
 )
 from mojive.ui.panels.inspector.materials import (
@@ -114,14 +115,14 @@ def _contact_collision_rows(
     changed, type_mask = imgui.input_int(
         "##collision_type_mask", properties.collision_type_mask, 1, 16
     )
-    imgui.set_item_tooltip(ctx.tr("Decimal MuJoCo contype bitmask"))
+    _property_tooltip(ctx, ctx.tr("Decimal MuJoCo contype bitmask"))
     if changed:
         edited = replace(edited, collision_type_mask=int(type_mask))
     _property_control_row(ctx, "collision affinity mask")
     changed, affinity_mask = imgui.input_int(
         "##collision_affinity_mask", properties.collision_affinity_mask, 1, 16
     )
-    imgui.set_item_tooltip(ctx.tr("Decimal MuJoCo conaffinity bitmask"))
+    _property_tooltip(ctx, ctx.tr("Decimal MuJoCo conaffinity bitmask"))
     if changed:
         edited = replace(edited, collision_affinity_mask=int(affinity_mask))
     _property_control_row(ctx, "contact priority")
@@ -238,7 +239,7 @@ def _geometry_mass_rows(
         properties.visual_group,
         tuple(str(value) for value in range(6)),
     )
-    imgui.set_item_tooltip(ctx.tr("MuJoCo geom group used by visibility filters"))
+    _property_tooltip(ctx, ctx.tr("MuJoCo geom group used by visibility filters"))
     if changed:
         edited = replace(edited, visual_group=int(group))
     mass_modes = ("density", "mass")
@@ -465,7 +466,7 @@ class _Geometry:
                 if editable_size
                 else "Edit model geometry dimensions in its source"
             )
-            imgui.set_item_tooltip(ctx.tr(hint))
+            _property_tooltip(ctx, ctx.tr(hint))
             if size_changed and editable_size:
                 self._submit_edit(
                     ctx,

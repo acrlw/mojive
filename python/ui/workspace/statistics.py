@@ -2,7 +2,7 @@
 
 from imgui_bundle import imgui
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.localization import render_note_text
 from mojive.ui.panels.stats import StatsPanel
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN
@@ -31,13 +31,17 @@ class NativeStatisticsPresentation:
         self.ui.component_text(part, rect, text, color, **options)
         style = self.ui.component_style(part)
         size = options.get("size", style.get("fontSize", BODY_SIZE))
-        if self.ui.measure(
-            str(text), size, translate=options.get("translate", True)
-        ) > rect.width and imgui.is_mouse_hovering_rect(
-            (rect.x, rect.y), (rect.right, rect.bottom)
+        if (
+            self.ui.measure(str(text), size, translate=options.get("translate", True), style=style)
+            > rect.width
         ):
-            self.ui.tooltip(str(text), translate=options.get("translate", True))
+            imgui.internal.item_add(
+                imgui.internal.ImRect((rect.x, rect.y), (rect.right, rect.bottom)), 0
+            )
+            if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+                self.ui.tooltip(str(text), translate=options.get("translate", True))
 
+    @part_scope("statistics_list")
     def draw(self, ctx, history, scale_ms, stats, caps):
         ui, scale = self.ui, self.workspace.s
         list_gap = (
@@ -52,7 +56,7 @@ class NativeStatisticsPresentation:
         self._cursor = origin
         width = imgui.get_content_region_avail().x
         font = ui.metric("data_list", "fontSize", BODY_SIZE)
-        imgui.push_font(ui.body, font * scale)
+        imgui.push_font(ui.resolve_font(ui.component_style("data_list")), font * scale)
         try:
             recent = ctx.dt * 1000
             imgui.plot_lines(
@@ -159,6 +163,10 @@ class NativeStatisticsPresentation:
         position = self._cursor
         width = imgui.get_content_region_avail().x
         group = ui.component_style("data_list")
+        # Counts use a compact shared value column; long diagnostic notes retain
+        # a wider reading measure. Authored component widths remain authoritative.
+        if not group.explicit("width"):
+            width = min(width, (560 if key == "stats-notes" else 360) * scale)
         with ui.component_scope("data_list"):
             row = ui.component_style("stat_row")
         font = row.get("fontSize", group.get("fontSize", BODY_SIZE))
@@ -291,6 +299,8 @@ class NativeStatisticsPresentation:
         position = self._cursor
         width = imgui.get_content_region_avail().x
         table = ui.component_style("table")
+        if not table.explicit("width"):
+            width = min(width, 560 * scale)
         with ui.component_scope("table"):
             row = ui.component_style("stat_row")
         font = row.get("fontSize", table.get("fontSize", BODY_SIZE))

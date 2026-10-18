@@ -13,6 +13,7 @@ from mojive.geometry2d.curves import (
     box_handle_points,
     smooth_polygon_corners,
 )
+from mojive.interaction.scene_icons import SCENE_ICON_GRID, scene_icon_data, scene_icon_geometry
 from mojive.types import CameraView
 
 SIZE_PT = 88.0
@@ -293,27 +294,63 @@ def screen_constant_world_sizes(
     return result
 
 
-_CAMERA_ICON_OUTLINE_2D = np.asarray(
-    (
-        (-0.50, -0.25),
-        (-0.43, -0.34),
-        (0.43, -0.34),
-        (0.50, -0.25),
-        (0.50, 0.25),
-        (0.43, 0.34),
-        (0.21, 0.34),
-        (0.12, 0.50),
-        (-0.17, 0.50),
-        (-0.26, 0.34),
-        (-0.43, 0.34),
-        (-0.50, 0.25),
-    ),
-    np.float64,
-)
-_CAMERA_ICON_ANGLES = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
-_CAMERA_ICON_LENS_2D = np.column_stack(
-    (0.16 * np.cos(_CAMERA_ICON_ANGLES), 0.16 * np.sin(_CAMERA_ICON_ANGLES))
-)
+def scene_icon_paths(
+    name: str,
+    positions: np.ndarray,
+    editor_camera: CameraView,
+    viewport_height: float,
+    pixels: float,
+    *,
+    visible_only: bool = False,
+) -> tuple[tuple[np.ndarray, float, bool], ...]:
+    """Place shared SVG centerlines in the editor-camera plane at a fixed screen size."""
+    points, spans = scene_icon_data(name)
+    world = _place_scene_icon_points(
+        points, positions, editor_camera, viewport_height, pixels, visible_only=visible_only
+    )
+    scale = float(pixels) / SCENE_ICON_GRID
+    return tuple(
+        (world[:, start:stop], width * scale, closed) for start, stop, width, closed in spans
+    )
+
+
+def scene_icon_triangles(
+    name: str,
+    positions: np.ndarray,
+    editor_camera: CameraView,
+    viewport_height: float,
+    pixels: float,
+    *,
+    visible_only: bool = False,
+) -> np.ndarray:
+    """Place the complete cached round silhouette as [N, T, 3, 3] world triangles."""
+    triangles = scene_icon_geometry(name)
+    world = _place_scene_icon_points(
+        triangles.reshape(-1, 2),
+        positions,
+        editor_camera,
+        viewport_height,
+        pixels,
+        visible_only=visible_only,
+    )
+    return world.reshape(world.shape[0], len(triangles), 3, 3)
+
+
+def _place_scene_icon_points(
+    points, positions, editor_camera, viewport_height, pixels, *, visible_only
+):
+    positions = np.asarray(positions, np.float64).reshape(-1, 3)
+    lengths = screen_constant_world_sizes(
+        editor_camera,
+        positions,
+        viewport_height,
+        float(pixels) / SCENE_ICON_GRID,
+        visible_only=visible_only,
+    )
+    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
+    right, up = view_rotation[0], view_rotation[1]
+    offsets = points[:, 0, None] * right - points[:, 1, None] * up
+    return (positions[:, None, :] + lengths[:, None, None] * offsets).astype(np.float32)
 
 
 def camera_icon_paths(
@@ -324,29 +361,12 @@ def camera_icon_paths(
     *,
     visible_only: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build joined screen-facing camera outline and lens paths."""
-
-    if not views:
-        return (
-            np.empty((0, len(_CAMERA_ICON_OUTLINE_2D), 3), np.float32),
-            np.empty((0, len(_CAMERA_ICON_LENS_2D), 3), np.float32),
-        )
-    eyes = np.asarray([view.eye for view in views], np.float64)
-    lengths = screen_constant_world_sizes(
-        editor_camera, eyes, viewport_height, pixels, visible_only=visible_only
+    """Build the shared round camera outline and lens paths."""
+    positions = np.asarray([view.eye for view in views], np.float64).reshape(-1, 3)
+    paths = scene_icon_paths(
+        "camera", positions, editor_camera, viewport_height, pixels, visible_only=visible_only
     )
-    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
-    right = view_rotation[0]
-    up = view_rotation[1]
-
-    def transform(points: np.ndarray) -> np.ndarray:
-        values = eyes[:, None, :] + lengths[:, None, None] * (
-            points[None, :, 0, None] * right[None, None, :]
-            + points[None, :, 1, None] * up[None, None, :]
-        )
-        return values.astype(np.float32)
-
-    return transform(_CAMERA_ICON_OUTLINE_2D), transform(_CAMERA_ICON_LENS_2D)
+    return tuple(points for points, _width, _closed in paths)
 
 
 def camera_icon_segments(

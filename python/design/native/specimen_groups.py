@@ -1,34 +1,51 @@
 """Concrete group specimens composed from the production native controls."""
 
+from contextlib import nullcontext
+from dataclasses import replace
 from types import SimpleNamespace
 
 from imgui_bundle import imgui as g
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, corner_radius_scope
+from mojive.design.specification import component_catalog
 from mojive.ui.design_palette import rgba8
 from mojive.ui.workspace.button_rows import draw_button_row
-from mojive.ui.workspace.component_layout import component_flow
+from mojive.ui.workspace.component_layout import component_flow, control_frame_size, control_size
+from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.geometry_view import GEOMETRY_ICONS, GEOMETRY_VIEWS
+from mojive.ui.workspace.group_corners import ACTION_PARTS, action_corners, centered_action_corners
+from mojive.ui.workspace.menu_geometry import native_edges, native_unit, popup_padding, popup_radius
 from mojive.ui.workspace.menu_item import Item
 from mojive.ui.workspace.menu_rows import menu_row_size, paint_menu_row
 from mojive.ui.workspace.popup_style import popup_box
+from mojive.ui.workspace.rail_geometry import (
+    expand_rail_box,
+    rail_corners,
+    rail_dimensions,
+    rail_padding,
+)
 from mojive.ui.workspace.statistics import NativeStatisticsPresentation
+from mojive.ui.workspace.window_chrome import surface_ink
 
 # Every entry describes an actual application operation, not a numbered placeholder.
 ACTIONS = {
     "button_row": (("定位", "frame"), ("复制", "copy"), ("删除", "delete")),
     "tabs": (("属性", None), ("物理", None), ("材质", None), ("关节", None)),
     "bottom_header": (
-        ("时间轴", "chart"),
-        ("曲线", "chart"),
-        ("统计", "chart"),
+        ("时间轴", None),
+        ("曲线", "waveform"),
+        ("统计", "performance"),
         ("输出", "terminal"),
     ),
     "type_filters": (("本体 11", "body"), ("几何体 20", "geom"), ("关节 11", "joint")),
-    "panel_tools": (("外观", "visual"), ("碰撞", "collision"), ("叠加", "both")),
+    "panel_tools": tuple(
+        (view.value.title(), icon)
+        for view, icon in zip(GEOMETRY_VIEWS, GEOMETRY_ICONS, strict=True)
+    ),
     "menu_bar": (("文件", None), ("编辑", None), ("添加", None), ("视图", None)),
     "title_actions": (("", "inspect"), ("", "settings")),
     "document_title": (("joint_types.xml", "file"),),
-    "viewport_toolbar": (("透视", "camera"), ("", "shading"), ("", "layers")),
+    "viewport_toolbar": (("透视", "perspective"), ("", "shading"), ("", "layers")),
     "transport": (
         ("", "previous"),
         ("播放", "play"),
@@ -36,8 +53,8 @@ ACTIONS = {
         ("0.000 s", None),
         ("", "reset"),
     ),
-    "rail": (("", "scene"), ("", "joint"), ("", "sliders"), ("", "folder"), ("", "camera")),
-    "toolbox": (("", "select"), ("", "move"), ("", "rotate"), ("", "scale"), ("", "cube")),
+    "rail": (("", "scene"), ("", "pose"), ("", "sliders"), ("", "folder"), ("", "camera")),
+    "toolbox": (("", "select"), ("", "move"), ("", "rotate"), ("", "scale"), ("", "frame")),
     "output_toolbar": (
         ("信息 3", "info"),
         ("警告 1", "warn"),
@@ -51,7 +68,7 @@ ACTIONS = {
         ("播放", "play"),
         ("", "transport-last"),
         ("录制", "record"),
-        ("快照", "camera"),
+        ("快照", "snapshot"),
     ),
     "timeline_details": (
         ("关键帧  0.250 s", "diamond"),
@@ -64,33 +81,150 @@ ACTIONS = {
     "dialog_footer": (("完成", "check"),),
 }
 
+# Other action groups are transparent in production; their controls do not gain
+# an enclosing rounded plate just because they are shown in the catalogue.
+ACTION_SURFACES = frozenset(
+    ("rail", "toolbox", "viewport_toolbar", "transport", "pending_edits", "file_receipt")
+)
+ACTION_PADDING = {
+    "toolbox": (4,) * 4,
+    "viewport_toolbar": (4,) * 4,
+    "transport": (6,) * 4,
+    "pending_edits": (8,) * 4,
+    "file_receipt": (4,) * 4,
+}
+
+
+def filter_geometry(ui, part, width):
+    """Measure the production search field and optional geometry segments."""
+    with ui.component_scope("panel_tools", part):
+        search = ui.component_style(("input_text", "search"))
+        margins = search.edges("margin", ui.s)
+        height = (
+            ui.design.primitives.field_height(("input_text", "search"), DESIGN.control_height)
+            * ui.s
+            + margins[1]
+            + margins[3]
+        )
+        style = ui.component_style(("panel_tools", part))
+        gap = style.get("rowGap", style.get("gap", 8 if part == "scene_tools" else 10)) * ui.s
+        segment_height = 0
+        if part == "scene_tools":
+            segment_height = ui.segment_height()
+        return width, height + gap + segment_height, height, gap
+
+
+def filters(owner, ui, engine, style, part, bounds):
+    with ui.component_scope("panel_tools", part):
+        _, _, search_height, gap = filter_geometry(ui, part, bounds.width)
+        key = "reference-" + part
+        _, owner.values[key] = ui.search(
+            key,
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            owner.values.get(key, ""),
+            hint=ui.translate("Search scene" if part == "scene_tools" else "Search joints"),
+        )
+        children = [ui.hits[key]]
+        if part == "scene_tools":
+            segment_key = key + "-geometry"
+            owner.values[segment_key] = ui.segmented(
+                segment_key,
+                bounds.x,
+                bounds.y + search_height + gap,
+                bounds.width / ui.s,
+                tuple(view.value.title() for view in GEOMETRY_VIEWS),
+                owner.values.get(segment_key, 0),
+                icons=GEOMETRY_ICONS,
+            )
+            children.append(ui.hits[segment_key])
+        return children
+
 
 def action_layout(ui, part, bounds):
     vertical = part in ("rail", "toolbox")
+    style = ui.component_style(part)
+    padding = tuple(
+        (style.get(field) or 0) * ui.s
+        for field in ("paddingLeft", "paddingTop", "paddingRight", "paddingBottom")
+    )
+    if part in ACTION_PADDING:
+        padding = action_corners(ui, part, ACTION_PADDING[part]).padding
+    elif part == "rail":
+        padding = rail_padding(ui)
+    column_gap = style.get("columnGap") if style.has("columnGap") else style.get("gap", 6)
+    row_gap = style.get("rowGap") if style.has("rowGap") else style.get("gap", 6)
     items = ACTIONS[part]
     sizes = []
-    for label, icon in items:
-        w = 32 if vertical or not label else ui.measure(label) / ui.s + (40 if icon else 24)
-        sizes.append((w * ui.s, 32 * ui.s))
+    for index, (label, icon) in enumerate(items):
+        slot = (
+            rail_dimensions(ui)[0]
+            if part == "rail"
+            else style.get("slotSize", 36)
+            if vertical
+            else 28
+            if part in ACTION_SURFACES
+            else 32
+        )
+        w = slot if vertical or not label else ui.measure(label) / ui.s + (40 if icon else 24)
+        sizes.append(
+            control_size(
+                ui,
+                "reference-" + part + "/" + str(index),
+                w,
+                slot,
+                label=label,
+                icon=icon,
+                **(
+                    {
+                        "icon_size": style.get("iconSize", 24 if part == "rail" else 20),
+                        "icon_role": "activity" if part == "rail" else "toolbar",
+                    }
+                    if part in ("rail", "toolbox")
+                    else {}
+                ),
+            )
+            if part in ACTION_SURFACES
+            else (w * ui.s, slot * ui.s)
+        )
+        if part == "transport" and index == 3:
+            sizes[-1] = (w * ui.s, DESIGN.control_height * ui.s)
+    if part == "transport":
+        padding = centered_action_corners(
+            action_corners(ui, part, ACTION_PADDING[part]), sizes
+        ).padding
     box, flow = component_flow(
         ui,
         part,
         bounds.x,
         bounds.y,
-        min(bounds.width, 48 * ui.s)
-        if vertical
+        min(bounds.width, rail_dimensions(ui)[1] * ui.s)
+        if part == "rail"
+        else min(bounds.width, max(v[0] for v in sizes) + padding[0] + padding[2])
+        if part == "toolbox"
         else min(
             bounds.width,
             sum(v[0] for v in sizes)
-            + max(0, len(sizes) - 1) * ui.metric(part, "columnGap", 6) * ui.s
-            + sum(ui.component_style(part).edges("padding", ui.s)[::2]),
+            + max(0, len(sizes) - 1) * column_gap * ui.s
+            + padding[0]
+            + padding[2],
         ),
         sizes,
         key="reference-" + part,
-        column_gap=6,
-        row_gap=6,
+        padding=padding,
+        column_gap=column_gap,
+        row_gap=row_gap,
         observe=False,
+        resolved_padding=padding if part in ACTION_SURFACES else None,
     )
+    if part == "rail":
+        box = expand_rail_box(ui, box)
+        rectangles = tuple(
+            replace(rect, width=min(size[0], box.content.width))
+            for rect, size in zip(flow.rectangles, sizes, strict=True)
+        )
+        flow = replace(flow, rectangles=rectangles, width=max(r.width for r in rectangles))
     return box, flow
 
 
@@ -106,22 +240,64 @@ def actions(owner, ui, engine, style, part, bounds):
         boxes = [ui.hits["reference-actions/" + str(i)] for i in range(len(items))]
         return boxes
     box, flow = action_layout(ui, part, bounds)
-    if part not in ("menu_bar", "document_title", "status_hints", "button_row"):
-        ui.rect(*box.frame.tuple(), rgba8("child"), r=style.get("radius", 8))
-    children = []
-    for i, ((label, icon), rect) in enumerate(zip(items, flow.rectangles, strict=True)):
-        result = engine.button(
-            "reference-" + part + "/" + str(i),
-            rect,
-            label=label,
-            icon=icon,
-            parts="tab" if part in ("tabs", "bottom_header") else "button",
-            active=owner.values.get(part, 0) == i,
-            filled=True,
+    corners = action_corners(ui, part, ACTION_PADDING[part]) if part in ACTION_PADDING else None
+    if part == "transport":
+        corners = centered_action_corners(
+            corners, tuple((r.width, r.height) for r in flow.rectangles)
         )
-        if result.changed:
-            owner.values[part] = i
-        children.append(result.box.frame.tuple())
+    radius = rail_corners(ui, box)[0] if part == "rail" else corners.radius if corners else 0
+    child_radius = (
+        rail_corners(ui, box)[2] if part == "rail" else corners.inner_radius if corners else None
+    )
+    if part in ACTION_SURFACES:
+        ui.rect(*box.frame.tuple(), rgba8("child"), r=radius / ui.s)
+    children = []
+    scope = (
+        corner_radius_scope(child_radius, ACTION_PARTS)
+        if child_radius is not None
+        else nullcontext()
+    )
+    with scope:
+        for i, ((label, icon), rect) in enumerate(zip(items, flow.rectangles, strict=True)):
+            if part == "transport" and i == 3:
+                ui.component_text(part, rect, label, rgba8("text"))
+                children.append(rect.tuple())
+                continue
+            if part in ACTION_SURFACES:
+                width, height = control_frame_size(
+                    ui,
+                    "reference-" + part + "/" + str(i),
+                    rect.width,
+                    rect.height,
+                    label=label,
+                    icon=icon,
+                )
+                rect = replace(rect, width=width * ui.s, height=height * ui.s)
+            result = engine.button(
+                "reference-" + part + "/" + str(i),
+                rect,
+                label=label,
+                icon=icon,
+                parts="icon_button"
+                if part in ACTION_SURFACES and not label
+                else "tab"
+                if part in ("tabs", "bottom_header")
+                else "button",
+                active=owner.values.get(part, 0) == i,
+                filled=True,
+                radius=None,
+                **(
+                    {
+                        "icon_size": style.get("iconSize", 24 if part == "rail" else 20),
+                        "icon_role": "activity" if part == "rail" else "toolbar",
+                    }
+                    if part in ("rail", "toolbox")
+                    else {}
+                ),
+            )
+            if result.changed:
+                owner.values[part] = i
+            children.append(result.box.frame.tuple())
     return children
 
 
@@ -135,9 +311,9 @@ def choice_rows(owner, part):
                 if part == "menu_item" and owner.long_text
                 else "保存场景",
                 shortcut="Ctrl+S",
-                icon="file",
+                icon="save",
             ),
-            Item(label="撤销", shortcut="Ctrl+Z", icon="reset", enabled=False),
+            Item(label="撤销", shortcut="Ctrl+Z", icon="undo", enabled=False),
         )
         return entries[1:2] if part == "menu_item" else entries
     entries = ("简体中文", "English", "日本語") if part == "select_popup" else ("简体中文",)
@@ -156,12 +332,18 @@ def choice_rows(owner, part):
 def choice_size(owner, ui, part, width):
     container = part not in ("select_option", "menu_item")
     row_part = "select_option" if part.startswith("select_") else "menu_item"
-    sizes = [menu_row_size(ui, row, part=row_part) for row in choice_rows(owner, part)]
+    pad = popup_padding(ui, part) if container else (0,) * 4
+    with (
+        ui.corner_scope(max(0, popup_radius(ui, part, pad) - pad[0]), row_part)
+        if part in ("menu", "select_popup")
+        else nullcontext()
+    ):
+        sizes = [menu_row_size(ui, row, part=row_part) for row in choice_rows(owner, part)]
     height = sum(h for _w, h in sizes)
     if container:
         style = ui.component_style(part)
-        pad, margin = style.edges("padding", ui.s, (12, 6, 12, 6)), style.edges("margin", ui.s)
-        height += max(0, len(sizes) - 1) * style.get("rowGap", 6) * ui.s
+        margin = native_edges(style, "margin", ui.s)
+        height += max(0, len(sizes) - 1) * native_unit(style.get("rowGap", 6) * ui.s)
         height += pad[1] + pad[3] + margin[1] + margin[3]
         width = min(width, style.dimension("width", width / ui.s) * ui.s)
         height = style.dimension("height", height / ui.s) * ui.s
@@ -173,31 +355,83 @@ def choices(owner, ui, engine, style, part, bounds):
     row_part = "select_option" if part.startswith("select_") else "menu_item"
     box = popup_box(ui, bounds, part=part) if popup else None
     if box is not None:
-        ui.rect(*box.frame.tuple(), rgba8("popup"), r=style.get("radius", 8))
+        ui.rect(
+            *box.frame.tuple(),
+            surface_ink(ui, part, "popup"),
+            r=popup_radius(ui, part, box.padding) / ui.s,
+            color_resolved=True,
+        )
     content = box.content if box is not None else bounds
     y, boxes = content.y, []
     g.push_clip_rect((content.x, content.y), (content.right, content.bottom), True)
     try:
-        for index, row in enumerate(choice_rows(owner, part)):
-            g.set_cursor_screen_pos((content.x, y))
-            result = paint_menu_row(
-                ui,
-                row,
-                "reference-choice/" + str(index),
-                content_right=content.right,
-                part=row_part,
-            )
-            if result.activated:
-                owner.values[part] = row.label if popup else not row.checked
-            if not popup:
-                ui.hits["reference-" + part] = result.box.frame.tuple()
-            boxes.append(result.box.frame.tuple())
-            y = result.box.outer.bottom + style.get("rowGap", 6) * ui.s if popup else y
+        with (
+            ui.corner_scope(max(0, popup_radius(ui, part, box.padding) - box.padding[0]), row_part)
+            if part in ("menu", "select_popup")
+            else nullcontext()
+        ):
+            for index, row in enumerate(choice_rows(owner, part)):
+                g.set_cursor_screen_pos((content.x, y))
+                result = paint_menu_row(
+                    ui,
+                    row,
+                    "reference-choice/" + str(index),
+                    content_right=content.right,
+                    part=row_part,
+                )
+                if result.activated:
+                    owner.values[part] = row.label if popup else not row.checked
+                if not popup:
+                    ui.hits["reference-" + part] = result.box.frame.tuple()
+                boxes.append(result.box.frame.tuple())
+                y = (
+                    result.box.outer.bottom + native_unit(style.get("rowGap", 6) * ui.s)
+                    if popup
+                    else y
+                )
     finally:
         g.pop_clip_rect()
     if box is not None:
         ui.record_component_box(part, box, key="reference-" + part, fields=boxes)
     return box if box is not None else result.box, boxes
+
+
+def status_readout_geometry(ui, part):
+    """Measure one reference using the complete production telemetry layout."""
+    from mojive.ui.imgui_draw import ImguiDraw2D
+    from mojive.ui.viewport_widgets.status_metrics import _status_performance_layout
+    from mojive.ui.workspace.status_components import StatusGroups
+
+    groups = StatusGroups(ui)
+    draw = ImguiDraw2D(ui.draw)
+    text = groups.text_draw(draw, "status_metrics")
+    mode = "steps" if part == "status_steps" else "time"
+    styles = groups.metric_styles(draw, mode)
+    layout = _status_performance_layout(
+        text,
+        0,
+        ui.s,
+        "OpenGL",
+        0.002,
+        59.8,
+        metric_text="Steps 130" if mode == "steps" else "Time 0.26 s",
+        metric_mode=mode,
+        step=130,
+        sim_time=0.26,
+        show_physics=True,
+        physics_hz=120,
+        text_budget=groups.text_budget,
+        metric_styles=styles,
+        group_gap=groups.gap("status_metrics"),
+        **groups.metric_options(),
+    )
+    key = (
+        "metric"
+        if part in ("status_steps", "status_time")
+        else component_catalog()[part]["statusKey"]
+    )
+    field = next(field for field in layout.fields if field.key == key)
+    return field, styles[key].draw if key in styles else text, groups
 
 
 def status(owner, ui, engine, style, part, bounds):
@@ -206,9 +440,45 @@ def status(owner, ui, engine, style, part, bounds):
     from mojive.ui.viewport_widgets.hints import draw_tool_hints, tool_hints_height
     from mojive.ui.viewport_widgets.model import ToolHint
     from mojive.ui.viewport_widgets.status import draw_status
-    from mojive.ui.workspace.status_components import StatusBadge, StatusGroups
+    from mojive.ui.workspace.status_components import (
+        StatusBadge,
+        StatusGroups,
+        resolve_status_bar_layout,
+    )
 
-    groups, badge = StatusGroups(ui), StatusBadge(ui)
+    if "statusKey" in component_catalog()[part]:
+        from mojive.ui.viewport_widgets.status_metrics import _StatusNumbers
+
+        field, draw, groups = status_readout_geometry(ui, part)
+        separator_width = groups.metric_options()["separator_width"]
+        leading_width = separator_width if field.key != "backend" else 0
+        offset = bounds.x + leading_width + field.left_gap - field.x
+        field = replace(
+            field,
+            x=field.x + offset,
+            content_x=field.content_x + offset,
+            value_x=field.value_x + offset,
+            unit_x=field.unit_x + offset,
+        )
+        center = bounds.y + bounds.height / 2
+        _StatusNumbers(draw).paint(field, center, THEME.text_disabled)
+        if field.key != "backend":
+            groups.divider(draw, bounds.x + separator_width / 2, center, bounds.height, THEME)
+        if field.key != "render":
+            groups.divider(
+                draw,
+                field.x + field.width + field.right_gap + separator_width / 2,
+                center,
+                bounds.height,
+                THEME,
+            )
+        groups.record_readout(
+            field,
+            (field.x, bounds.y, field.width, bounds.height),
+            "steps" if part == "status_steps" else "time",
+        )
+        return [(field.x, bounds.y, field.width, bounds.height)]
+    groups, badge = StatusGroups(ui), StatusBadge(ui, keycap=True)
     draw = ImguiDraw2D(ui.draw)
     center = bounds.y + bounds.height / 2
     if part == "status_separator":
@@ -240,8 +510,12 @@ def status(owner, ui, engine, style, part, bounds):
             fields,
         )
         return fields
+    surface = None
     if part == "statusbar":
-        bounds = style.box(*bounds.tuple(), scale=ui.s).content
+        box = resolve_status_bar_layout(ui, badge=badge, groups=groups).box(
+            bounds.x, bounds.y, bounds.width
+        )
+        bounds, surface = box.content, box.frame.tuple()
     draw_status(
         draw,
         (bounds.x, bounds.y),
@@ -253,18 +527,43 @@ def status(owner, ui, engine, style, part, bounds):
         state="paused" if part in ("statusbar", "status_context") else "external",
         sim_time=0.26,
         step=130,
-        metric_mode="time",
+        metric_mode="steps" if part == "status_steps" else "time",
+        show_physics=True,
         backend="OpenGL" if part != "status_context" else "",
         show_metrics=part != "status_context",
         dt=0.002,
         fps=60,
         presentation=groups,
+        surface_rect=surface,
         keycap=badge,
         tool_hints=(ToolHint("key", "Esc", "取消选择"), ToolHint("key", "Shift", "吸附"))
         if part == "status_context"
         else (),
     )
     return groups.fields
+
+
+def native_chrome(owner, ui, engine, style, part, bounds):
+    from mojive.ui.workspace.window_chrome import native_chrome as chrome_scope
+
+    g.set_cursor_screen_pos((bounds.x, bounds.y))
+    boxes = []
+    with chrome_scope(ui, part):
+        if part == "window_title":
+            g.text_unformatted(ui.translate("Help"))
+            lo, hi = g.get_item_rect_min(), g.get_item_rect_max()
+            return [(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)]
+        if g.begin_tab_bar("reference-dock-tabs"):
+            try:
+                for label in ("Timeline", "Output", "Statistics", "Plot"):
+                    selected, _ = g.begin_tab_item(ui.translate(label))
+                    lo, hi = g.get_item_rect_min(), g.get_item_rect_max()
+                    boxes.append((lo.x, lo.y, hi.x - lo.x, hi.y - lo.y))
+                    if selected:
+                        g.end_tab_item()
+            finally:
+                g.end_tab_bar()
+    return boxes
 
 
 def data(owner, ui, engine, style, part, bounds):
@@ -412,21 +711,31 @@ def rows(owner, ui, engine, style, part, bounds):
             g.end_child()
         return [bounds.tuple()]
     if part == "sensor":
-        from mojive.ui.workspace.sensors_panel import SensorPresentation
+        import numpy as np
+
+        from mojive.adapters.base import SensorInfo
+        from mojive.ui.workspace.sensors_panel import WorkspaceSensors
 
         g.set_cursor_screen_pos((bounds.x, bounds.y))
-        g.begin_child("reference-sensor", (bounds.width, bounds.height), g.ChildFlags_.borders)
+        g.begin_child("reference-sensor", (bounds.width, bounds.height))
         try:
-            presenter = SensorPresentation(ui, prefix="reference-sensor")
-            if presenter.begin_table("reference-sensor-values"):
-                for label, value in (
-                    ("名称", "joint_position"),
-                    ("类型", "jointpos"),
-                    ("维数", "1"),
-                    ("当前值", "0.785 rad"),
-                ):
-                    presenter.labeled(label, value)
-                presenter.end_table()
+            if "sensor-preview" not in owner.objects:
+                panel = WorkspaceSensors(SimpleNamespace(ui=ui, s=ui.s))
+                ctx = SimpleNamespace(
+                    tr=ui.translate,
+                    panels=None,
+                    session=SimpleNamespace(
+                        sensor_infos=(
+                            SensorInfo(0, "joint_position", "jointpos", 0, 1),
+                            SensorInfo(1, "position_xyz", "framepos", 1, 3),
+                            SensorInfo(2, "component_readings", "user", 4, 14),
+                        ),
+                        frame=SimpleNamespace(sensors=np.arange(18, dtype=float) * 0.125),
+                    ),
+                )
+                owner.objects["sensor-preview"] = panel, ctx
+            panel, ctx = owner.objects["sensor-preview"]
+            panel.draw(ctx)
         finally:
             g.end_child()
         return [bounds.tuple()]
@@ -470,6 +779,19 @@ def rows(owner, ui, engine, style, part, bounds):
 
 
 GROUP_RENDERERS = {
+    **dict.fromkeys(("window_title", "dock_tabs"), native_chrome),
+    **dict.fromkeys(
+        (
+            "status_backend",
+            "status_steps",
+            "status_time",
+            "status_delta",
+            "status_physics",
+            "status_render",
+        ),
+        status,
+    ),
+    **dict.fromkeys(("scene_tools", "pose_tools"), filters),
     **dict.fromkeys(
         ("statusbar", "status_context", "status_hints", "status_metrics", "status_separator"),
         status,

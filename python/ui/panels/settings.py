@@ -21,6 +21,7 @@ from mojive.ui.panels.settings_pages import camera, interaction, recording, rend
 from mojive.ui.panels.settings_pages.catalog import (
     _CATEGORIES,
     _CATEGORY_WIDTH_PT,
+    settings_category_label,
     settings_category_matches,
     settings_uses_stacked_layout,
 )
@@ -71,7 +72,7 @@ class SettingsPanel(Panel):
             changed, selected = self._choice_list(
                 "##settings_category",
                 _CATEGORIES.index(self._category),
-                tuple(ctx.tr(category) for category in _CATEGORIES),
+                tuple(ctx.tr(settings_category_label(category)) for category in _CATEGORIES),
                 enabled=tuple(
                     settings_category_matches(category, self._search) for category in _CATEGORIES
                 ),
@@ -106,7 +107,7 @@ class SettingsPanel(Panel):
                 self._category,
             )
         imgui.spacing()
-        imgui.text(ctx.tr(self._category))
+        imgui.text(ctx.tr(settings_category_label(self._category)))
         imgui.separator()
         if self._search and not settings_category_matches(self._category, self._search):
             imgui.text_disabled(ctx.tr("No matching settings"))
@@ -140,7 +141,8 @@ class SettingsPanel(Panel):
             matched = settings_category_matches(category, self._search)
             imgui.begin_disabled(not matched)
             selected, _ = padded_selectable(
-                f"{ctx.tr(category)}##settings_{category}", self._category == category
+                f"{ctx.tr(settings_category_label(category))}##settings_{category}",
+                self._category == category,
             )
             if selected:
                 self._category = category
@@ -169,7 +171,7 @@ class SettingsPanel(Panel):
         )
         if value != selected and ctx.set_live_model_updates is not None:
             ctx.apply_setting(ctx.set_live_model_updates, value == 0)
-        imgui.set_item_tooltip(
+        self._tooltip(
             t("Realtime applies each edit. Deferred edits wait for Apply in the viewport.")
         )
         if ctx.set_scrollbar_hide_delay is not None:
@@ -259,14 +261,20 @@ class SettingsPanel(Panel):
         if reset:
             changed, edited = True, default
         if hovered and (tooltip or show_reset_hint):
-            imgui.set_tooltip(
+            self._tooltip(
                 ctx.tr(tooltip)
                 if tooltip
-                else pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset"))
+                else pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")),
+                hovered=True,
             )
         # Idle float widgets may round-trip through float32. A commit on release
         # must retain the last accepted preview rather than replacing its precision.
         return changed, edited if changed else value, committed or reset
+
+    def _geometry_view(self, ctx):
+        from mojive.ui.geometry_view import draw_geometry_view
+
+        draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme, combo=self._combo)
 
     def _mujoco_visuals(self, ctx: PanelContext) -> None:
         return visuals.draw(self, ctx)
@@ -368,7 +376,7 @@ class SettingsPanel(Panel):
                     and tooltips[option]
                     and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
                 ):
-                    imgui.set_tooltip(tooltips[option])
+                    self._tooltip(tooltips[option], hovered=True)
             imgui.end_combo()
         return selected != index, selected
 

@@ -1,6 +1,6 @@
 """Explicit component boxes, typography and sibling placement for native panels."""
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 
 from imgui_bundle import imgui
 
@@ -11,18 +11,83 @@ from mojive.design.native.geometry import (
     NativePartStyle,
     Rect,
     budget_margins,
+    corner_radius_scope,
     equal_spacing_layout,
     part_scope,
+    scoped_corner_radius,
 )
+
+
+class _ComponentTextDraw:
+    """Keep a component's native font identical during Draw2D measurement and painting."""
+
+    def __init__(self, draw, ui, part):
+        self.draw, self.ui = draw, ui
+        self.style = ui.component_style(part)
+        self.font = ui.resolve_font(self.style)
+        self.size = self.style.get("fontSize", imgui.get_font_size() / ui.s) * ui.s
+
+    def __getattr__(self, name):
+        return getattr(self.draw, name)
+
+    def _current_font(self):
+        return imgui.get_font().font_id == self.font.font_id and imgui.get_font_size() == self.size
+
+    @contextmanager
+    def font_scope(self):
+        imgui.push_font(self.font, self.size)
+        try:
+            yield
+        finally:
+            imgui.pop_font()
+
+    def text_size(self, value):
+        if self._current_font():
+            return self.draw.text_size(value)
+        with self.font_scope():
+            return self.draw.text_size(value)
+
+    def text_ink_bounds(self, value):
+        if self._current_font():
+            return self.draw.text_ink_bounds(value)
+        with self.font_scope():
+            return self.draw.text_ink_bounds(value)
+
+    def text(self, position, color, value, **options):
+        color = self._text_ink(color)
+        if self._current_font():
+            return self.draw.text(position, color, value, **options)
+        with self.font_scope():
+            return self.draw.text(position, color, value, **options)
+
+    def centered_label(self, text, center, color, max_width):
+        color = self._text_ink(color)
+        if self._current_font():
+            return self.draw.centered_label(text, center, color, max_width)
+        with self.font_scope():
+            return self.draw.centered_label(text, center, color, max_width)
+
+    def _text_ink(self, color):
+        if self.ui.design is not None and self.ui.design.runtime.has_module_palette:
+            tint = self.ui.ink(tuple(round(v * 255) for v in color), self.style)
+            color = tuple(v / 255 for v in tint)
+        if self.style.get("textColor", "inherit") != "inherit":
+            tint = self.ui.style_color(
+                self.style, "textColor", tuple(round(channel * 255) for channel in color)
+            )
+            color = tuple(channel / 255 for channel in tint)
+        return color
 
 
 class _BaselineStyle:
     """Retain caller geometry when the workspace has no design runtime."""
 
-    def __init__(self, font_size=None):
-        self.font_size = font_size
+    def __init__(self, font_size=None, radius=None):
+        self.font_size, self.radius = font_size, radius
 
     def get(self, field, fallback=None):
+        if field == "radius" and self.radius is not None:
+            return self.radius
         return self.font_size if field == "fontSize" and self.font_size is not None else fallback
 
     def explicit(self, field):
@@ -54,11 +119,36 @@ _BASELINE = _BaselineStyle()
 
 
 class ComponentStyles:
+    @contextmanager
+    def component_font(self, part):
+        """Batch a uniform group's font; explicit child faces can still override it."""
+        from mojive.ui.workspace.design import DESIGN
+
+        style = self.component_style(part)
+        imgui.push_font(self.resolve_font(style), style.get("fontSize", DESIGN.body_size) * self.s)
+        try:
+            yield
+        finally:
+            imgui.pop_font()
+
+    def text_draw(self, draw, part):
+        return _ComponentTextDraw(draw, self, part)
+
     def component_style(self, part):
         if self.design is not None:
             return self.design.style(part)
-        size = self.typography.size_for((part,) if isinstance(part, str) else part)
-        return _BASELINE if size is None else _BaselineStyle(size)
+        parts = (part,) if isinstance(part, str) else part
+        size = self.typography.size_for(parts)
+        radius = scoped_corner_radius(parts)
+        return (
+            _BASELINE
+            if size is None and radius is None
+            else _BaselineStyle(size, None if radius is None else radius / self.s)
+        )
+
+    def corner_scope(self, radius_native, parts):
+        """Apply a parent's native corner budget without changing authored styles."""
+        return corner_radius_scope(radius_native, parts)
 
     def component_scope(self, *parts):
         return (
@@ -128,9 +218,10 @@ class ComponentStyles:
         if key is None:
             name = part if isinstance(part, str) else "/".join(part)
             key = f"component/{name}/{imgui.get_id(name)}"
+        style = self.component_style(part)
         self.design.record(
             key,
-            (part,) if isinstance(part, str) else tuple(part),
+            style.part_ids,
             box.frame.tuple(),
             "container",
             draw=draw,
@@ -140,9 +231,7 @@ class ComponentStyles:
             padding=list(box.padding),
             margin=list(box.margin),
             requestedMargin=list(
-                self.component_style(part).edges("margin", self.s)
-                if requested_margin is None
-                else requested_margin
+                style.edges("margin", self.s) if requested_margin is None else requested_margin
             ),
             **geometry,
         )
@@ -175,7 +264,13 @@ class ComponentStyles:
         text_width = min(
             rect.width,
             self.measure(
-                shown, font_size, translate=False, font_resolved=True, mono=mono, bold=bold
+                shown,
+                font_size,
+                translate=False,
+                font_resolved=True,
+                mono=mono,
+                bold=bold,
+                style=style,
             ),
         )
         factor_x = (
@@ -193,20 +288,20 @@ class ComponentStyles:
         target = draw or self.draw
         target.push_clip_rect((rect.x, rect.y), (rect.right, rect.bottom), True)
         try:
-            with self.component_scope(part):
-                self.text(
-                    x,
-                    y,
-                    shown,
-                    c,
-                    font_size,
-                    bold=bold,
-                    mono=mono,
-                    draw=target,
-                    max_width=max(0, rect.right - x),
-                    translate=False,
-                    font_resolved=True,
-                )
+            self.text(
+                x,
+                y,
+                shown,
+                c,
+                font_size,
+                bold=bold,
+                mono=mono,
+                draw=target,
+                max_width=max(0, rect.right - x),
+                translate=False,
+                font_resolved=True,
+                style=style,
+            )
         finally:
             target.pop_clip_rect()
 

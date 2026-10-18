@@ -1,25 +1,31 @@
 """Native presentation of the registered editor's real timeline and transport."""
 
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
+from mojive.design.native.geometry import Box, Rect, part_scope
 from mojive.ui.icons import draw_icon_label
 from mojive.ui.keyframe_editor.controls import FOLLOW_MODE_TOOLTIPS
 from mojive.ui.keyframe_editor.toolbar import TimelineToolbar
 from mojive.ui.keyframe_editor.track import draw_dope_sheet
-from mojive.ui.timeline import nearest_take_frame
+from mojive.ui.timeline import nearest_take_frame, timeline_range_format, valid_timeline_range
 from mojive.ui.workspace.component_layout import (
-    component_flow,
     control_frame_size,
     control_size,
 )
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN
-from mojive.ui.workspace.property_style import NativePropertyPresentation, property_toggle
+from mojive.ui.workspace.form_popup import form_popup, measure_form_popup
+from mojive.ui.workspace.property_style import NativePropertyPresentation, toggle_row_height
+from mojive.ui.workspace.timeline_body import body_corner_scope, body_geometry
 from mojive.ui.workspace.timeline_details import NativeTimelineDetails
+from mojive.ui.workspace.timeline_header import toolbar_group_layout
 from mojive.ui.workspace.timeline_track import NativeTimelineTrack, measure_layout
+from mojive.ui.workspace.widgets import MUTED
+from mojive.ui.workspace.window_chrome import native_child_extent
 
 _COMMAND_ICONS = {
     "first": "transport-first",
@@ -39,13 +45,13 @@ _COMMAND_ICONS = {
     "fit": "fit",
     "follow": "follow",
     "view": "video",
-    "key": "link",
+    "key": "snapshot",
     "key-keyframe": "diamond",
 }
 _FOLLOW_ICONS = {
-    "key-follow-off": "pin",
-    "key-follow-page": "follow",
-    "key-follow-locked": "lock",
+    "key-follow-off": "follow-off",
+    "key-follow-page": "follow-page",
+    "key-follow-locked": "follow-locked",
 }
 _FOLLOW_MODES = ("off", "page", "locked")
 _NATIVE_FOLLOW_ICONS = tuple(_FOLLOW_ICONS.values())
@@ -73,6 +79,7 @@ class _RangeEdit:
     selected: tuple[int, int] | None
     loop_enabled: bool
     view: tuple[float, float, bool]
+    manual_view_range: tuple[float, float] | None
 
 
 class _ToolbarRows:
@@ -181,8 +188,9 @@ class NativeTimelineToolbar(TimelineToolbar):
         ):
             self.workspace.collapse_bottom()
 
+    @part_scope("timeline_toolbar")
     def draw_compact_toolbar(self, editor, ctx, take_times):
-        """Place every action in reading order, wrapping complete controls at the edge."""
+        """Keep transport, capture, range and view controls in complete wrapping groups."""
         ui, scale = self.workspace.ui, ctx.style_scale
         origin = imgui.get_cursor_screen_pos()
         available = imgui.get_content_region_avail().x
@@ -191,18 +199,24 @@ class NativeTimelineToolbar(TimelineToolbar):
         pads = style.edges("padding", scale)
         margins = style.edges("margin", scale)
         content_width = max(scale, available - pads[0] - pads[2] - margins[0] - margins[2])
+        content_width = min(
+            content_width,
+            max(0, style.dimension("width", available / scale) * scale - pads[0] - pads[2]),
+        )
         width = content_width / scale
-        labels = tuple(ctx.tr(title) for title in ("Start", "End"))
+        labels = self._range_labels(ctx, take_times)
         label_width = max(ui.measure(title) for title in labels) / scale
-        endpoints = self._range_endpoints(editor, ctx, take_times)
-        number_sizes = tuple(self._numeric_size("%.2f s", value) for value in endpoints)
-        number_width = max(size[0] for size in number_sizes)
-        number_height = max(size[1] for size in number_sizes)
+        number_width, number_height = self._numeric_size(
+            timeline_range_format(*self._range_endpoints(editor, ctx, take_times), suffix=" s")
+        )
         from mojive.ui.workspace.labeled_input import measure_labeled_input
 
+        loop_size = control_size(ui, "timeline-loop", 28, 28, icon="loop")
+        column_gap = style.get("columnGap", style.get("gap", DESIGN.timeline_column_gap)) * scale
+        range_budget = max(0, (content_width - loop_size[0] - 2 * column_gap) / 2)
         range_layout = measure_labeled_input(
             ui,
-            content_width,
+            range_budget,
             labels[0],
             (number_width * scale, number_height * scale),
             label_width=label_width * scale,
@@ -225,14 +239,18 @@ class NativeTimelineToolbar(TimelineToolbar):
             return control_size(ui, "timeline-" + name, baseline, 28, icon=icon, label=label)
 
         playing, recording = ctx.session.state_take_playing, ctx.session.state_take_recording
+        compact_play = width < 360
+        compact_record = width < 360
         sizes = [
             button_size(
                 name,
-                72 if name == "play-pause" else 24,
+                (28 if compact_play else 72) if name == "play-pause" else 24,
                 icon=("pause" if playing else "play")
                 if name == "play-pause"
                 else _COMMAND_ICONS[name],
-                label=("Pause" if playing else "Play") if name == "play-pause" else "",
+                label=("Pause" if playing else "Play")
+                if name == "play-pause" and not compact_play
+                else "",
             )
             for name in ("first", "previous", "play-pause", "next", "last")
         ]
@@ -240,36 +258,36 @@ class NativeTimelineToolbar(TimelineToolbar):
             (80 * scale, 28 * scale),
             button_size(
                 "record",
-                88 if width >= 180 else 28,
+                28 if compact_record else 88,
                 icon="stop" if recording else "record",
-                label=("Stop" if recording else "Record simulation state") if width >= 180 else "",
+                label="" if compact_record else "Stop" if recording else "Record simulation state",
             ),
             (120 * scale, 28 * scale),
         ]
         sizes += [
-            button_size(kind, w, icon="link" if kind == "snapshot" else "video", label=caption)
+            button_size(kind, w, icon="snapshot" if kind == "snapshot" else "video", label=caption)
             for kind, caption, w in captures
         ]
         sizes += [
             range_size,
             range_size,
-            button_size("loop", 28, icon="loop"),
+            loop_size,
             (90 * scale, 28 * scale),
             button_size("fit", 28, icon="fit"),
             button_size("settings", 28, icon="settings"),
             control_size(ui, "collapse-timeline", 28, 28, icon="down"),
         ]
-        box, layout = component_flow(
+        box, layout, groups = toolbar_group_layout(
             ui,
-            "timeline_toolbar",
             origin.x,
             origin.y,
             available,
-            sizes,
-            key="timeline-toolbar",
+            (sizes[:6], sizes[6:10], sizes[10:13], sizes[13:]),
             column_gap=DESIGN.timeline_column_gap,
             row_gap=DESIGN.timeline_row_gap,
         )
+        for name, rect in zip(("transport", "capture", "range", "view"), groups, strict=True):
+            ui.hits["timeline-group-" + name] = rect.tuple()
         available = box.content.width
         rows = _ToolbarRows(
             imgui.ImVec2(box.content.x, box.content.y),
@@ -286,12 +304,20 @@ class NativeTimelineToolbar(TimelineToolbar):
                 button_width = 72 if name == "play-pause" else 24
                 x, y, allocated = rows.place(button_width)
                 self._draw_transport(
-                    editor, ctx, take_times, x, y, 4, names=(name,), width_limit=allocated * scale
+                    editor,
+                    ctx,
+                    take_times,
+                    x,
+                    y,
+                    4,
+                    names=(name,),
+                    compact_play=compact_play,
+                    width_limit=allocated * scale,
                 )
             x, y, time_width = rows.place(80)
             self._draw_time(editor, ctx, x, y, width=time_width)
             tools_top = rows.y
-            record_width = 88 if width >= 180 else 28
+            record_width = 28 if compact_record else 88
             x, y, allocated = rows.place(record_width)
             self._draw_record(
                 editor, ctx, x, y, compact=record_width == 28, width_limit=allocated * scale
@@ -301,7 +327,7 @@ class NativeTimelineToolbar(TimelineToolbar):
             for kind, caption, capture_width in captures:
                 x, y, capture_width = rows.place(capture_width)
                 self._draw_capture(editor, ctx, kind, x, y, capture_width, caption)
-            self._draw_range(editor, ctx, take_times, rows)
+            self._draw_range(editor, ctx, take_times, rows, field_width=range_budget)
             x, y, _ = rows.place(90)
             self._draw_follow(editor, ctx, x, y)
             x, y, allocated = rows.place(28)
@@ -337,42 +363,47 @@ class NativeTimelineToolbar(TimelineToolbar):
             width_limit=width_limit,
         ):
             imgui.open_popup("Timeline settings")
-        number_width = (
-            max(
-                (
-                    self._numeric_size("%.1f", getattr(ctx.recording_config, field))[0]
-                    for field in ("countdown", "end_hold")
-                ),
-                default=82,
+        with part_scope("form_popup", inherit=False):
+            labels = [ctx.tr("Pause at last frame")]
+            if ctx.recording_config is not None:
+                labels.extend(ctx.tr(label) for label in ("Start delay (s)", "End hold (s)"))
+            number_width, number_height = self._numeric_size("%.1f")
+            layout = measure_form_popup(
+                ui,
+                labels,
+                field_width=max(96 * scale, number_width * scale, ui.numeric_minimum()),
+                row_height=max(number_height * scale, toggle_row_height(ui)),
+                group_starts=(1,),
             )
-            if ctx.recording_config is not None
-            else 82
-        )
-        switch_width = ui.component_style("switch").get("switchWidth", DESIGN.switch_track_width)
-        row = ui.component_style("form_row")
-        margin = row.edges("margin", scale)
-        gap = row.get("columnGap", row.get("labelGap", DESIGN.label_gap)) * scale
-        field_width = max(
-            96 * scale, number_width * scale, switch_width * scale, ui.numeric_minimum()
-        )
-        form_width = self._settings_label_width(ctx) + gap + field_width + margin[0] + margin[2]
-        width = min(
-            form_width + 20 * scale,
-            imgui.get_io().display_size.x - 20 * scale,
-        )
-        imgui.set_next_window_size((width, 0))
-        imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 10 * scale))
-        imgui.push_style_var(imgui.StyleVar_.window_min_size, (0, 0))
-        try:
-            if imgui.begin_popup("Timeline settings"):
-                origin = imgui.get_cursor_screen_pos()
-                available = imgui.get_content_region_avail().x
-                self._draw_pause_at_end(ctx, origin.x, origin.y, available / scale)
-                if ctx.recording_config is not None:
-                    self._draw_recording_fields(ctx)
-                imgui.end_popup()
-        finally:
-            imgui.pop_style_var(2)
+            with form_popup(ui, "Timeline settings", layout) as opened:
+                if opened:
+                    origin = imgui.get_window_pos()
+                    self._draw_pause_at_end(ctx, layout.row(origin, 0))
+                    if ctx.recording_config is not None:
+                        self._draw_recording_fields(ctx, layout, origin)
+                    self._record_settings_layout(layout, origin, labels)
+
+    def _record_settings_layout(self, layout, origin, labels):
+        ui = self.workspace.ui
+        window = imgui.internal.get_current_window()
+        rows = [layout.row(origin, index).tuple() for index in range(len(labels))]
+        ui.hits["timeline-settings-popup"] = (origin.x, origin.y, window.size.x, window.size.y)
+        if ui.design is not None:
+            ui.design.record(
+                "timeline-settings-popup",
+                ("form_popup",),
+                ui.hits["timeline-settings-popup"],
+                "form_popup",
+                padding=list(layout.padding),
+                radius=window.window_rounding,
+                innerRadius=layout.inner_radius,
+                rowGap=layout.row_gap,
+                groupGap=layout.group_gap,
+                rows=rows,
+                labels=labels,
+                labelWidth=layout.label_width,
+                fields=[layout.field(origin, index).tuple() for index in range(1, len(labels))],
+            )
 
     def _button(self, ctx, name, x, y, *, width=24, icon=None, label="", **kwargs):
         ui = self.workspace.ui
@@ -481,7 +512,14 @@ class NativeTimelineToolbar(TimelineToolbar):
         from mojive.ui.workspace.time_readout import draw_time_readout
 
         draw_time_readout(self.workspace.ui, "timeline-time", x, y, editor.playhead, width=width)
-        imgui.set_item_tooltip(ctx.tr("Timeline time") + f": {editor.playhead:.6f} s")
+        if imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+            text = ctx.tr("Timeline time") + f": {editor.playhead:.6f} s"
+            times, index = ctx.session.state_take_times, ctx.session.state_take_cursor
+            if 0 <= index < len(times):
+                text += (
+                    f"\n{ctx.tr('Recorded frame')} {index + 1}/{len(times)}: {times[index]:.6f} s"
+                )
+            self.workspace.ui.tooltip(text, translate=False)
 
     def _draw_record(self, editor, ctx, x, y, *, compact=False, width_limit=None):
         recording = ctx.session.state_take_recording
@@ -524,7 +562,7 @@ class NativeTimelineToolbar(TimelineToolbar):
             if video and ctx.take_video_active
             else "Export Video"
             if video
-            else "Capture Snapshot"
+            else "Save the scene state at this time; restore it from the Snapshots track."
         )
         if stopping and label:
             label = "Stop" if label == "Video" else "Stop Video"
@@ -534,7 +572,7 @@ class NativeTimelineToolbar(TimelineToolbar):
             x,
             y,
             width=width,
-            icon="stop" if stopping else "video" if video else "link",
+            icon="stop" if stopping else "video" if video else "snapshot",
             label=label,
             enabled=enabled,
             tooltip=ctx.tr(tooltip),
@@ -607,7 +645,7 @@ class NativeTimelineToolbar(TimelineToolbar):
                             else cmd.SelectStateTake(take.take_id)
                         )
                         editor.error = "" if result.ok else result.message
-                imgui.separator()
+                menus.local_separator()
                 if menus.local_item("New Take", key="timeline-new-take", icon="plus")[0]:
                     result = ctx.submit(cmd.CreateStateTake())
                     editor.error = "" if result.ok else result.message
@@ -647,6 +685,7 @@ class NativeTimelineToolbar(TimelineToolbar):
         selected, _ = menus.local_item(
             self.take_name(ctx, take),
             checked=take.take_id == ctx.session.active_state_take_id,
+            checkable=True,
             key=f"timeline-take-choice-{take.take_id}",
             width=max(0, width - remove_size[0] - gap),
             minimum_height=remove_size[1] + padding[1] + padding[3],
@@ -654,11 +693,11 @@ class NativeTimelineToolbar(TimelineToolbar):
         )
         return selected, removed
 
-    def _numeric_size(self, format, value):
+    def _numeric_size(self, format):
         ui, scale = self.workspace.ui, self.workspace.s
         style = ui.component_style("input_number")
         margin = style.edges("margin")
-        width = max(82, ui.numeric_minimum(axis=False, format=format, values=(value,)) / scale)
+        width = max(82, ui.numeric_minimum(axis=False, format=format) / scale)
         if style.get("widthMode", "auto") == "fixed":
             width = style.get("width", width)
         else:
@@ -667,24 +706,31 @@ class NativeTimelineToolbar(TimelineToolbar):
         return width + margin[0] + margin[2], height + margin[1] + margin[3]
 
     @staticmethod
+    def _range_labels(ctx, take_times):
+        titles = ("Loop start", "Loop end") if len(take_times) > 1 else ("View start", "View end")
+        return tuple(ctx.tr(title) for title in titles)
+
+    @staticmethod
     def _range_endpoints(editor, ctx, take_times):
+        if len(take_times) < 2:
+            return editor.view_start, editor.view_end
         limits = ctx.session.state_take_range
         return (
             (take_times[limits[0]], take_times[limits[1]])
             if limits
             else (take_times[0], take_times[-1])
-            if take_times
-            else (editor.view_start, editor.view_end)
         )
 
-    def _numeric_field(self, rows, key, label, value, *, format, speed=0.01, label_width=None):
+    def _numeric_field(
+        self, rows, key, label, value, *, format, speed=0.01, label_width=None, available=None
+    ):
         from mojive.ui.workspace.labeled_input import draw_labeled_input, measure_labeled_input
 
         ui, scale = self.workspace.ui, self.workspace.s
-        number_width, number_height = self._numeric_size(format, value)
+        number_width, number_height = self._numeric_size(format)
         layout = measure_labeled_input(
             ui,
-            rows.right - rows.left,
+            rows.right - rows.left if available is None else available,
             label,
             (number_width * scale, number_height * scale),
             label_width=None if label_width is None else label_width * scale,
@@ -692,11 +738,12 @@ class NativeTimelineToolbar(TimelineToolbar):
         x, y, _ = rows.place(layout.width / scale, layout.height / scale)
         return draw_labeled_input(ui, key, x, y, layout, label, value, format=format, speed=speed)
 
-    def _draw_range(self, editor, ctx, take_times, rows):
-        labels = tuple(ctx.tr(title) for title in ("Start", "End"))
+    def _draw_range(self, editor, ctx, take_times, rows, *, field_width=None):
+        labels = self._range_labels(ctx, take_times)
         label_width = max(self.workspace.ui.measure(title) for title in labels) / ctx.style_scale
         limits = ctx.session.state_take_range
         endpoints = self._range_endpoints(editor, ctx, take_times)
+        range_format = timeline_range_format(*endpoints, suffix=" s")
         changed, values, canceled = False, [], False
         range_key = None
         imgui.begin_disabled(ctx.session.state_take_recording or ctx.take_video_active)
@@ -707,9 +754,15 @@ class NativeTimelineToolbar(TimelineToolbar):
                 key,
                 title,
                 value,
-                format="%.2f s",
+                format=range_format,
                 label_width=label_width,
+                available=field_width,
             )
+            if imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+                hint = ctx.tr("Playback range" if len(take_times) > 1 else "Visible time range")
+                self.workspace.ui.tooltip(
+                    f"{hint}\n{endpoints[0]:.6f}–{endpoints[1]:.6f} s", translate=False
+                )
             state = self.workspace.ui.numeric_edits[key]
             if state.activated:
                 self._range_edit = _RangeEdit(
@@ -718,6 +771,7 @@ class NativeTimelineToolbar(TimelineToolbar):
                     limits,
                     ctx.session.state_take_loop_enabled,
                     (editor.view_start, editor.view_end, editor.view_needs_fit),
+                    editor.manual_view_range,
                 )
             if self._range_edit is not None and self._range_edit.key == key:
                 range_key = key
@@ -748,9 +802,10 @@ class NativeTimelineToolbar(TimelineToolbar):
                         result = ctx.submit(cmd.SetStateTakeLoopEnabled(original.loop_enabled))
                     editor.error = "" if result.ok else result.message
                 editor.view_start, editor.view_end, editor.view_needs_fit = original.view
+                editor.manual_view_range = original.manual_view_range
             imgui.internal.clear_active_id()
             self._range_edit = None
-        elif changed and math.isfinite(start) and math.isfinite(end) and end > start:
+        elif changed and valid_timeline_range(start, end):
             if len(take_times) > 1:
                 first, last = (
                     nearest_take_frame(take_times, start),
@@ -759,33 +814,51 @@ class NativeTimelineToolbar(TimelineToolbar):
                 if first < last:
                     ctx.submit(cmd.SetStateTakeLoop(first, last))
             else:
-                editor.view_start, editor.view_end, editor.view_needs_fit = start, end, False
+                editor.set_view_range(start, end)
         if range_key is not None and self.workspace.ui.numeric_edits[range_key].deactivated:
             self._range_edit = None
+        ui = self.workspace.ui
+        if ui.design is not None:
+            ui.design.record(
+                "timeline-range-context",
+                ("range_bounds",),
+                ui.hits["timeline-group-range"],
+                "timeline_range",
+                rangeKind="loop" if len(take_times) > 1 else "view",
+                timeRange=list(endpoints),
+                playhead=editor.playhead,
+                viewRange=[editor.view_start, editor.view_end],
+                loopEnabled=ctx.session.state_take_loop_enabled,
+            )
         imgui.end_disabled()
 
-    def _settings_label_width(self, ctx):
+    def _draw_pause_at_end(self, ctx, row):
         ui = self.workspace.ui
-        return max(
-            ui.measure(
-                ctx.tr(label), ui.metric("form_label", "fontSize", BODY_SIZE), translate=False
-            )
-            for label in ("Start delay (s)", "End hold (s)", "Pause at last frame")
-        )
-
-    def _draw_pause_at_end(self, ctx, x, y, width):
-        ui, scale = self.workspace.ui, ctx.style_scale
         on = ctx.session.state_take_pause_at_end
-        imgui.set_cursor_screen_pos((x, y))
+        label = ctx.tr("Pause at last frame")
         imgui.begin_disabled(ctx.take_video_active)
-        value = property_toggle(
-            ui,
-            "timeline-pause-at-end",
-            ctx.tr("Pause at last frame"),
-            on,
-            width=width * scale,
-            label_width=self._settings_label_width(ctx),
-        )
+        if ui.design is not None:
+            painter = ui.design.primitives
+            painter.family = ui.design.family()
+            box = Box(row, row, row, (0, 0, 0, 0), (0, 0, 0, 0))
+            value = painter.switch(
+                "timeline-pause-at-end",
+                row,
+                on,
+                label=label,
+                label_style=ui.component_style("form_label"),
+                layout_box=box,
+                control_x=row.right
+                - ui.metric("switch", "switchWidth", DESIGN.switch_track_width) * ui.s,
+            ).value
+            ui.hits["##timeline-pause-label"] = (row.x, row.y, row.width / 2, row.height)
+        else:
+            ui.component_text("form_label", row, label, MUTED, align="start", translate=False)
+            imgui.set_cursor_screen_pos((row.x, row.y))
+            clicked = imgui.invisible_button("##timeline-pause-label", (row.width / 2, row.height))
+            value = ui.switch(
+                "timeline-pause-at-end", row.right - 48 * ui.s, row.y, not on if clicked else on
+            )
         imgui.end_disabled()
         if value != on:
             if ctx.set_take_pause_at_end is not None:
@@ -793,16 +866,43 @@ class NativeTimelineToolbar(TimelineToolbar):
             else:
                 ctx.submit(cmd.SetStateTakePauseAtEnd(value))
 
-    def _draw_recording_fields(self, ctx):
-        fields = self.settings_fields
-        if not fields.begin_table("timeline-recording-fields"):
-            return
+    def _draw_recording_fields(self, ctx, layout, origin):
+        ui = self.workspace.ui
         config = ctx.recording_config
         labels = tuple(ctx.tr(title) for title in ("Start delay (s)", "End hold (s)"))
-        for field, label in zip(("countdown", "end_hold"), labels, strict=True):
+        for index, (field, label) in enumerate(
+            zip(("countdown", "end_hold"), labels, strict=True), 1
+        ):
             key = "##timeline-" + field
-            fields.row(label, label_width=self._settings_label_width(ctx))
-            changed, value = fields.numeric(key, getattr(config, field), 0.01, 0, 0, "%.1f")
+            row, target = layout.row(origin, index), layout.field(origin, index)
+            ui.component_text(
+                "form_label",
+                Rect(row.x, row.y, layout.label_width, row.height),
+                label,
+                MUTED,
+                align="start",
+                translate=False,
+            )
+            if ui.design is not None:
+                result = ui.design.primitives.input_number(
+                    key,
+                    target,
+                    getattr(config, field),
+                    speed=0.01,
+                    format="%.1f",
+                    minimum_height=target.height / ui.s,
+                )
+                changed, value = result.changed, result.value
+            else:
+                changed, value = ui.input(
+                    key,
+                    target.x,
+                    target.y,
+                    target.width,
+                    getattr(config, field),
+                    speed=0.01,
+                    format="%.1f",
+                )
             state = self.workspace.ui.numeric_edits[key]
             if state.activated:
                 self._recording_edit = key, getattr(config, field)
@@ -821,7 +921,6 @@ class NativeTimelineToolbar(TimelineToolbar):
                 ctx.apply_setting(ctx.set_recording_config, config)
             if state.deactivated:
                 self._recording_edit = None
-        fields.end_table()
 
 
 class WorkspaceTimeline:
@@ -874,8 +973,7 @@ class WorkspaceTimeline:
             self.workspace.ui.hits["timeline-toolbar"] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
             take_times = ctx.session.state_take_times
             editor.sync_selection(ctx, keyframe_by_id, take_times)
-            self._begin_body(y, h)
-            try:
+            with self._body_scope(y, h):
                 available = imgui.get_content_region_avail()
                 layout = measure_layout(
                     editor, ctx, imgui.get_cursor_screen_pos(), available, ui=self.workspace.ui
@@ -891,6 +989,7 @@ class WorkspaceTimeline:
                     icon_drawer=self.panel.toolbar.command_icon_drawer,
                     layout=layout,
                     presentation=self.track,
+                    selection_menu=self.track.draw_selection_menu,
                 )
                 detail_y = layout.lo[1] + max(
                     layout.height + DESIGN.timeline_sheet_gap * self.workspace.s,
@@ -898,25 +997,60 @@ class WorkspaceTimeline:
                 )
                 imgui.set_cursor_screen_pos((layout.lo[0], detail_y))
                 self.details.draw(editor, ctx, editable)
-            finally:
-                imgui.end_child()
         finally:
             imgui.pop_style_var()
             imgui.pop_font()
 
     def _begin_body(self, y, h):
+        ui, scale = self.workspace.ui, self.workspace.s
+        geometry = body_geometry(ui)
         pos = imgui.get_cursor_screen_pos()
-        imgui.begin_child(
-            "Timeline body",
-            (0, max(self.workspace.s, y + h - pos.y)),
-            imgui.ChildFlags_.none,
-            imgui.WindowFlags_.always_vertical_scrollbar,
+        height = native_child_extent(pos.y, y + h - pos.y)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, geometry.padding)
+        imgui.push_style_var(imgui.StyleVar_.child_rounding, geometry.radius)
+        try:
+            imgui.begin_child(
+                "Timeline body",
+                (0, max(scale, height)),
+                imgui.ChildFlags_.always_use_window_padding,
+                imgui.WindowFlags_.always_vertical_scrollbar,
+            )
+        finally:
+            imgui.pop_style_var(2)
+        window = imgui.internal.get_current_window()
+        origin, available = imgui.get_cursor_screen_pos(), imgui.get_content_region_avail()
+        frame = Rect(*window.pos, *window.size)
+        content = Rect(*origin, *available)
+        native_padding = (window.window_padding.x, window.window_padding.y) * 2
+        ui.hits["timeline-body"] = frame.tuple()
+        ui.hits["timeline-body-content"] = content.tuple()
+        ui.record_component_box(
+            "timeline_body",
+            Box(frame, frame, content, native_padding, (0, 0, 0, 0)),
+            key="timeline-body",
+            radius=window.window_rounding,
+            innerRadius=geometry.inner_radius,
+            childRadii={"selector": geometry.selector_radius, "lane": geometry.lane_radius},
+            requestedPadding=list(geometry.requested_padding),
+            scrollbarGutter=list(window.scrollbar_sizes),
+            scroll=list(window.scroll),
         )
+        return geometry
+
+    @contextmanager
+    def _body_scope(self, y, h):
+        geometry = self._begin_body(y, h)
+        try:
+            with body_corner_scope(self.workspace.ui, geometry):
+                yield
+        finally:
+            imgui.end_child()
 
     def _draw_replay(self, ctx, y, h):
         self.panel.toolbar._collapse(ctx)
-        self._begin_body(y, h)
-        try:
-            self.panel._replay.draw(ctx, combo=self.panel.toolbar.settings_fields.combo)
-        finally:
-            imgui.end_child()
+        with self._body_scope(y, h):
+            self.panel._replay.draw(
+                ctx,
+                combo=self.panel.toolbar.settings_fields.combo,
+                tooltip=lambda text: self.workspace.ui.tooltip(text, translate=False),
+            )

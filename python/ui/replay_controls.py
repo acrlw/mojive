@@ -15,7 +15,7 @@ class ReplayControls:
         self._token = None
         self._window_frames = 128
 
-    def draw(self, ctx, *, combo=None):
+    def draw(self, ctx, *, combo=None, tooltip=None):
         """Seek on slider release; ordinary playback and typing need no network traffic."""
         info = ctx.session.replay_info
         if info is None:
@@ -73,7 +73,7 @@ class ReplayControls:
             f"{t('Replay frame')}: {info.frame_index + 1} / {info.frame_count}  |  {info.frame_index / info.hz:.3f} s  |  {info.hz:g} Hz"
         )
         if sync is not None:
-            self._draw_sync(ctx, sync)
+            self._draw_sync(ctx, sync, tooltip=tooltip)
         changed, loop = imgui.checkbox(t("Loop") + "##replay_loop", info.loop)
         if changed:
             ctx.submit(cmd.SetReplayPlayback(loop=loop))
@@ -97,7 +97,7 @@ class ReplayControls:
         if info.error:
             imgui.text_wrapped(info.error)
 
-    def _draw_sync(self, ctx, sync):
+    def _draw_sync(self, ctx, sync, *, tooltip=None):
         t = ctx.tr
         available = imgui.get_content_region_avail().x
         valid = 2 <= self._window_frames <= sync.max_frames
@@ -107,7 +107,7 @@ class ReplayControls:
             ctx.submit(cmd.SyncRollout(frame_count=self._window_frames))
         imgui.end_disabled()
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            imgui.set_tooltip(
+            (tooltip or imgui.set_tooltip)(
                 f"{t('Manual sync; playback stays local')}\n"
                 f"{t('Source sample')}: {sync.start_step}  |  {sync.received_bytes / 1024:.1f} KiB"
             )

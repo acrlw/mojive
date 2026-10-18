@@ -183,14 +183,19 @@ class WorkbenchInput:
         self.show_field(field)
         key = f"value/parts/{part}/{field}"
         self.click(key)
-        if rule["type"] == "number":
+        if rule["type"] in ("number", "color"):
+            modifier = (
+                imgui.Key.mod_super
+                if imgui.get_io().config_mac_osx_behaviors
+                else imgui.Key.mod_ctrl
+            )
             self.batch(
-                ("add_key_event", (imgui.Key.mod_ctrl, True)),
+                ("add_key_event", (modifier, True)),
                 ("add_key_event", (imgui.Key.a, True)),
             )
             self.batch(
                 ("add_key_event", (imgui.Key.a, False)),
-                ("add_key_event", (imgui.Key.mod_ctrl, False)),
+                ("add_key_event", (modifier, False)),
             )
             self.event("add_input_characters_utf8", str(value))
             self.key(imgui.Key.enter)

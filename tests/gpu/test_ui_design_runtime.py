@@ -96,12 +96,17 @@ def runtime(backend_name, monkeypatch, tmp_path, request):
     )
     study = Study(window, backend_name, output_directory=tmp_path)
     events, modal_buttons = [], {}
+    pointer = None
     process_inputs = window._input.process_inputs
     native_button = imgui.button
 
     def inputs():
         process_inputs()
         io = imgui.get_io()
+        # Native cursor callbacks may arrive between a synthetic move and its
+        # press/release frames. The test gesture retains pointer ownership.
+        if pointer is not None:
+            io.add_mouse_pos_event(*pointer)
         for method, args in events:
             getattr(io, method)(*args)
         events.clear()
@@ -122,6 +127,9 @@ def runtime(backend_name, monkeypatch, tmp_path, request):
             study.draw()
 
     def event(method, *args):
+        nonlocal pointer
+        if method == "add_mouse_pos_event":
+            pointer = args
         events.append((method, args))
         frame()
 
@@ -248,7 +256,27 @@ def test_color_popup_formats_clipboard_cancel_and_single_undo(runtime):
     study.click_hit("material-color")
     study.frame(2)
     assert "color-editor-copy" in study.ui.hits
-    study.click_hit("color-editor-format-2")
+    for mode in (0, 1, 2):
+        study.click_hit("color-editor-format-" + str(mode))
+        study.frame(2)
+        popup_window = imgui.get_current_context().open_popup_stack[0].window
+        sv = study.ui.hits["color-editor-sv"]
+        assert sv[2] == pytest.approx(sv[3])
+        # This viewport fits the compact requested picker without shrinking it
+        # or enlarging it at the expense of the channel row and footer.
+        picker_height = study.ui.component_style("color_editor").get("pickerHeight", 160)
+        assert sv[3] == pytest.approx(picker_height * study.s)
+        assert popup_window.scroll_max.y == 0
+        clip = popup_window.inner_clip_rect
+        assert clip.min.x <= sv[0] < sv[0] + sv[2] <= clip.max.x + 1
+        assert clip.min.y <= sv[1] < sv[1] + sv[3] <= clip.max.y + 1
+        done = study.ui.hits["done-color"]
+        assert clip.min.x <= done[0] < done[0] + done[2] <= clip.max.x + 1
+        assert clip.min.y <= done[1] < done[1] + done[3] <= clip.max.y + 1
+        if mode:
+            fields = [study.ui.hits["color-editor" + axis + "-frame"] for axis in "RGBA"]
+            assert max(rect[1] for rect in fields) == pytest.approx(min(rect[1] for rect in fields))
+            assert all(clip.min.x <= x < x + w <= clip.max.x + 1 for x, _y, w, _h in fields)
     imgui.set_clipboard_text("rgba(0.125, 0.25, 0.5, 0.75)")
     study.click_hit("color-editor-paste")
     study.frame(2)
@@ -268,6 +296,7 @@ def test_color_popup_formats_clipboard_cancel_and_single_undo(runtime):
     study.click_hit("color-editor-paste")
     study.frame(2)
     assert not study.menus.color_editor.error
+    study.event("add_mouse_pos_event", 4, 4)
     study.capture("color-rgba-normalized")
     study.click_hit("done-color")
     study.frame(2)
@@ -276,12 +305,18 @@ def test_color_popup_formats_clipboard_cancel_and_single_undo(runtime):
     assert np.array_equal(session.source.geom_rgba, original)
 
     study.click_hit("material-color")
+    format_bounds = study.ui.hits["color-editor-format-0"]
+    study.frame()
+    assert study.ui.hits["color-editor-format-0"] == pytest.approx(format_bounds)
     study.click_hit("color-editor-format-0")
     study.click_hit("color-editor-hex")
-    study.event("add_key_event", imgui.Key.mod_ctrl, True)
+    modifier = (
+        imgui.Key.mod_super if imgui.get_io().config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    )
+    study.event("add_key_event", modifier, True)
     study.event("add_key_event", imgui.Key.a, True)
     study.event("add_key_event", imgui.Key.a, False)
-    study.event("add_key_event", imgui.Key.mod_ctrl, False)
+    study.event("add_key_event", modifier, False)
     study.event("add_input_characters_utf8", "#803319CC")
     study.event("add_key_event", imgui.Key.enter, True)
     study.event("add_key_event", imgui.Key.enter, False)

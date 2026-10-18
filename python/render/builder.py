@@ -282,10 +282,22 @@ class SceneSourceBuilder:
         material_indices[: len(src.geom_material)] = src.geom_material[:count]
         material_indices = material_indices[source_instances]
         valid_material = (material_indices >= 0) & (material_indices < len(materials))
+        infinite = (
+            src.geom_infinite_plane[source_instances]
+            if len(src.geom_infinite_plane)
+            else np.zeros(n, bool)
+        )
+        quiet_ground = infinite & style.quiet_ground & ~collision & ~island
+        # This is a renderer recipe, not an authoring override. Preserve source
+        # textures/colors and diagnostic collision or island treatments.
+        colors[quiet_ground, :3] = self._linear_color((0.32, 0.34, 0.36, 1.0))[:3]
         codes = np.where(valid_material, material_indices, len(materials))
         codes[collision] = len(materials)
         codes[island] = (
             len(materials) + 1 + np.where(valid_material[island], material_indices[island], 0)
+        )
+        codes[quiet_ground & valid_material] = (
+            len(materials) + 1 + material_indices[quiet_ground & valid_material]
         )
         table = (*materials, DEFAULT_MATERIAL, *untextured)
         sb = SceneBuilder()
@@ -298,6 +310,7 @@ class SceneSourceBuilder:
             [[mat.emission, mat.specular, mat.shininess, mat.reflectance] for mat in table],
             np.float32,
         )[codes]
+        values[quiet_ground, 1:] = 0
         planar = np.fromiter(
             (key.shape in (MeshShape.PLANE, MeshShape.BOX) for key in keys), bool, count=n
         )
@@ -315,11 +328,6 @@ class SceneSourceBuilder:
         # Separate only the translucent coplanar overlay; collision-only is exact.
         overlay = collision & both & ((roles & int(GeometryRole.VISUAL)) != 0)
         ls[overlay, :3, :3] *= 1.005
-        infinite = (
-            src.geom_infinite_plane[source_instances]
-            if len(src.geom_infinite_plane)
-            else np.zeros(n, bool)
-        )
         tex = np.zeros((n, 4), np.float32)
         tex[:, :2] = 1
         reflected = np.fromiter((key.shape is MeshShape.CAPSULE_CAP for key in keys), bool, count=n)
@@ -385,7 +393,9 @@ class SceneSourceBuilder:
         self._read_index[self._write_index] = np.arange(self._scene.count, dtype=np.intp)
         self._source_instances = np.asarray(source_instances, np.intp)
         self._base_colors = self._scene.colors.copy()
-        self._preserved_color_rows = np.flatnonzero(self._instance_views[self._source_instances])
+        self._preserved_color_rows = np.flatnonzero(
+            self._instance_views[self._source_instances] | quiet_ground
+        )
         self._preserved_colors = self._base_colors[self._write_index[self._preserved_color_rows]]
         self._color_stage = np.zeros((self._scene.count, 4), np.float32)
         self._colors_overridden = False

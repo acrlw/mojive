@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +12,7 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds, NodeType
 from mojive.ui.viewport_widgets import localized_viewport_labels
-
-from .settings_panel import CATEGORIES
+from mojive.ui.workspace.settings_panel import CATEGORIES
 
 
 def _window_rect(name):
@@ -110,6 +110,55 @@ def _check_inertial_groups(study, controls, node_id):
     return len(groups)
 
 
+def _fit_transform_review_layout(window, study, frames, mode):
+    """Fit each requested layout against real label/field bounds after resizing."""
+    ui, scale = study.ui, study.s
+    node_id = study.app.entity["id"]
+    components = (
+        ("position", "Position", "m"),
+        ("rotation", "Rotation", "°"),
+        ("scale", "Scale", ""),
+    )
+    inspector = imgui.internal.find_window_by_name("Inspector")
+    label = ui.hits[f"##{node_id}position-label"]
+    fields = [ui.hits[f"##{node_id}position{axis}-frame"] for axis in "XYZ"]
+    content_width = max(field[0] + field[2] for field in fields) - label[0]
+    chrome = inspector.size.x - content_width
+    caption_width = max(
+        ui.measure(ui.translate(label) + suffix)
+        for label, suffix in (("Position", " (m)"), ("Rotation", " (°)"), ("Scale", ""))
+    )
+    lower = math.ceil((chrome + max(ui.numeric_minimum(), caption_width)) / scale)
+    upper = math.floor(imgui.get_main_viewport().work_size.x / scale - 32)
+    best = None
+    while lower <= upper:
+        width = (lower + upper) // 2
+        _inspector_size(study, width, 820)
+        frames(window, study, count=3)
+        matches = True
+        for component, caption, unit in components:
+            fields = [ui.hits[f"##{node_id}{component}{axis}-frame"] for axis in "XYZ"]
+            label = ui.hits[f"##{node_id}{component}-label"]
+            above = fields[0][1] >= label[1] + label[3] - scale
+            rows = len({round(field[1], 3) for field in fields})
+            matches &= rows == (1 if mode == "inline" else 3)
+            matches &= above == (mode == "stacked")
+            shown = ui.translate(caption) + (f" ({unit})" if unit else "")
+            matches &= ui.measure(shown) + scale <= label[2]
+            minimum = ui.numeric_minimum(format="%.3g")
+            matches &= all(field[2] >= minimum for field in fields)
+        if matches:
+            best = width
+        if matches == (mode == "inline"):
+            upper = width - 1
+        else:
+            lower = width + 1
+    assert best is not None, ("The review viewport cannot fit the transform layout", mode)
+    _inspector_size(study, best, 820)
+    frames(window, study, count=3)
+    return best
+
+
 def capture_appearance(window, study, output, frames):
     """Render real Study pages without retaining scene or preference changes."""
     output = Path(output)
@@ -142,6 +191,22 @@ def capture_appearance(window, study, output, frames):
         app._viewport_labels = localized_viewport_labels(app.localizer.text)
 
     def capture(name, *, inspector_fields=False, settings=False):
+        page = None
+        if settings and study.settings._category == "General":
+            frames(window, study, count=3)
+            page = next(
+                child
+                for child in imgui.get_current_context().windows
+                if "Reference settings content" in str(child.name) and child.active
+            )
+            bottom = max(
+                study.ui.hits[key][1] + study.ui.hits[key][3]
+                for key in ("settings-sidebar", "settings-bottom", "settings-inspector")
+            )
+            if bottom > page.inner_clip_rect.max.y:
+                imgui.internal.set_scroll_y(
+                    page, page.scroll.y + bottom - page.inner_clip_rect.max.y + study.s
+                )
         snapshot = frames(window, study, output / f"{name}.png")
         controls = {key: list(rect) for key, rect in study.ui.hits.items()}
         checks = {}
@@ -186,6 +251,12 @@ def capture_appearance(window, study, output, frames):
                 checks["settings_panel_controls"] = _check_controls(
                     workspace, owner, tolerance=study.s
                 )
+                clip = page.inner_clip_rect
+                _check_controls(
+                    workspace,
+                    (clip.min.x, clip.min.y, clip.max.x - clip.min.x, clip.max.y - clip.min.y),
+                    tolerance=study.s,
+                )
                 _check_controls(header | navigation | workspace, owner, tolerance=study.s)
             assert settings_window.scroll_max.y == 0, (
                 "Settings must scroll its page, not its header"
@@ -212,20 +283,47 @@ def capture_appearance(window, study, output, frames):
         try:
             for language, suffix in (("en", "en"), ("zh_CN", "zh")):
                 set_language(language)
-                for width in (384, 424):
-                    _inspector_size(study, width, 820)
-                    assert session.submit(cmd.SelectNode(body.node_id)).ok
-                    study.inspector_tab = "Properties"
-                    frames(window, study, count=3)
-                    capture(f"transform-inline-{width}-{suffix}", inspector_fields=True)
-                    for component in ("position", "rotation", "scale"):
+                assert session.submit(cmd.SelectNode(body.node_id)).ok
+                study.inspector_tab = "Properties"
+                frames(window, study, count=3)
+                for mode in ("stacked", "inline"):
+                    width = _fit_transform_review_layout(window, study, frames, mode)
+                    name = f"transform-{mode}-{width}-{suffix}"
+                    capture(name, inspector_fields=True)
+                    peers = {}
+                    for component, label, unit in (
+                        ("position", "Position", "m"),
+                        ("rotation", "Rotation", "°"),
+                        ("scale", "Scale", ""),
+                    ):
                         fields = [
                             study.ui.hits[f"##{body.node_id}{component}{axis}-frame"]
                             for axis in "XYZ"
                         ]
-                        label = study.ui.hits[f"##{body.node_id}{component}-label"]
-                        assert len({round(field[1], 3) for field in fields}) == 1
-                        assert fields[0][0] >= label[0] + label[2] + 12 * study.s - 1
+                        label_rect = study.ui.hits[f"##{body.node_id}{component}-label"]
+                        caption = study.ui.translate(label) + (f" ({unit})" if unit else "")
+                        assert study.ui.measure(caption) <= label_rect[2]
+                        assert all(
+                            field[2] >= study.ui.numeric_minimum(format="%.3g") for field in fields
+                        ), ("Transform values are clipped", component, fields)
+                        assert len({round(field[1], 3) for field in fields}) == (
+                            1 if mode == "inline" else 3
+                        )
+                        if mode == "inline":
+                            assert fields[0][0] >= label_rect[0] + label_rect[2] + 12 * study.s - 1
+                        else:
+                            assert fields[0][1] >= label_rect[1] + label_rect[3] - study.s
+                        peers[component + "-label"] = label_rect
+                        peers.update(
+                            (component + axis, field)
+                            for axis, field in zip("XYZ", fields, strict=True)
+                        )
+                    states[name]["checks"]["transform_layout"] = {
+                        "mode": mode,
+                        "controls": _check_controls(
+                            peers, _window_rect("Inspector"), tolerance=study.s
+                        ),
+                    }
                 for width, name in ((284, "compact"), (344, "standard"), (744, "wide")):
                     _inspector_size(study, width, 820)
                     for node, tab, kind in ((body, "Physics", "body"), (joint, "Joint", "joint")):

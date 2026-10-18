@@ -11,6 +11,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_BUNDLED_CJK = Path(__file__).parent / "resources/fonts/MiSans-Regular.ttf"
+
 _MONO: tuple[tuple[str, int], ...] = (
     ("/System/Library/Fonts/SFNSMono.ttf", 0),
     ("/System/Library/Fonts/Menlo.ttc", 0),
@@ -101,21 +103,24 @@ def fetch(
         return dst, f"{remote.label} loaded from cache"
     if not allow_download:
         return None, f"{remote.label} is unavailable and downloads are disabled"
+    temporary_path = None
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         with tempfile.NamedTemporaryFile(dir=dst.parent, delete=False) as tmp:
-            tmp_path = Path(tmp.name)
+            temporary_path = Path(tmp.name)
             with urllib.request.urlopen(remote.url, timeout=timeout) as r:
                 shutil.copyfileobj(r, tmp)
-        got = _digest(tmp_path)
+        got = _digest(temporary_path)
         if got != remote.sha256:
-            tmp_path.unlink(missing_ok=True)
             return None, f"{remote.label} checksum mismatch ({got[:12]}...); download discarded"
-        tmp_path.replace(dst)
+        temporary_path.replace(dst)
         return dst, f"{remote.label} downloaded ({remote.size / 1e6:.1f} MB)"
     except Exception as e:
         return None, f"{remote.label} download failed: {type(e).__name__}: {e}"
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 BASE_SIZE_PT = 14.0
@@ -182,6 +187,9 @@ def _resolve_cjk(
         if path.is_file():
             return (str(path), 0), path.name
         notes.append(f"Configured CJK font is unavailable: {path}")
+
+    if _BUNDLED_CJK.is_file():
+        return (str(_BUNDLED_CJK), 0), "MiSans"
 
     font, label = _resolve(
         _NOTO_CJK,

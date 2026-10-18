@@ -18,6 +18,7 @@ from mojive.ui.panels import (
 from mojive.ui.panels.inspector.fields import (
     _end_property_table,
     _property_section,
+    _property_tooltip,
     _vector_fields,
 )
 from mojive.ui.panels.inspector.support import (
@@ -79,7 +80,7 @@ class _Transform:
             ctx.submit(cmd.SetScale(node.node_id, new_scale))
         if scale_editable:
             imgui.text_disabled(ctx.tr("Apply to bake scale."))
-            imgui.set_item_tooltip(ctx.tr("Apply bakes Scale into dimensions and resets it to 1."))
+            _property_tooltip(ctx, ctx.tr("Apply bakes Scale into dimensions and resets it to 1."))
         if velocity is not None:
             _vector_fields(
                 ctx,

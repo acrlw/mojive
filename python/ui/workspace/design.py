@@ -23,6 +23,8 @@ class WorkspaceDesign:
     container_radius: float = 8
     grab_radius: float = 4
     child_radius: float = 6
+    scrollbar_padding: float = 8
+    scrollbar_grab_width: float = 3
     panel_padding_x: float = 12
     panel_padding_y: float = 10
     frame_padding_x: float = 8
@@ -47,8 +49,8 @@ class WorkspaceDesign:
     timeline_sheet_gap: float = 2
     output_row_gap: float = 4
     menu_item_height: float = 30
-    menu_row_gap: float = 6
-    menu_padding_x: float = 12
+    menu_row_gap: float = 2
+    menu_padding_x: float = 6
     navigation_size: float = 90
     navigation_margin: float = 12
     transport_padding_y: float = 6
@@ -57,7 +59,7 @@ class WorkspaceDesign:
     data_row_gap: float = 10
     camera_right: float = 0
     camera_bottom: float = 0
-    file_receipt_padding: float = 12
+    file_receipt_padding: float = 4
     rail_entry_width: float = 84
     rail_unit_width: float = 24
     rail_minimum_track_width: float = 64

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -170,6 +172,15 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
     )
     viewer = build(scene, paused=True, vsync=False, width=960, height=640)
     try:
+        process = viewer.window._input.process_inputs
+
+        def inputs():
+            process()
+            # This compares scene composition outside UI hosts. An OS cursor
+            # over the hidden test window must not add a delayed tooltip there.
+            imgui.get_io().add_mouse_pos_event(-1, -1)
+
+        monkeypatch.setattr(viewer.window._input, "process_inputs", inputs)
         # Let initial scene framing finish before setting the horizon view.
         for _ in range(12):
             viewer.sync()
@@ -197,17 +208,25 @@ def test_interactive_viewport_does_not_composite_haze_twice(tmp_path, monkeypatc
         assert np.all(target[..., 3] == 255)
         # Sample a full-height strip between the tool and playback hosts,
         # including the horizon haze without either UI overlay.
-        # Host bounds include placement, per-widget scale, and AA padding.
+        # Hosts describe the filled geometry in window points. Native AA extends
+        # half a point beyond it; exclude that coverage and round outward.
         workspace = getattr(viewer.app, "workspace", None)
         if workspace is not None:
             viewport_rect = viewer.app._viewport_rect
             point_to_pixel = target.shape[1] / viewport_rect[2]
+            fringe = 0.5 * point_to_pixel
             visible = np.ones(target.shape[:2], dtype=bool)
             for ox, oy, ow, oh in workspace.rects.get("overlays", ()):
-                lx0 = max(0, round((ox - viewport_rect[0]) * point_to_pixel))
-                ly0 = max(0, round((oy - viewport_rect[1]) * point_to_pixel))
-                lx1 = min(target.shape[1], round((ox + ow - viewport_rect[0]) * point_to_pixel))
-                ly1 = min(target.shape[0], round((oy + oh - viewport_rect[1]) * point_to_pixel))
+                lx0 = max(0, math.floor((ox - viewport_rect[0]) * point_to_pixel - fringe))
+                ly0 = max(0, math.floor((oy - viewport_rect[1]) * point_to_pixel - fringe))
+                lx1 = min(
+                    target.shape[1],
+                    math.ceil((ox + ow - viewport_rect[0]) * point_to_pixel + fringe),
+                )
+                ly1 = min(
+                    target.shape[0],
+                    math.ceil((oy + oh - viewport_rect[1]) * point_to_pixel + fringe),
+                )
                 visible[ly0:ly1, lx0:lx1] = False
             difference = np.max(np.abs(target[..., :3].astype(int) - clear), axis=2)
             assert np.count_nonzero(difference[visible] > 5) > 100

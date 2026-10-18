@@ -84,16 +84,41 @@ class StrokeOutline {
         mOffsets.push_back(uint32_t(mPoints.size()));
     }
 
-    void circle(Point center) {
-        reservePolygon(mCircle.size());
-        for (auto p : mCircle)
+    void circle(Point center, std::span<const Point> tangents = {}) {
+        auto points = mCircle;
+        for (auto tangent : tangents) {
+            auto point = multiply(tangent, mRadius);
+            auto existing = std::find_if(points.begin(), points.end(), [&](Point p) {
+                auto delta = subtract(p, point);
+                return std::hypot(delta[0], delta[1]) <= mRadius * 1e-12;
+            });
+            if (existing == points.end())
+                points.push_back(point);
+            else
+                *existing = point;
+        }
+        if (!tangents.empty())
+            std::sort(points.begin(), points.end(), [](Point a, Point b) {
+                return std::atan2(a[1], a[0]) < std::atan2(b[1], b[0]);
+            });
+        reservePolygon(points.size());
+        for (auto p : points)
             append(add(center, p));
         mOffsets.push_back(uint32_t(mPoints.size()));
     }
 
+    void roundCap(Point center, Point outward) {
+        auto side = normal(outward);
+        circle(center, std::array{side, multiply(side, -1)});
+    }
+
     void join(Point center, Point incoming, Point outgoing) {
         if (mStyle.join == StrokeJoin::Round) {
-            circle(center);
+            // Include the exact rectangle tangent endpoints in the circle.
+            // Otherwise its inscribed polygon leaves tiny rectangle tips whose
+            // sharp turns become visible teeth when the AA boundary is offset.
+            auto a = normal(incoming), b = normal(outgoing);
+            circle(center, std::array{a, multiply(a, -1), b, multiply(b, -1)});
             return;
         }
         double turn = cross(incoming, outgoing);
@@ -178,8 +203,8 @@ class StrokeOutline {
                      direction(points[(i + 1) % count], points[(i + 2) % count]));
         }
         if (!contour.closed && mStyle.cap == StrokeCap::Round) {
-            circle(points.front());
-            circle(points.back());
+            roundCap(points.front(), direction(points[1], points.front()));
+            roundCap(points.back(), direction(points[points.size() - 2], points.back()));
         }
     }
 

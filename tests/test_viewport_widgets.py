@@ -65,6 +65,7 @@ from mojive.ui.viewport_widgets import (
     viewport_chrome_scale,
 )
 from mojive.ui.viewport_widgets import glyphs as viewport_glyphs
+from mojive.ui.viewport_widgets.status_metrics import _StatusNumbers
 from tests.curve_assertions import assert_paths_close
 
 
@@ -661,7 +662,7 @@ def test_frame_arrows_share_one_continuous_silhouette_and_center_shell(scale: fl
         replace(DEFAULT_VIEWPORT_LABELS, physics="物理", render="渲染"),
     ),
 )
-def test_status_rates_use_actual_width_and_uniform_separator_spacing(
+def test_status_rates_use_reserved_slots_and_uniform_separator_spacing(
     physics_hz, fps, scale, labels
 ):
     draw = _MeasuredText()
@@ -676,17 +677,22 @@ def test_status_rates_use_actual_width_and_uniform_separator_spacing(
         show_physics=True,
         labels=labels,
     )
-    spans = (
-        (layout.backend_x, draw.text_size(layout.backend_text)[0]),
-        (layout.delta_x, draw.text_size(layout.delta_text)[0]),
-        (layout.fps_x, draw.text_size(layout.fps_text)[0]),
-    )
+    assert [field.key for field in layout.fields] == ["backend", "delta", "physics", "render"]
+    spans = tuple((field.x, field.width) for field in layout.fields)
     assert spans[-1][0] + spans[-1][1] == pytest.approx(1000)
     for ((left, width), (right, _)), divider in zip(
         pairwise(spans), sorted(layout.dividers), strict=True
     ):
-        assert divider - (left + width) == pytest.approx(11 * scale)
-        assert right - divider == pytest.approx(11 * scale)
+        assert divider - scale / 2 - (left + width) == pytest.approx(6 * scale)
+        assert right - divider - scale / 2 == pytest.approx(6 * scale)
+    for field in layout.fields[1:]:
+        assert field.x < field.value_x < field.unit_x
+        assert field.value_text_width <= field.value_width
+        assert field.unit_x - field.value_x - field.value_text_width == pytest.approx(2 * scale)
+        assert field.value_x - field.content_x - draw.text_size(field.label)[0] == (
+            pytest.approx(4 * scale)
+        )
+        assert field.unit_x + draw.text_size(field.unit)[0] <= field.x + field.width
 
 
 def test_status_distinguishes_measured_physics_and_render_rates():
@@ -701,7 +707,17 @@ def test_status_distinguishes_measured_physics_and_render_rates():
         physics_hz=1000.0,
         show_physics=True,
     )
-    assert layout.fps_text == "Physics 1000 Hz · Render 60.0 FPS"
+    fields = {field.key: field for field in layout.fields}
+    assert (fields["physics"].label, fields["physics"].value, fields["physics"].unit) == (
+        "Physics",
+        "1",
+        "kHz",
+    )
+    assert (fields["render"].label, fields["render"].value, fields["render"].unit) == (
+        "Render",
+        "60.0",
+        "FPS",
+    )
     unknown = _status_performance_layout(
         draw,
         1000.0,
@@ -711,9 +727,12 @@ def test_status_distinguishes_measured_physics_and_render_rates():
         60.0,
         show_physics=True,
     )
-    assert unknown.fps_text == "Physics — Hz · Render 60.0 FPS"
+    fields = {field.key: field for field in unknown.fields}
+    assert fields["physics"].value == "—"
+    assert fields["physics"].unit == "Hz"
+    assert fields["render"].value == "60.0"
     static = _status_performance_layout(draw, 1000.0, 1.0, "OpenGL", 0, 60.0)
-    assert static.fps_text == "Render 60.0 FPS"
+    assert [field.key for field in static.fields] == ["backend", "delta", "render"]
 
 
 class _RecordedStatus(_MeasuredText):
@@ -811,7 +830,7 @@ def test_passive_status_preserves_optional_caller_activity():
     assert draw.texts[0] == "Passive · Episode 3"
 
 
-def test_status_badges_and_descriptions_share_one_text_baseline():
+def test_status_keycaps_descriptions_and_telemetry_share_one_text_baseline():
     from mojive.ui.theme import THEME
 
     class InkStatus(_RecordedStatus):
@@ -845,11 +864,9 @@ def test_status_badges_and_descriptions_share_one_text_baseline():
         tool_hints=(ToolHint("key", "Ctrl", "+ Drag"),),
     )
     positions = {value: position for position, value in draw.text_positions}
-    assert positions["Ctrl"][1] == positions["+ Drag"][1] == positions["Steps 0"][1]
-    assert len(draw.badges) == 2
-    first, second = draw.badges
-    assert first[1][1] - first[0][1] == second[1][1] - second[0][1]
-    assert first[2] == second[2]
+    assert positions["Ctrl"][1] == positions["+ Drag"][1] == positions["Steps"][1]
+    assert positions["Steps"][1] == positions["0"][1] == positions["FPS"][1]
+    assert len(draw.badges) == 1
 
 
 def test_status_places_simulation_state_before_selection():
@@ -881,7 +898,7 @@ def test_status_places_simulation_state_before_selection():
     assert draw.circles[0][0][0][1] == pytest.approx(14.0)
     x_by_text = {text: position[0] for position, text in draw.text_positions}
     assert x_by_text["01_revolute"] < x_by_text["OpenGL"]
-    assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]
+    assert x_by_text["OpenGL"] < x_by_text["Steps"] < x_by_text["Δt"]
 
 
 @pytest.mark.parametrize("phase", ("recording", "paused", "countdown"))
@@ -1086,7 +1103,7 @@ def test_status_renders_context_hints_after_core_simulation_fields():
     assert draw.texts[:4] == ["Paused", "01_revolute", "T", "Frame"]
     x_by_text = {text: position[0] for position, text in draw.text_positions}
     assert x_by_text["Frame"] < x_by_text["OpenGL"]
-    assert x_by_text["OpenGL"] < x_by_text["Steps 674"] < x_by_text["Δt 0.002 s"]
+    assert x_by_text["OpenGL"] < x_by_text["Steps"] < x_by_text["Δt"]
 
 
 def test_status_uses_muted_gray_for_chrome_and_context_hints():
@@ -1691,3 +1708,198 @@ def test_capsule_dividers_share_glyph_proportion_and_stroke_style(scale):
     for a, b, _, width in (playback, tools):
         assert (np.asarray(a) + b) * 0.5 == pytest.approx(center)
         assert width == pytest.approx(scale)
+
+
+@pytest.mark.parametrize("mode", ("steps", "time"))
+@pytest.mark.parametrize("value_width", (0, 40))
+def test_status_telemetry_slots_stay_fixed_with_proportional_digits(mode, value_width):
+    class ProportionalText(_MeasuredText):
+        def text_size(self, text):
+            return sum(3 if char == "1" else 8 if char.isdigit() else 7 for char in text), 14
+
+    draw, expected = ProportionalText(), None
+    for seconds, steps, dt, hz, fps in (
+        (1.001, 1, 0.001, None, 11.1),
+        (59.999, 999, 0.033333333, 99999, 9999.9),
+        (71.111, 12345, 1e-9, 11111, 1.1),
+        (99 * 86400, 1234567890, 0.002, 0, 60.0),
+    ):
+        metric, _exact = format_simulation_metric(mode, seconds, steps)
+        layout = _status_performance_layout(
+            draw,
+            1200,
+            1,
+            "OpenGL",
+            dt,
+            fps,
+            metric_text=metric,
+            metric_mode=mode,
+            max_width=1000,
+            physics_hz=hz,
+            show_physics=True,
+            steps_value_width=value_width,
+            time_value_width=value_width,
+            delta_value_width=value_width,
+            physics_value_width=value_width,
+            render_value_width=value_width,
+        )
+        rects = (
+            tuple(
+                (field.key, field.x, field.width, field.content_x, field.value_x, field.value_width)
+                + ((field.unit_x,) if not field.compact else ())
+                for field in layout.fields
+            ),
+            layout.dividers,
+            layout.left,
+        )
+        if value_width:
+            if expected is None:
+                expected = rects
+            assert rects == expected
+        for field in layout.fields[1:]:
+            suffix_gap = (
+                0
+                if (field.key == "metric" and mode == "steps")
+                or (not value_width and not field.unit)
+                else 2
+            )
+            numeric_end = field.value_x + (
+                field.value_text_width if field.compact else field.value_width
+            )
+            assert field.unit_x - numeric_end == pytest.approx(suffix_gap)
+            if not value_width:
+                assert field.value_width == field.value_text_width <= field.format_width
+                assert field.x + field.width - field.unit_x - field.unit_width == pytest.approx(2)
+
+
+def test_step_metric_reserves_its_own_compact_budget_instead_of_the_long_time_format():
+    draw = _MeasuredText()
+    layouts = {}
+    for mode in ("steps", "time"):
+        caption, _exact = format_simulation_metric(mode, 0, 0)
+        layouts[mode] = _status_performance_layout(
+            draw, 1200, 1, "OpenGL", 0.002, 60, metric_text=caption, metric_mode=mode
+        )
+    step = next(field for field in layouts["steps"].fields if field.key == "metric")
+    time = next(field for field in layouts["time"].fields if field.key == "metric")
+    assert step.value_width < time.value_width
+    assert layouts["steps"].left > layouts["time"].left
+    assert layouts["steps"].fields[-1].unit_x == layouts["time"].fields[-1].unit_x
+
+
+@pytest.mark.parametrize("scale", (0.75, 1, 2.25))
+@pytest.mark.parametrize("value_width", (0, 48))
+def test_status_rate_digits_keep_equal_cells_and_the_selected_anchor_mode(scale, value_width):
+    class ProportionalStatus(_RecordedStatus):
+        def text_size(self, text):
+            widths = {
+                "0": 8,
+                "1": 3,
+                "2": 6,
+                "3": 7,
+                "4": 7,
+                "5": 6,
+                "6": 8,
+                "7": 5,
+                "8": 9,
+                "9": 8,
+                ".": 2.5,
+            }
+            return sum(widths.get(char, 6) for char in text) * scale, 14 * scale
+
+        def text(self, position, color, value, *, pixel_snap=True):
+            assert not pixel_snap
+            super().text(position, color, value, pixel_snap=pixel_snap)
+
+    expected_decimal = expected_unit = expected_ones = expected_fraction = None
+    expected_bounds = None
+    for rate in (59.0, 51.1, 1.1, 999.9):
+        draw = ProportionalStatus()
+        layout = _status_performance_layout(
+            draw,
+            1200 * scale,
+            scale,
+            "OpenGL",
+            0.002,
+            rate,
+            render_value_width=value_width * scale,
+        )
+        field = next(field for field in layout.fields if field.key == "render")
+        numbers = _StatusNumbers(draw)
+        numbers.paint(field, 14 * scale, (1, 1, 1, 1))
+        unit = next(position for position, text in draw.text_positions if text == "FPS")
+        glyphs = [
+            (position, text) for position, text in draw.text_positions if text in "0123456789."
+        ]
+        assert "".join(text for _position, text in glyphs) == f"{rate:.1f}"
+        decimal_index = next(index for index, (_position, text) in enumerate(glyphs) if text == ".")
+        decimal = glyphs[decimal_index][0]
+        centers = [position[0] + draw.text_size(text)[0] / 2 for position, text in glyphs]
+        integer_centers = centers[:decimal_index]
+        for left, right in pairwise(integer_centers):
+            assert right - left == pytest.approx(numbers.digit)
+        ones, fraction = integer_centers[-1], centers[-1]
+        bounds = (field.x, field.width, field.content_x, field.value_x, field.value_width)
+        if value_width:
+            if expected_bounds is None:
+                expected_bounds = bounds
+            assert bounds == expected_bounds
+        if expected_decimal is None:
+            expected_decimal, expected_unit = decimal, unit
+            expected_ones, expected_fraction = ones, fraction
+        assert decimal == pytest.approx(expected_decimal)
+        assert unit == pytest.approx(expected_unit)
+        assert ones == pytest.approx(expected_ones)
+        assert fraction == pytest.approx(expected_fraction)
+        if not value_width:
+            assert integer_centers[0] - numbers.digit / 2 == pytest.approx(field.value_x)
+            assert field.value_width == numbers.width(f"{rate:.1f}")
+            assert field.x + field.width - unit[0] - draw.text_size(field.unit)[0] == (
+                pytest.approx(2 * scale)
+            )
+        numeric_end = field.value_x + (
+            field.value_width if value_width else numbers.width(f"{rate:.1f}")
+        )
+        assert unit[0] - numeric_end == pytest.approx(2 * scale)
+        assert unit[0] + draw.text_size(field.unit)[0] == field.unit_x + field.unit_width
+        assert all(position[1] == decimal[1] for position, _text in draw.text_positions)
+        intervals = sorted(
+            (position[0], position[0] + draw.text_size(text)[0])
+            for position, text in draw.text_positions
+        )
+        assert all(
+            left >= previous_right
+            for (_left, previous_right), (left, _right) in pairwise(intervals)
+        )
+        assert field.x <= intervals[0][0] < intervals[-1][1] <= field.x + field.width
+
+
+def test_recording_timer_does_not_move_its_action_buttons():
+    class ProportionalStatus(_RecordedStatus):
+        def text_size(self, text):
+            return sum(3 if char == "1" else 8 if char.isdigit() else 7 for char in text), 14
+
+    expected = None
+    for duration in (1, 9, 11, 59, 60, 111, 5999):
+        layout = draw_status(
+            ProportionalStatus(),
+            (0, 0),
+            1200,
+            28,
+            Theme(),
+            1,
+            selected="",
+            state="paused",
+            sim_time=duration,
+            step=duration,
+            metric_mode="time",
+            backend="OpenGL",
+            dt=0.002,
+            fps=60,
+            recording_phase="recording",
+            recording_duration=duration,
+        )
+        rects = layout.recording_pause_rect, layout.recording_stop_rect
+        if expected is None:
+            expected = rects
+        assert rects == expected

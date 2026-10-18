@@ -60,7 +60,13 @@ def dispatch(menu, action):
     elif prefix == "create":
         from mojive.types import MeshShape
 
-        app._add_scene_object(MeshShape(value.lower()), value.lower())
+        if value == "Capsule":
+            if session.adapter.caps.topology_editing:
+                app._add_model_primitive("capsule", "capsule")
+        elif value == "Ellipsoid":
+            app._add_scene_object(MeshShape.SPHERE, "ellipsoid", size=(0.65, 0.45, 0.35))
+        else:
+            app._add_scene_object(MeshShape(value.lower()), value.lower())
     elif prefix == "dialog":
         menu.dialog_pending = value
     elif action == "play":

@@ -302,5 +302,6 @@ def reference_manifest(spec=None):
             "fields": len(fields),
             "production": sum(f["status"] == "applied" for f in fields),
             "reference": sum(f["status"] == "reference" for f in fields),
+            "derived": sum(f["status"] == "derived" for f in fields),
         },
     }

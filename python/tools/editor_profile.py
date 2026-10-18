@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import cProfile
+import hashlib
 import json
 import os
 import platform
@@ -14,16 +15,22 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+from PIL import Image
 
 from mojive import commands as cmd
-from mojive.app.composition import build
+from mojive.adapters.base import NodeType
+from mojive.app.composition import build, build_workspace
+from mojive.config import LayoutConfig, ViewerConfig
 from mojive.scene.assets import resolve
 
 
 def _summary(values):
     return {
-        key: float(np.percentile(values, percentile))
-        for key, percentile in (("median", 50), ("p95", 95), ("p99", 99), ("max", 100))
+        "mean": float(np.mean(values)),
+        **{
+            key: float(np.percentile(values, percentile))
+            for key, percentile in (("median", 50), ("p95", 95), ("p99", 99), ("max", 100))
+        },
     }
 
 
@@ -41,10 +48,22 @@ def _stages(viewer):
     )
 
 
+def _draw_counts():
+    from imgui_bundle import imgui
+
+    data = imgui.get_draw_data()
+    return {
+        "vertices": data.total_vtx_count,
+        "indices": data.total_idx_count,
+        "commands": sum(len(commands.cmd_buffer) for commands in data.cmd_lists),
+    }
+
+
 def _run(args):
     report = {
         "platform": platform.platform(),
         "asset": args.asset,
+        "workspace": args.workspace,
         "frames": args.frames,
         "scope": (
             "Uninstrumented wall/CPU samples, inclusive stage timers and cProfile run separately. "
@@ -53,15 +72,33 @@ def _run(args):
         ),
         "cases": {},
     }
-    with build(
+    compose = build_workspace if args.workspace else build
+    with compose(
         resolve(args.asset),
         renderer=args.renderer,
         paused=True,
-        vsync=False,
-        show_window=False,
+        vsync=args.vsync,
+        show_window=args.visible,
         width=args.width,
         height=args.height,
+        config=ViewerConfig(layout=LayoutConfig(persistence=False)),
     ) as viewer:
+        if args.joint:
+            joint = next(
+                (
+                    node
+                    for node in viewer.session.nodes
+                    if node.type is NodeType.JOINT and node.name == args.joint
+                ),
+                None,
+            )
+            if joint is None:
+                raise ValueError(f"No joint node named {args.joint!r}")
+            result = viewer.session.submit(cmd.SelectNode(joint.node_id))
+            if not result.ok:
+                raise RuntimeError(result.message)
+            viewer.set_gizmo_mode("rotate")
+            report["selected_joint"] = args.joint
         for _ in range(24):
             viewer.sync()
         body = next(
@@ -73,11 +110,21 @@ def _run(args):
         report.update(
             renderer=viewer.backend.caps.name,
             window_points=viewer.window.size_points,
+            window_pixels=viewer.window.size_pixels,
             pixel_scale=viewer.window.pixel_scale,
+            style_scale=viewer.window.style_scale,
+            visible=args.visible,
+            vsync=args.vsync,
+            application=type(viewer.app).__name__,
             instances=viewer.session.source.instance_count,
             nodes=len(viewer.session.nodes),
             gpu_timing_supported=viewer.backend.caps.gpu_timing,
         )
+        design = getattr(viewer.app, "design", None)
+        if design is not None:
+            report["design_sha256"] = hashlib.sha256(
+                json.dumps(design.spec, sort_keys=True).encode()
+            ).hexdigest()
 
         def drain():
             if viewer.backend.caps.name == "opengl":
@@ -99,7 +146,7 @@ def _run(args):
                 raise RuntimeError(result.message)
             viewer.sync()
 
-        for mode in ("idle", "orbit", "visibility", "color"):
+        for mode in args.cases:
             count = args.frames if mode in ("idle", "orbit") else max(12, args.frames // 3)
             for index in range(5):
                 execute(mode, index)
@@ -120,7 +167,11 @@ def _run(args):
                 "main_thread_cpu_ms": _summary(cpu),
                 "post_sync_gpu_wait_or_readback_ms": _summary(waits),
                 "gpu_pass_ms": dict(viewer.backend.stats.gpu_ms),
+                "ui_draw_counts": _draw_counts(),
             }
+            report["cases"][mode] = row
+            if args.timing_only:
+                continue
             stages = {}
             with ExitStack() as stack:
                 for owner, name, label in _stages(viewer):
@@ -151,15 +202,31 @@ def _run(args):
             profiler.dump_stats(str(args.output / f"{mode}.prof"))
             with (args.output / f"{mode}.txt").open("w") as stream:
                 pstats.Stats(profiler, stream=stream).sort_stats("cumtime").print_stats(60)
-            report["cases"][mode] = row
-        viewer.capture(args.output / "window.png", surface="window")
+        Image.fromarray(viewer.capture_array(surface="window")).save(args.output / "window.png")
     return report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asset", default="joint_gizmo")
+    parser.add_argument("--joint", help="Select a named joint and enable its rotation gizmo")
     parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
+    parser.add_argument("--visible", action="store_true", help="Present the native window")
+    parser.add_argument(
+        "--vsync", action="store_true", help="Synchronize presentation to the display"
+    )
+    parser.add_argument(
+        "--workspace", action="store_true", help="Use the production editor workspace"
+    )
+    parser.add_argument(
+        "--cases",
+        nargs="+",
+        choices=("idle", "orbit", "visibility", "color"),
+        default=("idle", "orbit", "visibility", "color"),
+    )
+    parser.add_argument(
+        "--timing-only", action="store_true", help="Skip stage instrumentation and cProfile"
+    )
     parser.add_argument("--frames", type=int, default=90)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=800)

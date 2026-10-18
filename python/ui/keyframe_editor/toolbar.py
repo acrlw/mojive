@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
@@ -34,6 +33,8 @@ from mojive.ui.panels import PanelContext, button_row_layout, segmented_control
 from mojive.ui.text_layout import fit_text
 from mojive.ui.timeline import (
     nearest_take_frame,
+    timeline_range_format,
+    valid_timeline_range,
 )
 
 _FOLLOW_ICONS = ("key-follow-off", "key-follow-page", "key-follow-locked")
@@ -127,13 +128,17 @@ class TimelineToolbar:
         )
         icon_width = _command_button_width("", scale)
         first, last = (
-            (take_times[0], take_times[-1]) if take_times else (editor.view_start, editor.view_end)
+            (take_times[0], take_times[-1])
+            if len(take_times) > 1
+            else (editor.view_start, editor.view_end)
         )
         time_reference = f"{max(99, abs(first), abs(last)):.3f} s"
         time_width = imgui.calc_text_size(("-" if first < 0 else "") + time_reference).x
         transport_width = 5 * icon_width + time_width + 5 * gap
+        range_format = timeline_range_format(first, last)
         field_width = max(
-            56 * scale, imgui.calc_text_size(f"{max(abs(first), abs(last)):.2f}").x + 16 * scale
+            56 * scale,
+            imgui.calc_text_size(range_format % max(abs(first), abs(last))).x + 16 * scale,
         )
         take_width = max(
             84 * scale,
@@ -362,14 +367,15 @@ class TimelineToolbar:
         gap = 5 * scale
         recording = ctx.session.state_take_recording
         play_range = ctx.session.state_take_range
-        endpoints = (
-            [take_times[play_range[0]], take_times[play_range[1]]]
-            if play_range
-            else [take_times[0], take_times[-1]]
-            if take_times
-            else [editor.view_start, editor.view_end]
-        )
+        endpoints = [editor.view_start, editor.view_end]
+        if len(take_times) > 1:
+            endpoints = (
+                [take_times[play_range[0]], take_times[play_range[1]]]
+                if play_range
+                else [take_times[0], take_times[-1]]
+            )
         inline = button_row_layout(widths, imgui.get_content_region_avail().x, gap)
+        range_format = timeline_range_format(*endpoints)
         imgui.set_next_item_width(widths[0])
         imgui.set_next_window_size_constraints(
             (160 * scale + 2 * imgui.get_style().frame_padding.x, 0), (10000, 10000)
@@ -403,12 +409,14 @@ class TimelineToolbar:
             if inline[i]:
                 imgui.same_line()
             imgui.set_next_item_width(widths[i])
-            edited, value = imgui.drag_float("##timeline-range-" + name, value, 0.01, format="%.2f")
+            edited, value = imgui.drag_float(
+                "##timeline-range-" + name, value, 0.01, format=range_format
+            )
             imgui.set_item_tooltip(ctx.tr(title))
             changed |= edited
             values.append(value)
         start, end = values
-        if changed and math.isfinite(start) and math.isfinite(end) and end > start:
+        if changed and valid_timeline_range(start, end):
             if len(take_times) > 1:
                 first, last = (
                     nearest_take_frame(take_times, start),
@@ -417,7 +425,7 @@ class TimelineToolbar:
                 if first < last:
                     ctx.submit(cmd.SetStateTakeLoop(first, last))
             else:
-                editor.view_start, editor.view_end, editor.view_needs_fit = start, end, False
+                editor.set_view_range(start, end)
         if inline[3]:
             imgui.same_line()
         if _command_button(

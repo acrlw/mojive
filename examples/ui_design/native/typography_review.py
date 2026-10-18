@@ -8,7 +8,7 @@ import numpy as np
 from imgui_bundle import imgui
 from PIL import Image
 
-from .widgets import DIM, MUTED, TEXT, UI
+from mojive.ui.workspace.widgets import DIM, MUTED, TEXT, UI
 
 
 def _glyph_metrics(face, size, characters, scale):

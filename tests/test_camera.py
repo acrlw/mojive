@@ -438,6 +438,131 @@ def test_oblique_axis_view_only_nudges_an_edge_on_camera_as_far_as_needed():
     assert turn < 40.0
 
 
+def _focus_marker_clearance(axis, direction, markers):
+    side = np.cross(axis, direction)
+    side /= np.linalg.norm(side)
+    return float(np.min(np.abs(np.asarray(markers) @ side)))
+
+
+def _hinge_focus_markers(axis, angles):
+    from mojive.ui.gizmo.projection import _basis_from_z
+
+    basis = _basis_from_z(axis)
+    return np.asarray(
+        [np.cos(angle) * basis[:, 0] + np.sin(angle) * basis[:, 1] for angle in angles]
+    )
+
+
+@pytest.mark.parametrize("axis", ((0, 0, 1), (1, 0, 0), (0, 1, 0), (0.3, 0.4, 0.5)))
+def test_hinge_focus_keeps_all_returned_marker_directions_clear_before_occlusion_selection(axis):
+    normal = np.asarray(axis, np.float64)
+    normal /= np.linalg.norm(normal)
+    markers = _hinge_focus_markers(normal, np.deg2rad((0, -100, 100)))
+    eye = np.array((np.cos(np.deg2rad(35)), 0, np.sin(np.deg2rad(35))))
+    fallback = (1, 0, 0)
+    original = oblique_axis_view_directions(normal, eye, fallback, 35)
+    directions = oblique_axis_view_directions(normal, eye, fallback, 35, marker_directions=markers)
+    assert directions
+    nearest_turn = np.arccos(np.clip(np.dot(original[0], eye), -1, 1))
+    for direction in directions:
+        assert _focus_marker_clearance(normal, direction, markers) >= 0.2 - 1e-6
+        assert np.linalg.norm(direction) == pytest.approx(1)
+        axis_angle = np.degrees(np.arccos(np.clip(abs(np.dot(direction, normal)), -1, 1)))
+        assert 35 - 1e-6 <= axis_angle <= 55 + 1e-6
+        assert np.degrees(np.arcsin(direction[2])) >= 35 - 1e-6
+        turn = np.arccos(np.clip(np.dot(direction, eye), -1, 1))
+        assert turn <= nearest_turn + np.deg2rad(25) + 1e-9
+    repeated = oblique_axis_view_directions(
+        normal, directions[0], fallback, 35, marker_directions=markers
+    )
+    assert repeated[0] == pytest.approx(directions[0], abs=1e-9)
+
+
+@pytest.mark.parametrize("yaw", (0, 90, 180, -90))
+@pytest.mark.parametrize("orthographic", (False, True))
+def test_vertical_hinge_focus_separates_real_projected_ticks_from_axis(yaw, orthographic):
+    from mojive.interaction.gizmo import RING_RADIUS, SIZE_PT, project, world_scale
+
+    angle = np.deg2rad(yaw)
+    eye = np.array((np.cos(angle), np.sin(angle), 1.0))
+    markers = _hinge_focus_markers((0, 0, 1), np.deg2rad((0, -100, 100)))
+    direction = oblique_axis_view_directions(
+        (0, 0, 1), eye, (1, 0, 0), 35, marker_directions=markers
+    )[0]
+    view = CameraView(eye=direction * 3, target=np.zeros(3), orthographic=orthographic)
+    rect, ui_scale = (0, 0, 1200, 800), 1.2
+    scale = world_scale(view, (0, 0, 0), rect[3], SIZE_PT * ui_scale)
+    axis = project(view, np.array(((0, 0, -1), (0, 0, 1))) * scale * 1.05, rect)[:, :2]
+    side = np.array((axis[0, 1] - axis[1, 1], axis[1, 0] - axis[0, 0]))
+    side /= np.linalg.norm(side)
+    ticks = project(view, markers * (RING_RADIUS * scale), rect)[:, :2]
+    distances = np.abs((ticks - axis[0]) @ side)
+    assert np.min(distances) > 10 * ui_scale
+
+
+def test_already_clear_hinge_focus_retains_its_exact_first_view_and_filters_alternatives():
+    axis = np.array((0, 0, 1), np.float64)
+    eye = np.array((1, 1, 1), np.float64)
+    markers = _hinge_focus_markers(axis, np.deg2rad((0, -100, 100)))
+    original = oblique_axis_view_directions(axis, eye, (1, 0, 0), 35)
+    assert _focus_marker_clearance(axis, original[0], markers) > 0.2
+    directions = oblique_axis_view_directions(axis, eye, (1, 0, 0), 35, marker_directions=markers)
+    assert np.array_equal(directions[0], original[0])
+    assert all(_focus_marker_clearance(axis, value, markers) >= 0.2 - 1e-6 for value in directions)
+
+
+def test_invalid_hinge_markers_preserve_the_exact_original_candidate_sequence():
+    original = oblique_axis_view_directions((0, 0, 1), (1, 1, 1), (1, 0, 0), 35)
+    invalid = ((0, 0, 0), (0, 0, 4), (np.nan, 0, 0), (0, np.inf, 0))
+    directions = oblique_axis_view_directions(
+        (0, 0, 1), (1, 1, 1), (1, 0, 0), 35, marker_directions=invalid
+    )
+    assert len(directions) == len(original)
+    assert all(np.array_equal(a, b) for a, b in zip(directions, original, strict=True))
+
+
+def test_marker_normalization_does_not_mutate_published_inputs():
+    axis = np.array((0, 0, 1), np.float64)
+    markers = _hinge_focus_markers(axis, np.deg2rad((0, -100, 100))) * 4 + axis * 2
+    original = markers.copy()
+    directions = oblique_axis_view_directions(
+        axis, (1, 0, 1), (1, 0, 0), 35, marker_directions=markers
+    )
+    unit = _hinge_focus_markers(axis, np.deg2rad((0, -100, 100)))
+    expected = oblique_axis_view_directions(axis, (1, 0, 1), (1, 0, 0), 35, marker_directions=unit)
+    assert np.array_equal(markers, original)
+    assert np.array_equal(axis, (0, 0, 1))
+    assert all(np.allclose(a, b) for a, b in zip(directions, expected, strict=True))
+
+
+@pytest.mark.parametrize("yaw", (0, 4, 30, 90, 150))
+def test_impossible_dense_marker_clearance_is_stable_on_repeated_focus(yaw):
+    angle = np.deg2rad(yaw)
+    eye = np.array((np.cos(angle), np.sin(angle), 1.0))
+    markers = _hinge_focus_markers((0, 0, 1), np.deg2rad(np.arange(0, 180, 15)))
+    first = oblique_axis_view_directions((0, 0, 1), eye, (1, 0, 0), 35, marker_directions=markers)[
+        0
+    ]
+    repeated = oblique_axis_view_directions(
+        (0, 0, 1), first, (1, 0, 0), 35, marker_directions=markers
+    )[0]
+    assert repeated == pytest.approx(first, abs=1e-9)
+    turn = np.degrees(np.arccos(np.clip(np.dot(first, eye / np.linalg.norm(eye)), -1, 1)))
+    assert turn <= 25 + 1e-6
+
+
+def test_unreachable_marker_optimum_does_not_chase_the_neighborhood_boundary():
+    angle = np.deg2rad(30)
+    eye = np.array((np.cos(angle), np.sin(angle), 1.0))
+    markers = _hinge_focus_markers((0, 0, 1), np.deg2rad(np.arange(0, 121, 10)))
+    original = oblique_axis_view_directions((0, 0, 1), eye, (1, 0, 0), 35)
+    directions = oblique_axis_view_directions(
+        (0, 0, 1), eye, (1, 0, 0), 35, marker_directions=markers
+    )
+    assert len(directions) == 1
+    assert np.array_equal(directions[0], original[0])
+
+
 def test_elevated_focus_view_keeps_azimuth_and_enforces_iso_elevation():
     direction = elevated_focus_view_direction(
         (3.0, -4.0, -2.0),

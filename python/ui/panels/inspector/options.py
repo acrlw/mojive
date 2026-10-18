@@ -18,6 +18,7 @@ from mojive.ui.panels.inspector.fields import (
     _property_section,
     _property_text,
     _property_toggle,
+    _property_tooltip,
 )
 
 
@@ -62,7 +63,7 @@ class _Options:
             flags = imgui.TreeNodeFlags_.default_open if index < 2 else 0
             opened = _property_section(ctx, group, flags)
             if fields[0].group_description and imgui.is_item_hovered():
-                imgui.set_tooltip(ctx.tr(fields[0].group_description))
+                _property_tooltip(ctx, ctx.tr(fields[0].group_description), hovered=True)
             if not opened:
                 continue
             labels = tuple(ctx.tr(field.label) for field in fields)

@@ -26,6 +26,7 @@ from ..config import PanelConfig, RecordingConfig, ViewerConfig, ViewportLayers
 from ..render.debugdraw import Occlusion
 from ..types import CameraView
 from ..ui.gizmo import JOINT_RANGE_RADIUS, _RotationDialProjector
+from ..ui.layers import LAYER_SECTIONS
 
 
 def _save(viewer, path: Path, surface=CaptureSurface.WINDOW) -> np.ndarray:
@@ -45,7 +46,9 @@ def _click(viewer, point) -> None:
     viewer.sync()
 
 
-def _click_layer(viewer, label: str) -> None:
+def _click_layer(viewer, key: str, caption: str) -> None:
+    native = getattr(viewer.app, "workspace", None) is not None
+    label = key if native else caption
     _click(viewer, _item_center(viewer, "invisible_button", label, reveal=True))
 
 
@@ -81,25 +84,25 @@ def _run(viewer, output: Path) -> dict:
         viewer.sync()
     _save(viewer, output / "layers-panel.png")
     baseline = _save(viewer, output / "all-layers.png", CaptureSurface.VIEWPORT)
-    for field, label in (
-        ("debug_3d", "3D debug drawings"),
-        ("debug_2d", "2D canvas drawings"),
-        ("viewport_ui", "Viewport controls"),
-        ("gizmos", "Transform and joint gizmos"),
-    ):
-        _click_layer(viewer, app.localizer.text(label))
+    labels = {
+        name: app.localizer.text(caption)
+        for _title, controls in LAYER_SECTIONS
+        for name, caption in controls
+    }
+    for field in ("debug_3d", "debug_2d", "viewport_ui", "gizmos"):
+        _click_layer(viewer, "layer-" + field, labels[field])
         assert not getattr(app.viewport_layers, field), field
         hidden = _save(viewer, output / f"hidden-{field}.png", CaptureSurface.VIEWPORT)
         assert np.count_nonzero(np.max(np.abs(hidden.astype(int) - baseline), axis=2) > 5) > 25, (
             field
         )
-        _click_layer(viewer, app.localizer.text(label))
+        _click_layer(viewer, "layer-" + field, labels[field])
         assert getattr(app.viewport_layers, field), field
     assert debug.layer("trajectory", Occlusion.ALWAYS).visible
-    _click_layer(viewer, "trajectory##drawing_trajectory")
+    _click_layer(viewer, "drawing-layer-trajectory", "trajectory##drawing_trajectory")
     assert "trajectory" in app.viewport_layers.hidden_debug_layers
     _save(viewer, output / "hidden-named-layer.png", CaptureSurface.VIEWPORT)
-    _click_layer(viewer, "trajectory##drawing_trajectory")
+    _click_layer(viewer, "drawing-layer-trajectory", "trajectory##drawing_trajectory")
 
     # Hover the middle of the complementary arc, far from the four-degree allowed range.
     view, rect = app._camera_view(), app._viewport_rect
@@ -136,8 +139,8 @@ def _run(viewer, output: Path) -> dict:
     for _ in range(40):
         viewer.sync()
         time.sleep(1 / 60)
-    _click_layer(viewer, app.localizer.text("3D debug drawings"))
-    _click_layer(viewer, app.localizer.text("Viewport controls"))
+    _click_layer(viewer, "layer-debug_3d", labels["debug_3d"])
+    _click_layer(viewer, "layer-viewport_ui", labels["viewport_ui"])
     for _ in range(40):
         viewer.sync()
         time.sleep(1 / 60)

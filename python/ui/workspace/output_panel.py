@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import part_scope
@@ -11,7 +13,10 @@ from mojive.ui.panels import publish_status_hint
 from mojive.ui.panels.output import OutputPanel, OutputRowStyle
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.viewport_widgets import pointer_tool_hint
+from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.property_style import advance
+from mojive.ui.workspace.widgets import MUTED
 
 
 class WorkspaceOutput(OutputPanel):
@@ -31,6 +36,10 @@ class WorkspaceOutput(OutputPanel):
             self._filter_text = ""
             self._last_sequence = 0
 
+    def _tooltip(self, text, *, hovered=False):
+        if hovered or imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+            self.workspace.ui.tooltip(text, translate=False)
+
     def _toggle_auto_scroll(self):
         self.auto_scroll = not self.auto_scroll
         if self.auto_scroll:
@@ -41,7 +50,78 @@ class WorkspaceOutput(OutputPanel):
         selected = tuple(entry for entry in entries if entry.sequence in self._selected_sequences)
         return output.copy_message_text(selected) if selected else output.copy_text(entries)
 
-    @part_scope("output_toolbar")
+    @part_scope("empty")
+    def _draw_empty(self, ctx, filtered):
+        ui, scale = self.workspace.ui, self.workspace.s
+        pos, available = imgui.get_cursor_screen_pos(), imgui.get_content_region_avail()
+        style = ui.component_style("empty")
+        padding = style.edges("padding", scale, (12, 12, 12, 12))
+        margin = style.edges("margin", scale)
+        x, y = pos.x + margin[0] + padding[0], pos.y + margin[1] + padding[1]
+        width = max(scale, available.x - margin[0] - margin[2] - padding[0] - padding[2])
+        font = style.get("fontSize", DESIGN.body_size)
+        gap = style.get("rowGap", style.get("gap", 8)) * scale
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.begin_group()
+        imgui.push_font(ui.resolve_font(style), font * scale)
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap, gap))
+        imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + width)
+        try:
+            imgui.text_wrapped(ctx.tr("No matching messages" if filtered else "No messages"))
+            imgui.push_style_color(imgui.Col_.text, tuple(c / 255 for c in MUTED))
+            imgui.text_wrapped(
+                ctx.tr(
+                    "Change the search or severity filters."
+                    if filtered
+                    else "Runtime messages appear here."
+                )
+            )
+            imgui.pop_style_color()
+            if filtered:
+                p = imgui.get_cursor_screen_pos()
+                key, label = "output-reset-filters", "Clear filters"
+                parts = ui.design.button_parts(key, label) if ui.design else "button"
+                button_style = ui.component_style(parts)
+                button_padding = button_style.edges("padding", scale, (6, 0, 6, 0))
+                text_width = ui.measure(
+                    label,
+                    button_style.get("fontSize", DESIGN.body_size),
+                    style=button_style,
+                    font_resolved=True,
+                )
+                size = control_size(
+                    ui,
+                    key,
+                    (text_width + button_padding[0] + button_padding[2]) / scale,
+                    28,
+                    label=label,
+                )
+                fw, fh = control_frame_size(ui, key, min(width, size[0]), size[1], label=label)
+                if ui.button(
+                    key,
+                    p.x,
+                    p.y,
+                    fw,
+                    fh,
+                    label=label,
+                    filled=True,
+                    width_limit=fw * scale,
+                ):
+                    self._reset_filters()
+        finally:
+            imgui.pop_text_wrap_pos()
+            imgui.pop_style_var()
+            imgui.pop_font()
+            imgui.end_group()
+        bottom = imgui.get_item_rect_max().y + padding[3] + margin[3]
+        ui.hits["output-empty-state"] = (pos.x, pos.y, available.x, bottom - pos.y)
+        if ui.design is not None:
+            ui.design.record(
+                "output-empty-state", ("empty",), ui.hits["output-empty-state"], "empty"
+            )
+        advance(ui, pos.x, bottom)
+
+    @part_scope("output_layout", "output_toolbar")
     def _draw_toolbar(self, ctx, all_entries, newest_sequence):
         from mojive.ui.workspace.output_toolbar import draw_output_toolbar
 
@@ -54,7 +134,10 @@ class WorkspaceOutput(OutputPanel):
     def _draw_level_menu(self, levels, labels):
         for (level, _, _, _), label in zip(levels, labels, strict=True):
             changed, _ = self.workspace.menus.local_item(
-                label, checked=level in self._levels, key="output-menu-level-" + level
+                label,
+                checked=level in self._levels,
+                checkable=True,
+                key="output-menu-level-" + level,
             )
             if changed:
                 self._levels.symmetric_difference_update({level})
@@ -73,6 +156,18 @@ class WorkspaceOutput(OutputPanel):
             style.edges("margin", scale),
             style.get("textAlign", "start"),
             style.get("alignItems", "center"),
+            tuple(
+                channel / 255
+                for channel in ui.style_color(style, "textColor", (255, 255, 255, 255))
+            )
+            if style.get("textColor", "inherit") != "inherit"
+            else None,
+            tuple(
+                channel / 255
+                for channel in ui.style_color(style, "iconColor", (255, 255, 255, 255))
+            )
+            if style.get("iconColor", "inherit") != "inherit"
+            else None,
         )
 
     def record_row(self, sequence, outer, frame, content, **geometry):
@@ -111,11 +206,18 @@ class WorkspaceOutput(OutputPanel):
             max(0, imgui.get_content_region_avail().y),
         )
 
+    @part_scope("output_layout", "output_list", "output_row")
     def _draw_entries(self, ctx, entries, filtering):
         ui, scale = self.workspace.ui, self.workspace.s
         self._row_rectangles = []
+        style = ui.component_style("output_row")
+        if ui.design is not None and ui.design.runtime.has_module_palette:
+            theme = ui.design.runtime.theme_for(ctx.theme, style.family)
+            if theme is not ctx.theme:
+                ctx = replace(ctx, theme=theme)
         imgui.push_font(
-            ui.output_font, ui.component_style("output_row").get("fontSize", 14) * scale
+            ui.resolve_font(style, mono=ui.typography.output.family == "mono"),
+            style.get("fontSize", 14) * scale,
         )
         list_style = ui.component_style("output_list")
         gap = list_style.get("rowGap", list_style.get("gap", DESIGN.output_row_gap))
@@ -141,8 +243,11 @@ class WorkspaceOutput(OutputPanel):
     def _context_popup(self, key):
         return self.workspace.menus.local_popup(key)
 
-    def _context_item(self, label, shortcut="", checked=False, enabled=True, *, key):
+    def _context_item(self, label, shortcut="", checked=None, enabled=True, *, key):
         return self.workspace.menus.local_item(label, shortcut, checked, enabled, key=key)
+
+    def _context_separator(self):
+        self.workspace.menus.local_separator()
 
     def _draw_file_actions(self, ctx, entry):
         path = message_path(entry.text, entry.copy_text)

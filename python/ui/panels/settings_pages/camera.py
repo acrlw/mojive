@@ -42,7 +42,7 @@ def draw(panel, ctx: PanelContext) -> None:
         reset = imgui.is_item_hovered() and pointer_pressed(ctx, PointerAction.VALUE_RESET)
         if reset:
             changed, value = True, min(high, max(low, getattr(defaults, name)))
-        imgui.set_item_tooltip(t(tooltip))
+        panel._tooltip(t(tooltip))
         if changed:
             try:
                 config = replace(config, **{name: value})
@@ -96,7 +96,7 @@ def draw(panel, ctx: PanelContext) -> None:
     panel._group_heading(t("Zoom"))
     if panel._begin_properties("settings_camera_zoom"):
         choice("zoom_mode", "Zoom mode", (("proportional", "Proportional"), ("linear", "Linear")))
-        imgui.set_item_tooltip(
+        panel._tooltip(
             t(
                 "Proportional slows near the pivot. Linear uses a fixed step based on the framed scene size."
             )

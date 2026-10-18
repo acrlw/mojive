@@ -3,8 +3,10 @@
 from types import SimpleNamespace
 
 import pytest
-from examples.ui_design.native import widgets
-from examples.ui_design.native.widgets import (
+from imgui_bundle import imgui
+
+from mojive.ui.workspace import widgets
+from mojive.ui.workspace.widgets import (
     GLYPHS,
     ICON_GRID,
     ICON_ROLES,
@@ -13,7 +15,6 @@ from examples.ui_design.native.widgets import (
     icon_geometry,
     icon_role_canvas,
 )
-from imgui_bundle import imgui
 
 
 @pytest.fixture(params=(0.65, 1.0, 1.25, 1.5, 2.25))
@@ -242,10 +243,13 @@ def test_role_icon_fits_custom_small_slots_and_skips_empty_slots(role_ui):
         first = len(ui.draw.vtx_buffer)
         ui.role_icon("play", 80 * ui.s, 90 * ui.s, 8 * ui.s, 10 * ui.s, role="toolbar")
         left, top, right, bottom = _bounds(ui.draw, first, ink=True)
-        assert max(right - left, bottom - top) == pytest.approx(13 / ICON_GRID * 8 * ui.s, abs=0.01)
-        assert ((left + right) / 2, (top + bottom) / 2) == pytest.approx(
-            (84 * ui.s, 95 * ui.s), abs=0.01
+        # The compiled master contains the optical placement. No second fitter
+        # rescales or recenters its triangle for compact controls.
+        expected = tuple(
+            (80 if index % 2 == 0 else 91) * ui.s + value * 8 * ui.s / ICON_GRID
+            for index, value in enumerate(GLYPHS["play"]["bounds"])
         )
+        assert (left, top, right, bottom) == pytest.approx(expected, abs=0.01)
         first = len(ui.draw.vtx_buffer)
         ui.role_icon("play", 0, 0, 0, 10, role="toolbar")
         assert len(ui.draw.vtx_buffer) == first
@@ -276,17 +280,41 @@ def test_close_pin_and_playback_preserve_relative_optical_weight(role_ui, role):
         return boxes[name][3] - boxes[name][1]
 
     assert height("close") < height("pin") * 0.75
-    assert height("play") < height("pin") * 0.7
-    assert height("play") == pytest.approx(height("pause"), abs=0.01)
+    for name in ("play", "pause"):
+        bounds = GLYPHS[name]["bounds"]
+        assert height(name) == pytest.approx(
+            (bounds[3] - bounds[1]) * spec.canvas_size * ui.s / ICON_GRID, abs=0.01
+        )
     assert height("previous") == pytest.approx(height("next"), abs=0.01)
     assert height("previous") <= height("play") * 1.1
     assert height("reset") < height("pin")
-    for name in boxes:
-        left, top, right, bottom = boxes[name]
+    for name, (left, top, right, bottom) in boxes.items():
+        bx, by, br, bb = GLYPHS[name]["bounds"]
+        inset = (spec.slot_size - spec.canvas_size) / 2
         assert ((left + right) / 2, (top + bottom) / 2) == pytest.approx(
-            ((80 + spec.slot_size / 2) * ui.s, (90 + spec.slot_size / 2) * ui.s),
+            (
+                (80 + inset + (bx + br) / 2 * spec.canvas_size / ICON_GRID) * ui.s,
+                (90 + inset + (by + bb) / 2 * spec.canvas_size / ICON_GRID) * ui.s,
+            ),
             abs=0.15 * ui.s,
         ), name
+
+
+def test_context_aliases_submit_identical_canonical_geometry(role_ui):
+    from mojive.ui.workspace.widget_icons import COMPILED_ALIASES
+
+    ui, frame = role_ui.ui, role_ui.frame
+
+    def paint():
+        for alias, master in COMPILED_ALIASES.items():
+            first = len(ui.draw.vtx_buffer)
+            ui.icon(alias, 80 * ui.s, 90 * ui.s, 18)
+            actual = _vertices(ui.draw, first)
+            first = len(ui.draw.vtx_buffer)
+            ui.icon(master, 80 * ui.s, 90 * ui.s, 18)
+            assert _vertices(ui.draw, first) == actual, (alias, master)
+
+    frame(paint)
 
 
 @pytest.mark.parametrize("name", ("close", "pin", "previous", "next", "reset", "play", "pause"))

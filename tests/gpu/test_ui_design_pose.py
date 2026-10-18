@@ -53,16 +53,19 @@ def _field(study, kind, group, axis, panel="Pose"):
 
 
 def _text(study, point, value):
+    modifier = (
+        imgui.Key.mod_super if imgui.get_io().config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    )
     study.event("add_mouse_pos_event", *point)
-    study.event("add_key_event", imgui.Key.mod_ctrl, True)
+    study.event("add_key_event", modifier, True)
     study.event("add_mouse_button_event", 0, True)
     study.event("add_mouse_button_event", 0, False)
-    study.event("add_key_event", imgui.Key.mod_ctrl, False)
+    study.event("add_key_event", modifier, False)
     assert imgui.get_io().want_text_input
-    study.event("add_key_event", imgui.Key.mod_ctrl, True)
+    study.event("add_key_event", modifier, True)
     study.event("add_key_event", imgui.Key.a, True)
     study.event("add_key_event", imgui.Key.a, False)
-    study.event("add_key_event", imgui.Key.mod_ctrl, False)
+    study.event("add_key_event", modifier, False)
     study.event("add_input_characters_utf8", str(value))
     study.event("add_key_event", imgui.Key.enter, True)
     study.event("add_key_event", imgui.Key.enter, False)

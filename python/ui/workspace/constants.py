@@ -22,10 +22,10 @@ ICONS = (
     "control",
     "assets",
     "camera",
-    "chart",
+    "sensor",
     "layers",
     "terminal",
-    "chart",
+    "performance",
     "settings",
 )
 LEFT_PANELS = PANELS[:7]

@@ -1,6 +1,6 @@
 """Measured rows used by production containers and their design audit bounds."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import inf
 
 from mojive.design.native.geometry import Rect, budget_margins
@@ -17,7 +17,9 @@ class FlowLayout:
 
 def record_group(ui, part, key, rectangles, **geometry):
     """Observe the union of already placed children without allocating layout."""
-    if ui.design is None or ui.design.runtime.workbench is None:
+    from mojive.design.groups import scoped_parts
+
+    if ui.design is None or not ui.design.runtime.observes(scoped_parts((part,))):
         return
     rectangles = tuple(rectangles)
     if not rectangles:
@@ -87,11 +89,16 @@ def component_flow(
     column_gap=0,
     row_gap=0,
     observe=True,
+    resolved_padding=None,
 ):
     """Measure a wrapping container before publishing its final native box."""
     style, scale = ui.component_style(part), ui.s
     margins = budget_margins(style.edges("margin", scale), width, inf)
-    pads = style.edges("padding", scale, tuple(v / scale for v in padding))
+    pads = (
+        style.edges("padding", scale, tuple(v / scale for v in padding))
+        if resolved_padding is None
+        else resolved_padding
+    )
     available = max(0, width - margins[0] - margins[2])
     frame_width = min(available, style.dimension("width", available / scale) * scale)
     content = Rect(
@@ -121,6 +128,8 @@ def component_flow(
         minimum_height=minimum,
         observe=False,
     )
+    if resolved_padding is not None:
+        box = replace(box, content=box.frame.inset(*pads), padding=pads)
     if observe:
         ui.record_component_box(
             part, box, key=key, fields=[list(r.tuple()) for r in layout.rectangles]
@@ -128,8 +137,7 @@ def component_flow(
     return box, layout
 
 
-def control_size(ui, key, width, height, *, label="", icon=None, icon_size=None, icon_role=None):
-    """Measure the exact specialization before a parent allocates its row budget."""
+def _control_box(ui, key, width, height, *, label="", icon=None, icon_size=None, icon_role=None):
     from mojive.design.native.geometry import classify_button
 
     parts = (
@@ -154,16 +162,29 @@ def control_size(ui, key, width, height, *, label="", icon=None, icon_size=None,
         icon_height = extent * scale
     else:
         icon_height = 0
-    box = style.box(
+    return style.box(
         0,
         0,
         width * scale,
         height * scale,
         scale=scale,
         padding=padding,
-        intrinsic=(icon_height if icon and not label else 0, max(font_height, icon_height)),
+        intrinsic=(0, max(font_height, icon_height)),
+    )
+
+
+def control_size(ui, key, width, height, *, label="", icon=None, icon_size=None, icon_role=None):
+    """Measure the exact specialization before a parent allocates its row budget."""
+    box = _control_box(
+        ui, key, width, height, label=label, icon=icon, icon_size=icon_size, icon_role=icon_role
     )
     return box.outer.width, box.outer.height
+
+
+def control_radius_limit(ui, key, width, height, **options):
+    """Use the painted frame, including authored dimensions and intrinsic growth."""
+    frame = _control_box(ui, key, width, height, **options).frame
+    return max(0, min(frame.width, frame.height) / 2 - 1)
 
 
 def control_frame_size(ui, key, width, height, *, label="", icon=None):

@@ -19,6 +19,20 @@ from mojive.ui.app import ViewerApp
 from mojive.ui.panels import PanelContext, PanelManager
 
 
+def test_viewport_hint_has_initial_bounds_before_any_status_frame(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    app = ViewerApp(Session(StaticSceneAdapter(Scene())), NullBackend())
+    try:
+        app.window = SimpleNamespace(style_scale=1.25)
+        app._viewport_rect = (20, 30, 600, 400)
+        assert app._viewport_hint_bottom() == 410
+        app._status_notice_bounds = (50, 350, 500, 390)
+        assert app._viewport_hint_bottom() == 340
+    finally:
+        app.window = None
+        app.release()
+
+
 @pytest.mark.parametrize("config", [None, ViewerConfig()])
 def test_default_viewer_exposes_full_tools_without_opt_in(tmp_path, monkeypatch, config):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))

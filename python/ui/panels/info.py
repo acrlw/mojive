@@ -26,7 +26,7 @@ class InfoPanel(Panel):
     def draw(self, ctx: PanelContext) -> None:
         if not ctx.info:
             imgui.text_disabled(ctx.tr("nothing pushed yet"))
-            imgui.set_item_tooltip(ctx.tr("scripts fill this via the viewer's info dict"))
+            self._tooltip(ctx.tr("scripts fill this via the viewer's info dict"))
             return
         if not imgui.begin_table("info_kv", 2, _FLAGS):
             return

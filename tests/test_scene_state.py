@@ -178,6 +178,15 @@ def test_editor_snapshot_names_advance_without_overwriting(tmp_path):
     assert next_available_snapshot_name("named view", tmp_path) == "named-view"
 
 
+@pytest.mark.parametrize("name", ("../../前视图", r"..\相机\右视图", "視点/上面", "följ:vy"))
+def test_unicode_snapshot_names_remain_inside_the_requested_directory(tmp_path, name):
+    path = save_named_snapshot(name, {"value": 1}, tmp_path)
+    assert path.parent == tmp_path
+    assert path.suffix == ".json"
+    assert load_named_snapshot(path.stem, tmp_path) == {"value": 1}
+    assert next_available_snapshot_name(name, tmp_path) == path.stem + "-2"
+
+
 def test_snapshot_rejects_a_different_model(state_rig):
     session, backend, camera = state_rig
     snapshot = capture_scene(session, backend, camera)

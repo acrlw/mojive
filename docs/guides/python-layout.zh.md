@@ -74,7 +74,7 @@
 | 图标参数、几何、布局、缓存提交 | `ui/icons/model.py`、`glyphs.py`、`painter.py`、`layout.py`、`drawing.py`；预计算仍在 `ui/icon_presets.json` |
 | 图标与 viewport 共用几何 | `ui/overlay_geometry.py`；不依赖 viewport 控件组合 |
 | 面板绘制入口 | `PanelContext.painter()` 由 Window 注入；在当前 child/table 内创建，控件通过 `draw=` 接收，不另找全局 Window |
-| 中立绘制协议、ImGui 适配 | `ui/paint_protocol.py`、`ui/imgui_draw.py`；`ui/draw2d.py` 只保留旧导入兼容 |
+| 中立绘制协议、ImGui 适配 | `ui/paint_protocol.py`、`ui/imgui_draw.py`；调用方直接导入各自的定义模块 |
 | 文字布局、拖拽连线提交 | `ui/text_layout.py`、`ui/drag_link.py` |
 | 生产与设计工具的窗口及 UI 后端装配 | `app/ui/window.py`；工具不需要为纯 UI 预览创建 3D renderer |
 | UI Feasibility 参数、图标审阅、几何实验 | `tools/ui_feasibility/state.py`、`tuning.py`、`icon_library.py`；`geometry.py` 管画布，`geometry_scenes.py` 管独立展示内容 |

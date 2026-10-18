@@ -25,6 +25,7 @@ def test_visual_group_and_flag_checkboxes_keep_the_same_size(scale, monkeypatch)
     ui.s, ui.translate = scale, str
     ui.body = ui.bold = ui.mono = io.fonts.add_font_default()
     ui.hits, ui.numeric_edits = {}, {}
+    ui._section_columns = []
     panel = WorkspaceSettings(SimpleNamespace(ui=ui, s=scale))
     group = SimpleNamespace(category="geom", visible=(True,) * 6)
     ctx = SimpleNamespace(

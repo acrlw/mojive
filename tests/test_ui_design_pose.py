@@ -6,8 +6,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from examples.ui_design.native.docking_study import Study
-from examples.ui_design.native.pose_panel import NativePoseEditor, joint_pose_command
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive import Scene, math3d
@@ -30,6 +28,8 @@ from mojive.types import CameraView
 from mojive.ui.gizmo import ObjectGizmo, _JointPrecisionProjection
 from mojive.ui.panels import PanelContext
 from mojive.ui.panels.joints import JointsPanel
+from mojive.ui.workspace.pose_panel import NativePoseEditor, joint_pose_command
+from mojive.ui.workspace.widgets import UI
 
 
 @pytest.fixture
@@ -157,6 +157,7 @@ def editor(request, session, monkeypatch):
     ui.body = ui.bold = ui.mono = io.fonts.add_font_default()
     ui.translate = str
     ui.hits, ui.numeric_edits = {}, {}
+    imgui.get_style().font_size_base = 14 * ui.s
     ctx = PanelContext(session, NullBackend(), style_scale=ui.s)
     ui.value_context = ctx
     study = Study.__new__(Study)
@@ -176,9 +177,11 @@ def editor(request, session, monkeypatch):
         kind="ball",
         width=320,
         show_names=False,
+        show_types=False,
         shared=False,
         shared_panel=JointsPanel(),
         duplicate=False,
+        collapsible_poses=False,
     )
     drag_float = imgui.drag_float
 
@@ -220,6 +223,8 @@ def editor(request, session, monkeypatch):
                     select_joint=select,
                     initial_qpos=session.source.initial_qpos,
                     show_names=state.show_names,
+                    show_types=state.show_types,
+                    collapsible_poses=state.collapsible_poses,
                 )
             state.primary_hits = dict(ui.hits)
             imgui.end()
@@ -251,16 +256,17 @@ def editor(request, session, monkeypatch):
         return x + w / 2, y + h / 2
 
     def text(key, value, *, commit=True):
+        modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
         event("add_mouse_pos_event", *point(key))
-        event("add_key_event", imgui.Key.mod_ctrl, True)
+        event("add_key_event", modifier, True)
         event("add_mouse_button_event", 0, True)
         event("add_mouse_button_event", 0, False)
-        event("add_key_event", imgui.Key.mod_ctrl, False)
+        event("add_key_event", modifier, False)
         assert io.want_text_input
-        event("add_key_event", imgui.Key.mod_ctrl, True)
+        event("add_key_event", modifier, True)
         event("add_key_event", imgui.Key.a, True)
         event("add_key_event", imgui.Key.a, False)
-        event("add_key_event", imgui.Key.mod_ctrl, False)
+        event("add_key_event", modifier, False)
         event("add_input_characters_utf8", str(value))
         if commit:
             event("add_key_event", imgui.Key.enter, True)
@@ -275,6 +281,31 @@ def editor(request, session, monkeypatch):
         if session.editing:
             session.submit(cmd.CancelEditTransaction())
         imgui.destroy_context(context)
+
+
+@pytest.mark.physics
+@pytest.mark.parametrize("width", (160, 320))
+def test_inspected_body_joint_name_and_type_share_a_nonoverlapping_heading(
+    editor, monkeypatch, width
+):
+    editor.kind, editor.width = "hinge", width
+    editor.show_names = editor.show_types = True
+    captions = []
+    original = editor.ui.component_text
+
+    def record(component, rect, text, *args, **kwargs):
+        if text == "Hinge joint":
+            captions.append(rect)
+        return original(component, rect, text, *args, **kwargs)
+
+    monkeypatch.setattr(editor.ui, "component_text", record)
+    editor.frame(2)
+    name = editor.ui.hits[f"pose-joint-{editor.joint.joint_id}"]
+    type_rect = captions[-1]
+    assert name[0] + name[2] <= type_rect[0]
+    assert name[1] == type_rect[1]
+    assert type_rect[0] + type_rect[2] <= editor.width * editor.ui.s
+    assert name[2] > 0 and type_rect[2] > 0
 
 
 @pytest.mark.physics
@@ -310,12 +341,12 @@ def test_actual_pose_text_input_writes_one_undo_step(editor, kind, name, axis, v
 
 @pytest.mark.physics
 @pytest.mark.parametrize("kind,value", (("hinge", 17), ("slide", 0.21)))
-def test_existing_scalar_text_input_keeps_ids_and_one_undo_step(editor, kind, value):
+def test_scalar_text_input_writes_one_undo_step(editor, kind, value):
     state = editor
     state.kind = kind
     state.frame(3)
     before = state.session.adapter.primary.data.qpos.copy()
-    key = "##pose-" + ("hinge" if kind == "hinge" else "slide") + "-value"
+    key = f"##pose-joint-{state.joint.joint_id}-value"
     state.text(key, value)
     expected = np.radians(value) if kind == "hinge" else value
     assert state.session.adapter.primary.data.qpos[state.joint.qpos_adr] == pytest.approx(expected)

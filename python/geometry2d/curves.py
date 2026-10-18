@@ -540,6 +540,44 @@ def _capsule_shape(width: float, height: float, smoothing: float, tolerance: flo
     return tuple(map(tuple, points[keep].tolist()))
 
 
+def capsule_end_padding(width: float, height: float, smoothing: float = CORNER_SMOOTHING) -> float:
+    """Equalize mean end clearance and side clearance for the fitted capsule profile."""
+    short, long = min(width, height), max(width, height)
+    if short <= 0:
+        return 0.0
+    fitted = _fit_cap_smoothing(long / (2 * short), smoothing)
+    return min(long / 2, short / 2 * _capsule_padding_ratio(fitted))
+
+
+@lru_cache(maxsize=128)
+def _capsule_padding_ratio(smoothing: float) -> float:
+    # Normalize before caching so DPI and control size do not repeat the solve.
+    if smoothing == 0:
+        return 1.0
+    points = np.asarray(smooth_capsule_points(0, 0, 8, 2, smoothing, tolerance=1 / 26000))
+    edges = np.roll(points, -1, axis=0) - points
+    angles = np.linspace(math.pi / 2, 3 * math.pi / 2, 181)
+    rays = np.column_stack((np.cos(angles), np.sin(angles)))
+
+    def cross(a, b):
+        return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+    denominator = cross(rays[:, None], edges[None])
+    denominator = np.where(np.abs(denominator) < 1e-12, np.nan, denominator)
+    lo, hi = 1.0, 2.0
+    for _ in range(24):
+        middle = (lo + hi) / 2
+        offsets = points - (middle, 1.0)
+        distance = cross(offsets[None], edges[None]) / denominator
+        along = cross(offsets[None], rays[:, None]) / denominator
+        radii = np.where((distance > 0) & (along >= 0) & (along <= 1), distance, np.inf)
+        if radii.min(axis=1).mean() < 1.0:
+            lo = middle
+        else:
+            hi = middle
+    return (lo + hi) / 2
+
+
 @lru_cache(maxsize=1024)
 def smooth_rect_points(
     x0: float,

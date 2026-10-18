@@ -75,11 +75,16 @@ def _keycap(
     *,
     muted: bool = False,
     presentation=None,
+    width: float | None = None,
 ) -> float:
     if presentation is not None:
-        return presentation.draw(x, center_y, label, theme, muted=muted)
+        if width is None:
+            return presentation.draw(x, center_y, label, theme, muted=muted)
+        return presentation.draw(x, center_y, label, theme, muted=muted, width=width)
     text_width = draw.text_size(label)[0]
-    width = text_width + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale
+    width = (
+        text_width + OVERLAY_GEOMETRY.hint_key_padding_x * 2.0 * scale if width is None else width
+    )
     height = OVERLAY_GEOMETRY.hint_control_height * scale
     y = center_y - height * 0.5
     rounding = keycap_rounding(width, height)
@@ -188,6 +193,7 @@ def draw_mouse_hint_glyph(
     geometry: OverlayGeometry = OVERLAY_GEOMETRY,
     smoothing: float = CORNER_SMOOTHING,
     muted: bool = False,
+    icon_color: RGBA | None = None,
 ) -> float:
     """Draw a Blender-style mouse shell with one semantic control highlighted."""
 
@@ -200,6 +206,8 @@ def draw_mouse_hint_glyph(
     y = center_y - height * 0.5
     outline_width = geometry.hint_mouse_stroke * scale
     shell_color, fill_color, suffix_color = mouse_hint_colors(theme, muted=muted)
+    if icon_color is not None:
+        shell_color = fill_color = icon_color
     _paint_mouse_shape(
         draw,
         x,
@@ -330,6 +338,7 @@ def _tool_hint_width(
     text_scale: float = 1.0,
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     keycap=None,
+    mouse_scale=None,
 ) -> float:
     chord = OVERLAY_GEOMETRY.hint_chord_gap * scale
     input_gap = OVERLAY_GEOMETRY.hint_input_gap * scale
@@ -337,7 +346,8 @@ def _tool_hint_width(
     def text_width(value: str) -> float:
         return draw.text_size(value)[0] * text_scale
 
-    mouse = _mouse_width(draw, scale, text_scale=text_scale)
+    glyph_scale = scale if mouse_scale is None else mouse_scale
+    mouse = _mouse_width(draw, glyph_scale, text_scale=text_scale)
     if group.kind == "text":
         return text_width(group.label)
     if group.kind == "keys":
@@ -368,7 +378,7 @@ def _tool_hint_width(
         )
         return (
             modifier_width
-            + _mouse_width(draw, scale, group.suffix, text_scale)
+            + _mouse_width(draw, glyph_scale, group.suffix, text_scale)
             + input_gap
             + text_width(group.label)
         )
@@ -416,13 +426,18 @@ def tool_hints_size(
 
 
 def tool_hints_height(
-    draw: Draw2D, scale: float, hints: Sequence[ToolHint], *, keycap=None
+    draw: Draw2D, scale: float, hints: Sequence[ToolHint], *, keycap=None, mouse_scale=None
 ) -> float:
     """Measure the actual single-row mouse shells, text and authored keycaps."""
     if not hints:
         return 0
     return max(
-        OVERLAY_GEOMETRY.hint_control_height * scale,
+        OVERLAY_GEOMETRY.hint_control_height
+        * (
+            mouse_scale
+            if mouse_scale is not None and any(h.kind in ("mouse", "perturb") for h in hints)
+            else scale
+        ),
         draw.text_size("M")[1],
         keycap.size("Esc")[1] if keycap is not None else 0,
     )
@@ -458,6 +473,7 @@ def fitting_tool_hints(
     labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
     group_gap: float | None = None,
     keycap=None,
+    mouse_scale=None,
 ) -> tuple[ToolHint, ...]:
     """Return the largest whole-hint prefix that fits ``max_width``."""
 
@@ -465,7 +481,9 @@ def fitting_tool_hints(
     used = 0.0
     gap = OVERLAY_GEOMETRY.hint_group_gap * scale if group_gap is None else max(0, group_gap)
     for hint in hints:
-        width = _tool_hint_width(draw, scale, hint, labels=labels, keycap=keycap)
+        width = _tool_hint_width(
+            draw, scale, hint, labels=labels, keycap=keycap, mouse_scale=mouse_scale
+        )
         candidate = used + (gap if fitted else 0.0) + width
         if candidate > max(0.0, float(max_width)):
             break
@@ -574,6 +592,8 @@ def draw_tool_hints(
     separator_margin=None,
     record_item=None,
     separator_draw=None,
+    mouse_scale=None,
+    icon_color: RGBA | None = None,
 ) -> float:
     """Draw tool hints inline and return their consumed width."""
 
@@ -584,6 +604,7 @@ def draw_tool_hints(
     chord_gap = OVERLAY_GEOMETRY.hint_chord_gap * scale
     text_color = theme.text_disabled if muted else theme.text
     accent_color = theme.text_disabled if muted else theme.primary_bright
+    glyph_scale = scale if mouse_scale is None else mouse_scale
 
     def text(value: str, color=None) -> None:
         nonlocal cursor
@@ -607,9 +628,10 @@ def draw_tool_hints(
                 button,
                 suffix,
                 theme,
-                scale,
+                glyph_scale,
                 pixel_size=pixel_size,
                 muted=muted,
+                icon_color=icon_color,
             )
             + input_gap
         )
@@ -669,7 +691,9 @@ def draw_tool_hints(
         else:
             perturb(group.control)
         if record_item is not None:
-            height = tool_hints_height(draw, scale, (group,), keycap=keycap)
+            height = tool_hints_height(
+                draw, scale, (group,), keycap=keycap, mouse_scale=mouse_scale
+            )
             record_item((start_x, center_y - height / 2, cursor - start_x, height))
         if index + 1 < len(groups):
             divider_x = cursor + group_gap * 0.5

@@ -8,7 +8,6 @@ import pytest
 from examples.ui_design.native.camera_preview import preview_region
 from examples.ui_design.native.reference_menus import Menus
 from examples.ui_design.native.scene_preview import Preview
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
@@ -17,6 +16,7 @@ from mojive.render.backend import NullBackend
 from mojive.types import ViewportImage
 from mojive.ui import gestures as gs
 from mojive.ui.input_bindings import InputAction
+from mojive.ui.workspace.widgets import UI
 
 
 class ImageBackend(NullBackend):

@@ -26,10 +26,10 @@ from mojive.ui.workspace.widgets import ACCENT, DIM, INPUT, LINE, PANEL, TEXT, U
 
 
 class WorkspaceShell:
-    def __init__(self, app, *, portable_fonts=False):
+    def __init__(self, app, *, portable_fonts=False, ui=None):
         self.app, self.window = app, app.window
         self.s = self.window.style_scale
-        self.ui = UI(self.window, portable_fonts=portable_fonts)
+        self.ui = UI(self.window, portable_fonts=portable_fonts) if ui is None else ui
         self.ui.translate = lambda text: workspace_text(app.localizer, text)
         self.cube = app.view_cube
         self.open = PanelVisibility(app.panels)
@@ -76,7 +76,7 @@ class WorkspaceShell:
         self.menus = Menus(self, tuple(zip(PANELS, ICONS, strict=True)))
         self.settings = WorkspaceSettings(self)
         app.panels.workspace = self
-        for panel_id in ("plot",):
+        for panel_id in ("plot", "info", "help"):
             panel = app.panels.get(panel_id)
             if panel is not None:
                 panel.presentation = NativePropertyPresentation(self.ui, prefix=panel_id)

@@ -385,12 +385,16 @@ def themed_checkbox(
 
 
 @lru_cache(maxsize=256)
-def _segment_widths(font, font_size, labels, icons, padding, glyph_scale, icon_only_width):
+def _segment_widths(
+    font, font_size, labels, icons, padding, glyph_scale, icon_only_width, icon_width=None
+):
     """Measure stable labels once per font, language and UI scale."""
     return tuple(
         icon_only_width
         if icon and icon_only_width
-        else imgui.calc_text_size(label).x + padding + (20.0 * glyph_scale if icon else 0.0)
+        else imgui.calc_text_size(label).x
+        + padding
+        + ((20.0 * glyph_scale if icon_width is None else icon_width) if icon else 0.0)
         for label, icon in zip(labels, icons, strict=True)
     )
 
@@ -401,6 +405,8 @@ def segmented_control_width(
     icons: tuple[str, ...] | None = None,
     show_labels: bool = True,
     layout: Literal["equal", "content"] = "equal",
+    icon_width: float | None = None,
+    icon_only_width: float | None = None,
 ) -> float:
     """Return the horizontal width using the control's actual font and padding."""
     if not labels:
@@ -415,7 +421,12 @@ def segmented_control_width(
         icons,
         2 * imgui.get_style().frame_padding.x,
         max(0.65, imgui.get_frame_height() / 24.0),
-        0.0 if show_labels else imgui.get_frame_height(),
+        0.0
+        if show_labels
+        else imgui.get_frame_height()
+        if icon_only_width is None
+        else icon_only_width,
+        icon_width,
     )
     return sum(widths) if layout == "content" else len(labels) * max(widths)
 
@@ -434,13 +445,19 @@ def segmented_control(
     on_item: Callable[[int], None] | None = None,
     layout: Literal["equal", "content"] = "equal",
     gap: float = 0.0,
+    item_width: float | None = None,
+    item_drawer: IconLabelDrawer | None = None,
+    icon_width: float | None = None,
+    icon_only_width: float | None = None,
+    caption_tooltips: bool | Callable[[str], None] = True,
 ) -> int:
     """Choose one of N segments in one rounded frame.
 
     Only outer corners are rounded. Options form a contiguous vertical group
     when their labels cannot fit horizontally. Stable native button IDs retain
     keyboard navigation; measurement is cached independently of hover/selection.
-    Hidden icon captions become per-item tooltips and use square segments.
+    Hidden icon captions become per-item tooltips unless a parent owns their hints.
+    A caption tooltip callback paints hovered help using the caller's presenter.
     A selected index of -1 leaves every segment inactive until a choice is made.
     The optional callback receives each index with its native item still current.
     Content layout keeps each label's minimum width and shares the remaining space.
@@ -449,26 +466,47 @@ def segmented_control(
         return 0
     style = imgui.get_style()
     available = max(1.0, float(width if width > 0 else imgui.get_content_region_avail().x))
+    if item_width is not None:
+        item_width = max(1.0, item_width)
+        available = min(available, len(labels) * item_width + max(0, len(labels) - 1) * gap)
     gap = max(0.0, min(float(gap), available / max(1, len(labels))))
     usable = max(1.0, available - gap * (len(labels) - 1))
     glyph_scale = max(0.65, imgui.get_frame_height() / 24.0)
     icons = tuple(icons[i] if icons and i < len(icons) else "" for i in range(len(labels)))
-    minimum_width = segmented_control_width(
-        labels, icons=icons, show_labels=show_labels, layout=layout
+    minimum_width = (
+        len(labels) * item_width
+        if item_width is not None
+        else segmented_control_width(
+            labels,
+            icons=icons,
+            show_labels=show_labels,
+            layout=layout,
+            icon_width=icon_width,
+            icon_only_width=icon_only_width,
+        )
     )
     inline = minimum_width <= usable
     minimum_widths = (
-        _segment_widths(
-            imgui.get_font(),
-            imgui.get_font_size(),
-            labels,
-            icons,
-            2 * style.frame_padding.x,
-            glyph_scale,
-            0.0 if show_labels else imgui.get_frame_height(),
+        (item_width,) * len(labels)
+        if item_width is not None and inline
+        else (
+            _segment_widths(
+                imgui.get_font(),
+                imgui.get_font_size(),
+                labels,
+                icons,
+                2 * style.frame_padding.x,
+                glyph_scale,
+                0.0
+                if show_labels
+                else imgui.get_frame_height()
+                if icon_only_width is None
+                else icon_only_width,
+                icon_width,
+            )
+            if inline and layout == "content"
+            else ()
         )
-        if inline and layout == "content"
-        else ()
     )
     extra = (usable - minimum_width) / len(labels)
     offset = 0.0
@@ -518,7 +556,9 @@ def segmented_control(
         color = theme.primary_bright if is_selected else theme.text
         imgui.push_style_color(imgui.Col_.text, color)
         splitter.set_current_channel(dl, 1)
-        button_label = f"##{str_id}-{index}" if icon else f"{label}##{str_id}-{index}"
+        button_label = (
+            f"##{str_id}-{index}" if icon or item_drawer else f"{label}##{str_id}-{index}"
+        )
         imgui.push_style_color(imgui.Col_.nav_cursor, (0, 0, 0, 0))
         clicked = imgui.button(button_label, (item_width, 0))
         if on_item is not None:
@@ -562,10 +602,10 @@ def segmented_control(
             )
         splitter.set_current_channel(dl, 1)
         draw_focus_frame(lo, hi, rounding=style.frame_rounding, corners=corners)
-        if icon:
+        if icon or item_drawer:
             splitter.set_current_channel(dl, 1)
             dl.push_clip_rect(lo, hi, True)
-            (icon_label_drawer or draw_projection_label)(
+            (item_drawer or icon_label_drawer or draw_projection_label)(
                 draw,
                 (lo.x, lo.y),
                 (hi.x, hi.y),
@@ -575,8 +615,12 @@ def segmented_control(
                 label if show_labels else "",
             )
             dl.pop_clip_rect()
-            if not show_labels:
-                imgui.set_item_tooltip(label)
+            if not show_labels and caption_tooltips:
+                if callable(caption_tooltips):
+                    if imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+                        caption_tooltips(label)
+                else:
+                    imgui.set_item_tooltip(label)
         if clicked:
             result = index
     splitter.merge(dl)

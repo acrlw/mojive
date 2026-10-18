@@ -4,9 +4,11 @@ import contextvars
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any
 
+from mojive.design.groups import scoped_parts
 from mojive.design.native.style_cache import prepared_geometry
 from mojive.design.specification import BASELINE, component_catalog, resolve_part_value
 
@@ -27,8 +29,48 @@ BUTTON_PARTS = frozenset(
     )
 )
 CURRENT_NATIVE_PARTS = contextvars.ContextVar("design_native_parts", default=())
-INHERITED_TEXT_FIELDS = ("fontSize", "lineHeightMode", "lineHeight")
+_CORNER_RADII = contextvars.ContextVar("design_native_corner_radii", default=())
+INHERITED_TEXT_FIELDS = (
+    "fontSize",
+    "fontFamily",
+    "textColor",
+    "iconColor",
+    "iconSize",
+    "lineHeightMode",
+    "lineHeight",
+)
 PRECISE_TEXT_PARENTS = frozenset(("joint", "timeline_details", "section_body", "select_popup"))
+
+
+@contextmanager
+def corner_radius_scope(radius_native, parts):
+    """Constrain matching child corners to a parent's resolved native geometry."""
+    parts = (parts,) if isinstance(parts, str) else tuple(parts)
+    token = _CORNER_RADII.set((*_CORNER_RADII.get(), (parts, max(0, radius_native))))
+    try:
+        yield
+    finally:
+        _CORNER_RADII.reset(token)
+
+
+def scoped_corner_radius(parts):
+    """Return the innermost matching native radius, including an explicit zero."""
+    for candidates, radius in reversed(_CORNER_RADII.get()):
+        if any(part in parts for part in candidates):
+            return radius
+    return None
+
+
+@contextmanager
+def independent_corner_scope():
+    """Measure a separate popup root without inheriting its trigger's corners."""
+    token = _CORNER_RADII.set(())
+    try:
+        yield
+    finally:
+        _CORNER_RADII.reset(token)
+
+
 # Higher values take precedence when a field delegates to another field.
 RESOLVED_VALUE, AUTHORED_FALLBACK, INACTIVE_FIELD = range(3)
 
@@ -103,7 +145,7 @@ class NativePartStyle:
         self.runtime = runtime
         self.spec = runtime.spec if hasattr(runtime, "spec") else runtime
         self.catalog = getattr(runtime, "catalog", None) or component_catalog()
-        self.part_ids = (part_ids,) if isinstance(part_ids, str) else tuple(part_ids)
+        self.part_ids = scoped_parts(part_ids)
         self.family = family
         self.authored_defaults = authored_defaults
         self.values: dict[str, Any] = {}
@@ -180,7 +222,7 @@ class NativePartStyle:
         else:
             origin = self.origins[key]
             condition, use_fallback, alias = self._field_rule(origin, key)
-            reads = ((origin, key),) if self.authored_defaults else ()
+            reads = ((origin, key),) if self.authored_defaults and origin != "parent_corner" else ()
             fallback_mode = (
                 AUTHORED_FALLBACK if self.authored_defaults and use_fallback else RESOLVED_VALUE
             )
@@ -309,6 +351,8 @@ class NativePartStyle:
         Rules follow the resolved origin because parent typography may replace
         it on an individual control. Runtime spec updates clear the style cache.
         """
+        if origin == "parent_corner":
+            return None, False, None
         rule = self.catalog.get(origin, {}).get("fields", {}).get(key, {})
         condition = rule.get("condition")
         default = rule.get("default")
@@ -316,7 +360,17 @@ class NativePartStyle:
         source = reference.get("field")
         inherited = source is not None and self.explicit(source)
         mode_activated = condition and self.explicit(condition["field"])
-        token = reference.get("token")
+        token_default, token_part = reference, origin
+        # Panel-owned defaults delegate to a shared field. Keep the shared
+        # field's token activation, so global and family edits still apply.
+        while "field" in token_default:
+            token_part = token_default.get("part", token_part)
+            source_rule = (
+                self.catalog.get(token_part, {}).get("fields", {}).get(token_default["field"], {})
+            )
+            source_default = source_rule.get("default")
+            token_default = source_default if isinstance(source_default, dict) else {}
+        token = token_default.get("token")
         token_changed = (
             token is not None
             and self.spec.get("components", {})
@@ -561,9 +615,10 @@ class SliderGeometry:
 
 
 @contextmanager
-def part_scope(*part_ids):
+def part_scope(*part_ids, inherit=True):
     """Assign a real component identity at an exact native call boundary."""
-    token = CURRENT_NATIVE_PARTS.set(tuple(dict.fromkeys((*CURRENT_NATIVE_PARTS.get(), *part_ids))))
+    parents = CURRENT_NATIVE_PARTS.get() if inherit else ()
+    token = CURRENT_NATIVE_PARTS.set(tuple(dict.fromkeys((*parents, *scoped_parts(part_ids)))))
     try:
         yield
     finally:
@@ -571,16 +626,20 @@ def part_scope(*part_ids):
 
 
 def classify_button(key, label, override=()):
-    if str(key).startswith(("receipt-", "link-")):
+    override = (override,) if isinstance(override, str) else tuple(override)
+    return _classify_button(str(key), bool(label), override)
+
+
+@lru_cache(maxsize=4096)
+def _classify_button(key, label, override):
+    if key.startswith(("receipt-", "link-")):
         return ("link_button",)
-    if str(key) == "material-color":
+    if key == "material-color":
         # This input opens the existing color editor; it is not a material card.
         return ("color_input",)
-    override = (override,) if isinstance(override, str) else tuple(override)
     selected = tuple(part for part in override if part in BUTTON_PARTS)
     if selected:
         return selected
-    key = str(key)
     if key.startswith("tab-") or key in ("timeline-tab", "output-tab"):
         return ("tab",)
     if key.startswith("expand-"):

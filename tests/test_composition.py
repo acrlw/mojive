@@ -23,6 +23,9 @@ class Resource:
     def close(self) -> None:
         self.closes += 1
 
+    def make_current(self) -> None:
+        pass
+
 
 class App:
     def __init__(self, backend, session, bridge) -> None:
@@ -128,6 +131,27 @@ def test_viewer_context_manager_releases_every_owner_once():
     assert session.releases == 1
     assert bridge.closes == 1
     assert window.closes == 1
+
+
+def test_viewer_release_activates_its_window_before_releasing_application_resources():
+    viewer, app, _backend, _session, _bridge, window = _viewer()
+    current = object()
+    released_contexts = []
+    release = app.release
+
+    def activate():
+        nonlocal current
+        current = window
+
+    def release_with_context():
+        released_contexts.append(current)
+        release()
+
+    window.make_current = activate
+    app.release = release_with_context
+    viewer.release()
+    viewer.release()
+    assert released_contexts == [window]
 
 
 @pytest.mark.parametrize("frames", (0.5, "3"))

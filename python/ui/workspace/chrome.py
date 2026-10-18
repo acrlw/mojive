@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from math import ceil
+
 from imgui_bundle import imgui
 
+from mojive.design.native.geometry import part_scope
 from mojive.ui.workspace.component_layout import control_frame_size, control_size, record_group
 from mojive.ui.workspace.constants import ICONS, LEFT_PANELS, PANELS
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.rail_geometry import expand_rail_box, rail_corners, rail_dimensions
+from mojive.ui.workspace.tooltips import ShortcutHint
 from mojive.ui.workspace.widgets import (
     DIM,
     MUTED,
@@ -23,9 +28,33 @@ def sidebar(workspace, name, direction, size):
     if name == "Application":
         flags |= imgui.WindowFlags_.menu_bar
     imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-    visible = imgui.internal.begin_viewport_side_bar(
-        name, imgui.get_main_viewport(), direction, size * workspace.s, flags
-    )
+    previous = imgui.internal.find_window_by_name(name)
+    reserves = previous is None or previous.begin_count == 0
+    requested = size * workspace.s
+    if flags & imgui.WindowFlags_.menu_bar:
+        # The native menu minimum includes the quantized font size. It can
+        # exceed a fractional logical request; reserve its whole native row
+        # before the next sidebar truncates its position and remaining extent.
+        requested = ceil(max(requested, imgui.get_frame_height()))
+    viewport = imgui.get_main_viewport()
+    visible = imgui.internal.begin_viewport_side_bar(name, viewport, direction, requested, flags)
+    if reserves:
+        # Begin truncates native window dimensions, but BeginViewportSideBar
+        # reports its fractional request into the next sidebar's work rectangle.
+        # Reserve the size actually painted so orthogonal endpoints stay intact.
+        window = imgui.internal.get_current_window()
+        vertical = direction in (imgui.Dir.up, imgui.Dir.down)
+        actual = window.size.y if vertical else window.size.x
+        owner = imgui.get_current_context().viewports[0]
+        inset = (
+            owner.build_work_inset_min
+            if direction in (imgui.Dir.up, imgui.Dir.left)
+            else owner.build_work_inset_max
+        )
+        if vertical:
+            inset.y += actual - requested
+        else:
+            inset.x += actual - requested
     return visible
 
 
@@ -34,13 +63,15 @@ def end_sidebar(workspace):
     imgui.pop_style_var()
 
 
+@part_scope("titlebar")
 def chrome(workspace):
     u, scale = workspace.ui, workspace.s
     style = u.component_style("titlebar")
-    action_sizes = tuple(
-        control_size(u, key, 26, 28, icon=icon)
-        for key, icon in (("toggle-inspector", "inspect"), ("preferences", "settings"))
-    )
+    with u.component_scope("title_actions"):
+        action_sizes = tuple(
+            control_size(u, key, 26, 28, icon=icon)
+            for key, icon in (("toggle-inspector", "inspect"), ("preferences", "settings"))
+        )
     with u.component_scope("titlebar"):
         menu_sizes = tuple(
             workspace.menus.trigger_size(name) for name in (*workspace.menus.top_menus, "More")
@@ -154,15 +185,15 @@ def chrome(workspace):
 
                 title_style = u.component_style("document_title")
                 gap = title_style.get("columnGap", title_style.get("gap", 8)) * scale
-                icon_size = 14 * scale
+                icon_size = title_style.get("iconSize", 14) * scale
                 icon_rect = style.align_rect(
                     Rect(tx, content.y, icon_size, content.height), icon_size, icon_size
                 )
-                u.icon("file", icon_rect.x, icon_rect.y, icon_size / scale, DIM)
+                u.icon("file", icon_rect.x, icon_rect.y, icon_size / scale, DIM, style=title_style)
                 path = workspace.app.session.asset_path
 
                 u.component_text(
-                    "titlebar",
+                    "document_title",
                     Rect(
                         tx + icon_size + gap,
                         content.y,
@@ -186,34 +217,35 @@ def chrome(workspace):
                         ),
                     ),
                 )
-            if u.button(
-                "toggle-inspector",
-                content.right - action_width,
-                action_y,
-                *first_size,
-                icon="inspect",
-                active=workspace.open["Inspector"],
-                tooltip="Toggle Inspector",
-                width_limit=first_size[0] * scale,
-            ):
-                workspace.open["Inspector"] = not workspace.open["Inspector"]
-            if u.button(
-                "preferences",
-                content.right - action_sizes[1][0],
-                action_y,
-                *second_size,
-                icon="settings",
-                tooltip="Settings · F9",
-                active=workspace.open["Settings"],
-                width_limit=second_size[0] * scale,
-            ):
-                workspace.activate("Settings")
-            record_group(
-                u,
-                "title_actions",
-                "title-actions",
-                (u.hits[key] for key in ("toggle-inspector", "preferences")),
-            )
+            with u.component_scope("title_actions"):
+                if u.button(
+                    "toggle-inspector",
+                    content.right - action_width,
+                    action_y,
+                    *first_size,
+                    icon="inspect",
+                    active=workspace.open["Inspector"],
+                    tooltip="Toggle Inspector",
+                    width_limit=first_size[0] * scale,
+                ):
+                    workspace.open["Inspector"] = not workspace.open["Inspector"]
+                if u.button(
+                    "preferences",
+                    content.right - action_sizes[1][0],
+                    action_y,
+                    *second_size,
+                    icon="settings",
+                    tooltip=ShortcutHint("Settings", "F9"),
+                    active=workspace.open["Settings"],
+                    width_limit=second_size[0] * scale,
+                ):
+                    workspace.activate("Settings")
+                record_group(
+                    u,
+                    "title_actions",
+                    "title-actions",
+                    (u.hits[key] for key in ("toggle-inspector", "preferences")),
+                )
             gap = style.get("columnGap", style.get("gap", 10)) * scale
             after_logo = content.x + 26 * scale
             u.record_component_box(
@@ -238,13 +270,20 @@ def chrome(workspace):
             imgui.pop_clip_rect()
         workspace.end_sidebar()
     imgui.pop_style_var()
+    _activity_rail(workspace)
+
+
+@part_scope("rail")
+def _activity_rail(workspace):
+    u, scale = workspace.ui, workspace.s
     rail = u.component_style("rail")
     rail_margin = rail.edges("margin")
-    rail_width = rail.get("width", DESIGN.sidebar_width)
+    slot, rail_width = rail_dimensions(u)
+    reservation = rail_width + rail_margin[0] + rail_margin[2]
+    if rail_width > rail.get("width", DESIGN.sidebar_width):
+        reservation = ceil(reservation * scale) / scale
     with workspace.app.scrollbar_visibility.panel_scope("Navigation", window_name="Navigation"):
-        if workspace.sidebar(
-            "Navigation", imgui.Dir.left, rail_width + rail_margin[0] + rail_margin[2]
-        ):
+        if workspace.sidebar("Navigation", imgui.Dir.left, reservation):
             workspace.app.scrollbar_visibility.bind_current_window()
             p, h = imgui.get_window_pos(), imgui.get_window_height()
             box = u.component_box(
@@ -254,10 +293,13 @@ def chrome(workspace):
                 (rail_width + rail_margin[0] + rail_margin[2]) * scale,
                 h,
                 key="activity-rail",
-                padding=(6 * scale, 8 * scale, 6 * scale, 8 * scale),
+                padding=(6 * scale, 8 * scale, 6 * scale, 6 * scale),
                 observe=False,
             )
-            slot = rail.get("slotSize", 36)
+            box = expand_rail_box(u, box)
+            # Resolve the native window contour separately from application UI zoom.
+            outer_radius, corner_inset, item_radius = rail_corners(u, box)
+            bottom_inset = box.outer.bottom - box.content.bottom
             gap = rail.get("rowGap", rail.get("gap", 6))
             child_sizes = tuple(
                 control_size(
@@ -272,7 +314,8 @@ def chrome(workspace):
                 for name, icon in zip(PANELS, ICONS, strict=True)
             )
             stride = max(v[1] for v in child_sizes) + gap * scale
-            compact = box.content.height < len(PANELS) * stride
+            occupied_height = len(PANELS) * stride - gap * scale
+            compact = box.content.height < occupied_height
             rail_children = []
             for n, (name, icon) in enumerate(zip(PANELS, ICONS, strict=True)):
                 yy = (
@@ -287,23 +330,29 @@ def chrome(workspace):
                     child_sizes[n][1],
                     icon=icon,
                 )
-                if u.button(
-                    "rail-" + name,
-                    box.content.x,
-                    yy,
-                    *frame,
-                    icon=icon,
-                    icon_size=rail.get("iconSize", 24),
-                    icon_role="activity",
-                    width_limit=frame[0] * scale,
-                    active=(
-                        workspace.left_active == name
-                        if name in LEFT_PANELS
-                        else workspace.bottom_active == name
+                with u.corner_scope(item_radius, ("icon_button",)):
+                    clicked = u.button(
+                        "rail-" + name,
+                        box.content.x,
+                        yy,
+                        *frame,
+                        icon=icon,
+                        icon_size=rail.get("iconSize", 24),
+                        icon_role="activity",
+                        width_limit=frame[0] * scale,
+                        active=workspace.open[name]
+                        and (
+                            name == "Settings"
+                            or (
+                                workspace.left_active == name
+                                if name in LEFT_PANELS
+                                else workspace.bottom_active == name
+                            )
+                        ),
+                        tooltip=name,
+                        radius=item_radius / scale,
                     )
-                    and workspace.open[name],
-                    tooltip=name,
-                ):
+                if clicked:
                     workspace.toggle_activity(name)
                 rail_children.append(
                     [
@@ -324,10 +373,20 @@ def chrome(workspace):
                 key="activity-rail",
                 fields=rail_children,
                 fieldRegions=dict.fromkeys(("gap", "rowGap"), rail_gaps),
+                outerRadius=outer_radius,
+                itemRadius=item_radius,
+                cornerInset=corner_inset,
+                bottomInset=bottom_inset,
+                compact=compact,
             )
             if compact:
+                # Native scroll extent must include the authored bottom inset,
+                # independently of the spacing between neighboring buttons.
                 imgui.set_cursor_screen_pos(
-                    (box.content.x, box.content.y + len(PANELS) * stride - imgui.get_scroll_y())
+                    (
+                        box.content.x,
+                        ceil(box.content.y + occupied_height + bottom_inset - imgui.get_scroll_y()),
+                    )
                 )
-                imgui.dummy((1, 1))
+                imgui.dummy((0, 0))
         workspace.end_sidebar()

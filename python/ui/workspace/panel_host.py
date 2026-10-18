@@ -2,22 +2,40 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 
 import numpy as np
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
+from mojive.design.groups import group_scope
+from mojive.design.native.geometry import part_scope
+from mojive.design.native.presentation import PANEL_FAMILIES
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.constants import BOTTOM_PANELS, LEFT_PANELS
-from mojive.ui.workspace.design import BODY_SIZE, DESIGN, current_design, use_design
+from mojive.ui.workspace.design import DESIGN, TITLE_SIZE, current_design, use_design
 from mojive.ui.workspace.property_style import property_controls
+from mojive.ui.workspace.section_columns import section_column
 from mojive.ui.workspace.widgets import (
     TEXT,
+)
+from mojive.ui.workspace.window_chrome import (
+    fit_native_content_width,
+    floating_dock_root,
+    native_child_extent,
+    native_window_geometry,
+    panel_content_corners,
+    panel_surface,
 )
 
 
 def panel(workspace, name, ctx):
+    with group_scope(name):
+        return _scoped_panel(workspace, name, ctx)
+
+
+def _scoped_panel(workspace, name, ctx):
     visibility = getattr(workspace.app, "scrollbar_visibility", None)
     if visibility is not None:
         visibility.set_visible(name, workspace.open[name])
@@ -41,26 +59,18 @@ def _panel(workspace, name, ctx):
                 presentation.color_edit_owner = None
         panel.finish_frame(ctx)
         return False
-    if getattr(workspace, "new_panel", None) == name:
-        if name == "Settings":
-            viewport = imgui.get_main_viewport()
-            size = (
-                min(820 * workspace.s, viewport.size.x - 32 * workspace.s),
-                min(620 * workspace.s, viewport.size.y - 64 * workspace.s),
-            )
-            imgui.set_next_window_dock_id(0, imgui.Cond_.always)
-            imgui.set_next_window_pos(
-                (
-                    viewport.pos.x + (viewport.size.x - size[0]) / 2,
-                    viewport.pos.y + (viewport.size.y - size[1]) / 2,
-                ),
-                imgui.Cond_.appearing,
-            )
-            imgui.set_next_window_size(size, imgui.Cond_.appearing)
-        elif name in LEFT_PANELS:
+    opening = getattr(workspace, "new_panel", None) == name
+    dock_request = None
+    if name == "Settings":
+        from mojive.ui.workspace.settings_layout import prepare_window
+
+        prepare_window(workspace.settings, opening=opening)
+    if opening:
+        if name in LEFT_PANELS:
             scene = imgui.internal.find_window_by_name(workspace.left_active)
             target = scene.dock_id if scene is not None else getattr(workspace, "left", 0)
             imgui.set_next_window_dock_id(target, imgui.Cond_.first_use_ever)
+            dock_request = target, imgui.Cond_.first_use_ever
         workspace.new_panel = None
     if name == "Inspector" and workspace.float_next:
         viewport = imgui.get_main_viewport()
@@ -69,6 +79,7 @@ def _panel(workspace, name, ctx):
             min(570 * workspace.s, viewport.work_size.y - 24 * workspace.s),
         )
         imgui.set_next_window_dock_id(0, imgui.Cond_.always)
+        dock_request = 0, imgui.Cond_.always
         imgui.set_next_window_pos(
             (
                 viewport.work_pos.x + (viewport.work_size.x - size[0]) / 2,
@@ -106,19 +117,27 @@ def _panel(workspace, name, ctx):
     )
     if name == "Settings":
         imgui.set_next_window_dock_id(0, imgui.Cond_.always)
+        dock_request = 0, imgui.Cond_.always
         flags |= imgui.WindowFlags_.no_docking
     if name in LEFT_PANELS:
         flags |= imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse
-    panel_style = u.component_style("panel")
-    imgui.push_style_var(
-        imgui.StyleVar_.window_rounding,
-        panel_style.get("radius", DESIGN.container_radius) * workspace.s,
+    family = (
+        u.design.family_scope(PANEL_FAMILIES.get(name)) if u.design is not None else nullcontext()
     )
-    visible, workspace.open[name] = imgui.begin(title, True, flags)
+    docked = _requested_docked(name, window, dock_request)
+    with (
+        family,
+        panel_surface(
+            u,
+            name=name,
+            docked=docked,
+            floating=not docked or floating_dock_root(window) is not None,
+        ),
+    ):
+        visible, workspace.open[name] = imgui.begin(title, True, flags)
     visibility = getattr(workspace.app, "scrollbar_visibility", None)
     if visibility is not None:
         visibility.bind_current_window()
-    imgui.pop_style_var()
     if visible:
         if name in BOTTOM_PANELS:
             window = imgui.internal.get_current_window()
@@ -143,6 +162,7 @@ def _panel(workspace, name, ctx):
             key="panel-" + name,
             windowRect=[window.pos.x, window.pos.y, window.size.x, window.size.y],
             docked=bool(window.dock_id),
+            **native_window_geometry(window),
             nativeBackgroundClip=list(background_command.clip_rect)
             if background_command is not None
             else None,
@@ -162,78 +182,8 @@ def _panel(workspace, name, ctx):
             },
             spacing="header-content" if name in (*LEFT_PANELS, "Inspector") else None,
         )
-        x, y, w, h = outer.content.tuple()
-        if name in LEFT_PANELS:
-            body_top = workspace.panel_header(name, x, y, w)
-            extra_gap = panel_style.get("rowGap", 0) * workspace.s
-            body_top += extra_gap
-            h -= body_top - y
-            y = body_top
-        if name != "Inspector":
-            body = u.component_box(
-                "panel_body",
-                x,
-                y,
-                w,
-                max(workspace.s, h),
-                key="panel-body-" + name,
-                observe=False,
-            )
-            u.record_component_box(
-                "panel_body",
-                body,
-                key="panel-body-" + name,
-                ownedSpacingPart={
-                    "Scene": "tree_row",
-                    "Statistics": "statistics_list",
-                    "Output": "output_list",
-                    "Timeline": "timeline_sheet",
-                    "Sensors": "sensor",
-                }.get(name),
-            )
-            x, y, w, h = body.content.tuple()
-            imgui.set_cursor_screen_pos((x, y))
-            imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-            # A stable gutter prevents numeric reflow from changing its own
-            # available width when the new row count removes vertical overflow.
-            flags = (
-                imgui.WindowFlags_.always_vertical_scrollbar
-                if name in ("Pose", "Control", "Cameras")
-                else 0
-            )
-            imgui.begin_child("Panel content", (w, max(workspace.s, h)), window_flags=flags)
-            imgui.pop_style_var()
-            p = imgui.get_cursor_screen_pos()
-            size = imgui.get_content_region_avail()
-            x, y, w, h = p.x, p.y, size.x, size.y
-        draw = {
-            "Scene": workspace.scene_panel,
-            "Inspector": workspace.inspector,
-            "Control": workspace.control_panel,
-            "Assets": workspace.assets_panel,
-            "Pose": workspace.pose_panel,
-            "Cameras": workspace.camera_panel,
-            "Layers": workspace.layers_panel,
-            "Timeline": workspace.timeline,
-        }.get(name)
-        body_style = u.component_style("panel_body")
-        dimensions = replace(current_design(), row_gap=body_style.get("rowGap", DESIGN.row_gap))
-        with (
-            use_design(lambda _: dimensions),
-            u.component_scope("panel_body"),
-            property_controls(workspace.ui),
-        ):
-            if name == "Settings":
-                workspace.settings.draw(ctx)
-            elif name in ("Scene", "Inspector", "Timeline"):
-                draw(x, y, w, h)
-            elif draw is not None:
-                draw(x, y, w)
-            elif name in ("Sensors", "Output", "Statistics", "Plot"):
-                panel.draw(ctx)
-        if name != "Inspector":
-            imgui.end_child()
-        workspace.app.apply_document_edits()
+        with panel_content_corners(u, name, window):
+            draw_content(workspace, name, ctx, outer.content)
     if name == "Inspector":
         panel.finish_frame(
             ctx,
@@ -250,12 +200,168 @@ def _panel(workspace, name, ctx):
     return visible and workspace.open[name]
 
 
+def _requested_docked(name, window, request):
+    """Resolve our explicit docking request before Begin paints its new surface."""
+    if request is None:
+        return bool(window and window.dock_id)
+    target, condition = request
+    if window is not None:
+        # Let ImGui consume its own condition flags, including previously used
+        # FirstUseEver requests. The repeated request in Begin is then harmless.
+        imgui.internal.set_window_dock(window, target, condition)
+        return bool(window.dock_id)
+    if condition == imgui.Cond_.first_use_ever:
+        saved = imgui.internal.find_window_settings_by_id(imgui.internal.im_hash_str(name))
+        if saved is not None:
+            return bool(saved.dock_id)
+    return bool(target)
+
+
+def draw_content(workspace, name, ctx, rect):
+    """Draw one panel inside a supplied content rectangle using native presenters.
+
+    Docked windows and the design guide share this entry point. Window placement,
+    lifetime and application state remain with their hosts.
+    """
+    design = workspace.ui.design
+    family = design.family_scope(PANEL_FAMILIES.get(name)) if design is not None else nullcontext()
+    with group_scope(name), family:
+        _draw_content(workspace, name, ctx, rect)
+
+
+def _draw_content(workspace, name, ctx, rect):
+    u = workspace.ui
+    panel = workspace.app.panels.get(name)
+    panel_style = u.component_style("panel")
+    workspace._panel_context = ctx
+    workspace.ui.value_context = ctx
+    workspace.widths[name] = rect.width
+    x, y, w, h = rect.tuple()
+    if name in LEFT_PANELS:
+        body_top = workspace.panel_header(name, x, y, w)
+        extra_gap = panel_style.get("rowGap", 0) * workspace.s
+        body_top += extra_gap
+        h -= body_top - y
+        y = body_top
+    if name != "Inspector":
+        body = u.component_box(
+            "panel_body",
+            x,
+            y,
+            w,
+            max(workspace.s, h),
+            key="panel-body-" + name,
+            observe=False,
+        )
+        u.record_component_box(
+            "panel_body",
+            body,
+            key="panel-body-" + name,
+            ownedSpacingPart={
+                "Scene": "tree_row",
+                "Statistics": "statistics_list",
+                "Output": "output_list",
+                "Timeline": "timeline_sheet",
+                "Sensors": "sensor",
+            }.get(name),
+        )
+        x, y, w, h = body.content.tuple()
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
+        # A stable gutter prevents numeric reflow from changing its own
+        # available width when the new row count removes vertical overflow.
+        flags = (
+            imgui.WindowFlags_.always_vertical_scrollbar
+            if name in ("Pose", "Control", "Cameras")
+            else 0
+        )
+        imgui.begin_child(
+            "Panel content",
+            (w, max(workspace.s, native_child_extent(y, h))),
+            window_flags=flags | imgui.WindowFlags_.no_background,
+        )
+        imgui.pop_style_var()
+        viewport_right = fit_native_content_width(imgui.internal.get_current_window())
+        p = imgui.get_cursor_screen_pos()
+        size = imgui.get_content_region_avail()
+        x, y, w, h = p.x, p.y, size.x, size.y
+    draw = {
+        "Scene": workspace.scene_panel,
+        "Inspector": workspace.inspector,
+        "Control": workspace.control_panel,
+        "Assets": workspace.assets_panel,
+        "Pose": workspace.pose_panel,
+        "Cameras": workspace.camera_panel,
+        "Layers": workspace.layers_panel,
+        "Timeline": workspace.timeline,
+    }.get(name)
+    body_style = u.component_style("panel_body")
+    dimensions = replace(current_design(), row_gap=body_style.get("rowGap", DESIGN.row_gap))
+    column_scope = (
+        section_column(u) if name in ("Control", "Assets", "Cameras", "Layers") else nullcontext()
+    )
+    with (
+        use_design(lambda _: dimensions),
+        u.component_scope("panel_body"),
+        property_controls(workspace.ui),
+        column_scope as column,
+    ):
+        content_x, content_y, content_width, content_height = (
+            column.tuple() if column is not None else (x, y, w, h)
+        )
+        if name == "Settings":
+            workspace.settings.draw(ctx)
+        elif name in ("Scene", "Inspector", "Timeline"):
+            draw(content_x, content_y, content_width, content_height)
+        elif draw is not None:
+            draw(content_x, content_y, content_width)
+        elif name in ("Sensors", "Output", "Statistics", "Plot"):
+            panel.draw(ctx)
+    if name != "Inspector":
+        if u.design is not None:
+            window = imgui.internal.get_current_window()
+            scrollbar = (
+                imgui.internal.get_window_scrollbar_rect(window, imgui.internal.Axis.y)
+                if window.scrollbar_y
+                else None
+            )
+            u.design.record(
+                "panel-scroll-" + name,
+                ("panel_body",),
+                (x, y, w, h),
+                "panel_scroll",
+                windowRect=[window.pos.x, window.pos.y, window.size.x, window.size.y],
+                innerRect=[
+                    window.inner_rect.min.x,
+                    window.inner_rect.min.y,
+                    window.inner_rect.get_width(),
+                    window.inner_rect.get_height(),
+                ],
+                contentRight=x + w,
+                ownViewportRight=viewport_right,
+                scrollbarRect=[
+                    scrollbar.min.x,
+                    scrollbar.min.y,
+                    scrollbar.get_width(),
+                    scrollbar.get_height(),
+                ]
+                if scrollbar is not None
+                else None,
+                contentMaxY=window.dc.cursor_max_pos.y,
+                scrollY=window.scroll.y,
+                scrollMaxY=window.scroll_max.y,
+            )
+        imgui.end_child()
+    workspace.app.apply_document_edits()
+
+
+@part_scope("panel_header")
 def panel_header(workspace, name, x, y, w):
     u, s = workspace.ui, workspace.s
     style = u.component_style("panel_header")
     padding = style.edges("padding", s)
     margin = style.edges("margin", s)
-    font = style.get("fontSize", BODY_SIZE)
+    font = style.get("fontSize", TITLE_SIZE)
     gap = style.get("columnGap", style.get("gap", 2)) * s
     icon_size = style.get("iconSize", 16)
     actions = {
@@ -289,7 +395,13 @@ def panel_header(workspace, name, x, y, w):
         + padding[3],
     )
     box = u.component_box(
-        "panel_header", x, y, w, height + margin[1] + margin[3], key="panel-header-" + name
+        "panel_header",
+        x,
+        y,
+        w,
+        height + margin[1] + margin[3],
+        key="panel-header-" + name,
+        observe=False,
     )
     x, y, w, _ = box.content.tuple()
     # Keep the title readable as dock panels narrow; remaining actions stay in More.
@@ -307,7 +419,7 @@ def panel_header(workspace, name, x, y, w):
     from mojive.design.native.geometry import Rect
 
     title_rect = Rect(x, y, max(0, action_x - x - 4 * s), box.content.height)
-    u.component_text("panel_header", title_rect, name, TEXT, bold=True)
+    u.component_text("panel_header", title_rect, name, TEXT, size=TITLE_SIZE, bold=True)
     vertical = style.get("alignItems", "center")
     factor = 0 if vertical in ("start", "top") else 1 if vertical in ("end", "bottom") else 0.5
     for key, icon, label in visible:
@@ -354,13 +466,26 @@ def panel_header(workspace, name, x, y, w):
     with workspace.menus.local_popup(popup) as opened:
         if opened:
             for key, _icon, label in actions:
+                checkable = key in ("search", "sort", "gizmos")
+                checked = None
+                if checkable:
+                    if name == "Pose":
+                        checked = workspace.navigation.pose_action_active(key)
+                    elif key == "search":
+                        checked = workspace.search_visible
+                    else:
+                        checked = workspace.app.gizmos
                 clicked, _ = workspace.menus.local_item(
-                    label, key="header-menu-" + name + "-" + key, icon=_icon
+                    label,
+                    checked=checked,
+                    checkable=checkable,
+                    key="header-menu-" + name + "-" + key,
+                    icon=_icon,
                 )
                 if clicked:
                     workspace.header_action(name, key)
             if name == "Scene":
-                imgui.separator()
+                workspace.menus.local_separator()
                 with workspace.menus.local_submenu(
                     "Filter", key="header-menu-" + name + "-filters"
                 ) as filters_open:
@@ -376,31 +501,31 @@ def panel_header(workspace, name, x, y, w):
                             clicked, _ = workspace.menus.local_item(
                                 label,
                                 checked=workspace.filter.casefold() == kind,
+                                checkable=True,
                                 key="header-filter-" + kind,
                             )
                             if clicked:
                                 workspace.filter = kind.title()
             if actions:
-                imgui.separator()
+                workspace.menus.local_separator()
                 with workspace.menus.local_submenu(
                     "Header actions", key="header-menu-" + name + "-actions"
                 ) as actions_open:
                     if actions_open:
                         for key, _icon, label in actions:
-                            pos = imgui.get_cursor_screen_pos()
-                            changed, checked = u.checkbox(
-                                "##header-action-" + name + "-" + key,
-                                pos.x,
-                                pos.y,
-                                key in workspace.header_actions[name],
-                                label=u.translate(label),
+                            changed, checked = workspace.menus.local_item(
+                                label,
+                                checked=key in workspace.header_actions[name],
+                                checkable=True,
+                                key="header-action-" + name + "-" + key,
+                                icon=_icon,
                             )
                             if changed:
                                 if checked:
                                     workspace.header_actions[name].add(key)
                                 else:
                                     workspace.header_actions[name].discard(key)
-            imgui.separator()
+            workspace.menus.local_separator()
             clicked, _ = workspace.menus.local_item(
                 "Hide panel", key="header-menu-" + name + "-hide", icon="close"
             )
@@ -411,7 +536,22 @@ def panel_header(workspace, name, x, y, w):
             anchor = u.hits.get("header-Scene-add", u.hits["header-Scene-more"])
             workspace.menus.popup("Add", anchor, workspace.header_add_pending)
         workspace.header_add_pending = False
-    u.line(box.frame.x - 12 * s, box.outer.bottom + 2 * s, box.frame.width + 24 * s)
+    divider = u.line(
+        box.frame.x,
+        box.outer.bottom + 2 * s,
+        box.frame.width,
+    )
+    u.record_component_box(
+        "panel_header",
+        box,
+        key="panel-header-" + name,
+        titleRect=list(title_rect.tuple()),
+        actionRects=[
+            list(u.hits["header-" + name + "-" + key])
+            for key in (*[item[0] for item in visible], "more")
+        ],
+        dividerRect=list(divider.tuple()),
+    )
     return box.outer.bottom + 8 * s
 
 

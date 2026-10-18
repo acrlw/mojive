@@ -131,6 +131,7 @@ def value_rail(
     entry_painter=None,
     track_height=None,
     align_items="center",
+    integer=False,
 ):
     """Thin bounded rail plus numeric entry; unbounded values use only numeric entry.
 
@@ -249,6 +250,7 @@ def value_rail(
         hit_bounds,
         unit_font,
         frame_draw,
+        integer=integer,
     )
     activated = numeric.activated or (result is not None and result.activated)
     if result is None or numeric.changed:
@@ -286,6 +288,8 @@ def _value_entry(
     hit_bounds=None,
     unit_font=None,
     frame_draw=None,
+    *,
+    integer=False,
 ):
     """Center the complete value/unit caption inside one native numeric editor."""
     style = imgui.get_style()
@@ -327,12 +331,13 @@ def _value_entry(
             imgui.push_style_color(slot, (0, 0, 0, 0))
     lo, hi = bounds if bounds is not None else (0.0, 0.0)
     with borderless_numeric_input():
-        changed, current = imgui.drag_float(
+        drag, numeric = (imgui.drag_int, int) if integer else (imgui.drag_float, float)
+        changed, current = drag(
             f"{label}-value",
-            value,
+            numeric(value),
             0.01,
-            lo,
-            hi,
+            numeric(lo),
+            numeric(hi),
             display_format,
             imgui.SliderFlags_.always_clamp if bounds is not None else 0,
         )

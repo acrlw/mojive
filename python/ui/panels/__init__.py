@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib import import_module
+from typing import Literal
 
 import numpy as np
 from imgui_bundle import imgui
@@ -28,6 +30,7 @@ from mojive.ui.imgui_draw import ImguiDraw2D as ImguiDraw2D
 from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.paint_protocol import Draw2D as Draw2D
 from mojive.ui.panels.context import PanelContext as PanelContext
+from mojive.ui.panels.presentation import property_tooltip
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.theme import THEME as THEME
 from mojive.ui.theme import Theme as Theme
@@ -65,6 +68,9 @@ class Panel:
         """Return compact selection information for the status bar's right side."""
         return ""
 
+    def _tooltip(self, text: str, *, hovered: bool = False) -> None:
+        property_tooltip(getattr(self, "presentation", None), text, hovered=hovered)
+
     def finish_frame(self, ctx: PanelContext) -> None:
         pass
 
@@ -90,8 +96,14 @@ def slider_gesture(
     return None
 
 
-def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> bool:
-    """Expose a clipped row name and make its right-click action discoverable."""
+def copyable_name_item(
+    ctx: PanelContext,
+    name: str,
+    available_width: float,
+    *,
+    tooltip: Callable[[str], None] | Literal[False] | None = None,
+) -> bool:
+    """Expose clipped names unless the caller already owns their hint presentation."""
 
     publish_status_hint(
         ctx,
@@ -106,8 +118,11 @@ def copyable_name_item(ctx: PanelContext, name: str, available_width: float) -> 
     if not hovered:
         return False
     visible_width = max(1.0, float(available_width) - 2.0 * imgui.get_style().frame_padding.x)
-    if imgui.calc_text_size(name).x > visible_width:
-        imgui.set_tooltip(name)
+    if tooltip is not False and imgui.calc_text_size(name).x > visible_width:
+        if tooltip is not None:
+            tooltip(name)
+        else:
+            property_tooltip(getattr(ctx, "inspector_presentation", None), name, hovered=True)
     copied = pointer_pressed(ctx, PointerAction.COPY_NAME)
     if copied:
         imgui.set_clipboard_text(name)

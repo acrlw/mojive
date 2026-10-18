@@ -1255,6 +1255,83 @@
         }
       }
     },
+    "control_metadata": {
+      "label": "控制元数据",
+      "context": "执行器名称下方的目标、有效范围和控制权限说明；与主名称、数值输入分别排版。",
+      "preview": {
+        "area": "控制",
+        "steps": [
+          "打开控制面板，查看执行器名称下方的目标与范围。",
+          "比较说明文字与主名称的层级；此部件的修改不影响数值输入。"
+        ]
+      },
+      "fields": {
+        "fontSize": {
+          "summary": "目标、范围和权限说明的字号。",
+          "reference": "使用缩放前的逻辑像素。控制面板内容组的字号可由此部件继承；本部件的显式字号覆盖分组设置。文字测量、省略和行高使用同一字号。",
+          "unit": "像素",
+          "shortLabel": "字号",
+          "defaultHelp": "默认字号为12；恢复此项删除部件覆盖，使用所属内容组的字号或默认值。"
+        },
+        "textAlign": {
+          "summary": "文字在它自己的可用区域中的水平对齐方式。",
+          "reference": "以说明文字可用区域的左边、中心或右边为基准；不会移动执行器名称及数值输入。",
+          "unit": "选项",
+          "shortLabel": "文字对齐",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "lineHeight": {
+          "summary": "说明文字在固定行高模式下的行框高度。",
+          "reference": "固定行高模式下使用此值；文字在行框内垂直居中。部件之间的间距由面板行距设置。",
+          "unit": "像素",
+          "shortLabel": "固定行高",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。",
+          "condition": {
+            "field": "lineHeightMode",
+            "value": "fixed",
+            "reason": "固定行高模式尚未启用，当前数值保留。",
+            "enable": "行高方式选择固定后可调整此项。",
+            "disabledReason": "固定行高模式尚未启用，当前数值保留。",
+            "enabledWhen": "行高方式选择固定后可调整此项。"
+          }
+        },
+        "marginLeft": {
+          "summary": "说明文字框体左侧的外边距。",
+          "reference": "外边距计入此说明行的整体占位；面板行距另外计入。左右外边距缩小可读区域，上下外边距增加行的占位高度。",
+          "unit": "像素",
+          "shortLabel": "左外边距",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "marginRight": {
+          "summary": "说明文字框体右侧的外边距。",
+          "reference": "外边距计入此说明行的整体占位；面板行距另外计入。左右外边距缩小可读区域，上下外边距增加行的占位高度。",
+          "unit": "像素",
+          "shortLabel": "右外边距",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "marginTop": {
+          "summary": "说明文字框体上侧的外边距。",
+          "reference": "外边距计入此说明行的整体占位；面板行距另外计入。左右外边距缩小可读区域，上下外边距增加行的占位高度。",
+          "unit": "像素",
+          "shortLabel": "上外边距",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "marginBottom": {
+          "summary": "说明文字框体下侧的外边距。",
+          "reference": "外边距计入此说明行的整体占位；面板行距另外计入。左右外边距缩小可读区域，上下外边距增加行的占位高度。",
+          "unit": "像素",
+          "shortLabel": "下外边距",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "lineHeightMode": {
+          "summary": "每行文字高度采用随字体或固定值。",
+          "reference": "随字体模式根据字号计算行高；固定模式使用固定行高参数。此设置仅影响说明文字行。",
+          "unit": "选项",
+          "shortLabel": "行高方式",
+          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        }
+      }
+    },
     "input_shell": {
       "label": "输入框组合",
       "context": "数字与单位共用一个输入框，例如相机参数与关节控制。",
@@ -2980,10 +3057,10 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：比较整个面板背景外轮廓，而不是标题按钮。将面板拖出停靠区、放在不同背景上更容易看到四角；相邻面板与底层背景同色时，圆角切口可能不明显。",
+          "reference": "The default outer radius is derived from the resolved inner corner and the actual native inset (14 logical points at scale 1). Floating Timeline uses a 6-point inset around its 8-point body; ordinary panels use 8 around 6-point controls. Fractional scales resolve the inset first. An explicit outer radius constrains its nested corner.",
           "unit": "像素",
           "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         },
         "marginLeft": {
           "summary": "此部件框体外部左侧预留的空白。",
@@ -3019,6 +3096,13 @@
           "unit": "像素",
           "shortLabel": "行距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "surfaceColor": {
+          "summary": "此部件底色的独立覆盖。",
+          "reference": "停靠面使用面板背景；浮窗使用浮窗背景；菜单和选择列表使用弹出层背景。inherit 保留角色分层。",
+          "unit": "RGBA 颜色或 inherit",
+          "shortLabel": "表面颜色",
+          "defaultHelp": "继承当前模块对应的表面颜色；恢复删除独立覆盖。"
         }
       }
     },
@@ -4057,11 +4141,11 @@
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "radius": {
-          "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "summary": "搜索框固定为胶囊形；圆角由实际高度自动计算，旧值不独立参与绘制。",
+          "reference": "圆角随搜索框实际绘制高度更新；高度还会受字号、行高与上下内边距影响。搜索框不采用父容器的圆角约束。",
           "unit": "像素",
-          "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时跟随共享规范「控件圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "shortLabel": "胶囊圆角（兼容旧值）",
+          "defaultHelp": "旧设计文件中的圆角值仍会保留；恢复此项只删除旧值，不改变固定胶囊形。"
         },
         "iconSize": {
           "summary": "图标所在的正方形绘制区域尺寸。",
@@ -4919,47 +5003,47 @@
     },
     "sensor": {
       "label": "传感器列表项",
-      "context": "传感器选择与类型、维度、当前值等明细。",
+      "context": "传感器选择、单行类型与维度、当前读数和复制/曲线操作。",
       "preview": {
         "area": "传感器",
         "steps": [
-          "载入rangefinder等含传感器的场景，再打开传感器面板并选择传感器，观察类型、维度和当前值。",
+          "打开含传感器的场景或传感器部件样例，切换标量、XYZ 和多维传感器，比较宽窄窗口的读数布局。",
           "调整后比较同类部件；恢复此项可回到继承或默认值。"
         ]
       },
-      "emptyReason": "当前关节示例没有传感器；添加 assets/rangefinder.xml 后，可在传感器面板观察实际数值。",
+      "emptyReason": "当前场景没有传感器；规范样例提供标量、XYZ 和多维读数。",
       "fields": {
         "height": {
-          "summary": "此部件框体或行的目标高度。",
-          "reference": "从框体上边缘量到下边缘；外边距另算，内部文字和子控件仍需有容纳空间。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "summary": "单个读数单元的最小高度。",
+          "reference": "在读数单元背景上量取；内容、内边距和字体需要更多空间时自动增高。标量读数区至少保留64逻辑像素。",
           "unit": "像素",
           "shortLabel": "最小高度",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "fontSize": {
-          "summary": "顶部传感器下拉选择框的名称文字的字号。",
-          "reference": "实际传感器选择框使用此字号；类型、维度及其值由详情字号控制，当前采样数值和完整数值预览由数值字号控制。适用：载入带传感器的模型，观察顶部下拉框中当前传感器名称；类型和维度的名称和值使用详情字号，当前采样数值和完整预览使用数值字号。这三个文字区域分别设置，不用顶部名称字号判断明细数值是否改变。",
+          "summary": "顶部传感器选择器的名称字号。",
+          "reference": "选择器使用此字号；类型与维度、分量索引使用详情字号，采样数值使用数值字号。",
           "unit": "像素",
           "shortLabel": "字号",
           "defaultHelp": "未单独设值时跟随共享规范「正文字号」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
         },
         "paddingX": {
           "summary": "统一设置框体内部左、右两侧留白。",
-          "reference": "左或右内边距单独设值后，对应一侧使用单独值。适用：比较内容边界或长文字的裁切范围；对称内距且内容居中时短内容仍在中心。已单独设置左内边距、右内边距时，对应一侧继续使用单独值。",
+          "reference": "从每个读数单元背景边缘量到数值和索引内容框。此参数仅控制单元内部；选择器、说明、操作和读数区域的整体留白由「传感器 · 内容区」设置。单侧值覆盖对应方向的统一内边距。",
           "unit": "像素",
           "shortLabel": "左右内距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "paddingY": {
           "summary": "统一设置框体内部上、下两侧留白。",
-          "reference": "上或下内边距单独设值后，对应一侧使用单独值。适用：比较内容边界或长文字的裁切范围；对称内距且内容居中时短内容仍在中心。已单独设置上内边距、下内边距时，对应一侧继续使用单独值。",
+          "reference": "从每个读数单元背景边缘量到数值和索引内容框。此参数仅控制单元内部；选择器、说明、操作和读数区域的整体留白由「传感器 · 内容区」设置。单侧值覆盖对应方向的统一内边距。",
           "unit": "像素",
           "shortLabel": "上下内距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "gap": {
-          "summary": "顶部图表图标与传感器下拉框之间的水平净空。",
-          "reference": "水平：顶部图表图标右边缘与传感器下拉选择框完整外框左边缘。从图表图标的实际右边缘量到下拉选择框外边缘；显式列距优先于基础间距，明细表名称和值之间的距离由表格规格负责。适用：添加带传感器的模型并打开传感器面板，观察顶部图表图标与原生传感器下拉框。图标尺寸改变实际图形，横向间距从图标右边缘量到下拉框左边缘；交叉对齐比较这两项在同一行内的上下位置。显式横向列距优先于基础间距。",
+          "summary": "选择器、说明、读数标题与单元之间的基础间距。",
+          "reference": "默认8逻辑像素；说明到读数标题额外保留4像素。行距与列距可独立设置；复制和曲线按钮间距由「传感器 · 读数操作」分组设置。",
           "unit": "像素",
           "shortLabel": "间距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
@@ -4972,71 +5056,71 @@
           "defaultHelp": "未单独设值时跟随共享规范「控件圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
         },
         "iconSize": {
-          "summary": "图标所在的正方形绘制区域尺寸。",
-          "reference": "图标的线条、点和空隙随图形一起缩放；按钮外框尺寸单独设置。适用：添加带传感器的模型并打开传感器面板，观察顶部图表图标与原生传感器下拉框。图标尺寸改变实际图形，横向间距从图标右边缘量到下拉框左边缘；交叉对齐比较这两项在同一行内的上下位置。显式横向列距优先于基础间距。",
+          "summary": "复制与曲线操作的图标画布尺寸。",
+          "reference": "图形的线条、点和空隙一起缩放，按钮完整尺寸由图标按钮分组决定。",
           "unit": "像素",
           "shortLabel": "图标大小",
           "defaultHelp": "未单独设值时跟随共享规范「工具栏图标画布」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
         },
         "alignItems": {
-          "summary": "同一行中不同高度子项的竖向对齐方式。",
-          "reference": "以扣除上下内边距后的内容区为参考；顶部、居中、底部需要有剩余高度才会产生位置差。拉伸只扩大允许伸展的子项，图标及文字保留自身尺寸。适用：添加带传感器的模型并打开传感器面板，观察顶部图表图标与原生传感器下拉框。图标尺寸改变实际图形，横向间距从图标右边缘量到下拉框左边缘；交叉对齐比较这两项在同一行内的上下位置。显式横向列距优先于基础间距。",
+          "summary": "读数单元内文字的纵向对齐方式。",
+          "reference": "标量值、XYZ分量标题与数字、索引网格均按各自内容框对齐；内边距从单元背景边缘量取。",
           "unit": "选项",
           "shortLabel": "纵向对齐",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "paddingLeft": {
           "summary": "框体内部左边缘到内容区的留白。",
-          "reference": "在框体内部量取；此值覆盖同方向的统一内边距。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "从每个读数单元背景边缘量到数值和索引内容框。此参数仅控制单元内部；选择器、说明、操作和读数区域的整体留白由「传感器 · 内容区」设置。单侧值覆盖对应方向的统一内边距。",
           "unit": "像素",
           "shortLabel": "左内边距",
           "defaultHelp": "未单独设值时跟随「传感器列表项 / 左右内边距」。单独设值后解除跟随；恢复此项可重新跟随。"
         },
         "paddingRight": {
           "summary": "框体内部右边缘到内容区的留白。",
-          "reference": "在框体内部量取；此值覆盖同方向的统一内边距。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "从每个读数单元背景边缘量到数值和索引内容框。此参数仅控制单元内部；选择器、说明、操作和读数区域的整体留白由「传感器 · 内容区」设置。单侧值覆盖对应方向的统一内边距。",
           "unit": "像素",
           "shortLabel": "右内边距",
           "defaultHelp": "未单独设值时跟随「传感器列表项 / 左右内边距」。单独设值后解除跟随；恢复此项可重新跟随。"
         },
         "paddingTop": {
           "summary": "框体内部上边缘到内容区的留白。",
-          "reference": "在框体内部量取；此值覆盖同方向的统一内边距。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "从每个读数单元背景边缘量到数值和索引内容框。此参数仅控制单元内部；选择器、说明、操作和读数区域的整体留白由「传感器 · 内容区」设置。单侧值覆盖对应方向的统一内边距。",
           "unit": "像素",
           "shortLabel": "上内边距",
           "defaultHelp": "未单独设值时跟随「传感器列表项 / 上下内边距」。单独设值后解除跟随；恢复此项可重新跟随。"
         },
         "paddingBottom": {
           "summary": "框体内部下边缘到内容区的留白。",
-          "reference": "在框体内部量取；此值覆盖同方向的统一内边距。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "从每个读数单元背景边缘量到数值和索引内容框。此参数仅控制单元内部；选择器、说明、操作和读数区域的整体留白由「传感器 · 内容区」设置。单侧值覆盖对应方向的统一内边距。",
           "unit": "像素",
           "shortLabel": "下内边距",
           "defaultHelp": "未单独设值时跟随「传感器列表项 / 上下内边距」。单独设值后解除跟随；恢复此项可重新跟随。"
         },
         "marginLeft": {
           "summary": "此部件框体外部左侧预留的空白。",
-          "reference": "属于部件的整体占位，父级行距或列距还会另外计入。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "在整个读数网格外沿预留空间，不改变选择器、说明或操作行的位置。单元之间的间距由行距和列距设置；整个面板的内容边界由「传感器 · 内容区」设置。",
           "unit": "像素",
           "shortLabel": "左外边距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "marginRight": {
           "summary": "此部件框体外部右侧预留的空白。",
-          "reference": "属于部件的整体占位，父级行距或列距还会另外计入。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "在整个读数网格外沿预留空间，不改变选择器、说明或操作行的位置。单元之间的间距由行距和列距设置；整个面板的内容边界由「传感器 · 内容区」设置。",
           "unit": "像素",
           "shortLabel": "右外边距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "marginTop": {
           "summary": "此部件框体外部上侧预留的空白。",
-          "reference": "属于部件的整体占位，父级行距或列距还会另外计入。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "在整个读数网格外沿预留空间，不改变选择器、说明或操作行的位置。单元之间的间距由行距和列距设置；整个面板的内容边界由「传感器 · 内容区」设置。",
           "unit": "像素",
           "shortLabel": "上外边距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "marginBottom": {
           "summary": "此部件框体外部下侧预留的空白。",
-          "reference": "属于部件的整体占位，父级行距或列距还会另外计入。适用：按定位步骤显示「传感器列表项」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "在整个读数网格外沿预留空间，不改变选择器、说明或操作行的位置。单元之间的间距由行距和列距设置；整个面板的内容边界由「传感器 · 内容区」设置。",
           "unit": "像素",
           "shortLabel": "下外边距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
@@ -5064,24 +5148,31 @@
           }
         },
         "detailSize": {
-          "summary": "辅助说明文字的字号。",
-          "reference": "只改变项目的次要说明，不改变主名称和当前值。适用：显示「说明文字大小」后比较；子部件显式覆盖的同名文字设置优先。",
+          "summary": "类型、维度、分量名称及索引的字号。",
+          "reference": "选择器下方的类型和维度组成一行；XYZ显示固定轴名，多维数组保留从0开始的完整索引。",
           "unit": "像素",
           "shortLabel": "说明文字大小",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "valueSize": {
-          "summary": "当前值或数值文字的字号。",
-          "reference": "只影响值这一列，字段名称和辅助说明各有独立字号。适用：载入带传感器的模型并让传感器采样启用，扩大面板或向下滚动到当前数值和完整数值预览。此项改变实际传感器数值文字；类型和维数说明使用详情字号，顶部选择器使用通用文字字号。",
+          "summary": "当前采样数值的等宽字号。",
+          "reference": "读数单元的列数与宽度按此字号、窗口和固定字符预算确定；数字变化不改变布局，完整精度保留在延迟提示和复制结果中。",
           "unit": "像素",
           "shortLabel": "数值文字大小",
           "defaultHelp": "未单独设值时跟随共享规范「数字字号」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
         },
         "columnGap": {
-          "summary": "顶部图表图标与传感器下拉框之间的水平净空。",
-          "reference": "水平：顶部图表图标右边缘与传感器下拉选择框完整外框左边缘。从图表图标的实际右边缘量到下拉选择框外边缘；显式列距优先于基础间距，明细表名称和值之间的距离由表格规格负责。适用：添加带传感器的模型并打开传感器面板，观察顶部图表图标与原生传感器下拉框。图标尺寸改变实际图形，横向间距从图标右边缘量到下拉框左边缘；交叉对齐比较这两项在同一行内的上下位置。显式横向列距优先于基础间距。",
+          "summary": "读数网格相邻列之间的净空。",
+          "reference": "从前一列单元背景右边缘量到后一列背景左边缘；纵向行距独立设置。XYZ可在窄窗口改为单列，多维索引网格可用1至3列。",
           "unit": "像素",
           "shortLabel": "列距",
+          "defaultHelp": "未单独设值时跟随「传感器列表项 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
+        },
+        "rowGap": {
+          "summary": "读数网格相邻行之间的净空。",
+          "reference": "从上一行单元背景下边缘量到下一行背景上边缘；横向列距和操作行到读数网格的间距不受影响。",
+          "unit": "像素",
+          "shortLabel": "行距",
           "defaultHelp": "未单独设值时跟随「传感器列表项 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
         }
       }
@@ -5098,11 +5189,11 @@
       },
       "fields": {
         "navWidth": {
-          "summary": "设置窗口左侧类别导航的宽度。",
-          "reference": "从设置内容区左边缘量到导航列右边缘；列距再隔开右侧设置页。适用：按定位步骤显示「设置整体布局」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
-          "unit": "像素",
-          "shortLabel": "导航栏宽度",
-          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+          "summary": "设置导航栏未单独调整宽度时使用此值；0 按字体、图标和边距自动计算。与窗口宽度及两列间距独立。",
+          "reference": "打开设置窗口观察实际框体；此项按逻辑像素计量，修改后实时重排。",
+          "unit": "逻辑像素",
+          "shortLabel": "导航栏默认宽度",
+          "defaultHelp": "恢复此项删除局部覆盖，重新使用自动尺寸或所属分组的默认值。"
         },
         "gap": {
           "summary": "同一组合内相邻子项的基础间距。",
@@ -5159,17 +5250,24 @@
           "unit": "像素",
           "shortLabel": "列距",
           "defaultHelp": "未单独设值时跟随「设置整体布局 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
+        },
+        "windowWidth": {
+          "summary": "0 保留手动窗口宽度；正值实时设置整个设置窗口的宽度，包含标题、导航和内容区。恢复 0 时还原调整前的手动宽度；超出可用视口时自动限制。",
+          "reference": "打开设置窗口观察实际框体；此项按逻辑像素计量，修改后实时重排。",
+          "unit": "逻辑像素",
+          "shortLabel": "设置窗口宽度",
+          "defaultHelp": "恢复此项删除局部覆盖，重新使用自动尺寸或所属分组的默认值。"
         }
       }
     },
     "settings_nav": {
       "label": "设置导航栏",
-      "context": "宽窗口左侧竖向、窄窗口顶部网格排列的类别导航。",
+      "context": "宽窗口左侧竖向、窄窗口顶部网格排列的类别导航。文字和图标仅统一此设置类别导航组，不改变其他面板的按钮。",
       "preview": {
         "area": "设置",
         "steps": [
           "打开设置，观察通用、相机、交互等类别；缩窄设置面板可比较顶部多列导航。",
-          "调整后比较同类部件；恢复此项可回到继承或默认值。"
+          "Alt + 单击类别按钮优先选择设置导航栏；通用文字按钮类可在关联项中显式选择。"
         ]
       },
       "fields": {
@@ -5195,11 +5293,11 @@
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "radius": {
-          "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "summary": "Outer corner radius of the settings navigation background.",
+          "reference": "The standalone outer corner is the navigation row corner plus its 4-point inset. A floating Settings window uses its own 6-point inset: host14 - inset6 = nav8, nav8 - inset4 = row4 at scale1. Resolve actual native insets before subtracting radii; other floating panels retain their own padding.",
           "unit": "像素",
           "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时跟随共享规范「子容器圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         },
         "paddingLeft": {
           "summary": "框体内部左边缘到内容区的留白。",
@@ -5270,40 +5368,47 @@
           "unit": "像素",
           "shortLabel": "列距",
           "defaultHelp": "未单独设值时跟随「设置导航栏 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
+        },
+        "navWidth": {
+          "summary": "包含整列导航的内边距和外边距；0 自动计算。正值在宽窗口和窄窗口中都实时生效，右侧设置内容随导航列宽移动；不改变其他导航或工具栏。可用空间不足时保留设置内容区。",
+          "reference": "打开设置窗口观察实际框体；此项按逻辑像素计量，修改后实时重排。",
+          "unit": "逻辑像素",
+          "shortLabel": "导航栏宽度",
+          "defaultHelp": "恢复此项删除局部覆盖，重新使用自动尺寸或所属分组的默认值。"
         }
       }
     },
     "color_editor": {
       "label": "颜色编辑器布局",
-      "context": "上方复制、粘贴操作，选色区和格式、通道输入组成的整体。默认选色区在上、通道区在下。",
+      "context": "紧凑的原色与当前色色片、复制粘贴操作、选色区、格式与完整通道行组成的共享颜色弹窗。",
       "preview": {
         "area": "颜色编辑",
         "steps": [
-          "点击材质颜色打开完整编辑器；增加可用宽度并设置选色占比或列距，可观察左右双列。",
-          "调整后比较同类部件；恢复此项可回到继承或默认值。"
+          "点击材质颜色打开完整编辑器，观察选色区、通道行与底部操作。",
+          "调整弹窗宽度、四边内距及圆角；窄幅时通道整组变为单列，恢复此项回到自动布局。"
         ]
       },
       "fields": {
         "gap": {
           "summary": "同一组合内相邻子项的基础间距。",
-          "reference": "水平：复制、粘贴操作之间的横向净空；左右双列时也分隔选色和通道区。竖向：顶部复制粘贴操作行底边与选色和格式区域顶边。横向排列时是列距，纵向排列时是行距；显式设置列距或行距后，对应方向使用独立值。适用：按定位步骤显示「颜色编辑器布局」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "横向：原色与当前色对照、复制与粘贴操作之间的净空；竖向：标题行、选色区、格式与通道区域之间的净空。显式设置列距或行距后，对应方向使用独立值。",
           "unit": "像素",
           "shortLabel": "间距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "pickerHeight": {
-          "summary": "颜色编辑器选色区域的目标高度。",
-          "reference": "默认选色区在通道区上方，双列时在左侧；从选色区上边缘量到下边缘，复制、粘贴操作另算。SV 区域保持正方形，实际高度受可用宽度、色相和透明度条的占位限制。适用：观察饱和度与明度区域的真实上下边缘，选择与当前可用宽度明显不同的目标高度；超过原生选色器按宽度分配的上限时仍受可用区域约束。颜色选择区域显式设置的高度优先，应先恢复该专用高度再比较编辑器的共享选色高度。",
+          "summary": "饱和度与明度方块的高度上限。",
+          "reference": "默认将 SV 方块限制为 160 逻辑像素；色相和透明度条单独占宽，SV 方块保持正方形。更窄的可用宽度和底部完整操作区仍有约束。",
           "unit": "像素",
           "shortLabel": "颜色区高度",
-          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+          "defaultHelp": "恢复此项删除局部覆盖，重新使用紧凑的默认高度上限。"
         },
         "pickerShare": {
-          "summary": "左右双列显示时，扣除列距后分配给选色区的宽度百分比。",
-          "reference": "默认选色区在上、通道区在下。明确设置此项或列距后，只有选色区至少110、通道区至少140逻辑像素时才改为左右两列；右侧使用剩余宽度。适用：按定位步骤显示「颜色编辑器布局」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "summary": "选色方块相对于编辑器内容宽度的上限百分比。",
+          "reference": "明确设值后限制 SV 方块宽度，格式与通道保持在下方。此参数不创建左右双列，也不改变通道的完整行或整组单列规则。",
           "unit": "%",
           "shortLabel": "颜色区比例",
-          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+          "defaultHelp": "未单独设值时使用可用空间；恢复此项删除比例上限。"
         },
         "marginLeft": {
           "summary": "此部件框体外部左侧预留的空白。",
@@ -5335,17 +5440,31 @@
         },
         "rowGap": {
           "summary": "颜色编辑器顶部复制、粘贴操作行与下方选色内容之间的竖向空白。",
-          "reference": "竖向：顶部复制粘贴操作行底边与选色和格式区域顶边。默认选色区在上、通道区在下；足够宽且明确设置选色占比或列距时可改为左右两列。操作行与选色内容之间的距离始终按本项计算，通道区内部连续行距另设。适用：按定位步骤显示「颜色编辑器布局」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "顶部对照行、选色区、格式与通道区域之间的竖向净空；通道内部行距独立设置。",
           "unit": "像素",
           "shortLabel": "行距",
           "defaultHelp": "未单独设值时跟随「颜色编辑器布局 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
         },
         "columnGap": {
-          "summary": "顶部复制、粘贴操作之间的水平净空；双列时也分隔选色区与通道区。",
-          "reference": "水平：复制、粘贴操作之间的横向净空；左右双列时也分隔选色和通道区。明确设置此项会请求左右双列；只有选色区至少110、通道区至少140逻辑像素时采用双列，否则保持选色在上、通道在下。复制、粘贴两按钮始终使用此净空。适用：按定位步骤显示「颜色编辑器布局」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "summary": "顶部色片与文字、复制粘贴操作之间的横向净空。",
+          "reference": "原色与当前色对照、复制与粘贴操作之间的净空。选色区保持在通道行上方。",
           "unit": "像素",
           "shortLabel": "列距",
           "defaultHelp": "未单独设值时跟随「颜色编辑器布局 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
+        },
+        "popupWidth": {
+          "summary": "生产颜色弹窗的首选宽度。",
+          "reference": "默认 280；未明确限制宽度时，会为完整通道行及当前字体留出空间，并受视口宽度限制。明确设置更窄的宽度时，通道整组转为单列，不产生 2＋1 的残缺行。",
+          "unit": "逻辑像素",
+          "shortLabel": "弹窗宽度",
+          "defaultHelp": "恢复此项删除局部覆盖并重新使用自动或共享尺寸。"
+        },
+        "radius": {
+          "summary": "颜色弹窗外轮廓的圆角。",
+          "reference": "The outer corner is the contained control corner plus the actual uniform inset: 6 + 8 = 14 logical points at scale 1. Native insets are resolved before deriving the outer radius. An explicit outer radius constrains contained corners.",
+          "unit": "逻辑像素",
+          "shortLabel": "外圆角",
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         }
       }
     },
@@ -6199,7 +6318,7 @@
           "reference": "在框体内部量取；此值覆盖同方向的统一内边距。适用：按定位步骤显示「活动导航栏」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
           "unit": "像素",
           "shortLabel": "下内边距",
-          "defaultHelp": "未单独设值时跟随「活动导航栏 / 上下内边距」。单独设值后解除跟随；恢复此项可重新跟随。"
+          "defaultHelp": "By default, the bottom inset follows the horizontal inset so the Settings button has balanced clearance from the native window corner. An explicit value overrides this relation."
         },
         "marginLeft": {
           "summary": "此部件框体外部左侧预留的空白。",
@@ -6235,6 +6354,13 @@
           "unit": "像素",
           "shortLabel": "行距",
           "defaultHelp": "未单独设值时跟随「活动导航栏 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
+        },
+        "radius": {
+          "summary": "Outer corner target for the navigation rail.",
+          "reference": "The OS-facing radius is measured in native window points, including authored fractional values, and stays fixed when application UI scale changes. The contained button radius is max(0, outer radius minus the actual equal leading and bottom inset). The default approximates the measured macOS contour at 16 native window points. Generic button radius overrides do not break this local relationship.",
+          "unit": "native window points",
+          "shortLabel": "Outer corner target",
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         }
       }
     },
@@ -6383,7 +6509,7 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "Adjacent controls share the enclosing surface corner budget: outer radius equals effective inner radius plus the actual uniform inset. Resolve native insets before deriving radii. Explicit parent corners constrain local child corners; a zero-radius offset retains the content spacing.",
           "unit": "像素",
           "shortLabel": "圆角",
           "defaultHelp": "未单独设值时跟随共享规范「容器圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
@@ -6508,7 +6634,7 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "Adjacent controls share the enclosing surface corner budget: outer radius equals effective inner radius plus the actual uniform inset. Resolve native insets before deriving radii. Explicit parent corners constrain local child corners; a zero-radius offset retains the content spacing.",
           "unit": "像素",
           "shortLabel": "圆角",
           "defaultHelp": "未单独设值时跟随共享规范「容器圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
@@ -6653,21 +6779,21 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "The default outer corner is the inner action/image corner plus the actual uniform inset: 6 + 8 = 14 logical points at scale 1. Resolve the native inset before deriving the outer radius. An explicit outer radius constrains its contained corners.",
           "unit": "像素",
           "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时跟随共享规范「容器圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         },
         "right": {
           "summary": "浮动部件右边缘与所属视口右边缘的距离。",
-          "reference": "从视口右边缘向左量取，不是部件的水平坐标。适用：选中相机并开启实际预览，比较完整浮窗到可用视口右边和底边的位置。左外距减右外距、上外距减下外距修正同一锚点，热更新会保留已有拖拽偏移；窗口仍限制在未被工具占用的可用区域内。先给右侧与底部留足空白，边界钳制时继续向外移动可能保持位置不变。",
+          "reference": "Inset from the corresponding viewport edge, in addition to the shared viewport breathing room. Automatic placement avoids tools; a manually dragged preview retains its pointer anchor and is clamped to all four viewport margins without switching free regions.",
           "unit": "像素",
           "shortLabel": "距右侧",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "bottom": {
           "summary": "浮动部件下边缘与所属视口下边缘的距离。",
-          "reference": "从视口下边缘向上量取，不是部件的竖向坐标。适用：选中相机并开启实际预览，比较完整浮窗到可用视口右边和底边的位置。左外距减右外距、上外距减下外距修正同一锚点，热更新会保留已有拖拽偏移；窗口仍限制在未被工具占用的可用区域内。先给右侧与底部留足空白，边界钳制时继续向外移动可能保持位置不变。",
+          "reference": "Inset from the corresponding viewport edge, in addition to the shared viewport breathing room. Automatic placement avoids tools; a manually dragged preview retains its pointer anchor and is clamped to all four viewport margins without switching free regions.",
           "unit": "像素",
           "shortLabel": "距底部",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
@@ -6960,7 +7086,7 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "Adjacent controls share the enclosing surface corner budget: outer radius equals effective inner radius plus the actual uniform inset. Resolve native insets before deriving radii. Explicit parent corners constrain local child corners; a zero-radius offset retains the content spacing.",
           "unit": "像素",
           "shortLabel": "圆角",
           "defaultHelp": "未单独设值时跟随共享规范「容器圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
@@ -7115,7 +7241,7 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "Adjacent controls share the enclosing surface corner budget: outer radius equals effective inner radius plus the actual uniform inset. Resolve native insets before deriving radii. Explicit parent corners constrain local child corners; a zero-radius offset retains the content spacing.",
           "unit": "像素",
           "shortLabel": "圆角",
           "defaultHelp": "未单独设值时跟随共享规范「容器圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
@@ -7412,6 +7538,13 @@
           "unit": "像素",
           "shortLabel": "表头到轨道间距",
           "defaultHelp": "默认 8 像素；恢复后使用默认值。"
+        },
+        "columnGap": {
+          "summary": "轨道标签区域与右侧时间网格之间的独立留白。",
+          "reference": "以左侧选中背景的右边缘和时间网格背景的左边缘为界；绘制、裁剪、命中和时间坐标共同使用此间距。它不改变左右两侧各自的内部留白。",
+          "unit": "像素",
+          "shortLabel": "分栏间距",
+          "defaultHelp": "默认12逻辑像素；显式0关闭间距，恢复此项重新使用默认值。"
         }
       }
     },
@@ -8309,7 +8442,7 @@
       "fields": {
         "widthMode": {
           "summary": "宽度由当前布局分配，或使用指定的固定宽度。",
-          "reference": "自动沿用父区域和内容的可用宽度；固定使用固定宽度字段。适用：先记录自动模式下的实际宽度，把固定宽度设成明显不同的合法值，再切换模式比较外框。固定值与自动布局结果相同时，切换模式不改变当前外观；窗口或父容器的可用范围仍约束最终可见区域。",
+          "reference": "自动模式按整组最长标题、最长快捷键和实际需要的图标、箭头列计算宽度，并向外取整到原生像素。固定模式使用指定宽度；两者都受屏幕可用范围约束。只有宽度确实受限时才省略文字，悬停可查看完整标题。",
           "unit": "选项",
           "shortLabel": "宽度方式",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
@@ -8374,10 +8507,10 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "菜单外框圆角默认 12，菜单行圆角默认 6，四边内距默认 6；同心嵌套时外圆角等于内圆角加内距。独立调整后应一起检查首行与末行的悬停四角。",
           "unit": "像素",
           "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时跟随共享规范「弹出层圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "defaultHelp": "未单独设值时使用弹出菜单默认值；恢复此项会删除该项的单独覆盖。"
         },
         "paddingLeft": {
           "summary": "框体内部左边缘到内容区的留白。",
@@ -8463,6 +8596,13 @@
           "unit": "像素",
           "shortLabel": "行距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "surfaceColor": {
+          "summary": "此部件底色的独立覆盖。",
+          "reference": "停靠面使用面板背景；浮窗使用浮窗背景；菜单和选择列表使用弹出层背景。inherit 保留角色分层。",
+          "unit": "RGBA 颜色或 inherit",
+          "shortLabel": "表面颜色",
+          "defaultHelp": "继承当前模块对应的表面颜色；恢复删除独立覆盖。"
         }
       }
     },
@@ -8482,7 +8622,7 @@
           "reference": "从框体上边缘量到下边缘；外边距另算，内部文字和子控件仍需有容纳空间。适用：按定位步骤显示「菜单项目」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
           "unit": "像素",
           "shortLabel": "最小高度",
-          "defaultHelp": "未单独设值时跟随共享规范「控件高度」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "defaultHelp": "未单独设值时使用菜单行默认最小高度 30 逻辑像素；实际行高仍须容纳文字、图标和上下内距。恢复此项会删除该项的单独覆盖。"
         },
         "fontSize": {
           "summary": "菜单项名称和快捷键的字号。",
@@ -9574,6 +9714,27 @@
           "unit": "像素",
           "shortLabel": "下外边距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "barWidth": {
+          "summary": "原生色相及透明度条的宽度。",
+          "reference": "色条独立于大幅 SV 方块分配宽度；不能窄于选色器内部字号。普通文字和数值字号不随色条收窄。",
+          "unit": "逻辑像素",
+          "shortLabel": "色条宽度",
+          "defaultHelp": "恢复此项删除局部覆盖并重新使用自动或共享尺寸。"
+        },
+        "columnGap": {
+          "summary": "SV 方块与色条、相邻色条之间的净空。",
+          "reference": "按原生选色器实际色条边缘测量，RGBA 有两条色带，RGB 只有色相条。",
+          "unit": "逻辑像素",
+          "shortLabel": "色条间距",
+          "defaultHelp": "恢复此项删除局部覆盖并重新使用自动或共享尺寸。"
+        },
+        "minimumHeight": {
+          "summary": "高度受限时保留的最小可操作选色方块。",
+          "reference": "自适应布局先为格式、完整通道与确认按钮分配空间；不足时保留此选色高度并允许弹窗滚动，可用宽度仍是上限。",
+          "unit": "逻辑像素",
+          "shortLabel": "选色高度下限",
+          "defaultHelp": "恢复此项删除局部覆盖并重新使用自动或共享尺寸。"
         }
       }
     },
@@ -9829,32 +9990,32 @@
     },
     "visual_group": {
       "label": "可视组筛选行",
-      "context": "MuJoCo 可视化设置中的可视组复选项表格。",
+      "context": "内容可视化设置中的可视组复选项表格。",
       "preview": {
         "area": "设置",
         "steps": [
-          "载入含模型可视组的场景，例如 mujoco_visuals，再打开设置的 MuJoCo 可视化页，观察可视组表格。",
+          "载入含模型可视组的场景，例如 mujoco_visuals，再打开设置的 内容可视化页，观察可视组表格。",
           "调整后比较同类部件；恢复此项可回到继承或默认值。"
         ]
       },
       "fields": {
         "gap": {
           "summary": "同一组合内相邻子项的基础间距。",
-          "reference": "水平：可视组表格相邻列的单元格内容区域。竖向：可视组表格上一行内容底边与下一行内容顶边。横向排列时是列距，纵向排列时是行距；显式设置列距或行距后，对应方向使用独立值。适用：载入有模型可视组的场景后，设置的MuJoCo可视化页才有此表格；纵向间距作用于表格每行，横向间距作用于单元格之间。",
+          "reference": "水平：可视组表格相邻列的单元格内容区域。竖向：可视组表格上一行内容底边与下一行内容顶边。横向排列时是列距，纵向排列时是行距；显式设置列距或行距后，对应方向使用独立值。适用：载入有模型可视组的场景后，设置的内容可视化页才有此表格；纵向间距作用于表格每行，横向间距作用于单元格之间。",
           "unit": "像素",
           "shortLabel": "间距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "rowGap": {
           "summary": "可视组表格上下相邻两行内容之间的留白。",
-          "reference": "竖向：可视组表格上一行内容底边与下一行内容顶边。原生将此值平均分给单元格上、下内距；始终作用于现有表格行，不要求按钮先换行。适用：载入有模型可视组的场景后，设置的MuJoCo可视化页才有此表格；纵向间距作用于表格每行，横向间距作用于单元格之间。",
+          "reference": "竖向：可视组表格上一行内容底边与下一行内容顶边。原生将此值平均分给单元格上、下内距；始终作用于现有表格行，不要求按钮先换行。适用：载入有模型可视组的场景后，设置的内容可视化页才有此表格；纵向间距作用于表格每行，横向间距作用于单元格之间。",
           "unit": "像素",
           "shortLabel": "行距",
           "defaultHelp": "未单独设值时跟随「可视组筛选行 / 统一内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
         },
         "columnGap": {
           "summary": "可视组表格相邻列内容之间的水平留白。",
-          "reference": "水平：可视组表格相邻列的单元格内容区域。原生将此值平均预留在相邻列边界两侧；无边框表格使用列间留白，有边框表格使用单元格内距。可视组项目的独立列距优先于可视组表格的同名值。适用：载入有模型可视组的场景后，设置的MuJoCo可视化页才有此表格；纵向间距作用于表格每行，横向间距作用于单元格之间。",
+          "reference": "水平：可视组表格相邻列的单元格内容区域。原生将此值平均预留在相邻列边界两侧；无边框表格使用列间留白，有边框表格使用单元格内距。可视组项目的独立列距优先于可视组表格的同名值。适用：载入有模型可视组的场景后，设置的内容可视化页才有此表格；纵向间距作用于表格每行，横向间距作用于单元格之间。",
           "unit": "像素",
           "shortLabel": "列距",
           "defaultHelp": "未单独设值时跟随「可视组筛选行 / 统一内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
@@ -9867,7 +10028,7 @@
       "preview": {
         "area": "设置",
         "steps": [
-          "载入含模型可视组的场景，例如 mujoco_visuals，再打开设置的 MuJoCo 可视化页，观察表格相邻列。",
+          "载入含模型可视组的场景，例如 mujoco_visuals，再打开设置的 内容可视化页，观察表格相邻列。",
           "调整后比较同类部件；恢复此项可回到继承或默认值。"
         ]
       },
@@ -10352,14 +10513,14 @@
       "fields": {
         "gap": {
           "summary": "菜单文字、快捷键和子菜单箭头之间的基础水平空白。",
-          "reference": "水平：菜单主文字、快捷键、勾选或子菜单箭头的占位框。单独设值后这些内容连续排列；已设置横向列距时使用列距。适用：按定位步骤显示「菜单文字与快捷键组」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "整组菜单共享最长标题和最长快捷键的列宽，标题与淡色快捷键列之间默认留 12 逻辑像素；子菜单箭头在需要时单独占列。整组包含可切换项时保留勾选列，纯操作组取消空勾选列；图标列也只在该组需要时出现。",
           "unit": "像素",
           "shortLabel": "间距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
         },
         "columnGap": {
           "summary": "菜单文字、快捷键和子菜单箭头之间的水平空白。",
-          "reference": "水平：菜单主文字、快捷键、勾选或子菜单箭头的占位框。单独设值后按此间距连续排列这些内容；菜单项外框宽度另设。适用：按定位步骤显示「菜单文字与快捷键组」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "reference": "整组菜单共享最长标题和最长快捷键的列宽，标题与淡色快捷键列之间默认留 12 逻辑像素；子菜单箭头在需要时单独占列。整组包含可切换项时保留勾选列，纯操作组取消空勾选列；图标列也只在该组需要时出现。",
           "unit": "像素",
           "shortLabel": "列距",
           "defaultHelp": "未单独设值时跟随「菜单文字与快捷键组 / 统一内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
@@ -10544,10 +10705,10 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "The outer corner is the selected/hovered row corner plus the actual uniform inset: 6 + 8 = 14 logical points at scale 1. Native insets are resolved before deriving the outer radius. An explicit outer radius constrains contained rows.",
           "unit": "像素",
           "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时跟随共享规范「弹出层圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         },
         "paddingLeft": {
           "summary": "框体内部左边缘到内容区的留白。",
@@ -10633,6 +10794,13 @@
           "unit": "像素",
           "shortLabel": "行距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        },
+        "surfaceColor": {
+          "summary": "此部件底色的独立覆盖。",
+          "reference": "停靠面使用面板背景；浮窗使用浮窗背景；菜单和选择列表使用弹出层背景。inherit 保留角色分层。",
+          "unit": "RGBA 颜色或 inherit",
+          "shortLabel": "表面颜色",
+          "defaultHelp": "继承当前模块对应的表面颜色；恢复删除独立覆盖。"
         }
       }
     },
@@ -10810,8 +10978,8 @@
           }
         },
         "checkGap": {
-          "summary": "选项文字与右侧选中标记之间的最小留白。",
-          "reference": "只调整下拉选项，不影响菜单快捷键列。",
+          "summary": "左侧选中标记与后续图标或文字之间的最小留白。",
+          "reference": "选项左侧始终保留选中标记的位置；此值控制标记右边缘到后续图标或文字的留白。勾选状态不改变后续列的位置，快捷键保持尾部对齐。",
           "unit": "像素",
           "defaultHelp": "默认 12 个逻辑像素。"
         }
@@ -10829,18 +10997,88 @@
       },
       "fields": {
         "gap": {
-          "summary": "同一组合内相邻子项的基础间距。",
-          "reference": "水平：底部状态名称、提示及性能指标等相邻内容组的占位框。横向排列时是列距，纵向排列时是行距；显式设置列距或行距后，对应方向使用独立值。适用：按定位步骤显示「应用状态栏」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "summary": "运行指标到分隔线的单侧默认间距。",
+          "reference": "分别提供给每项的左分隔线间距与右分隔线间距。单项可以独立覆盖两侧，不再把相邻项之间的整段空白围绕分隔线平分。",
           "unit": "像素",
-          "shortLabel": "间距",
-          "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+          "shortLabel": "分隔线单侧默认间距",
+          "defaultHelp": "默认每侧 6 个逻辑像素；在单项指标中分别覆盖左侧或右侧间距。"
         },
         "columnGap": {
-          "summary": "同一行内相邻子项之间额外插入的水平净空。",
-          "reference": "水平：底部状态名称、提示及性能指标等相邻内容组的占位框。从前一项完整外边距框的右边缘量到后一项完整外边距框的左边缘；可见框之间还包含各自外边距。适用：按定位步骤显示「应用状态栏」，比较其布局边界和内容；恢复此项重新跟随默认或共享值。",
+          "summary": "运行指标到分隔线的单侧默认间距。",
+          "reference": "分别提供给每项的左分隔线间距与右分隔线间距。单项可以独立覆盖两侧，不再把相邻项之间的整段空白围绕分隔线平分。",
           "unit": "像素",
-          "shortLabel": "条目水平间距",
-          "defaultHelp": "未单独设值时跟随「应用状态栏 / 内容间距」。单独设值后解除跟随；恢复此项可重新跟随。"
+          "shortLabel": "分隔线单侧默认间距",
+          "defaultHelp": "默认每侧 6 个逻辑像素；在单项指标中分别覆盖左侧或右侧间距。"
+        },
+        "labelGap": {
+          "summary": "运行指标标签末尾到数字区域左边缘的水平净空。",
+          "reference": "从标签文字排版区域末端到数字起点量取。自动宽度按实际短语布局，数字个数或单位改变时允许短语边界更新；相同格式的数字替换使用等宽字位，避免逐帧抖动。",
+          "unit": "逻辑像素",
+          "shortLabel": "标签与数字间距",
+          "defaultHelp": "默认 4 个逻辑像素；设为 0 可使标签紧邻数字区域。恢复此项删除单独覆盖。"
+        },
+        "unitGap": {
+          "summary": "显示数字末端到单位起点的水平净空。",
+          "reference": "显示数字与 Hz、FPS 等单位组成连续短语，SI 前缀随单位直接显示。自动宽度不在数字、单位或短语末尾保留空预算，数字和单位共用一条字体与缩放路径。步数的 k、M 等后缀紧邻数字。",
+          "unit": "逻辑像素",
+          "shortLabel": "数字与单位间距",
+          "defaultHelp": "默认 2 个逻辑像素；设为 0 可使数字与单位相邻。恢复此项删除单独覆盖。"
+        },
+        "deltaValueWidth": {
+          "summary": "Δt 的数字区域宽度，0 表示按当前字体自动安排。",
+          "reference": "0 按实际短语宽度布局；99.9 预算只用于格式和精度上限，不产生空白占位。默认保留一位小数，例如 2.0 ms。正数固定数字列宽和小数点锚点；缩窄后降低显示精度或切换单位，仍不足则显示省略号。悬停查看完整值，右键复制。",
+          "unit": "逻辑像素",
+          "shortLabel": "Δt 数字区域宽度",
+          "defaultHelp": "默认 0：按当前显示内容自动安排紧凑短语。输入正数固定数字列宽；恢复此项返回自动宽度。"
+        },
+        "physicsValueWidth": {
+          "summary": "物理频率的数字区域宽度，0 表示按当前字体自动安排。",
+          "reference": "0 按实际短语宽度布局，常用频率如 480 Hz 保持完整整数。999 预算只用于格式上限，不产生空白占位。正数固定数字列宽和小数点锚点；缩窄后压缩显示或提升单位，仍不足则显示省略号。完整频率可悬停查看或右键复制。",
+          "unit": "逻辑像素",
+          "shortLabel": "物理频率数字区域宽度",
+          "defaultHelp": "默认 0：按当前显示内容自动安排紧凑短语。输入正数固定数字列宽；恢复此项返回自动宽度。"
+        },
+        "stepsValueWidth": {
+          "summary": "步数模式的数字区域宽度，0 表示按当前字体自动安排。",
+          "reference": "0 按实际短语宽度布局，999.9 预算只限制显示格式，不产生空白占位。步数与 k、M 等后缀紧邻。正数固定数字列宽和小数点锚点；缩窄后降低显示精度或提升单位。此项只影响步数模式。",
+          "unit": "逻辑像素",
+          "shortLabel": "步数数字区域宽度",
+          "defaultHelp": "默认 0：按当前显示内容自动安排紧凑短语。输入正数固定数字列宽；恢复此项返回自动宽度。"
+        },
+        "timeValueWidth": {
+          "summary": "时间模式的数值区域宽度：0 为自动紧凑，正数为自定义宽度。",
+          "reference": "0 按实际短语宽度布局。999.999 与 99:59:59 是所选时间格式的显示预算，不产生空白占位。普通秒数保留三位小数；超出格式预算使用完整科学计数法，仍不足显示单个省略号。相同数字个数使用等宽字位，数字个数或单位改变时边界可更新。正数固定数字列宽和小数点锚点。此项不改变实际时间。",
+          "unit": "逻辑像素",
+          "shortLabel": "时间数字区域宽度",
+          "defaultHelp": "默认 0：按当前显示内容自动安排紧凑短语。输入正数固定数字列宽；恢复此项返回自动宽度。"
+        },
+        "renderValueWidth": {
+          "summary": "渲染帧率的数字区域宽度，0 表示按当前字体自动安排。",
+          "reference": "0 按实际短语宽度布局，默认保留一位小数。999.9 预算只限制显示格式，不产生空白占位。正数固定数字列宽和小数点锚点；缩窄后降低显示精度或提升单位，仍不足显示省略号。完整帧率可悬停查看或右键复制。",
+          "unit": "逻辑像素",
+          "shortLabel": "渲染帧率数字区域宽度",
+          "defaultHelp": "默认 0：按当前显示内容自动安排紧凑短语。输入正数固定数字列宽；恢复此项返回自动宽度。"
+        },
+        "tooltipPaddingX": {
+          "summary": "运行指标悬停提示框内左、右两侧的留白。",
+          "reference": "在提示框边缘与文字之间量取。只影响状态栏运行指标组的悬停提示，不改变状态栏本身的数字间距、数字区域宽度或其他组件提示。所有运行指标共用此值。",
+          "unit": "逻辑像素",
+          "shortLabel": "提示左右内距",
+          "defaultHelp": "默认每侧 10 个逻辑像素；恢复此项删除单独覆盖。"
+        },
+        "tooltipPaddingY": {
+          "summary": "运行指标悬停提示框内上、下两侧的留白。",
+          "reference": "在提示框边缘与首行、末行文字之间量取。只影响状态栏运行指标组的悬停提示，不改变提示行间距、状态栏高度或其他组件提示。所有运行指标共用此值。",
+          "unit": "逻辑像素",
+          "shortLabel": "提示上下内距",
+          "defaultHelp": "默认每侧 8 个逻辑像素；恢复此项删除单独覆盖。"
+        },
+        "tooltipRowGap": {
+          "summary": "运行指标悬停提示中相邻文字行之间的额外净空。",
+          "reference": "在一行的文字区域底部与下一行的文字区域顶部之间量取。用于分隔精确值和操作提示，不改变字体字号或状态栏数字间距。只影响状态栏运行指标组的悬停提示。",
+          "unit": "逻辑像素",
+          "shortLabel": "提示行间距",
+          "defaultHelp": "默认 6 个逻辑像素；设为 0 可取消额外行间留白，恢复此项返回默认值。"
         },
         "paddingX": {
           "summary": "统一设置框体内部左、右两侧留白。",
@@ -11063,6 +11301,204 @@
           "unit": "像素",
           "shortLabel": "下外边距",
           "defaultHelp": "未单独设值时使用部件默认值；恢复此项会删除该项的单独覆盖。"
+        }
+      }
+    },
+    "scene_tools": {
+      "label": "场景筛选区",
+      "context": "场景筛选区独立控制本面板筛选控件的文字、图标及间距；恢复字段重新继承通用面板筛选区。",
+      "preview": {
+        "area": "场景",
+        "steps": [
+          "打开场景面板，观察搜索、几何外观切换和类型筛选。",
+          "Alt + 单击筛选区优先选择此独立分组；其他面板的筛选区保持各自设置。"
+        ]
+      },
+      "fields": {
+        "gap": {
+          "summary": "本面板筛选控件之间的基础间距。",
+          "reference": "场景的搜索、几何切换和类型筛选之间留白；类型筛选自身的间距仍可在类型筛选组单独设置。只作用于此面板；不修改其他面板筛选区。",
+          "unit": "逻辑像素",
+          "shortLabel": "统一内容间距",
+          "defaultHelp": "默认继承通用面板筛选区；恢复此项删除独立覆盖，重新跟随通用值。"
+        },
+        "rowGap": {
+          "summary": "本面板筛选控件之间的竖向间距。",
+          "reference": "场景的搜索、几何切换和类型筛选之间留白；类型筛选自身的间距仍可在类型筛选组单独设置。只作用于此面板；不修改其他面板筛选区。",
+          "unit": "逻辑像素",
+          "shortLabel": "纵向等间距（行距）",
+          "defaultHelp": "默认继承通用面板筛选区；恢复此项删除独立覆盖，重新跟随通用值。"
+        },
+        "columnGap": {
+          "summary": "本面板筛选控件之间的水平间距。",
+          "reference": "场景的搜索、几何切换和类型筛选之间留白；类型筛选自身的间距仍可在类型筛选组单独设置。只作用于此面板；不修改其他面板筛选区。",
+          "unit": "逻辑像素",
+          "shortLabel": "横向等间距（列距）",
+          "defaultHelp": "默认继承通用面板筛选区；恢复此项删除独立覆盖，重新跟随通用值。"
+        }
+      }
+    },
+    "pose_tools": {
+      "label": "姿态筛选区",
+      "context": "姿态筛选区独立控制本面板筛选控件的文字、图标及间距；恢复字段重新继承通用面板筛选区。",
+      "preview": {
+        "area": "姿态",
+        "steps": [
+          "打开姿态面板，点击标题栏搜索按钮，显示关节搜索框。",
+          "Alt + 单击搜索框优先选择此独立分组；场景筛选区保持各自设置。"
+        ]
+      },
+      "fields": {
+        "gap": {
+          "summary": "本面板筛选控件之间的基础间距。",
+          "reference": "关节搜索框底边与下方关节列表之间的留白。只作用于此面板；不修改其他面板筛选区。",
+          "unit": "逻辑像素",
+          "shortLabel": "统一内容间距",
+          "defaultHelp": "默认继承通用面板筛选区；恢复此项删除独立覆盖，重新跟随通用值。"
+        },
+        "rowGap": {
+          "summary": "本面板筛选控件之间的竖向间距。",
+          "reference": "关节搜索框底边与下方关节列表之间的留白。只作用于此面板；不修改其他面板筛选区。",
+          "unit": "逻辑像素",
+          "shortLabel": "纵向等间距（行距）",
+          "defaultHelp": "默认继承通用面板筛选区；恢复此项删除独立覆盖，重新跟随通用值。"
+        }
+      }
+    },
+    "form_popup": {
+      "label": "Compact form popup",
+      "context": "A compact settings form with measured label and control columns, independent of command-menu geometry.",
+      "preview": {
+        "area": "时间轴",
+        "steps": [
+          "Open Timeline settings from the Timeline toolbar.",
+          "Compare the pause row, the recording timing group, the four popup insets and the numeric-control corners at normal and fractional UI scales."
+        ]
+      },
+      "fields": {
+        "fontFamily": {
+          "summary": "The font family used by this form.",
+          "reference": "Body text and numeric text retain their declared roles; independently authored child settings take precedence.",
+          "unit": "",
+          "shortLabel": "Font family",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "fontSize": {
+          "summary": "The form body text size.",
+          "reference": "Labels and controls use shared measurement and painting. Explicit child typography retains its own setting.",
+          "unit": "logical pt",
+          "shortLabel": "Body font size",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "textColor": {
+          "summary": "The text ink used by this form.",
+          "reference": "The popup surface is independent of command menus. Explicit child ink settings take precedence.",
+          "unit": "",
+          "shortLabel": "Text color",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "paddingX": {
+          "summary": "Equal padding inside the left and right popup edges.",
+          "reference": "An explicit left or right edge overrides that side. Native layout resolves all four edges before allocating the popup.",
+          "unit": "logical pt",
+          "shortLabel": "Horizontal padding",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "paddingY": {
+          "summary": "Equal padding inside the top and bottom popup edges.",
+          "reference": "An explicit top or bottom edge overrides that side. Final padding is included once, without trailing row spacing.",
+          "unit": "logical pt",
+          "shortLabel": "Vertical padding",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "paddingLeft": {
+          "summary": "Space from the popup left edge to the form rows.",
+          "reference": "This side overrides horizontal padding. Labels share the resulting left edge.",
+          "unit": "logical pt",
+          "shortLabel": "Left padding",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "paddingRight": {
+          "summary": "Space from the form controls to the popup right edge.",
+          "reference": "This side overrides horizontal padding. Numeric fields and the switch share the resulting right edge.",
+          "unit": "logical pt",
+          "shortLabel": "Right padding",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "paddingTop": {
+          "summary": "Space from the popup top edge to the first form row.",
+          "reference": "This side overrides vertical padding; row geometry is resolved on the native window grid.",
+          "unit": "logical pt",
+          "shortLabel": "Top padding",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "paddingBottom": {
+          "summary": "Space from the final form row to the popup bottom edge.",
+          "reference": "This side overrides vertical padding. The final row contributes no trailing row or group gap.",
+          "unit": "logical pt",
+          "shortLabel": "Bottom padding",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "radius": {
+          "summary": "The popup outer corner radius.",
+          "reference": "The outer corner is the contained control corner plus the actual uniform inset: 6 + 8 = 14 logical points at scale 1. Native insets are resolved before deriving the outer radius. An explicit outer radius constrains contained corners.",
+          "unit": "logical pt",
+          "shortLabel": "Outer corner radius",
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
+        },
+        "rowGap": {
+          "summary": "Vertical space between adjacent rows in one form group.",
+          "reference": "In Timeline settings this separates Start delay from End hold. No row gap follows the last row.",
+          "unit": "logical pt",
+          "shortLabel": "Row gap",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "columnGap": {
+          "summary": "Horizontal space between the measured label column and numeric fields.",
+          "reference": "Labels are measured as one column and numeric controls share their right edge. This does not set spacing between unrelated panels.",
+          "unit": "logical pt",
+          "shortLabel": "Label-to-field gap",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        },
+        "groupGap": {
+          "summary": "Vertical space between distinct groups in the form.",
+          "reference": "In Timeline settings this separates Pause at last frame from the recording timing fields. No empty group gap is added when recording fields are unavailable.",
+          "unit": "logical pt",
+          "shortLabel": "Group gap",
+          "defaultHelp": "Reset removes this local override and restores the shared or inherited form setting."
+        }
+      }
+    },
+    "timeline_body": {
+      "label": "Timeline content surface",
+      "context": "The scrolling surface contains the model selector, recorded lanes, details and replay content.",
+      "preview": {
+        "area": "时间轴",
+        "steps": [
+          "Open Timeline and inspect the inset around the model selector and selected lane."
+        ]
+      },
+      "fields": {
+        "paddingX": {
+          "summary": "Space between the surface edge and its contained controls.",
+          "reference": "The same native content origin is used for painting, timeline projection and input. Scrollbar space is reserved separately.",
+          "unit": "logical points",
+          "shortLabel": "Horizontal content inset",
+          "defaultHelp": "Restore this field to use the shared default or derived geometry."
+        },
+        "paddingY": {
+          "summary": "Space between the surface edge and its contained controls.",
+          "reference": "The same native content origin is used for painting, timeline projection and input. Scrollbar space is reserved separately.",
+          "unit": "logical points",
+          "shortLabel": "Vertical content inset",
+          "defaultHelp": "Restore this field to use the shared default or derived geometry."
+        },
+        "radius": {
+          "summary": "Outer corner radius of the scrolling surface.",
+          "reference": "The body shares a corner budget with its floating host and nested selector/lane backgrounds: host 14, body 8, controls 4 with insets 6 and 4 at scale 1. Resolve native insets first, then derive nested corners; do not scale and round each radius independently.",
+          "unit": "logical points",
+          "shortLabel": "Outer corner radius",
+          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
         }
       }
     }

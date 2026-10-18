@@ -134,6 +134,36 @@ def test_numeric_array_geometry_stays_fixed_when_value_gains_digits(properties):
             assert state.ui.hits[key] == before[key]
 
 
+@pytest.mark.parametrize("width", (180, 280, 310, 620))
+@pytest.mark.parametrize("count,fmt", ((3, "%.5f"), (3, "%.5g"), (2, "%.4g")))
+@pytest.mark.parametrize("properties", (1.0, 1.2, 2.0, 2.25), indirect=True)
+def test_plain_numeric_group_reserves_only_its_actual_rows(properties, width, count, fmt):
+    state = properties
+    values = (1.0, 0.005, 0.0001)[:count]
+
+    def draw():
+        imgui.set_cursor_screen_pos((40 * state.ui.s, 40 * state.ui.s))
+        imgui.begin_child("contact-group", (width * state.ui.s, 580 * state.ui.s))
+        if state.inspector.begin_table("insp_geometry_contact"):
+            state.inspector.row("Friction", components=count)
+            state.inspector.numbers("##friction", values, 0.005, 0, 1e6, fmt, 0)
+            state.inspector.row("Contact dimension")
+            state.inspector.numeric("##dimension", 3, 1, 1, 6, "%d", 0, integer=True)
+            state.inspector.end_table()
+        imgui.end_child()
+
+    for _ in range(3):
+        state.frame(draw)
+    fields = [state.ui.hits[f"##friction-{index}-frame"] for index in range(count)]
+    bottom = max(y + h for _x, y, _w, h in fields)
+    next_label = state.ui.hits["property-label-Contact dimension"]
+    assert 0 <= next_label[1] - bottom <= 2 * DESIGN.row_gap * state.ui.s
+    first_label = state.ui.hits["property-label-Friction"]
+    assert first_label[0] == pytest.approx(next_label[0])
+    if width == 620:
+        assert len({y for _x, y, _w, _h in fields}) == 1
+
+
 @pytest.mark.parametrize("width", (280, 600))
 def test_related_scalar_and_xyz_rows_share_columns_across_formats(properties, width):
     state, node = properties, SimpleNamespace(node_id=7)

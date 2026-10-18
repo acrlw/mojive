@@ -8,6 +8,7 @@ from mojive.design.help import get_part_help
 from mojive.design.native.editor_chrome import EditorChrome
 from mojive.design.native.editor_controls import EditorControls
 from mojive.design.native.editor_pages import EditorPages
+from mojive.design.native.selection import selection_parts
 
 
 class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
@@ -38,7 +39,6 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
         self.requested_detached = None
         self.editor_rect = None
         self._requested_navigation = None
-        self.preview_typography = None
         self.pick = True
         self.pick_pressed = False
         self.selected_field = None
@@ -74,7 +74,14 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
 
     def navigate(self, workspace, part=None):
         part = part or self.part
+        if part not in self.selection_parts:
+            self.selection_parts = []
+        definition = self.runtime.catalog[part]
+        if "controlGroup" in definition:
+            part = definition["controlGroup"]
+            definition = self.runtime.catalog[part]
         area = get_part_help(part)["preview"]["area"]
+        part = definition.get("basePart", part)
         area = {
             "input_text": "设置",
             "checkbox": "设置",
@@ -94,6 +101,10 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
             "table": "统计",
         }.get(part, area)
         workspace.menus.preview(())
+        for panel_id, panel_area in (("help", "帮助"), ("info", "信息")):
+            panel = workspace.app.panels.get(panel_id)
+            if panel is not None:
+                panel.open = area == panel_area
         self.show_sample = False
         if area != "设置" and hasattr(workspace, "open"):
             workspace.open["Settings"] = False
@@ -160,8 +171,12 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
                 workspace, "free_body" if part == "vector_heading" else "hinge_body"
             )
             workspace.app.panels.get("joints")._search = ""
+            if part == "pose_tools" and not hasattr(workspace, "navigation"):
+                from mojive.ui.workspace.navigation import Navigation
+
+                workspace.navigation = Navigation(workspace)
             if hasattr(workspace, "navigation"):
-                workspace.navigation.pose_search_visible = False
+                workspace.navigation.pose_search_visible = part == "pose_tools"
             workspace.activate("Pose")
         elif area == "传感器":
             workspace.activate("Sensors")
@@ -175,6 +190,12 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
             workspace.activate("Output")
         elif area == "统计":
             workspace.activate("Statistics")
+        elif area == "图层":
+            workspace.activate("Layers")
+        elif area == "曲线":
+            workspace.activate("Plot")
+        elif area in ("帮助", "信息"):
+            pass
         elif area == "设置":
             category = (
                 "Interaction"
@@ -183,6 +204,9 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
                 if part in ("visual_group", "visual_group_item")
                 else "General"
             )
+            owner = definition.get("groupOwner", "")
+            if owner.startswith("Settings/"):
+                category = owner.removeprefix("Settings/")
             workspace.settings.show_category(category)
             workspace.activate("Settings")
         elif area == "智能体":
@@ -200,8 +224,6 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
             workspace.activate("Scene")
             if part != "notice":
                 self.select_sample_body(workspace)
-        if part == "selection_caption" and hasattr(workspace, "open"):
-            workspace.open["Inspector"] = False
         if part == "bottom_header":
             workspace.collapse_bottom()
         self._receipt_pending = 3 if part in ("file_receipt", "link_button") else 0
@@ -230,7 +252,6 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
         self.hits.clear()
 
     def begin_frame(self, workspace):
-        self.preview_typography = workspace.ui.typography
         if not self.detached:
             self.poll_editor()
         if not self._started or self._requested_navigation is not None:
@@ -361,16 +382,6 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
                     }
                 )
         records = visible_records
-        seen = set()
-        self.native_instances = []
-        for record in records:
-            if not shared_selection and self.part not in record["parts"]:
-                continue
-            signature = tuple(round(v, 2) for v in record["hit"])
-            if signature in seen:
-                continue
-            seen.add(signature)
-            self.native_instances.append(record)
         if self.ready_path is not None and not self._ready_written and self.frame_index >= 4:
             import glfw
 
@@ -423,20 +434,24 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
                 )
             ]
             if candidates:
-                candidates.sort(key=lambda r: r["hit"][2] * r["hit"][3])
-                self.selection_parts = list(
-                    dict.fromkeys(
-                        part
-                        for record in candidates
-                        for part in reversed(record["parts"])
-                        if part in self.editor.catalog
-                    )
-                )
+                self.selection_parts = selection_parts(candidates, self.editor.catalog)
                 self.part = self.selection_parts[0]
                 self.selected_field = None
+                shared_selection = False
                 self.category, self.search, self.mode = "全部部件", "", "部件参数"
                 self.field_search = ""
+                self.field_group = "全部参数"
                 self._catalogue_scroll_pending = True
+        seen = set()
+        self.native_instances = []
+        for record in records:
+            if not shared_selection and self.part not in record["parts"]:
+                continue
+            signature = tuple(round(v, 2) for v in record["hit"])
+            if signature in seen:
+                continue
+            seen.add(signature)
+            self.native_instances.append(record)
         self.field_highlights = []
         if self.mode != "部件参数" and not self.selected_field:
             return

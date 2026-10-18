@@ -1,6 +1,8 @@
 """Published imports and command polymorphism survive implementation reorganization."""
 
+import ast
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -8,10 +10,6 @@ import pytest
 @pytest.mark.parametrize(
     "legacy,implementation,names",
     [
-        ("ui.draw2d", "ui.paint_protocol", ("Draw2D",)),
-        ("ui.draw2d", "ui.imgui_draw", ("ImguiDraw2D", "ink_box")),
-        ("ui.draw2d", "ui.text_layout", ("fit_text", "text_line_y")),
-        ("ui.draw2d", "ui.drag_link", ("draw_drag_link",)),
         ("curves2d", "geometry2d.curves", ("arrow_points", "smooth_capsule_points")),
         ("draglink2d", "geometry2d.drag_link", ("drag_link_field", "smooth_drag_link_mesh")),
         ("canvas2d", "render.canvas", ("Canvas2D", "CanvasLayer2D")),
@@ -31,6 +29,29 @@ def test_published_imports_resolve_to_the_same_implementation(legacy, implementa
     owner = importlib.import_module(f"mojive.{implementation}")
     for name in names:
         assert getattr(old, name) is getattr(owner, name)
+
+
+def test_internal_module_imports_resolve_including_deferred_imports():
+    """Catch removed modules even when their imports only run during interaction."""
+    source = Path(__file__).resolve().parents[1] / "python"
+    missing = []
+    for path in sorted(source.rglob("*.py")):
+        package = ("mojive", *path.relative_to(source).parts[:-1])
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                prefix = package[: len(package) - node.level + 1] if node.level else ()
+                modules = [".".join((*prefix, *node.module.split(".")))] if node.module else []
+            else:
+                continue
+            for module in modules:
+                if not module.startswith("mojive."):
+                    continue
+                target = source.joinpath(*module.split(".")[1:])
+                if not target.with_suffix(".py").is_file() and not target.is_dir():
+                    missing.append(f"{path.relative_to(source)}:{node.lineno}: {module}")
+    assert not missing, "Unresolved internal imports:\n" + "\n".join(missing)
 
 
 def test_command_subclasses_keep_dispatch_and_unknown_commands_keep_failure():

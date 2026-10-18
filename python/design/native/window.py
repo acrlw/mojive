@@ -46,10 +46,17 @@ class WorkbenchWindow:
             renderer,
         )
         try:
-            self.surface = EditorSurface(UI(self.window), self.window.style_scale)
+            self.surface = EditorSurface(
+                UI(
+                    self.window,
+                    portable_fonts=workbench.runtime.spec["tokens"]["font_family"] == "portable",
+                ),
+                self.window.style_scale,
+            )
             from mojive.design.native.presentation import DesignPresentation
 
             self.surface.ui.design = DesignPresentation(self.surface.ui, workbench.runtime)
+            self._font_revision = -1
             self.scrollbars = NativeScrollbarVisibility()
             workbench.detached = detached
             workbench._viewport_rect = None
@@ -83,6 +90,9 @@ class WorkbenchWindow:
         surface, bench = self.surface, self.workbench
         surface.s = surface.ui.s = self.window.style_scale
         bench.poll_editor()
+        if self._font_revision != bench.runtime.revision:
+            bench.runtime.prepare_fonts(surface.ui)
+            self._font_revision = bench.runtime.revision
         surface.ui.design.begin_frame()
         self.scrollbars.update()
         with (

@@ -13,6 +13,8 @@ from mojive.scene import Scene
 
 from .. import commands as cmd
 from ..adapters.base import NodeType
+from ..config import ViewportLayers
+from ..render.backend import RenderFlag
 from ..types import CameraView, Light, LightSet, LightType
 
 
@@ -39,6 +41,13 @@ def acceptance_scene() -> Scene:
             diffuse=np.array((0.52, 0.82, 0.48), np.float32),
             range=3.0,
             area_radius=0.65,
+        ),
+        Light(
+            type=LightType.DIRECTIONAL,
+            position=np.array((-0.8, 1.2, 3.0), np.float32),
+            direction=np.array((-0.5, -0.5, -1.0), np.float32),
+            diffuse=np.full(3, 0.5, np.float32),
+            intensity=0.4,
         ),
     )
     scene = Scene(lights=LightSet(lights=lights, ambient=np.full(3, 0.12, np.float32)))
@@ -88,13 +97,22 @@ def acceptance_scene() -> Scene:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", type=Path, default=Path("output/scene-entities"))
+    parser.add_argument(
+        "--diagnostic-only", action="store_true", help="Show renderer flags without editor helpers"
+    )
+    parser.add_argument("--overview-only", action="store_true", help="Capture the unselected scene")
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=True)
     for capture in args.output.glob("*.png"):
         capture.unlink()
 
-    viewer = build_scene(acceptance_scene(), vsync=False, width=1600, height=1000)
+    viewer = build_scene(
+        acceptance_scene(), vsync=False, width=1600, height=1000, show_window=False
+    )
     try:
+        viewer.configure_layers(ViewportLayers(helpers=not args.diagnostic_only))
+        viewer.backend.set_flag(RenderFlag.CAMERA, args.diagnostic_only)
+        viewer.backend.set_flag(RenderFlag.LIGHT, args.diagnostic_only)
         viewer.sync()
         editor_view = CameraView(
             eye=np.array((5.6, -7.2, 4.8), np.float32),
@@ -107,10 +125,14 @@ def main(argv: list[str] | None = None) -> int:
         viewer.app.camera.publish(viewer.app.camera_out)
         for _ in range(2):
             viewer.sync()
+        viewer.session.submit(cmd.Select(0))
+        for _ in range(3):
+            viewer.sync()
+        _save(viewer, args.output / "overview.png")
         entities = [
             node for node in viewer.session.nodes if node.type in (NodeType.CAMERA, NodeType.LIGHT)
         ]
-        for node in entities:
+        for node in () if args.overview_only else entities:
             viewer.session.submit(cmd.Select(node.object_id))
             viewer.app.gizmo.set_mode("translate")
             for _ in range(3):

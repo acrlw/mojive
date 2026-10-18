@@ -406,9 +406,13 @@ def test_recorded_clip_stays_continuous_and_single_frame_selection_matches_its_c
     assert strips[0][0] + strips[0][2] == pytest.approx(gap[0])
     assert strips[1][0] == pytest.approx(gap[1])
     pixels = np.asarray(study.draw(readback=True))[::-1].copy()
-    yy = round(layout.lane_y(1) + 5 * study.s)
-    empty = pixels[yy, round(sum(gap) / 2), :3].astype(float)
-    filled = pixels[yy, round(gap[0] - (gap[1] - gap[0]) / 2), :3].astype(float)
+    sample_y = layout.lane_y(1) + 5 * study.s
+    empty_x, yy = (
+        round(value) for value in study.window.points_to_pixels((sum(gap) / 2, sample_y))
+    )
+    filled_x = round(study.window.points_to_pixels(gap[0] - (gap[1] - gap[0]) / 2))
+    empty = pixels[yy, empty_x, :3].astype(float)
+    filled = pixels[yy, filled_x, :3].astype(float)
     assert np.linalg.norm(filled - empty) > 8
     study.capture("timeline-deleted-single-frame")
     study.event("add_key_event", imgui.Key.mod_ctrl, True)
@@ -419,7 +423,7 @@ def test_recorded_clip_stays_continuous_and_single_frame_selection_matches_its_c
     assert "timeline-take-selection-0" in study.ui.hits
     assert "timeline-take-selection-1" in study.ui.hits
     pixels = np.asarray(study.draw(readback=True))[::-1].copy()
-    np.testing.assert_allclose(pixels[yy, round(sum(gap) / 2), :3], empty, atol=1)
+    np.testing.assert_allclose(pixels[yy, empty_x, :3], empty, atol=1)
     study.capture("timeline-selection-across-deletion")
     editor.take_selection = None
     for span, name in ((0.8, "medium"), (6.0, "dense")):

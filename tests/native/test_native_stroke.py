@@ -151,3 +151,59 @@ def test_stroke_failures_do_not_poison_later_compilation(native):
     for width, cap, join in ((-1, 0, 0), (1, -1, 0), (1, 0, 5), (float("nan"), 0, 0)):
         with pytest.raises(ValueError):
             native.compile_stroke(shape.packed(), width, cap, join)
+
+
+def boundary_loops(mesh):
+    edges = {int(a): int(b) for a, b in mesh.boundary_edges}
+    assert len(edges) == len(mesh.boundary_edges)
+    result = []
+    while edges:
+        start = current = next(iter(edges))
+        loop = []
+        while True:
+            loop.append(current)
+            current = edges.pop(current)
+            if current == start:
+                break
+        result.append(mesh.positions[loop])
+    return result
+
+
+def boundary_turns(points):
+    edges = np.roll(points, -1, axis=0) - points
+    directions = edges / np.linalg.norm(edges, axis=1)[:, None]
+    incoming = np.roll(directions, 1, axis=0)
+    return np.arctan2(
+        incoming[:, 0] * directions[:, 1] - incoming[:, 1] * directions[:, 0],
+        (incoming * directions).sum(axis=1),
+    )
+
+
+@pytest.mark.parametrize("angle", (0, 0.17, math.pi / 4, 1.1, 2.9))
+def test_round_caps_meet_diagonal_segments_without_microscopic_corner_tips(native, angle):
+    direction = np.array((math.cos(angle), math.sin(angle)))
+    mesh = compile_stroke(
+        path([(0, 0), direction * 10]), StrokeStyle(1.5, cap="round"), tolerance=0.025
+    )
+    (outline,) = boundary_loops(mesh)
+    turns = boundary_turns(outline)
+    # A capsule is convex. Independently sampled circles left near-right-angle
+    # notches at its tangent points, amplified into teeth by an outward AA offset.
+    assert turns.min() >= -1e-4
+    assert turns.max() <= math.radians(20)
+
+
+@pytest.mark.parametrize("phase", (0, 0.07, 0.19))
+def test_round_joins_preserve_convexity_around_a_sampled_circle(native, phase):
+    angles = np.arange(48) * math.tau / 48 + phase
+    points = 8 * np.column_stack((np.cos(angles), np.sin(angles)))
+    mesh = compile_stroke(
+        path(points, closed=True), StrokeStyle(1.5, join="round"), tolerance=0.025
+    )
+    loops = boundary_loops(mesh)
+    assert len(loops) == 2
+    for loop in loops:
+        turns = boundary_turns(loop)
+        winding = math.copysign(1, turns.sum())
+        assert (turns * winding).min() >= -1e-4
+        assert np.abs(turns).max() <= math.radians(8)

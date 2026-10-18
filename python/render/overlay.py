@@ -13,7 +13,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from mojive.interaction.gizmo import camera_icon_segments, screen_constant_world_sizes
+from mojive.interaction.gizmo import scene_icon_triangles, screen_constant_world_sizes
+from mojive.interaction.scene_icons import SCENE_ICON_SIZE_PT
 
 from .. import math3d
 from ..adapters.base import (
@@ -657,8 +658,13 @@ class OverlayPublisher:
 
         if self.get_flag(RenderFlag.CAMERA):
             views = frame.cameras if frame.cameras is not None else source.cameras
-            starts, ends = camera_icon_segments(views, state.camera, state.viewport_height, 26.0)
-            cameras.lines("cameras", starts, ends, source.diagnostics.camera_rgba, 1.8)
+            positions = np.asarray([view.eye for view in views], np.float32).reshape(-1, 3)
+            triangles = scene_icon_triangles(
+                "camera", positions, state.camera, state.viewport_height, SCENE_ICON_SIZE_PT
+            )
+            cameras.triangles(
+                "cameras", triangles.reshape(-1, 3, 3), source.diagnostics.camera_rgba
+            )
         else:
             cameras.clear()
 
@@ -666,7 +672,10 @@ class OverlayPublisher:
             light_set = frame.lights if frame.lights is not None else source.lights
             active = tuple(light for light in light_set.lights if light.active)
             positions = np.asarray([light.position for light in active], np.float32).reshape(-1, 3)
-            lights.points("lights", positions, source.diagnostics.light_rgba, 6.0)
+            triangles = scene_icon_triangles(
+                "light", positions, state.camera, state.viewport_height, SCENE_ICON_SIZE_PT
+            )
+            lights.triangles("lights", triangles.reshape(-1, 3, 3), source.diagnostics.light_rgba)
             directed = tuple(
                 light for light in active if light.type not in (LightType.POINT, LightType.IMAGE)
             )

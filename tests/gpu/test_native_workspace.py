@@ -99,6 +99,299 @@ def test_default_production_panels_and_activity_toggle(workspace):
     assert pixels.std() > 10
 
 
+def test_every_panel_has_owned_groups_and_local_header_edits(
+    workspace, backend_name, monkeypatch, tmp_path
+):
+    import json
+    from copy import deepcopy
+    from pathlib import Path
+
+    from PIL import Image
+
+    from mojive.adapters.base import NodeType
+    from mojive.design.groups import component_groups, group_part
+    from mojive.tools.design_audit_scenes import write_audit_model, write_component_model
+    from mojive.ui.workspace import inspector_style, property_style, scene_panels
+
+    viewer, shell = workspace, workspace.app.workspace
+    runtime = viewer.app.design
+    runtime.observe_components = True
+    result = viewer.session.submit(cmd.LoadAsset(write_audit_model(tmp_path / "panel-groups.xml")))
+    assert result.ok, result.message
+    viewer.frame(5)
+    directory = Path("output/panel-groups") / backend_name / f"{shell.s:g}x"
+    directory.mkdir(parents=True, exist_ok=True)
+    seen, samples = set(), {}
+
+    def records():
+        return [*runtime.observed, *shell.ui.design.primitives.observed]
+
+    def observe(owner):
+        viewer.frame(4)
+        assert not any(
+            window.active and window.name == "Debug##Default"
+            for window in imgui.get_current_context().windows
+        )
+        rows = records()
+        parts = {part for row in rows for part in row["parts"]}
+        parts.update(
+            runtime.catalog[part]["controlGroup"]
+            for part in tuple(parts)
+            if "controlGroup" in runtime.catalog.get(part, {})
+        )
+        seen.update(parts)
+        samples[owner] = sorted(
+            set(samples.get(owner, ()))
+            | {part for part in parts if runtime.catalog.get(part, {}).get("groupOwner") == owner}
+        )
+        return rows
+
+    for owner in component_groups():
+        if owner.startswith("Settings/"):
+            shell.settings.show_category(owner.removeprefix("Settings/"))
+            shell.activate("Settings")
+            rows = observe(owner)
+            assert group_part(owner, "settings_page") in samples[owner]
+        else:
+            if owner in ("Help", "Info"):
+                viewer.panels.get(owner.lower()).open = True
+            else:
+                shell.activate(owner)
+            if owner == "Inspector":
+                viewer.app.selected = "hinge_body"
+            rows = observe(owner)
+            assert group_part(owner, "panel_body") in samples[owner]
+        if "panel_header" in component_groups()[owner]["parts"]:
+            part = group_part(owner, "panel_header")
+            assert part in samples[owner]
+            body_before = next(row["hit"] for row in rows if row["key"] == "panel-body-" + owner)
+            spec = deepcopy(runtime.spec)
+            spec["parts"][part] = {
+                "fontSize": 20,
+                "iconSize": 25,
+                "columnGap": 7,
+                "textColor": "#f4b860",
+            }
+            runtime.update_spec(spec)
+            rows = observe(owner)
+            actions = [
+                row
+                for row in rows
+                if row["key"].startswith("header-" + owner + "-") and row.get("kind") == "button"
+            ]
+            if actions:
+                assert all(row["fieldValues"]["iconSize"] == 25 for row in actions)
+            assert any(row["key"] == "panel-body-" + owner for row in rows)
+            assert body_before[2] > 0
+            Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(
+                directory / (owner.lower() + ".png")
+            )
+            spec["parts"].pop(part)
+            runtime.update_spec(spec)
+        if owner == "Settings" or owner.startswith("Settings/"):
+            shell.open["Settings"] = False
+        if owner == "Timeline":
+            viewer.frame(4)
+            viewer.click("timeline-settings")
+            observe(owner)
+            assert group_part(owner, "form_popup") in samples[owner]
+            viewer.event("add_key_event", imgui.Key.escape, True)
+            viewer.event("add_key_event", imgui.Key.escape, False)
+        if owner in ("Help", "Info"):
+            assert group_part(owner, "window_title") in samples[owner]
+            viewer.panels.get(owner.lower()).open = False
+
+    original_section = property_style.property_section
+
+    def expanded_section(*args, **kwargs):
+        imgui.set_next_item_open(True, imgui.Cond_.always)
+        return original_section(*args, **kwargs)
+
+    for module in (property_style, inspector_style, scene_panels):
+        monkeypatch.setattr(module, "property_section", expanded_section)
+    viewer.app.selected = None
+    shell.activate("Inspector")
+    rows = observe("Inspector")
+    assert any("inspector_panel_body" in row["parts"] for row in rows)
+    shell.activate("Assets")
+    observe("Assets")
+    shell.activate("Inspector")
+    for name, tab in (("hinge_body", "Physics"), ("free_box", "Material")):
+        viewer.app.selected = name
+        shell.inspector_tab = tab
+        observe("Inspector")
+    viewer.backend.debug.layer("panel-group-coverage").line(
+        "sample", (0, 0, 0), (1, 0, 0), (1, 1, 1, 1)
+    )
+    shell.activate("Layers")
+    observe("Layers")
+    model_ids = {model.model_id for model in viewer.session.scene_models}
+    result = viewer.session.submit(
+        cmd.AddSceneModel(
+            write_component_model(tmp_path / "component-groups.xml"), position=(10, 0, 0)
+        )
+    )
+    assert result.ok, result.message
+    viewer.frame(5)
+    added = [model for model in viewer.session.scene_models if model.model_id not in model_ids]
+    assert len(added) == 1
+    model_node = next(
+        node
+        for node in viewer.session.nodes
+        if node.type is NodeType.MODEL and node.model_id == added[0].model_id
+    )
+    assert viewer.session.submit(cmd.SelectNode(model_node.node_id)).ok
+    shell.activate("Inspector")
+    shell.inspector_tab = "Properties"
+    observe("Inspector")
+    component = next(
+        item for item in viewer.session.model_components(added[0].model_id, "tendon") if item.path
+    )
+    viewer.panels.get("inspector")._begin_component_edit(component)
+    observe("Inspector")
+    report = {
+        "observed": samples,
+        "unobservedGroups": sorted(
+            part
+            for part, definition in runtime.catalog.items()
+            if "groupOwner" in definition and part not in seen
+        ),
+    }
+    (directory / "coverage.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    )
+    assert not report["unobservedGroups"]
+
+
+def test_status_readouts_have_independent_divider_sides_and_unit_insets(workspace, backend_name):
+    from copy import deepcopy
+    from pathlib import Path
+
+    from PIL import Image
+
+    viewer, shell = workspace, workspace.app.workspace
+    runtime = viewer.app.design
+    runtime.observe_components = True
+    viewer.app._status_metric_mode = "steps"
+    viewer.frame()
+
+    def columns():
+        return {
+            row["parts"][0]: row
+            for row in runtime.observed
+            if row["key"].startswith("application-status_") and "valueRect" in row
+        }
+
+    before = columns()
+    assert set(before) == {
+        "status_backend",
+        "status_steps",
+        "status_delta",
+        "status_physics",
+        "status_render",
+    }
+    for part in ("status_physics", "status_render"):
+        row = before[part]
+        assert row["hit"][0] + row["hit"][2] - row["padding"][2] == pytest.approx(
+            row["unitRight"] + row["trailingReserve"]
+        )
+        assert row["unitX"] - row["valueTextRect"][0] - row["valueTextRect"][2] == (
+            pytest.approx(row["unitGap"])
+        )
+    directory = Path("output/status-spacing") / backend_name / f"{shell.s:g}x"
+    directory.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(
+        directory / "status-default.png"
+    )
+    spec = deepcopy(runtime.spec)
+    spec["parts"].update(
+        {
+            "status_backend": {
+                "fontFamily": "portable",
+                "textColor": "#f4b860",
+                "valueWidth": 72,
+                "paddingRight": 3,
+                "rightGap": 14,
+            },
+            "status_steps": {"valueWidth": 26, "rightGap": 4},
+            "status_delta": {"valueWidth": 24, "rightGap": 5, "unitGap": 1},
+            "status_physics": {"valueWidth": 16, "paddingRight": 2, "rightGap": 7},
+            "status_render": {"valueWidth": 34, "leftGap": 11, "rightGap": 12},
+        }
+    )
+    runtime.update_spec(spec)
+    viewer.frame()
+    after = columns()
+    for name, values in spec["parts"].items():
+        if name in after:
+            assert after[name]["rightGap"] == pytest.approx(values["rightGap"] * shell.s)
+            assert after[name]["valueRect"][2] == pytest.approx(values["valueWidth"] * shell.s)
+    physics, render = after["status_physics"], after["status_render"]
+    physics_right = physics["hit"][0] + physics["hit"][2]
+    divider = physics_right + physics["rightGap"] + shell.s / 2
+    assert physics_right - physics["unitRight"] - physics["trailingReserve"] == (
+        pytest.approx(2 * shell.s)
+    )
+    assert render["hit"][0] - divider - shell.s / 2 == pytest.approx(11 * shell.s)
+    assert any(
+        row["hit"][0] + row["hit"][2] / 2 == pytest.approx(divider)
+        for row in runtime.observed
+        if row["parts"] == ("status_separator",)
+    )
+    assert after["status_render"]["unitX"] != before["status_render"]["unitX"]
+    fixed = {name: (row["valueRect"], row["unitX"]) for name, row in after.items()}
+    viewer.frame(8)
+    assert {name: (row["valueRect"], row["unitX"]) for name, row in columns().items()} == fixed
+    spec["parts"]["status_physics"]["rightGap"] = 17
+    runtime.update_spec(spec)
+    viewer.frame()
+    changed = columns()
+    assert changed["status_render"]["hit"] == render["hit"]
+    assert changed["status_render"]["leftGap"] == render["leftGap"]
+    assert changed["status_physics"]["unitRight"] == pytest.approx(
+        physics["unitRight"] - 10 * shell.s
+    )
+    Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(
+        directory / "status-custom.png"
+    )
+
+
+def test_native_titles_and_dock_tabs_have_separate_typography(workspace):
+    from copy import deepcopy
+
+    viewer, shell = workspace, workspace.app.workspace
+    runtime = viewer.app.design
+    runtime.observe_components = True
+    shell.activate("Timeline")
+    viewer.frame(5)
+    baseline = next(row for row in runtime.observed if "dock_tabs" in row["parts"])
+    before = tuple(baseline["hit"])
+    spec = deepcopy(runtime.spec)
+    spec["parts"].update(
+        {
+            "dock_tabs": {
+                "fontSize": 20,
+                "fontFamily": "portable",
+                "paddingX": 14,
+                "paddingY": 8,
+                "gap": 9,
+            },
+            "help_window_title": {"fontSize": 22, "paddingY": 10},
+        }
+    )
+    runtime.update_spec(spec)
+    for panel in ("help", "info"):
+        viewer.panels.get(panel).open = True
+    viewer.frame(6)
+    dock = next(row for row in runtime.observed if "dock_tabs" in row["parts"])
+    assert dock["nativeFontSize"] == 20 * shell.s
+    assert dock["hit"][3] > before[3]
+    titles = {
+        row["key"]: row["hit"] for row in runtime.observed if row["key"].startswith("window-title/")
+    }
+    assert titles["window-title/Help"][3] > titles["window-title/Info"][3]
+
+
 def test_scene_shift_range_and_ctrl_toggle_use_visible_row_order(workspace):
     viewer, shell = workspace, workspace.app.workspace
     navigation = shell.navigation
@@ -113,9 +406,12 @@ def test_scene_shift_range_and_ctrl_toggle_use_visible_row_order(workspace):
     row_ids = [row[0].node_id for row in rows]
     start, end = sorted((row_ids.index(first.node_id), row_ids.index(last.node_id)))
     assert navigation.hierarchy._batch_selected == set(row_ids[start : end + 1])
-    viewer.event("add_key_event", imgui.Key.mod_ctrl, True)
+    modifier = (
+        imgui.Key.mod_super if imgui.get_io().config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    )
+    viewer.event("add_key_event", modifier, True)
     viewer.click("entity-" + str(last.node_id))
-    viewer.event("add_key_event", imgui.Key.mod_ctrl, False)
+    viewer.event("add_key_event", modifier, False)
     assert last.node_id not in navigation.hierarchy._batch_selected
 
 
@@ -253,8 +549,9 @@ def test_selection_notices_are_quiet_and_real_results_and_receipts_remain(worksp
     viewer.frame()
     receipt = viewer.app._status_notice_bounds
     caption = viewer.app._status_path_bounds
+    text_inset = viewer.app.workspace.ui.component_style("file_receipt").get("gap", 8)
     assert caption[0] - receipt[0] == pytest.approx(
-        DESIGN.file_receipt_padding * viewer.window.style_scale, abs=1
+        (DESIGN.file_receipt_padding + text_inset) * viewer.window.style_scale, abs=1
     )
 
 
@@ -331,9 +628,8 @@ def test_common_xyz_values_share_one_row_and_precision_reflows(workspace):
             )
     # Long precision reserves enough text width; narrow rows remain usable by stacking.
     assert shell.ui.vector_layout(296 * shell.s, format="%.12f").columns == 1
-    values = (0.0533713, 0.0533713, 0.00288568)
-    layout = shell.ui.vector_layout(296 * shell.s, format="%.6g", values=values)
-    minimum = shell.ui.numeric_minimum(format="%.6g", values=values)
+    layout = shell.ui.vector_layout(296 * shell.s, format="%.6g")
+    minimum = shell.ui.numeric_minimum(format="%.6g")
     assert all(field[2] >= minimum for field in layout.fields)
     assert shell.ui.vector_layout(180 * shell.s, format="%.3g").columns == 1
 
@@ -535,6 +831,9 @@ def test_assets_native_sections_and_height_field_draft(workspace):
     tr = viewer.app._panel_context().tr
     key = "section-" + tr("Model assets")
     viewer.click(key)
+    options_key = "section-" + tr("Import options")
+    _scroll_to_hit(viewer, options_key, "Assets")
+    viewer.click(options_key)
     field_key = "section-" + tr("Height-field import size")
     _scroll_to_hit(viewer, field_key, "Assets")
     viewer.click(field_key)
@@ -586,9 +885,11 @@ def test_settings_every_page_uses_native_fields_and_plot_toggles(workspace):
     panel = viewer.panels.get("plot")
     assert panel.presentation is not None
     original = panel.show_angle
-    viewer.click("plot-show_angle")
+    viewer.click("plot-channels")
+    viewer.click("plot-channels/choice/0")
     assert panel.show_angle is not original
-    viewer.click("plot-show_angle")
+    viewer.click("plot-channels")
+    viewer.click("plot-channels/choice/0")
     assert panel.show_angle is original
     viewer.click("plot-source-1")
     assert panel.source == "sensor"
@@ -598,6 +899,7 @@ def test_settings_every_page_uses_native_fields_and_plot_toggles(workspace):
 
 def test_control_layers_sensor_output_and_statistics_share_native_geometry(workspace):
     from mojive.tools.ui_runtime import _item_center
+    from mojive.ui.layers import LAYER_SECTIONS
     from mojive.ui.workspace.design import DESIGN
 
     viewer, shell = workspace, workspace.app.workspace
@@ -621,9 +923,14 @@ def test_control_layers_sensor_output_and_statistics_share_native_geometry(works
     assert viewer.app.viewport_layers.gizmos is not original
     viewer.click("layer-gizmos")
     assert viewer.app.viewport_layers.gizmos is original
-    for first, second in pairwise(("viewport_ui", "gizmos", "selection", "helpers")):
-        a, b = shell.ui.hits["layer-" + first], shell.ui.hits["layer-" + second]
-        assert b[1] - a[1] - a[3] == pytest.approx(DESIGN.row_gap * shell.s, abs=1)
+    for _title, controls in LAYER_SECTIONS:
+        for (first, _), (second, _) in pairwise(controls):
+            a, b = shell.ui.hits["layer-" + first], shell.ui.hits["layer-" + second]
+            assert b[1] - a[1] - a[3] == pytest.approx(DESIGN.row_gap * shell.s, abs=1)
+    for (_, previous), (_, following) in pairwise(LAYER_SECTIONS):
+        a = shell.ui.hits["layer-" + previous[-1][0]]
+        b = shell.ui.hits["layer-" + following[0][0]]
+        assert b[1] - a[1] - a[3] > DESIGN.row_gap * shell.s
     shell.activate("Sensors")
     viewer.frame()
     sensor = viewer.panels.get("sensors")
@@ -716,6 +1023,15 @@ def test_native_settings_numeric_preview_reset_and_shared_color_popup(workspace)
     assert "##collision_color-picker" in shell.ui.hits
     viewer.click("##collision_color-format-2")
     assert "##collision_colorR" in shell.ui.hits
+    stack = imgui.get_current_context().open_popup_stack
+    popup = stack[len(stack) - 1].window
+    viewport = imgui.get_main_viewport()
+    assert popup.pos.y + popup.size.y <= viewport.work_pos.y + viewport.work_size.y
+    for action in ("cancel", "done"):
+        x, y, w, h = shell.ui.hits["##collision_color-" + action]
+        clip = popup.inner_clip_rect
+        assert clip.min.x <= x < x + w <= clip.max.x + 1
+        assert clip.min.y <= y < y + h <= clip.max.y + 1
     x, y, w, h = shell.ui.hits["##collision_colorR"]
     viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
     viewer.event("add_mouse_button_event", 0, True)
@@ -728,6 +1044,15 @@ def test_native_settings_numeric_preview_reset_and_shared_color_popup(workspace)
     assert viewer.backend.get_geometry_style().collision_color == pytest.approx(original_color)
     viewer.click("##collision_color-swatch")
     viewer.click("##collision_color-format-2")
+    x, y, w, h = shell.ui.hits["##collision_colorR"]
+    viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
+    viewer.event("add_mouse_button_event", 0, True)
+    for step in range(1, 4):
+        viewer.event("add_mouse_pos_event", x + w / 2 - step * 10, y + h / 2)
+    viewer.event("add_mouse_button_event", 0, False)
+    viewer.click("##collision_color-original")
+    assert viewer.backend.get_geometry_style().collision_color == pytest.approx(original_color)
+    assert "##collision_color-picker" in shell.ui.hits
     x, y, w, h = shell.ui.hits["##collision_colorR"]
     viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
     viewer.event("add_mouse_button_event", 0, True)

@@ -172,13 +172,16 @@ def oblique_axis_view_directions(
     eye_offset,
     fallback,
     angle_degrees: float,
+    *,
+    marker_directions=(),
 ) -> tuple[np.ndarray, ...]:
     """Return nearby elevated views that keep a rotation axis readable.
 
     Preserve the current azimuth whenever it already gives the joint useful
     depth. Only clamp views that are nearly axial or edge-on, then offer small
     neighboring turns for the one-shot occlusion check. This avoids snapping
-    every focus request to one of four global ISO-like quadrants.
+    every focus request to one of four global ISO-like quadrants. Optional
+    hinge-plane marker directions also keep dial ticks clear of the axis.
     """
 
     minimum_angle = float(np.clip(angle_degrees, 0.0, 45.0))
@@ -224,6 +227,7 @@ def oblique_axis_view_directions(
     if not scored:
         return (elevated,)
     scored.sort(key=lambda item: item[0])
+    scored = _marker_clear_focus_views(scored, normal, marker_directions)
     candidates: list[np.ndarray] = []
     minimum_separation = float(np.cos(np.deg2rad(10.0)))
     for _turn, candidate in scored:
@@ -233,6 +237,34 @@ def oblique_axis_view_directions(
         if len(candidates) >= 9:
             break
     return tuple(candidates)
+
+
+def _marker_clear_focus_views(scored, normal, marker_directions):
+    markers = np.asarray(marker_directions, np.float64).reshape(-1, 3)
+    markers = markers[np.isfinite(markers).all(axis=1)]
+    markers = markers - (markers @ normal)[:, None] * normal
+    lengths = np.linalg.norm(markers, axis=1)
+    markers = markers[lengths > 1e-9] / lengths[lengths > 1e-9, None]
+    if not len(markers):
+        return scored
+
+    directions = np.asarray([direction for _turn, direction in scored])
+    perpendicular = np.cross(normal, directions)
+    lengths = np.linalg.norm(perpendicular, axis=1)
+    perpendicular /= np.maximum(lengths[:, None], 1e-9)
+    # Distance to the projected axis, in unforeshortened dial-radius units.
+    # This is independent of screen roll and runs only on a focus request.
+    clearance = np.min(np.abs(perpendicular @ markers.T), axis=1)
+    angles = np.arccos(np.clip(1.0 - np.asarray([turn for turn, _ in scored]), -1, 1))
+    nearby = angles <= angles[0] + np.deg2rad(25.0) + 1e-9
+    selected = nearby & (clearance >= 0.2 - 1e-6)
+    if not np.any(selected):
+        # Prefer a stable optimum over repeatedly chasing a neighborhood edge
+        # when dense ticks cannot all clear the axis from a nearby direction.
+        selected = nearby & (clearance >= float(np.max(clearance)) - 1e-6)
+        if not np.any(selected):
+            return scored[:1]
+    return [item for item, keep in zip(scored, selected, strict=True) if keep]
 
 
 def elevated_focus_view_direction(

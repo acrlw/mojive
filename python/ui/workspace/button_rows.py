@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.workspace.component_layout import control_frame_size, control_size, flow_layout
 from mojive.ui.workspace.component_style import budget_margins
 from mojive.ui.workspace.design import DESIGN
@@ -18,6 +18,7 @@ class ButtonRowGeometry:
     rectangles: tuple[Rect, ...]
 
 
+@part_scope("button_row")
 def measure_button_row(ui, available, labels):
     """Return relative frames for the same styles used by the production buttons."""
     scale, row = ui.s, ui.component_style("button_row")
@@ -71,6 +72,7 @@ def measure_button_row(ui, available, labels):
     )
 
 
+@part_scope("button_row")
 def draw_button_row(ui, key, labels, enabled=None, *, available=None):
     pos = imgui.get_cursor_screen_pos()
     available = imgui.calc_item_width() if available is None else available

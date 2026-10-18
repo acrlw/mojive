@@ -10,6 +10,7 @@ from mojive.geometry2d.curves import (
     CURVE_TOLERANCE,
     _ellipse_advance,
     _ellipse_frame,
+    capsule_end_padding,
     circular_stroke_mesh,
     clip_polygon_rect,
     offset_closed_path,
@@ -22,6 +23,29 @@ from mojive.geometry2d.curves import (
     turn_curvature,
 )
 from tests.curve_assertions import assert_paths_close, distance_to_path
+
+
+@pytest.mark.parametrize("smoothing", (0.0, 0.16, 0.382, 0.618, 1.0))
+@pytest.mark.parametrize("aspect", (1.0, 1.05, 1.5, 2.25, 4.0))
+def test_capsule_optical_padding_matches_the_fitted_contour(smoothing, aspect):
+    from mojive.tools.ui_capsule_geometry import end_radii
+
+    width, height = 52 * aspect, 52
+    padding = capsule_end_padding(width, height, smoothing)
+    assert 26 <= padding <= width / 2
+    assert capsule_end_padding(height, width, smoothing) == padding
+    assert capsule_end_padding(width * 2.25, height * 2.25, smoothing) == pytest.approx(
+        padding * 2.25
+    )
+    path = smooth_capsule_points(0, 0, width, height, smoothing, tolerance=26 / 26000)
+    assert end_radii(path, (padding, 26), samples=721).mean() == pytest.approx(26, abs=0.02)
+
+
+def test_capsule_optical_padding_handles_empty_and_circular_bounds():
+    assert capsule_end_padding(0, 24) == 0
+    assert capsule_end_padding(24, -1) == 0
+    assert capsule_end_padding(54, 24, 0) == 12
+    assert capsule_end_padding(24, 24, 1) == 12
 
 
 @pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))

@@ -9,7 +9,6 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.render.backend import RenderFlag
 from mojive.types import ContactStyle
-from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.panels import (
     PanelContext,
     pointer_hint,
@@ -21,7 +20,7 @@ from mojive.ui.pointer_bindings import PointerAction
 
 def draw(panel, ctx: PanelContext) -> None:
     imgui.text(ctx.tr("Geometry view"))
-    draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme, combo=panel._combo)
+    panel._geometry_view(ctx)
     geometry_style(panel, ctx)
     contact_style(panel, ctx)
     panel._visual_groups(ctx)
@@ -78,7 +77,7 @@ def contact_style(panel, ctx: PanelContext) -> None:
         imgui.end_disabled()
         if changed:
             style = replace(style, color=tuple(color))
-        imgui.set_item_tooltip(t("Island visualization overrides contact colors."))
+        panel._tooltip(t("Island visualization overrides contact colors."))
         panel._property(t("Size"))
         changed, scale = panel._slider_float(
             "##contact_scale", style.scale, 0.1, 10, "%.2fx", imgui.SliderFlags_.always_clamp
@@ -197,7 +196,9 @@ def bvh_depth(panel, ctx: PanelContext) -> None:
         if hovered and pointer_pressed(ctx, PointerAction.VALUE_RESET):
             changed, depth = True, 0
         if hovered:
-            imgui.set_tooltip(pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")))
+            panel._tooltip(
+                pointer_hint(ctx, PointerAction.VALUE_RESET, ctx.tr("Reset")), hovered=True
+            )
         if changed:
             backend.set_bvh_depth(depth)
         panel._end_properties()

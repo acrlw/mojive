@@ -9,7 +9,7 @@ from mojive.design.consumer_support import (
     field_condition,
 )
 from mojive.design.runtime import PART_METRICS
-from mojive.design.specification import component_catalog
+from mojive.design.specification import SCHEMA, component_catalog
 
 
 def native_consumers(catalog=None):
@@ -27,10 +27,37 @@ def native_consumers(catalog=None):
                 if field in catalog.get(part, {}).get("fields", {})
             }
         )
+    for part, definition in catalog.items():
+        if "statusKey" in definition:
+            result[part] = {
+                field: [
+                    {
+                        "source": "ui/workspace/status_components.py",
+                        "description": "生产指标独立布局",
+                    }
+                ]
+                for field in definition["fields"]
+            }
+        base = definition.get("basePart")
+        if base is not None:
+            result[part] = {field: list(rows) for field, rows in result.get(base, {}).items()}
+        for kind in definition.get("appearance", ()):
+            for field in SCHEMA["componentAppearance"][kind]:
+                result.setdefault(part, {}).setdefault(
+                    field,
+                    [
+                        {
+                            "source": "ui/workspace/widgets.py",
+                            "description": "组件分组文字与图标绘制",
+                        }
+                    ],
+                )
     for part in UNAVAILABLE_PARTS:
         result.pop(part, None)
     for part, field in UNAVAILABLE_FIELDS:
         result.get(part, {}).pop(field, None)
+    # Search keeps the serialized legacy field, but its painter owns a capsule.
+    result.get("search", {}).pop("radius", None)
     return result
 
 
@@ -38,7 +65,7 @@ def native_consumers(catalog=None):
 def native_support():
     catalog = component_catalog()
     consumers = native_consumers(catalog)
-    return {
+    support = {
         part: {
             "label": definition["label"],
             "fields": {
@@ -59,3 +86,10 @@ def native_support():
         }
         for part, definition in catalog.items()
     }
+    support["search"]["fields"]["radius"].update(
+        status="derived",
+        nativeLabel="随高度计算",
+        description=catalog["search"]["fields"]["radius"]["description"],
+        condition="固定胶囊形；旧圆角值保留，但不独立参与绘制。",
+    )
+    return support

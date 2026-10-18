@@ -292,7 +292,11 @@
     "sample": {
       "source": "primitives",
       "selector": ".button:not(.icon-button):not(.menu-item):not([role=tab]):not(.menu-trigger):not(.type-filter)"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "icon_button",
@@ -517,7 +521,10 @@
     "sample": {
       "source": "primitives",
       "selector": ".icon-button"
-    }
+    },
+    "appearance": [
+      "icon"
+    ]
   },
   {
     "id": "input_text",
@@ -766,7 +773,10 @@
     "sample": {
       "source": "primitives",
       "selector": "input[type=text]:not(.source-editor)"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "input_number",
@@ -1014,7 +1024,10 @@
     "sample": {
       "source": "primitives",
       "selector": "input[type=number]"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "select",
@@ -1262,7 +1275,10 @@
     "sample": {
       "source": "primitives",
       "selector": "select"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "select_option",
@@ -1556,7 +1572,11 @@
     "sample": {
       "label": "简体中文",
       "icon": "check"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "select_popup",
@@ -1639,7 +1659,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 8,
         "css": [
           "padding-left",
           "padding-right"
@@ -1651,7 +1671,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 6,
+        "default": 8,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -1663,7 +1683,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 14,
         "css": [
           "border-radius"
         ]
@@ -1804,6 +1824,16 @@
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "surfaceColor": {
+        "label": "表面颜色",
+        "type": "color",
+        "default": "inherit",
+        "css": [
+          "background-color"
+        ],
+        "group": "颜色与状态",
+        "description": "继承所在表面角色；独立覆盖只改变此部件的底色。"
       }
     },
     "sample": {
@@ -1813,7 +1843,10 @@
       "kind": "column",
       "establishOnEdit": true,
       "normalizeMarginsOnEdit": true
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "textarea",
@@ -2011,7 +2044,10 @@
     "sample": {
       "source": "primitives",
       "selector": "textarea"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "range",
@@ -2270,7 +2306,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "form_row",
@@ -2461,7 +2500,10 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "form_label",
@@ -2581,7 +2623,128 @@
     "sample": {
       "source": "settings",
       "selector": ".native-label"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
+  },
+  {
+    "id": "control_metadata",
+    "label": "控制元数据",
+    "category": "表单与分组",
+    "selectors": [],
+    "fields": {
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 1,
+        "default": 12,
+        "css": [
+          "font-size"
+        ]
+      },
+      "textAlign": {
+        "label": "文字对齐",
+        "type": "select",
+        "default": "left",
+        "choices": [
+          "left",
+          "center",
+          "right"
+        ],
+        "choiceLabels": {
+          "left": "靠左",
+          "center": "居中",
+          "right": "靠右"
+        },
+        "css": [
+          "text-align"
+        ]
+      },
+      "lineHeight": {
+        "label": "固定行高",
+        "type": "number",
+        "min": 8,
+        "max": 100,
+        "step": 1,
+        "default": 18,
+        "css": [
+          "line-height"
+        ],
+        "condition": {
+          "field": "lineHeightMode",
+          "value": "fixed"
+        }
+      },
+      "marginLeft": {
+        "label": "左外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-left"
+        ]
+      },
+      "marginRight": {
+        "label": "右外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-right"
+        ]
+      },
+      "marginTop": {
+        "label": "上外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-top"
+        ]
+      },
+      "marginBottom": {
+        "label": "下外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-bottom"
+        ]
+      },
+      "lineHeightMode": {
+        "label": "行高方式",
+        "type": "select",
+        "default": "auto",
+        "choices": [
+          "auto",
+          "fixed"
+        ],
+        "choiceLabels": {
+          "auto": "随字体",
+          "fixed": "固定"
+        },
+        "special": "lineHeightMode"
+      }
+    },
+    "sample": {
+      "source": "control",
+      "selector": ".control-metadata"
+    },
+    "appearance": [
+      "text"
+    ],
+    "previewArea": "控制"
   },
   {
     "id": "input_shell",
@@ -2804,7 +2967,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "vector_row",
@@ -2978,7 +3144,10 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "vector_group",
@@ -3285,7 +3454,10 @@
     "sample": {
       "source": "inspector",
       "selector": ".axis-field"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "section",
@@ -3386,7 +3558,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 2,
+        "default": 6,
         "css": [
           "padding-left",
           "padding-right"
@@ -3589,7 +3761,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "section_body",
@@ -3755,7 +3931,14 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "button_row",
@@ -3981,7 +4164,14 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "badge",
@@ -4170,7 +4360,10 @@
     "sample": {
       "source": "sensor",
       "selector": ".tag"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "notice",
@@ -4391,7 +4584,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "empty",
@@ -4619,7 +4816,11 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "stat_row",
@@ -4853,7 +5054,10 @@
     "layoutSpacing": {
       "kind": "row",
       "normalizeDistributionOnEdit": true
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "data_list",
@@ -5090,7 +5294,10 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "table",
@@ -5286,7 +5493,10 @@
     "sample": {
       "source": "statistics",
       "selector": ".pass-table"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "separator",
@@ -5394,7 +5604,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 0,
+        "default": 14,
         "css": [
           "border-radius"
         ]
@@ -5454,6 +5664,16 @@
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "surfaceColor": {
+        "label": "表面颜色",
+        "type": "color",
+        "default": "inherit",
+        "css": [
+          "background-color"
+        ],
+        "group": "颜色与状态",
+        "description": "继承所在表面角色；独立覆盖只改变此部件的底色。"
       }
     },
     "sample": {
@@ -5490,7 +5710,9 @@
         "min": 8,
         "max": 48,
         "step": 1,
-        "default": 14,
+        "default": {
+          "token": "title_font_size"
+        },
         "css": [
           "font-size"
         ]
@@ -5706,7 +5928,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "inspector_header",
@@ -5951,7 +6177,12 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "panel_body",
@@ -6168,7 +6399,11 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "tabs",
@@ -6350,7 +6585,14 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "tab"
+    ]
   },
   {
     "id": "tab",
@@ -6641,7 +6883,11 @@
     "sample": {
       "source": "timeline",
       "selector": ".tab-strip>.button"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "segment",
@@ -6824,7 +7070,14 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "filter",
@@ -6891,7 +7144,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 5,
+        "default": 8,
         "css": [
           "gap"
         ]
@@ -7113,7 +7366,11 @@
     "sample": {
       "source": "scene",
       "selector": ".type-filters .type-filter"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "search",
@@ -7173,7 +7430,8 @@
         ]
       },
       "radius": {
-        "label": "圆角",
+        "label": "胶囊圆角（兼容旧值）",
+        "description": "搜索框始终保持胶囊形，圆角由实际绘制高度自动计算，不跟随父容器圆角。旧值仅保留以兼容已有设计文件，不独立参与绘制。",
         "type": "number",
         "min": 0,
         "max": 80,
@@ -7356,7 +7614,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "tree_row",
@@ -7565,7 +7827,14 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "tree_label"
+    ]
   },
   {
     "id": "tree_label",
@@ -7811,12 +8080,43 @@
         "css": [
           "align-items"
         ]
+      },
+      "widthMode": {
+        "label": "宽度模式",
+        "type": "select",
+        "choices": [
+          "auto",
+          "fixed"
+        ],
+        "choiceLabels": {
+          "auto": "自动",
+          "fixed": "固定"
+        },
+        "default": "auto",
+        "special": "widthMode"
+      },
+      "width": {
+        "label": "固定宽度",
+        "type": "number",
+        "min": 16,
+        "max": 900,
+        "step": 1,
+        "default": 160,
+        "special": "width",
+        "condition": {
+          "field": "widthMode",
+          "value": "fixed"
+        }
       }
     },
     "sample": {
       "source": "scene",
       "selector": ".entity-row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "tree_expander",
@@ -8026,7 +8326,10 @@
     "sample": {
       "source": "scene",
       "selector": ".tree-expander"
-    }
+    },
+    "appearance": [
+      "icon"
+    ]
   },
   {
     "id": "joint",
@@ -8219,6 +8522,20 @@
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "columnGap": {
+        "label": "横向等间距（列距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "gap"
+        },
+        "css": [
+          "column-gap"
+        ],
+        "group": "边距与间距"
       }
     },
     "sample": {
@@ -8227,7 +8544,14 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "range_number",
@@ -8343,7 +8667,10 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "material",
@@ -8609,7 +8936,14 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "sensor",
@@ -8625,7 +8959,7 @@
         "min": 24,
         "max": 160,
         "step": 1,
-        "default": 28,
+        "default": 40,
         "css": [
           "min-height"
         ]
@@ -8848,7 +9182,7 @@
         "min": 8,
         "max": 32,
         "step": 1,
-        "default": 14,
+        "default": 12,
         "css": [
           "font-size"
         ],
@@ -8860,7 +9194,7 @@
         "min": 8,
         "max": 40,
         "step": 1,
-        "default": 14,
+        "default": 18,
         "css": [
           "font-size"
         ],
@@ -8877,6 +9211,20 @@
           "column-gap"
         ],
         "group": "边距与间距"
+      },
+      "rowGap": {
+        "label": "纵向等间距（行距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "gap"
+        },
+        "css": [
+          "row-gap"
+        ],
+        "group": "边距与间距"
       }
     },
     "sample": {
@@ -8885,7 +9233,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "settings_layout",
@@ -8896,13 +9248,13 @@
     ],
     "fields": {
       "navWidth": {
-        "label": "导航栏宽度",
+        "label": "导航栏默认宽度",
         "type": "number",
-        "min": 100,
-        "max": 400,
+        "min": 0,
+        "max": 600,
         "step": 1,
-        "default": 180,
-        "special": "settingsColumns"
+        "default": 0,
+        "description": "设置导航栏未单独调整宽度时使用此值；0 按字体、图标和边距自动计算。与窗口宽度及两列间距独立。"
       },
       "gap": {
         "label": "内容间距",
@@ -8993,6 +9345,17 @@
           "column-gap"
         ],
         "group": "边距与间距"
+      },
+      "windowWidth": {
+        "label": "设置窗口宽度",
+        "type": "number",
+        "min": 0,
+        "max": 2400,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "尺寸与形状",
+        "description": "0 保留手动窗口宽度；正值实时设置整个设置窗口的宽度，包含标题、导航和内容区。恢复 0 时还原调整前的手动宽度；超出可用视口时自动限制。"
       }
     },
     "sample": {
@@ -9001,7 +9364,8 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "selectionScope": "group"
   },
   {
     "id": "settings_nav",
@@ -9028,7 +9392,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 0,
+        "default": 4,
         "css": [
           "padding-left",
           "padding-right"
@@ -9040,7 +9404,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 0,
+        "default": 4,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -9052,7 +9416,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 10,
         "css": [
           "border-radius"
         ]
@@ -9176,6 +9540,20 @@
           "column-gap"
         ],
         "group": "边距与间距"
+      },
+      "navWidth": {
+        "label": "导航栏宽度",
+        "type": "number",
+        "min": 0,
+        "max": 600,
+        "step": 1,
+        "default": {
+          "part": "settings_layout",
+          "field": "navWidth"
+        },
+        "css": [],
+        "group": "尺寸与形状",
+        "description": "包含整列导航的内边距和外边距；0 自动计算。正值在宽窗口和窄窗口中都实时生效，右侧设置内容随导航列宽移动；不改变其他导航或工具栏。可用空间不足时保留设置内容区。"
       }
     },
     "sample": {
@@ -9185,7 +9563,15 @@
     "layoutSpacing": {
       "kind": "column",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "color_editor",
@@ -9212,7 +9598,7 @@
         "min": 80,
         "max": 600,
         "step": 1,
-        "default": 260,
+        "default": 160,
         "css": [
           "height"
         ],
@@ -9277,7 +9663,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 6,
         "css": [
           "row-gap"
         ],
@@ -9294,6 +9680,102 @@
           "column-gap"
         ],
         "group": "边距与间距"
+      },
+      "paddingX": {
+        "label": "左右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 8,
+        "css": [
+          "padding-left",
+          "padding-right"
+        ]
+      },
+      "paddingY": {
+        "label": "上下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 8,
+        "css": [
+          "padding-top",
+          "padding-bottom"
+        ]
+      },
+      "paddingLeft": {
+        "label": "左内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-left"
+        ]
+      },
+      "paddingRight": {
+        "label": "右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-right"
+        ]
+      },
+      "paddingTop": {
+        "label": "上内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-top"
+        ]
+      },
+      "paddingBottom": {
+        "label": "下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-bottom"
+        ]
+      },
+      "popupWidth": {
+        "label": "弹窗宽度",
+        "type": "number",
+        "min": 160,
+        "max": 800,
+        "step": 4,
+        "default": 280,
+        "special": "colorPopupWidth"
+      },
+      "radius": {
+        "label": "弹窗外圆角",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 14,
+        "css": [
+          "border-radius"
+        ]
       }
     },
     "sample": {
@@ -9302,7 +9784,14 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "controlKinds": [
+      "input_number",
+      "axis_input"
+    ],
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "rgba",
@@ -9430,7 +9919,10 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "component_list",
@@ -9661,7 +10153,13 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "component_path",
@@ -9892,7 +10390,13 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "application",
@@ -9981,7 +10485,10 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "workspace",
@@ -10289,7 +10796,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "menu_trigger",
@@ -10553,7 +11063,10 @@
     "sample": {
       "source": "application",
       "selector": ".menus .button"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "rail",
@@ -10675,7 +11188,7 @@
         "max": 100,
         "step": 1,
         "default": {
-          "field": "paddingY"
+          "field": "paddingX"
         },
         "css": [
           "padding-bottom"
@@ -10736,6 +11249,17 @@
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "radius": {
+        "label": "Outer corner target",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 16,
+        "css": [
+          "border-radius"
+        ]
       }
     },
     "sample": {
@@ -10744,7 +11268,11 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "viewport_toolbar",
@@ -10771,7 +11299,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 3,
+        "default": 4,
         "css": [
           "padding-left",
           "padding-right"
@@ -10946,7 +11474,15 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "transport",
@@ -10962,7 +11498,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 4,
+        "default": 6,
         "css": [
           "padding-left",
           "padding-right"
@@ -10986,7 +11522,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 12,
         "css": [
           "border-radius"
         ]
@@ -11143,6 +11679,43 @@
         ],
         "group": "边距与间距",
         "target": "> .transport-main"
+      },
+      "separatorThickness": {
+        "label": "分隔线厚度（0 隐藏）",
+        "type": "number",
+        "min": 0,
+        "max": 8,
+        "step": 0.5,
+        "default": 1,
+        "group": "分隔线",
+        "description": "Divider thickness; zero removes the divider and restores ordinary item spacing."
+      },
+      "separatorInset": {
+        "label": "分隔线端点内距",
+        "type": "number",
+        "min": 0,
+        "max": 40,
+        "step": 1,
+        "default": 6,
+        "group": "分隔线",
+        "description": "Inset at both ends of the divider inside the adjacent tool slots."
+      },
+      "separatorGap": {
+        "label": "分隔线两侧间距",
+        "type": "number",
+        "min": 0,
+        "max": 40,
+        "step": 1,
+        "default": 6,
+        "group": "分隔线",
+        "description": "Clear space between the divider and each neighboring control."
+      },
+      "separatorColor": {
+        "label": "分隔线颜色",
+        "type": "color",
+        "default": "#FFFFFF2E",
+        "group": "分隔线",
+        "description": "Color of this toolbar group divider."
       }
     },
     "sample": {
@@ -11152,7 +11725,12 @@
     "layoutSpacing": {
       "kind": "row",
       "target": "> .transport-main"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "toolbox",
@@ -11203,7 +11781,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 10,
         "css": [
           "border-radius"
         ]
@@ -11345,6 +11923,43 @@
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "separatorThickness": {
+        "label": "分隔线厚度（0 隐藏）",
+        "type": "number",
+        "min": 0,
+        "max": 8,
+        "step": 0.5,
+        "default": 1,
+        "group": "分隔线",
+        "description": "Divider thickness; zero removes the divider and restores ordinary item spacing."
+      },
+      "separatorInset": {
+        "label": "分隔线端点内距",
+        "type": "number",
+        "min": 0,
+        "max": 40,
+        "step": 1,
+        "default": 6,
+        "group": "分隔线",
+        "description": "Inset at both ends of the divider inside the adjacent tool slots."
+      },
+      "separatorGap": {
+        "label": "分隔线两侧间距",
+        "type": "number",
+        "min": 0,
+        "max": 40,
+        "step": 1,
+        "default": 6,
+        "group": "分隔线",
+        "description": "Clear space between the divider and each neighboring control."
+      },
+      "separatorColor": {
+        "label": "分隔线颜色",
+        "type": "color",
+        "default": "#FFFFFF2E",
+        "group": "分隔线",
+        "description": "Color of this toolbar group divider."
       }
     },
     "sample": {
@@ -11353,7 +11968,11 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "nav_widget",
@@ -11401,7 +12020,11 @@
     "sample": {
       "source": "application",
       "selector": ".nav-widget"
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "camera_preview",
@@ -11428,7 +12051,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 14,
         "css": [
           "border-radius"
         ]
@@ -11547,7 +12170,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 6,
+        "default": 8,
         "css": [
           "padding-left",
           "padding-right"
@@ -11559,7 +12182,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 3,
+        "default": 8,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -11750,7 +12373,12 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "camera_body",
@@ -11878,7 +12506,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 8,
         "css": [
           "padding-left",
           "padding-right"
@@ -11890,7 +12518,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 6,
+        "default": 8,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -11913,7 +12541,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 14,
         "css": [
           "border-radius"
         ]
@@ -11944,7 +12572,9 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": {
+          "field": "paddingX"
+        },
         "css": [
           "padding-left"
         ]
@@ -11955,7 +12585,9 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": {
+          "field": "paddingX"
+        },
         "css": [
           "padding-right"
         ]
@@ -12089,7 +12721,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "file_receipt",
@@ -12131,7 +12767,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 4,
         "css": [
           "padding-left",
           "padding-right"
@@ -12143,7 +12779,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 4,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -12155,9 +12791,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": {
-          "token": "container_radius"
-        },
+        "default": 10,
         "css": [
           "border-radius"
         ]
@@ -12333,7 +12967,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "timeline_toolbar",
@@ -12546,7 +13183,15 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "timeline_model_group",
@@ -12639,7 +13284,64 @@
     "sample": {
       "source": "timeline",
       "selector": ""
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
+  },
+  {
+    "id": "timeline_body",
+    "label": "Timeline content surface",
+    "category": "时间轴与输出",
+    "selectors": [
+      ".native-timeline-body"
+    ],
+    "fields": {
+      "paddingX": {
+        "label": "Horizontal content inset",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 4,
+        "css": [
+          "padding-left",
+          "padding-right"
+        ]
+      },
+      "paddingY": {
+        "label": "Vertical content inset",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 4,
+        "css": [
+          "padding-top",
+          "padding-bottom"
+        ]
+      },
+      "radius": {
+        "label": "Outer corner radius",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": {
+          "token": "container_radius"
+        },
+        "css": [
+          "border-radius"
+        ]
+      }
+    },
+    "sample": {
+      "source": "timeline",
+      "selector": ".native-timeline-body"
+    },
+    "selectionScope": "group"
   },
   {
     "id": "timeline_sheet",
@@ -12743,6 +13445,15 @@
         "step": 1,
         "default": 8,
         "group": "边距与间距"
+      },
+      "columnGap": {
+        "label": "标签与时间轴间距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 12,
+        "group": "边距与间距"
       }
     },
     "sample": {
@@ -12753,7 +13464,12 @@
       "kind": "column",
       "establishOnEdit": true,
       "normalizeMarginsOnEdit": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "timeline_ruler",
@@ -12875,7 +13591,11 @@
     "sample": {
       "source": "timeline",
       "selector": ".native-ruler"
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "timeline_lane",
@@ -12985,7 +13705,10 @@
     "sample": {
       "source": "timeline",
       "selector": ".native-lane"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "lane_label",
@@ -13222,7 +13945,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "timeline_key",
@@ -13438,7 +14165,10 @@
     "sample": {
       "source": "timeline",
       "selector": ".native-key"
-    }
+    },
+    "appearance": [
+      "icon"
+    ]
   },
   {
     "id": "timeline_details",
@@ -13692,7 +14422,12 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "output_layout",
@@ -13716,7 +14451,12 @@
         "step": 1,
         "default": 8
       }
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "output_toolbar",
@@ -13949,7 +14689,15 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "output_row",
@@ -14208,7 +14956,12 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "menu",
@@ -14291,7 +15044,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 6,
         "css": [
           "padding-left",
           "padding-right"
@@ -14315,7 +15068,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 8,
+        "default": 12,
         "css": [
           "border-radius"
         ]
@@ -14451,11 +15204,21 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 6,
+        "default": 2,
         "css": [
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "surfaceColor": {
+        "label": "表面颜色",
+        "type": "color",
+        "default": "inherit",
+        "css": [
+          "background-color"
+        ],
+        "group": "颜色与状态",
+        "description": "继承所在表面角色；独立覆盖只改变此部件的底色。"
       }
     },
     "sample": {
@@ -14466,7 +15229,10 @@
       "kind": "column",
       "establishOnEdit": true,
       "normalizeMarginsOnEdit": true
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "menu_item",
@@ -14504,7 +15270,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 6,
         "css": [
           "padding-left",
           "padding-right"
@@ -14528,7 +15294,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 12,
+        "default": 6,
         "css": [
           "gap"
         ]
@@ -14749,7 +15515,11 @@
     "sample": {
       "source": "menu",
       "selector": ".menu-item"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "dialog",
@@ -14899,7 +15669,10 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "dialog_header",
@@ -15147,7 +15920,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "dialog_body",
@@ -15351,7 +16127,10 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "dialog_footer",
@@ -15507,7 +16286,11 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
   },
   {
     "id": "settings_page",
@@ -15722,7 +16505,14 @@
       "kind": "column",
       "establishOnEdit": true,
       "normalizeMarginsOnEdit": true
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "button"
+    ]
   },
   {
     "id": "statusbar",
@@ -15964,7 +16754,12 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "color_input",
@@ -16278,6 +17073,35 @@
         "css": [
           "margin-bottom"
         ]
+      },
+      "barWidth": {
+        "label": "色相与透明度条宽",
+        "type": "number",
+        "min": 8,
+        "max": 40,
+        "step": 1,
+        "default": 14,
+        "special": "colorBarWidth"
+      },
+      "columnGap": {
+        "label": "色条间距",
+        "type": "number",
+        "min": 0,
+        "max": 40,
+        "step": 1,
+        "default": 6,
+        "css": [
+          "column-gap"
+        ]
+      },
+      "minimumHeight": {
+        "label": "最小选色高度",
+        "type": "number",
+        "min": 80,
+        "max": 400,
+        "step": 4,
+        "default": 160,
+        "special": "colorMinimumHeight"
       }
     },
     "sample": {
@@ -16545,7 +17369,10 @@
     "sample": {
       "source": "receipt",
       "selector": ".file-receipt .reference-link"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "type_filters",
@@ -16603,7 +17430,15 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "filter"
+    ]
   },
   {
     "id": "menu_bar",
@@ -16644,7 +17479,15 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "menu_trigger"
+    ]
   },
   {
     "id": "material_list",
@@ -16677,6 +17520,135 @@
           "row-gap"
         ],
         "group": "边距与间距"
+      },
+      "paddingX": {
+        "label": "左右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "padding-left",
+          "padding-right"
+        ]
+      },
+      "paddingY": {
+        "label": "上下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "padding-top",
+          "padding-bottom"
+        ]
+      },
+      "paddingLeft": {
+        "label": "左内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-left"
+        ]
+      },
+      "paddingRight": {
+        "label": "右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-right"
+        ]
+      },
+      "paddingTop": {
+        "label": "上内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-top"
+        ]
+      },
+      "paddingBottom": {
+        "label": "下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-bottom"
+        ]
+      },
+      "marginLeft": {
+        "label": "左外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-left"
+        ]
+      },
+      "marginRight": {
+        "label": "右外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-right"
+        ]
+      },
+      "marginTop": {
+        "label": "上外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-top"
+        ]
+      },
+      "marginBottom": {
+        "label": "下外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-bottom"
+        ]
+      },
+      "actionGap": {
+        "label": "应用按钮上方间距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 8,
+        "description": "Space from the material list to its Apply material action."
       }
     },
     "sample": {
@@ -16685,7 +17657,12 @@
     },
     "layoutSpacing": {
       "kind": "column"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "visual_group",
@@ -16743,7 +17720,11 @@
     "layoutSpacing": {
       "kind": "row",
       "wrap": true
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "visual_group_item",
@@ -16786,7 +17767,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "panel_tools",
@@ -16845,7 +17829,262 @@
     },
     "layoutSpacing": {
       "kind": "grid"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ]
+  },
+  {
+    "id": "scene_tools",
+    "label": "场景筛选区",
+    "category": "面板与导航",
+    "selectors": [],
+    "fields": {
+      "gap": {
+        "label": "统一内容间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "gap"
+        },
+        "css": [],
+        "group": "边距与间距"
+      },
+      "rowGap": {
+        "label": "纵向等间距（行距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "rowGap"
+        },
+        "css": [],
+        "group": "边距与间距"
+      },
+      "columnGap": {
+        "label": "横向等间距（列距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "边距与间距"
+      },
+      "fontFamily": {
+        "label": "字体家族",
+        "type": "select",
+        "default": {
+          "part": "panel_tools",
+          "field": "fontFamily"
+        },
+        "choices": [
+          "inherit",
+          "system",
+          "portable",
+          "mono"
+        ],
+        "choiceLabels": {
+          "inherit": "继承全局",
+          "system": "系统无衬线",
+          "portable": "Roboto",
+          "mono": "等宽数字"
+        },
+        "description": "同类组件的字体家族；继承时保留正文、标题与数值的语义字体。",
+        "css": []
+      },
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 0.5,
+        "default": {
+          "part": "panel_tools",
+          "field": "fontSize"
+        },
+        "description": "同类组件的文字字号；组内子项继承，明确设置的专用文字组件可单独覆盖。",
+        "css": []
+      },
+      "textColor": {
+        "label": "文字颜色",
+        "type": "color",
+        "default": {
+          "part": "panel_tools",
+          "field": "textColor"
+        },
+        "inherit": true,
+        "description": "同类组件的文字颜色。inherit 保留全局语义颜色与选中、警告、禁用状态；恢复此项重新继承。",
+        "css": []
+      },
+      "iconSize": {
+        "label": "图标大小",
+        "type": "number",
+        "min": 6,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "iconSize"
+        },
+        "description": "此组内图标的统一画布尺寸，线条、点与空隙一同缩放；不改变其他组。",
+        "css": []
+      },
+      "iconColor": {
+        "label": "图标颜色",
+        "type": "color",
+        "default": {
+          "part": "panel_tools",
+          "field": "iconColor"
+        },
+        "inherit": true,
+        "description": "同类组件的图标颜色。inherit 保留图标语义色与交互状态；恢复此项重新继承。",
+        "css": []
+      }
+    },
+    "sample": {
+      "source": "scene",
+      "selector": ".panel-tools"
+    },
+    "layoutSpacing": {
+      "kind": "grid"
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "filter"
+    ]
+  },
+  {
+    "id": "pose_tools",
+    "label": "姿态筛选区",
+    "category": "面板与导航",
+    "selectors": [],
+    "fields": {
+      "gap": {
+        "label": "统一内容间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "gap"
+        },
+        "css": [],
+        "group": "边距与间距"
+      },
+      "rowGap": {
+        "label": "纵向等间距（行距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "rowGap"
+        },
+        "css": [],
+        "group": "边距与间距"
+      },
+      "fontFamily": {
+        "label": "字体家族",
+        "type": "select",
+        "default": {
+          "part": "panel_tools",
+          "field": "fontFamily"
+        },
+        "choices": [
+          "inherit",
+          "system",
+          "portable",
+          "mono"
+        ],
+        "choiceLabels": {
+          "inherit": "继承全局",
+          "system": "系统无衬线",
+          "portable": "Roboto",
+          "mono": "等宽数字"
+        },
+        "description": "同类组件的字体家族；继承时保留正文、标题与数值的语义字体。",
+        "css": []
+      },
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 0.5,
+        "default": {
+          "part": "panel_tools",
+          "field": "fontSize"
+        },
+        "description": "同类组件的文字字号；组内子项继承，明确设置的专用文字组件可单独覆盖。",
+        "css": []
+      },
+      "textColor": {
+        "label": "文字颜色",
+        "type": "color",
+        "default": {
+          "part": "panel_tools",
+          "field": "textColor"
+        },
+        "inherit": true,
+        "description": "同类组件的文字颜色。inherit 保留全局语义颜色与选中、警告、禁用状态；恢复此项重新继承。",
+        "css": []
+      },
+      "iconSize": {
+        "label": "图标大小",
+        "type": "number",
+        "min": 6,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "panel_tools",
+          "field": "iconSize"
+        },
+        "description": "此组内图标的统一画布尺寸，线条、点与空隙一同缩放；不改变其他组。",
+        "css": []
+      },
+      "iconColor": {
+        "label": "图标颜色",
+        "type": "color",
+        "default": {
+          "part": "panel_tools",
+          "field": "iconColor"
+        },
+        "inherit": true,
+        "description": "同类组件的图标颜色。inherit 保留图标语义色与交互状态；恢复此项重新继承。",
+        "css": []
+      }
+    },
+    "sample": {
+      "source": "pose",
+      "selector": ".panel-tools"
+    },
+    "layoutSpacing": {
+      "kind": "column"
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "filter"
+    ]
   },
   {
     "id": "bottom_header",
@@ -16888,7 +18127,15 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "tab"
+    ]
   },
   {
     "id": "title_actions",
@@ -16929,7 +18176,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "document_title",
@@ -16970,7 +18221,12 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "status_context",
@@ -17136,7 +18392,12 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "status_hints",
@@ -17297,7 +18558,15 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group",
+    "controlKinds": [
+      "badge"
+    ]
   },
   {
     "id": "status_metrics",
@@ -17308,28 +18577,132 @@
     ],
     "fields": {
       "gap": {
-        "label": "统一内容间距",
+        "label": "分隔线单侧默认间距",
         "type": "number",
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 24,
+        "default": 6,
         "css": [
           "gap"
         ],
-        "group": "边距与间距"
+        "group": "边距与间距",
+        "description": "各指标到分隔线的单侧默认距离；单项的左、右分隔线间距可以分别覆盖。"
       },
       "columnGap": {
-        "label": "横向等间距（列距）",
+        "label": "分隔线单侧默认间距（横向）",
         "type": "number",
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 24,
+        "default": {
+          "field": "gap"
+        },
         "css": [
           "column-gap"
         ],
-        "group": "边距与间距"
+        "group": "边距与间距",
+        "description": "分别用作每项左、右分隔线间距的默认值，不再将两侧合并后平分。"
+      },
+      "labelGap": {
+        "label": "标签与数字间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": 4,
+        "css": [],
+        "group": "数字排版"
+      },
+      "unitGap": {
+        "label": "数字与单位间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "数字排版"
+      },
+      "deltaValueWidth": {
+        "label": "Δt 数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 160,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "数字排版"
+      },
+      "physicsValueWidth": {
+        "label": "物理频率数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 160,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "数字排版"
+      },
+      "stepsValueWidth": {
+        "label": "步数数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "数字排版"
+      },
+      "timeValueWidth": {
+        "label": "时间数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "数字排版"
+      },
+      "renderValueWidth": {
+        "label": "渲染帧率数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "数字排版"
+      },
+      "tooltipPaddingX": {
+        "label": "提示左右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 48,
+        "step": 1,
+        "default": 10,
+        "css": [],
+        "group": "悬停提示"
+      },
+      "tooltipPaddingY": {
+        "label": "提示上下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 48,
+        "step": 1,
+        "default": 8,
+        "css": [],
+        "group": "悬停提示"
+      },
+      "tooltipRowGap": {
+        "label": "提示行间距",
+        "type": "number",
+        "min": 0,
+        "max": 48,
+        "step": 1,
+        "default": 6,
+        "css": [],
+        "group": "悬停提示"
       },
       "paddingX": {
         "label": "左右内边距",
@@ -17458,7 +18831,11 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "status_separator",
@@ -17537,7 +18914,8 @@
         "default": 5,
         "css": []
       }
-    }
+    },
+    "selectionScope": "group"
   },
   {
     "id": "vector_heading",
@@ -17752,7 +19130,10 @@
     "layoutSpacing": {
       "kind": "row",
       "normalizeDistributionOnEdit": true
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "time_field",
@@ -17793,7 +19174,10 @@
     },
     "layoutSpacing": {
       "kind": "row"
-    }
+    },
+    "appearance": [
+      "text"
+    ]
   },
   {
     "id": "output_list",
@@ -17836,7 +19220,12 @@
       "kind": "column",
       "establishOnEdit": true,
       "normalizeMarginsOnEdit": true
-    }
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "statistics_list",
@@ -17879,7 +19268,11 @@
       "kind": "column",
       "establishOnEdit": true,
       "normalizeMarginsOnEdit": true
-    }
+    },
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group"
   },
   {
     "id": "color_channels",
@@ -17895,7 +19288,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 0,
+        "default": 6,
         "css": [
           "gap"
         ],
@@ -17940,7 +19333,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 16,
+        "default": 12,
         "css": [
           "gap"
         ],
@@ -17952,7 +19345,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 16,
+        "default": 12,
         "css": [
           "column-gap"
         ],
@@ -17967,5 +19360,837 @@
       "kind": "row",
       "normalizeDistributionOnEdit": true
     }
+  },
+  {
+    "id": "status_backend",
+    "label": "状态栏 · 渲染后端",
+    "category": "应用与视口",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "statusKey": "backend",
+    "helpPart": "status_metrics",
+    "fields": {
+      "valueWidth": {
+        "label": "文字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "指标布局",
+        "description": "0 按当前名称和字体自动计算；正值固定文字区域宽度，过长名称显示省略号。"
+      },
+      "paddingLeft": {
+        "label": "文字左内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域左端到本项边框的距离，不改变左分隔线到本项边框的间距。"
+      },
+      "paddingRight": {
+        "label": "文字右内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域右端到本项右边框的距离。自动模式按实际短语宽度布局，末尾不保留空预算；正数自定义数字列仍保留固定列与单位预算。"
+      },
+      "leftGap": {
+        "label": "左分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "指标布局",
+        "description": "左分隔线右边缘到本项左边框的距离，只改变分隔线右侧的留白；首项控制到指标组左边缘的距离。"
+      },
+      "rightGap": {
+        "label": "右分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "本项右边框到右分隔线左边缘的距离，只改变分隔线左侧的留白；末项控制到指标组右边缘的距离。"
+      }
+    }
+  },
+  {
+    "id": "status_steps",
+    "label": "状态栏 · 仿真步数",
+    "category": "应用与视口",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "statusKey": "steps",
+    "helpPart": "status_metrics",
+    "fields": {
+      "valueWidth": {
+        "label": "数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "stepsValueWidth"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "0 按当前显示内容安排紧凑宽度，数字使用当前正文字体的等宽字位。格式预算只限制显示精度，不产生空白占位。正数固定数字列宽并保持小数点和单位锚点；标签、单位与两侧内距另计。"
+      },
+      "labelGap": {
+        "label": "标签与数字间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "labelGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": ""
+      },
+      "unitGap": {
+        "label": "数字与单位间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "unitGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "显示数字末端到单位起点的距离；步数的 k、M 等后缀紧邻数字。自动宽度不预留空数字字位或 SI 前缀。"
+      },
+      "paddingLeft": {
+        "label": "文字左内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域左端到本项边框的距离，不改变左分隔线到本项边框的间距。"
+      },
+      "paddingRight": {
+        "label": "文字右内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域右端到本项右边框的距离。自动模式按实际短语宽度布局，末尾不保留空预算；正数自定义数字列仍保留固定列与单位预算。"
+      },
+      "leftGap": {
+        "label": "左分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "左分隔线右边缘到本项左边框的距离，只改变分隔线右侧的留白；首项控制到指标组左边缘的距离。"
+      },
+      "rightGap": {
+        "label": "右分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "本项右边框到右分隔线左边缘的距离，只改变分隔线左侧的留白；末项控制到指标组右边缘的距离。"
+      }
+    }
+  },
+  {
+    "id": "status_time",
+    "label": "状态栏 · 仿真时间",
+    "category": "应用与视口",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "statusKey": "time",
+    "helpPart": "status_metrics",
+    "fields": {
+      "displayFormat": {
+        "label": "时间显示格式",
+        "type": "select",
+        "default": "seconds",
+        "choices": [
+          "seconds",
+          "clock"
+        ],
+        "choiceLabels": {
+          "seconds": "秒数（3 位小数）",
+          "clock": "时:分:秒"
+        },
+        "css": [],
+        "group": "时间格式",
+        "description": "秒数按 999.999 静态字位预算；时:分:秒按 99:59:59 预算。超过预算时显示完整科学计数法秒数，数值增长不扩展区域。显示格式不改变实际时间，悬停或右键复制完整秒数。"
+      },
+      "valueWidth": {
+        "label": "数字宽度（0 自动紧凑）",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "timeValueWidth"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "0 按当前显示内容安排紧凑宽度，数字使用当前正文字体的等宽字位。格式预算只限制显示精度，不产生空白占位。正数固定数字列宽并保持小数点和单位锚点；标签、单位与两侧内距另计。"
+      },
+      "labelGap": {
+        "label": "标签与数字间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "labelGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": ""
+      },
+      "unitGap": {
+        "label": "数字与单位间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "unitGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "显示数字末端到单位起点的距离；步数的 k、M 等后缀紧邻数字。自动宽度不预留空数字字位或 SI 前缀。"
+      },
+      "paddingLeft": {
+        "label": "文字左内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域左端到本项边框的距离，不改变左分隔线到本项边框的间距。"
+      },
+      "paddingRight": {
+        "label": "文字右内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域右端到本项右边框的距离。自动模式按实际短语宽度布局，末尾不保留空预算；正数自定义数字列仍保留固定列与单位预算。"
+      },
+      "leftGap": {
+        "label": "左分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "左分隔线右边缘到本项左边框的距离，只改变分隔线右侧的留白；首项控制到指标组左边缘的距离。"
+      },
+      "rightGap": {
+        "label": "右分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "本项右边框到右分隔线左边缘的距离，只改变分隔线左侧的留白；末项控制到指标组右边缘的距离。"
+      }
+    }
+  },
+  {
+    "id": "status_delta",
+    "label": "状态栏 · 仿真步长",
+    "category": "应用与视口",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "statusKey": "delta",
+    "helpPart": "status_metrics",
+    "fields": {
+      "valueWidth": {
+        "label": "数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "deltaValueWidth"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "0 按当前显示内容安排紧凑宽度，数字使用当前正文字体的等宽字位。格式预算只限制显示精度，不产生空白占位。正数固定数字列宽并保持小数点和单位锚点；标签、单位与两侧内距另计。"
+      },
+      "labelGap": {
+        "label": "标签与数字间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "labelGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": ""
+      },
+      "unitGap": {
+        "label": "数字与单位间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "unitGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "显示数字末端到单位起点的距离；步数的 k、M 等后缀紧邻数字。自动宽度不预留空数字字位或 SI 前缀。"
+      },
+      "paddingLeft": {
+        "label": "文字左内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域左端到本项边框的距离，不改变左分隔线到本项边框的间距。"
+      },
+      "paddingRight": {
+        "label": "文字右内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域右端到本项右边框的距离。自动模式按实际短语宽度布局，末尾不保留空预算；正数自定义数字列仍保留固定列与单位预算。"
+      },
+      "leftGap": {
+        "label": "左分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "左分隔线右边缘到本项左边框的距离，只改变分隔线右侧的留白；首项控制到指标组左边缘的距离。"
+      },
+      "rightGap": {
+        "label": "右分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "本项右边框到右分隔线左边缘的距离，只改变分隔线左侧的留白；末项控制到指标组右边缘的距离。"
+      }
+    }
+  },
+  {
+    "id": "status_physics",
+    "label": "状态栏 · 物理频率",
+    "category": "应用与视口",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "statusKey": "physics",
+    "helpPart": "status_metrics",
+    "fields": {
+      "valueWidth": {
+        "label": "数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "physicsValueWidth"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "0 按当前显示内容安排紧凑宽度，数字使用当前正文字体的等宽字位。格式预算只限制显示精度，不产生空白占位。正数固定数字列宽并保持小数点和单位锚点；标签、单位与两侧内距另计。"
+      },
+      "labelGap": {
+        "label": "标签与数字间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "labelGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": ""
+      },
+      "unitGap": {
+        "label": "数字与单位间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "unitGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "显示数字末端到单位起点的距离；步数的 k、M 等后缀紧邻数字。自动宽度不预留空数字字位或 SI 前缀。"
+      },
+      "paddingLeft": {
+        "label": "文字左内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域左端到本项边框的距离，不改变左分隔线到本项边框的间距。"
+      },
+      "paddingRight": {
+        "label": "文字右内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域右端到本项右边框的距离。自动模式按实际短语宽度布局，末尾不保留空预算；正数自定义数字列仍保留固定列与单位预算。"
+      },
+      "leftGap": {
+        "label": "左分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "左分隔线右边缘到本项左边框的距离，只改变分隔线右侧的留白；首项控制到指标组左边缘的距离。"
+      },
+      "rightGap": {
+        "label": "右分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "本项右边框到右分隔线左边缘的距离，只改变分隔线左侧的留白；末项控制到指标组右边缘的距离。"
+      }
+    }
+  },
+  {
+    "id": "status_render",
+    "label": "状态栏 · 渲染帧率",
+    "category": "应用与视口",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "statusKey": "render",
+    "helpPart": "status_metrics",
+    "fields": {
+      "valueWidth": {
+        "label": "数字区域宽度",
+        "type": "number",
+        "min": 0,
+        "max": 240,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "renderValueWidth"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "0 按当前显示内容安排紧凑宽度，数字使用当前正文字体的等宽字位。格式预算只限制显示精度，不产生空白占位。正数固定数字列宽并保持小数点和单位锚点；标签、单位与两侧内距另计。"
+      },
+      "labelGap": {
+        "label": "标签与数字间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "labelGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": ""
+      },
+      "unitGap": {
+        "label": "数字与单位间距",
+        "type": "number",
+        "min": 0,
+        "max": 32,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "unitGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "显示数字末端到单位起点的距离；步数的 k、M 等后缀紧邻数字。自动宽度不预留空数字字位或 SI 前缀。"
+      },
+      "paddingLeft": {
+        "label": "文字左内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域左端到本项边框的距离，不改变左分隔线到本项边框的间距。"
+      },
+      "paddingRight": {
+        "label": "文字右内距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "default": 2,
+        "css": [],
+        "group": "指标布局",
+        "description": "文字区域右端到本项右边框的距离。自动模式按实际短语宽度布局，末尾不保留空预算；正数自定义数字列仍保留固定列与单位预算。"
+      },
+      "leftGap": {
+        "label": "左分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "part": "status_metrics",
+          "field": "columnGap"
+        },
+        "css": [],
+        "group": "指标布局",
+        "description": "左分隔线右边缘到本项左边框的距离，只改变分隔线右侧的留白；首项控制到指标组左边缘的距离。"
+      },
+      "rightGap": {
+        "label": "右分隔线间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": 0,
+        "css": [],
+        "group": "指标布局",
+        "description": "本项右边框到右分隔线左边缘的距离，只改变分隔线左侧的留白；末项控制到指标组右边缘的距离。"
+      }
+    }
+  },
+  {
+    "id": "window_title",
+    "label": "原生窗口标题",
+    "category": "布局",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "helpPart": "panel_header",
+    "fields": {
+      "paddingX": {
+        "label": "左右内距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "token": "frame_padding_x"
+        },
+        "css": []
+      },
+      "paddingY": {
+        "label": "上下内距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "token": "frame_padding_y"
+        },
+        "css": []
+      }
+    },
+    "previewArea": "帮助"
+  },
+  {
+    "id": "dock_tabs",
+    "label": "停靠面板标签导航",
+    "category": "布局",
+    "appearance": [
+      "text"
+    ],
+    "selectionScope": "group",
+    "helpPart": "tabs",
+    "fields": {
+      "paddingX": {
+        "label": "左右内距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "token": "frame_padding_x"
+        },
+        "css": []
+      },
+      "paddingY": {
+        "label": "上下内距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "token": "frame_padding_y"
+        },
+        "css": []
+      },
+      "gap": {
+        "label": "标签间距",
+        "type": "number",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "token": "item_spacing_x"
+        },
+        "css": []
+      }
+    },
+    "previewArea": "时间轴"
+  },
+  {
+    "id": "form_popup",
+    "label": "紧凑表单弹窗",
+    "category": "菜单与对话框",
+    "selectors": [
+      ".native-form-popup"
+    ],
+    "fields": {
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 1,
+        "default": {
+          "token": "body_font_size"
+        },
+        "css": [
+          "font-size"
+        ]
+      },
+      "paddingX": {
+        "label": "左右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 8,
+        "css": [
+          "padding-left",
+          "padding-right"
+        ]
+      },
+      "paddingY": {
+        "label": "上下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 8,
+        "css": [
+          "padding-top",
+          "padding-bottom"
+        ]
+      },
+      "paddingLeft": {
+        "label": "左内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-left"
+        ]
+      },
+      "paddingRight": {
+        "label": "右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-right"
+        ]
+      },
+      "paddingTop": {
+        "label": "上内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-top"
+        ]
+      },
+      "paddingBottom": {
+        "label": "下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-bottom"
+        ]
+      },
+      "radius": {
+        "label": "圆角",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 0.1,
+        "default": 14,
+        "css": [
+          "border-radius"
+        ]
+      },
+      "rowGap": {
+        "label": "行距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 6
+      },
+      "columnGap": {
+        "label": "标签与字段间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 12
+      },
+      "groupGap": {
+        "label": "组间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 12
+      }
+    },
+    "sample": {
+      "source": "timeline",
+      "selector": ".native-form-popup"
+    },
+    "appearance": [
+      "text"
+    ],
+    "previewArea": "时间轴"
   }
 ]

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from imgui_bundle import imgui
 
-from ..layers import LAYER_LABELS, debug_layer_group
+from ..layers import LAYER_LABELS, LAYER_SECTIONS, debug_layer_group
 from . import Panel, PanelContext, themed_checkbox
 
 
@@ -20,11 +20,16 @@ class LayersPanel(Panel):
             return
         imgui.text_wrapped(ctx.tr("Choose the content visible in the viewport."))
         imgui.spacing()
-        for name, label in LAYER_LABELS:
-            changed, value = themed_checkbox(ctx.tr(label), getattr(layers, name), ctx.theme)
-            if changed:
-                layers = replace(layers, **{name: value})
-                ctx.set_viewport_layers(layers)
+        descriptions = dict(LAYER_LABELS)
+        for title, controls in LAYER_SECTIONS:
+            imgui.separator_text(ctx.tr(title))
+            for name, label in controls:
+                changed, value = themed_checkbox(ctx.tr(label), getattr(layers, name), ctx.theme)
+                if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+                    imgui.set_tooltip(ctx.tr(descriptions[name]))
+                if changed:
+                    layers = replace(layers, **{name: value})
+                    ctx.set_viewport_layers(layers)
         draw = ctx.backend.debug
         if draw is None:
             return

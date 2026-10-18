@@ -28,7 +28,7 @@ from mojive.ui.panels import (
 )
 from mojive.ui.panels.filters import _tint, node_filter_color
 from mojive.ui.panels.inspector.environment import _Environment
-from mojive.ui.panels.inspector.fields import _property_input_text
+from mojive.ui.panels.inspector.fields import _property_input_text, _property_tooltip
 from mojive.ui.panels.inspector.geometry import _Geometry
 from mojive.ui.panels.inspector.model import _Model
 from mojive.ui.panels.inspector.options import _Options
@@ -163,7 +163,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
         if node is None:
             self._transform_velocity = False
             imgui.text_disabled(ctx.tr("nothing selected"))
-            imgui.set_item_tooltip(ctx.tr("click an object in the viewport or the Hierarchy panel"))
+            _property_tooltip(ctx, ctx.tr("click an object in the viewport or the Hierarchy panel"))
             return
 
         self._name_editor(ctx, node)
@@ -314,7 +314,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
                 hint = (
                     pointer_hint(ctx, PointerAction.NAME_EDIT, ctx.tr("Rename")) if editable else ""
                 )
-                imgui.set_tooltip(node.name + ("\n" + hint if hint else ""))
+                _property_tooltip(ctx, node.name + ("\n" + hint if hint else ""), hovered=True)
         if self._rename_error:
             imgui.text_wrapped(self._rename_error)
         if inline:

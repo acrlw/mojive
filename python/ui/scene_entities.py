@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import lru_cache
 
 import numpy as np
 
-from mojive.interaction.gizmo import project, screen_constant_world_sizes, world_scale
+from mojive.interaction.gizmo import (
+    project,
+    scene_icon_paths,
+    scene_icon_triangles,
+    screen_constant_world_sizes,
+    world_scale,
+)
+from mojive.interaction.scene_icons import SCENE_ICON_SIZE_PT
 
 from .. import math3d
 from ..adapters.base import NodeType, SceneNode
@@ -16,7 +22,6 @@ from ..math3d import direction_basis
 from ..render.debugdraw import Occlusion
 from ..scene.queries import camera_for_node
 from ..types import CameraView, Light, LightType
-from .icons import production_helper_strokes
 from .theme import THEME
 
 HELPER_LAYER = "ui.scene_entities"
@@ -25,61 +30,10 @@ HELPER_COLOR = np.array((*THEME.text_disabled[:3], 0.82), np.float32)
 SELECTED_COLOR = np.array(THEME.primary_bright, np.float32)
 ANCHOR_RADIUS_PT = 6.0
 PICK_RADIUS_PT = 13.0
-CAMERA_HELPER_SIZE_PT = 24.0
-LIGHT_HELPER_SCALE_PT = 1.2
+CAMERA_HELPER_SIZE_PT = SCENE_ICON_SIZE_PT
 _CIRCLE_SEGMENTS = 48
 _SPOT_HELPER_LENGTH_PT = 180.0
 _SPOT_HELPER_RADIUS_PT = 120.0
-
-
-@lru_cache(maxsize=2)
-def _helper_path_data(
-    name: str,
-) -> tuple[np.ndarray, tuple[tuple[int, int, float, bool], ...]]:
-    """Flatten stable helper paths once so each frame performs one transform."""
-
-    points = []
-    spans = []
-    for stroke in production_helper_strokes(name):
-        start = len(points)
-        points.extend(stroke.points)
-        spans.append((start, len(points), stroke.width, stroke.closed))
-    values = np.asarray(points, np.float64)
-    values.setflags(write=False)
-    return values, tuple(spans)
-
-
-def _production_helper_geometry(
-    name: str,
-    positions: np.ndarray,
-    editor_camera: CameraView,
-    viewport_height: float,
-    ui_scale: float,
-) -> tuple[tuple[np.ndarray, float, bool], ...]:
-    """Project cached, optically placed UI helper paths into the scene."""
-
-    positions = np.asarray(positions, np.float64).reshape(-1, 3)
-    if not len(positions):
-        return ()
-    pixel_world = screen_constant_world_sizes(
-        editor_camera,
-        positions,
-        viewport_height,
-        float(ui_scale),
-        visible_only=True,
-    )
-    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
-    right, up = view_rotation[0], view_rotation[1]
-    points, spans = _helper_path_data(name)
-    offsets = (
-        points[None, :, 0, None] * right[None, None, :]
-        - points[None, :, 1, None] * up[None, None, :]
-    )
-    world = (positions[:, None, :] + pixel_world[:, None, None] * offsets).astype(np.float32)
-    return tuple(
-        (world[:, start:end], width * float(ui_scale), closed)
-        for start, end, width, closed in spans
-    )
 
 
 @dataclass
@@ -194,19 +148,23 @@ class SceneEntityHelpers:
         if not helpers:
             return
         eyes = np.asarray([view.eye for _, view, _ in helpers], np.float32)
-        paths = _production_helper_geometry(
-            "helper-camera",
+        triangles = scene_icon_triangles(
+            "camera",
             eyes,
             editor_camera,
             viewport_height,
-            ui_scale,
+            SCENE_ICON_SIZE_PT * ui_scale,
+            visible_only=True,
         )
         colors = np.asarray(
             [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
             np.float32,
         )
-        for part, (points, width, closed) in zip(("outline", "lens"), paths, strict=True):
-            icon_layer.polylines(f"cameras:{part}", points, colors, width, closed=closed)
+        icon_layer.triangles(
+            "cameras:glyph",
+            triangles.reshape(-1, 3, 3),
+            np.repeat(colors, triangles.shape[1], axis=0),
+        )
         if self.show_influence:
             for object_id, view, selected in helpers:
                 if selected:
@@ -235,40 +193,19 @@ class SceneEntityHelpers:
             [SELECTED_COLOR if selected else HELPER_COLOR for _, _, selected in helpers],
             np.float32,
         )
-        paths = _production_helper_geometry(
-            "helper-light",
+        triangles = scene_icon_triangles(
+            "light",
             positions,
             editor_camera,
             viewport_height,
-            ui_scale,
+            SCENE_ICON_SIZE_PT * ui_scale,
+            visible_only=True,
         )
-        closed_paths = tuple(path for path in paths if path[2])
-        open_paths = tuple(path for path in paths if not path[2])
-        detail_widths = {width for _points, width, _closed in open_paths}
-        if len(detail_widths) != 1 or any(
-            points.shape[1] != 2 for points, _width, _closed in open_paths
-        ):
-            raise RuntimeError("helper-light detail paths must share one two-point stroke")
-        detail_width = detail_widths.pop()
-        for index, (object_id, _light, _selected) in enumerate(helpers):
-            for path_index, (points, width, closed) in enumerate(closed_paths):
-                icon_layer.polyline(
-                    f"light:{object_id}:ring"
-                    if len(closed_paths) == 1
-                    else f"light:{object_id}:ring:{path_index}",
-                    points[index],
-                    colors[index],
-                    width,
-                    closed=closed,
-                )
-            if open_paths:
-                icon_layer.lines(
-                    f"light:{object_id}:details",
-                    np.asarray([points[index, 0] for points, _width, _closed in open_paths]),
-                    np.asarray([points[index, 1] for points, _width, _closed in open_paths]),
-                    colors[index],
-                    detail_width,
-                )
+        icon_layer.triangles(
+            "lights:glyph",
+            triangles.reshape(-1, 3, 3),
+            np.repeat(colors, triangles.shape[1], axis=0),
+        )
 
         directed = np.asarray(
             [selected and light.type is not LightType.POINT for _, light, selected in helpers],
@@ -330,82 +267,29 @@ class SceneEntityHelpers:
             layer.polyline(f"{ident}:area", points, color, 1.4 * ui_scale, closed=True)
 
 
-_LIGHT_RING_ANGLES = np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False)
-_LIGHT_RAY_ANGLES = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
-_LIGHT_RING_UNIT = np.column_stack((np.cos(_LIGHT_RING_ANGLES), np.sin(_LIGHT_RING_ANGLES)))
-_LIGHT_RAY_UNIT = np.column_stack((np.cos(_LIGHT_RAY_ANGLES), np.sin(_LIGHT_RAY_ANGLES)))
-_LIGHT_DETAIL_STARTS_2D = np.concatenate(
-    (
-        np.asarray(((-2.6, -5.2), (-1.9, -6.9)), np.float64),
-        _LIGHT_RAY_UNIT * 5.9,
-    )
-)
-_LIGHT_DETAIL_ENDS_2D = np.concatenate(
-    (
-        np.asarray(((2.6, -5.2), (1.9, -6.9)), np.float64),
-        _LIGHT_RAY_UNIT * 7.8,
-    )
-)
-
-
-def _light_icon_geometry(
-    positions: np.ndarray,
-    editor_camera: CameraView,
-    viewport_height: float,
-    ui_scale: float = 1.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    positions = np.asarray(positions, np.float64).reshape(-1, 3)
-    if not len(positions):
-        return (
-            np.empty((0, len(_LIGHT_RING_UNIT), 3), np.float32),
-            np.empty((0, len(_LIGHT_DETAIL_STARTS_2D), 3), np.float32),
-            np.empty((0, len(_LIGHT_DETAIL_ENDS_2D), 3), np.float32),
-        )
-    units = screen_constant_world_sizes(
-        editor_camera,
-        positions,
-        viewport_height,
-        LIGHT_HELPER_SCALE_PT * ui_scale,
-        visible_only=True,
-    )
-    view_rotation = np.asarray(editor_camera.view_matrix(), np.float64)[:3, :3]
-    right = view_rotation[0]
-    up = view_rotation[1]
-
-    def transform(points: np.ndarray) -> np.ndarray:
-        offsets = (
-            points[None, :, 0, None] * right[None, None, :]
-            + points[None, :, 1, None] * up[None, None, :]
-        )
-        return (positions[:, None, :] + units[:, None, None] * offsets).astype(np.float32)
-
-    return (
-        transform(_LIGHT_RING_UNIT * 4.3),
-        transform(_LIGHT_DETAIL_STARTS_2D),
-        transform(_LIGHT_DETAIL_ENDS_2D),
-    )
-
-
 def light_icon_segments(
     positions: np.ndarray,
     editor_camera: CameraView,
     viewport_height: float,
     ui_scale: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return screen-facing bulb icons scaled with the rest of the UI."""
-
-    rings, detail_starts, detail_ends = _light_icon_geometry(
+    """Return the shared screen-facing bulb centerlines at the viewport icon size."""
+    paths = scene_icon_paths(
+        "light",
         positions,
         editor_camera,
         viewport_height,
-        ui_scale,
+        SCENE_ICON_SIZE_PT * ui_scale,
+        visible_only=True,
     )
-    if not len(rings):
-        empty = np.empty((0, 3), np.float32)
-        return empty, empty
-    starts = np.concatenate((rings, detail_starts), axis=1)
-    ends = np.concatenate((np.roll(rings, -1, axis=1), detail_ends), axis=1)
-    return starts.reshape(-1, 3), ends.reshape(-1, 3)
+    starts, ends = [], []
+    for points, _width, closed in paths:
+        starts.append(points if closed else points[:, :-1])
+        ends.append(np.roll(points, -1, axis=1) if closed else points[:, 1:])
+    return (
+        np.concatenate(starts, axis=1).reshape(-1, 3),
+        np.concatenate(ends, axis=1).reshape(-1, 3),
+    )
 
 
 def camera_frustum_segments(view: CameraView) -> tuple[np.ndarray, np.ndarray]:

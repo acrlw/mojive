@@ -187,7 +187,7 @@ def next_available_snapshot_name(name: str, directory=DEFAULT_DIRECTORY) -> str:
 
 
 def _safe_name(name: str) -> str:
-    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", name.strip()).strip("-.")
+    value = re.sub(r"[^\w.-]+", "-", name.strip()).strip("-.")
     if not value:
         raise ValueError("Snapshot name is empty")
     return value

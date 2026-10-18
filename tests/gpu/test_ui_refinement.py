@@ -397,8 +397,7 @@ def test_viewport_recording_controls_drive_a_real_take(viewer):
 
 
 def test_capture_snapshot_does_not_recompile_or_modify_model_keyframes(viewer):
-    from mojive.tools.keyframe_timeline import show_timeline
-    from mojive.ui.panels.keyframes import timeline_channel_width, timeline_time_to_x
+    from mojive.tools.keyframe_timeline import show_timeline, timeline_point
 
     show_timeline(viewer)
     session = viewer.session
@@ -413,17 +412,9 @@ def test_capture_snapshot_does_not_recompile_or_modify_model_keyframes(viewer):
     assert session.submit(cmd.Step(8))
     _settle(viewer, 3)
     assert session.frame.time > snapshot.time
-    panel = viewer.panels.get("Keyframes")
-    lo, hi = _item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
-    scale = viewer.window.style_scale
-    left = lo[0] + timeline_channel_width(hi[0] - lo[0], scale)
-    right = hi[0] - (64 * scale if hi[0] - lo[0] >= 600 * scale else 0)
-    x = timeline_time_to_x(
-        snapshot.time, panel.editor.view_start, panel.editor.view_end, left, right
-    )
-    y = lo[1] + 27 * scale + (hi[1] - lo[1] - 27 * scale) * 0.75
-    _click(viewer, (x, y))
-    _click(viewer, (x, y))
+    point = timeline_point(viewer, snapshot.time, "snapshots")
+    _click(viewer, point)
+    _click(viewer, point)
     _settle(viewer, 3)
     assert session.frame.time == pytest.approx(snapshot.time)
     assert session.structure_generation == generation

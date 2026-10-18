@@ -8,12 +8,18 @@ from dataclasses import replace
 import numpy as np
 from imgui_bundle import imgui
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.panels import pointer_pressed
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.workspace.button_rows import draw_button_row, measure_button_row
 from mojive.ui.workspace.choice_popup import ChoicePopup
-from mojive.ui.workspace.color_editor import ColorEditor
+from mojive.ui.workspace.color_editor import (
+    ColorEditor,
+    color_popup,
+    color_popup_width,
+    place_color_popup,
+)
+from mojive.ui.workspace.component_layout import control_size
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN, MONO_SIZE
 from mojive.ui.workspace.property_groups import PropertyGroups
 from mojive.ui.workspace.property_style import (
@@ -76,6 +82,10 @@ class NativeInspectorPresentation:
 
     def _field_width(self):
         return imgui.calc_item_width() if self._control_width is None else self._control_width
+
+    def tooltip(self, text, *, hovered=False):
+        if hovered or imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+            self.ui.tooltip(text, translate=False)
 
     def begin_table(self, table_id):
         self._control_width = None
@@ -205,6 +215,20 @@ class NativeInspectorPresentation:
             field_part="switch" if toggle else control_part,
             minimum_height=minimum_height,
         )
+        if components > 1 and not toggle:
+            # The caption shares the group's column, but numbers() owns the
+            # actual plain-field grid. An XYZ estimate can reserve extra rows
+            # even when all of the formatted plain numbers fit inline.
+            layout = self.ui.form_layout(
+                width,
+                1,
+                axis=False,
+                minimum=0 if group_vector else self._control_minimum * s,
+                label_above=layout.label_above,
+                label_width=layout.label_width,
+                field_part=control_part,
+                minimum_height=minimum_height,
+            )
         if toggle and group_vector:
             anchor = self.ui.form_layout(width, 3, axis=True, minimum=0)
             label_style = self.ui.component_style(("switch", "form_label"))
@@ -536,9 +560,7 @@ class NativeInspectorPresentation:
             width,
             count,
             axis=False,
-            minimum=self.ui.numeric_minimum()
-            if self._vector_group
-            else self.ui.numeric_minimum(axis=False, format=fmt),
+            minimum=self.ui.numeric_minimum(axis=False, format=fmt),
         )
         changed = False
         out = list(values)
@@ -609,9 +631,11 @@ class NativeInspectorPresentation:
         )
         return result
 
-    def text(self, item_id, value, flags):
+    def text(self, item_id, value, flags, *, mono=False):
         pos = imgui.get_cursor_screen_pos()
-        return self.ui.input_text(item_id, pos.x, pos.y, self._field_width(), value, flags=flags)
+        return self.ui.input_text(
+            item_id, pos.x, pos.y, self._field_width(), value, flags=flags, mono=mono
+        )
 
     def input_text_multiline(self, item_id, value, size, flags=0):
         """Keep multiline editing native inside the authored padding and margins."""
@@ -702,41 +726,54 @@ class NativeInspectorPresentation:
         if imgui.is_item_hovered():
             self.ui.tooltip(self.ctx.tr("Edit color"))
         viewport = imgui.get_main_viewport()
-        popup_width = min(320 * s, max(160 * s, viewport.work_size.x - 16 * s))
+        popup_width = color_popup_width(self.ui, len(out))
         imgui.set_next_window_size_constraints(
             (popup_width, 0), (popup_width, max(80 * s, viewport.work_size.y - 16 * s))
         )
-        if imgui.begin_popup(popup):
-            changed, out = editor.draw(self.ui, popup, out, imgui.get_content_region_avail().x)
-            self.canceled |= any(
-                self.ui.numeric_edits.get(popup + axis)
-                and self.ui.numeric_edits[popup + axis].canceled
-                for axis in "RGBA"
-            )
-            if self.canceled or imgui.is_key_pressed(imgui.Key.escape, False):
-                self.color_edit_action = "cancel"
-                changed = False
-                imgui.close_current_popup()
-            else:
-                footer = imgui.get_cursor_screen_pos()
-                available = imgui.get_content_region_avail().x
-                half = (available - 6 * s) / 2
-                if self.ui.button(popup + "-cancel", footer.x, footer.y, half / s, label="Cancel"):
+        place_color_popup(self.ui, popup)
+        with color_popup(self.ui, popup) as opened:
+            if opened:
+                changed, out = editor.draw(
+                    self.ui,
+                    popup,
+                    out,
+                    imgui.get_content_region_avail().x,
+                    footer_height=control_size(
+                        self.ui, popup + "-done", 80, DESIGN.control_height, label="Apply"
+                    )[1],
+                )
+                self.canceled |= any(
+                    self.ui.numeric_edits.get(popup + axis)
+                    and self.ui.numeric_edits[popup + axis].canceled
+                    for axis in "RGBA"
+                )
+                if self.canceled or imgui.is_key_pressed(imgui.Key.escape, False):
+                    advance(self.ui, *imgui.get_cursor_screen_pos())
                     self.color_edit_action = "cancel"
                     changed = False
                     imgui.close_current_popup()
-                if self.ui.button(
-                    popup + "-done",
-                    footer.x + half + 6 * s,
-                    footer.y,
-                    half / s,
-                    label="Done",
-                    active=True,
-                    enabled=not editor.error,
-                ):
-                    self.color_edit_action = "apply"
-                    imgui.close_current_popup()
-            imgui.end_popup()
+                else:
+                    footer = imgui.get_cursor_screen_pos()
+                    available = editor.content_width
+                    gap = self.ui.metric("color_editor", "columnGap", 6) * s
+                    half = (available - gap) / 2
+                    if self.ui.button(
+                        popup + "-cancel", footer.x, footer.y, half / s, label="Cancel"
+                    ):
+                        self.color_edit_action = "cancel"
+                        changed = False
+                        imgui.close_current_popup()
+                    if self.ui.button(
+                        popup + "-done",
+                        footer.x + half + gap,
+                        footer.y,
+                        half / s,
+                        label="Done",
+                        active=True,
+                        enabled=not editor.error,
+                    ):
+                        self.color_edit_action = "apply"
+                        imgui.close_current_popup()
         if owns_popup:
             self.color_edit_open = imgui.is_popup_open(popup)
             if was_open and not self.color_edit_open and self.color_edit_action is None:
@@ -755,35 +792,42 @@ class NativeInspectorPresentation:
         )
         x = p.x
         y = b.y + DESIGN.row_gap * self.ui.s
-        layout = self.ui.numeric_layout(
-            width,
-            len(out),
-            column_options=(len(out), 2, 1),
-            minimum=self.ui.color_channel_minimum(),
-            parts="rgba",
-        )
-        imgui.begin_group()
-        for index, axis in enumerate("RGBA"[: len(out)]):
-            dx, dy, field_width, _ = layout.fields[index]
-            edit, out[index] = self._field(
-                item_id + axis,
-                out[index],
-                x + dx,
-                y + dy,
-                field_width,
-                axis=axis,
-                speed=0.005,
-                lo=0,
-                hi=1,
-                fmt="%.3g",
-                reset=resets[index],
+        with self.ui.component_scope("rgba"):
+            number_format = "%.3f"
+            layout = self.ui.numeric_layout(
+                width,
+                len(out),
+                column_options=(len(out), 1),
+                minimum=self.ui.color_channel_minimum(format=number_format),
+                parts="rgba",
             )
-            changed |= edit
-        advance(self.ui, x, y + layout.height)
-        imgui.end_group()
-        self.ui.record_numeric_group(item_id + "-channels", x, y, width, layout, parts="rgba")
+            imgui.begin_group()
+            for index, axis in enumerate("RGBA"[: len(out)]):
+                dx, dy, field_width, _ = layout.fields[index]
+                edit, out[index] = self._field(
+                    item_id + axis,
+                    out[index],
+                    x + dx,
+                    y + dy,
+                    field_width,
+                    axis=axis,
+                    speed=0.005,
+                    lo=0,
+                    hi=1,
+                    fmt=number_format,
+                    reset=resets[index],
+                )
+                changed |= edit
+            advance(self.ui, x, y + layout.height)
+            imgui.end_group()
+            self.ui.record_numeric_group(item_id + "-channels", x, y, width, layout, parts="rgba")
         return changed, out
 
+    @part_scope("vector_row")
+    def _vector_caption_width(self, captions):
+        return max(self.ui.vector_caption_width(text) for text in captions)
+
+    @part_scope("vector_row")
     def _vector(
         self,
         node,
@@ -806,7 +850,10 @@ class NativeInspectorPresentation:
         shown = _label(self.ctx.tr(label), unit)
         fmt = _number_format(fmt, unit)
         layout = layout or self.ui.vector_layout(
-            width, format=fmt, values=values, key=f"{node.node_id}-{name}"
+            width,
+            format=fmt,
+            label_minimum=self._vector_caption_width((shown,)),
+            key=f"{node.node_id}-{name}",
         )
         above, label_width = layout.label_above, layout.label_width
         imgui.begin_group()
@@ -860,16 +907,21 @@ class NativeInspectorPresentation:
         self.ui.record_form_group(f"{node.node_id}/{name}", p.x, p.y + extra_height, layout)
         return changed, out
 
+    @part_scope("vector_row")
     def vectors(self, node, table_id, rows, editable, *, units=()):
         result = []
         minimum = max(
-            self.ui.numeric_minimum(
-                format=_number_format(row[3], units[index] if units else ""), values=row[1]
-            )
+            self.ui.numeric_minimum(format=_number_format(row[3], units[index] if units else ""))
             for index, row in enumerate(rows)
         )
         layout = self.ui.vector_layout(
-            imgui.get_content_region_avail().x, minimum=minimum, key=f"{node.node_id}-{table_id}"
+            imgui.get_content_region_avail().x,
+            minimum=minimum,
+            label_minimum=self._vector_caption_width(
+                _label(self.ctx.tr(row[0]), units[index] if units else "")
+                for index, row in enumerate(rows)
+            ),
+            key=f"{node.node_id}-{table_id}",
         )
         for index, (label, values, speed, fmt, resets) in enumerate(rows):
             result.append(
@@ -888,6 +940,7 @@ class NativeInspectorPresentation:
             )
         return tuple(result)
 
+    @part_scope("vector_row")
     def vector_row(self, node, label, name, values, **options):
         imgui.table_next_row()
         imgui.table_next_column()
@@ -898,11 +951,14 @@ class NativeInspectorPresentation:
         if self._vector_group:
             # Related rows use the table's XYZ budget, including scalar label columns.
             options["layout"] = self.ui.form_layout(body_width, 3, axis=True, vector=True)
-        options.setdefault(
-            "layout",
-            self.ui.vector_layout(
-                body_width, format=options.get("fmt"), values=values, key=f"{node.node_id}-{name}"
-            ),
-        )
+        if "layout" not in options:
+            options["layout"] = self.ui.vector_layout(
+                body_width,
+                format=options.get("fmt"),
+                label_minimum=self._vector_caption_width(
+                    (_label(self.ctx.tr(label), options.get("unit", "")),)
+                ),
+                key=f"{node.node_id}-{name}",
+            )
         result = self._vector(node, name, label, values, **options)
         return result

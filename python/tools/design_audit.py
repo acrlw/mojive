@@ -71,6 +71,8 @@ def changed_value(rule, current):
     if rule["type"] == "select":
         choices = rule["choices"]
         return choices[(choices.index(current) + 1) % len(choices)]
+    if rule["type"] == "color":
+        return "#e8b04fff" if current != "#e8b04fff" else "#68b5b7ff"
     step = rule.get("step", 1)
     delta = step if rule.get("max", 1) <= 10 else max(step, 4)
     value = current + delta if current + delta <= rule["max"] else current - delta
@@ -249,7 +251,14 @@ class ParameterAudit:
                     if record not in consumed
                 ]
                 records = consumed
-        draw_samples = NativeDrawSamples(self.bench)
+        # imgui-bundle's OpenGL renderer scales scissors in place during submit.
+        # Native bgfx stages its own packet and retains logical draw-data clips.
+        clip_scale = (
+            tuple(imgui.get_draw_data().framebuffer_scale)
+            if self.viewer.backend.caps.name == "opengl"
+            else (1.0, 1.0)
+        )
+        draw_samples = NativeDrawSamples(self.bench, clip_scale=clip_scale)
         instances = {}
         sources = {}
         for record in records:
@@ -258,7 +267,7 @@ class ParameterAudit:
         vertices = (
             np.concatenate([instances[key] for key in sorted(instances)])
             if instances
-            else np.empty((0, 4))
+            else np.empty((0, 6))
         )
         raw_records = self.production_raw_records()
         app, context = self.viewer.app, imgui.get_current_context()
@@ -423,7 +432,11 @@ class ParameterAudit:
         # Preserve the whole production workspace and remove the parameter
         # editor. The exported capture keeps the native screen scale.
         rect = self.bench._viewport_rect
-        right = round(rect[0]) if rect and not include_editor else image.width
+        right = image.width
+        if rect and not include_editor:
+            right = max(0, min(image.width, round(self.viewer.window.points_to_pixels(rect[0]))))
+            if right == 0:
+                raise RuntimeError("The production workspace is outside the captured window")
         image.crop((0, 0, right, image.height)).save(path)
         return str(path)
 
@@ -569,6 +582,16 @@ class ParameterAudit:
                 row["resetBaselineSettleTrace"] = self.last_settle_trace
             row["resetBaselineSettleFrames"] = reset_settle_frames
             changed = changed_value(rule, original)
+            if field == "fontFamily":
+                effective = (
+                    original
+                    if original != "inherit"
+                    else runtime.value(
+                        "font_family",
+                        before["records"][0].get("styleFamily") if before["records"] else None,
+                    )
+                )
+                changed = "system" if effective == "portable" else "portable"
             if part == "color_input" and field == "width":
                 minimum_text = max(
                     (

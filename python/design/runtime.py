@@ -4,6 +4,7 @@ import time
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
+from functools import lru_cache
 
 from mojive.design.specification import BASELINE, DEFAULT, component_catalog, resolve_part_value
 from mojive.design.store import SpecificationStore
@@ -56,6 +57,35 @@ PART_METRICS = {
     "file_receipt_padding": ("file_receipt", "paddingX"),
     "rail_entry_width": ("range_number", "numberWidth"),
 }
+PALETTE_TOKENS = {
+    "text": "text_color",
+    "secondary": "muted_color",
+    "disabled": "dim_color",
+    "primary": "sage_color",
+    "warning": "amber_color",
+    "background": "panel_color",
+    "floating": "floating_color",
+    "popup": "popup_color",
+    "field": "input_color",
+}
+THEME_ROLES = {
+    "text": "text",
+    "text_disabled": "disabled",
+    "primary": "primary",
+    "bg_window": "background",
+    "bg_child": "background",
+    "bg_popup": "popup",
+    "bg_frame": "field",
+    "warning": "warning",
+}
+
+
+@lru_cache(maxsize=256)
+def _palette_ink(value):
+    return (
+        *(int(value[index : index + 2], 16) for index in (1, 3, 5)),
+        int(value[7:9], 16) if len(value) == 9 else 255,
+    )
 
 
 class DesignRuntime:
@@ -68,6 +98,10 @@ class DesignRuntime:
         self._stamp = None
         self._poll_at = 0
         self._inks = {}
+        self._module_inks = {}
+        self._module_themes = {}
+        self._palette_families = frozenset()
+        self.has_module_palette = False
         self._theme_revision = -1
         self._theme_key = None
         self._edit_cache = {}
@@ -76,7 +110,6 @@ class DesignRuntime:
         self._dimensions_key = None
         self._dimensions = None
         self._layout_signature = None
-        self._font_family = "system"
         self.observed = []
         self.used_fields = {}
         self.track_field_reads = False
@@ -86,6 +119,7 @@ class DesignRuntime:
         self.authored_defaults = True
         self.workbench = None
         self.observe_components = False
+        self._reset_inks()
         self.poll(force=True)
 
     def poll(self, *, force=False):
@@ -94,7 +128,8 @@ class DesignRuntime:
         self._poll_at = time.monotonic()
         envelope = self.store.latest()
         self.error = "; ".join(error["error"] for error in envelope["errors"])
-        if envelope["errors"] and envelope["source"] == "design-spec.json":
+        if envelope["source"] is None and (envelope["errors"] or self.spec != DEFAULT):
+            self.error = self.error or "The saved specification and draft are missing"
             return False
         if self._stamp == envelope["revision"]:
             return False
@@ -104,6 +139,7 @@ class DesignRuntime:
         self._style_cache.clear()
         self._stamp = envelope["revision"]
         self.revision += 1
+        self._reset_inks()
         return True
 
     def update_spec(self, value):
@@ -112,67 +148,125 @@ class DesignRuntime:
         self._value_cache.clear()
         self._style_cache.clear()
         self.revision += 1
+        self._reset_inks()
 
-    def ink(self, color):
-        replacement = self._inks.get(tuple(color[:3]))
+    def _reset_inks(self):
+        from mojive.ui.design_palette import rgba8
+
+        self._inks = {
+            rgba8(role)[:3]: _palette_ink(self.value(token))
+            for role, token in PALETTE_TOKENS.items()
+        }
+        self._module_inks.clear()
+        self._module_themes.clear()
+        self._palette_families = frozenset(
+            family
+            for family, values in self.spec.get("components", {}).items()
+            if any(token in values for token in PALETTE_TOKENS.values())
+        )
+        self.has_module_palette = bool(self._palette_families)
+
+    def ink(self, color, family=None):
+        palette = self._inks
+        if self.has_module_palette and family in self._palette_families:
+            cached = self._module_inks.get(family)
+            if cached is None:
+                from mojive.ui.design_palette import rgba8
+
+                palette = {}
+                aliases = {}
+                overrides = self.spec["components"][family]
+                for role, token in PALETTE_TOKENS.items():
+                    source = rgba8(role)[:3]
+                    value = _palette_ink(self.value(token, family))
+                    palette[source] = value
+                    if token in overrides:
+                        # Neutral Draw2D consumers receive the applied global
+                        # Theme. Recognize that exact ink before class overrides.
+                        aliases[self._inks[source]] = value
+                cached = self._module_inks[family] = palette, aliases
+            palette, aliases = cached
+            replacement = aliases.get(tuple(color))
+            if replacement is not None:
+                return replacement
+        replacement = palette.get(tuple(color[:3]))
         if replacement is None:
             return color
         return (*replacement[:3], round(color[3] * replacement[3] / 255))
 
+    def theme_for(self, theme, family):
+        """Reuse a module's existing palette for neutral status and output painters."""
+        if not self.has_module_palette or family not in self._palette_families:
+            return theme
+        key = (id(theme), family)
+        cached = self._module_themes.get(key)
+        if cached is None:
+            themed = replace(
+                theme,
+                **{
+                    field: tuple(
+                        v / 255 for v in _palette_ink(self.value(PALETTE_TOKENS[role], family))
+                    )
+                    for field, role in THEME_ROLES.items()
+                },
+            )
+            cached = self._module_themes[key] = theme, themed
+        return cached[1]
+
+    def prepare_fonts(self, ui):
+        """Prepare the requested faces in each surface's own native context."""
+        ui.prepare_fonts(
+            self.spec["tokens"]["font_family"],
+            {
+                values["fontFamily"]
+                for values in self.spec.get("parts", {}).values()
+                if values.get("fontFamily") in ("system", "portable")
+            }
+            | {
+                values["font_family"]
+                for values in self.spec.get("components", {}).values()
+                if values.get("font_family") in ("system", "portable")
+            },
+        )
+
     def apply_theme(self, shell):
+        shell.app.theme = self.apply_surface(shell.window, shell.s, shell.app.theme)
+
+    def apply_surface(self, window, scale, theme):
+        """Apply the same native type, geometry and theme to a workspace or guide surface."""
         from imgui_bundle import imgui
 
         from mojive.ui.design_palette import rgba8
-        from mojive.ui.workspace.design import DESIGN
+        from mojive.ui.workspace.design import DEFAULT_DESIGN
 
-        imgui.set_current_context(shell.window._imgui_context)
-        mapping = {
-            "text": "text_color",
-            "secondary": "muted_color",
-            "disabled": "dim_color",
-            "primary": "sage_color",
-            "warning": "amber_color",
-            "background": "panel_color",
-            "field": "input_color",
-        }
-        self._inks = {
-            rgba8(role)[:3]: (
-                *tuple(int(self.value(token)[n : n + 2], 16) for n in (1, 3, 5)),
-                int(self.value(token)[7:9], 16) if len(self.value(token)) == 9 else 255,
-            )
-            for role, token in mapping.items()
-        }
-        names = {
-            "text": "text",
-            "text_disabled": "disabled",
-            "primary": "primary",
-            "bg_window": "background",
-            "bg_child": "background",
-            "bg_frame": "field",
-            "warning": "warning",
-        }
-        shell.app.theme = replace(
-            shell.app.theme,
+        imgui.set_current_context(window._imgui_context)
+        self._reset_inks()
+        themed = replace(
+            theme,
+            border=tuple(channel / 255 for channel in _palette_ink(self.value("border_color"))),
             **{
                 name: tuple(channel / 255 for channel in self.ink(rgba8(role)))
-                for name, role in names.items()
+                for name, role in THEME_ROLES.items()
             },
         )
-        shell.window.apply_theme(shell.app.theme)
-        family = self.spec["tokens"]["font_family"]
-        if family != self._font_family:
-            from mojive.ui.workspace.widget_style import install_fonts
-
-            shell.ui.font_sources, (shell.ui.body, shell.ui.bold, shell.ui.mono) = install_fonts(
-                shell.window, portable=family == "portable"
-            )
-            self._font_family = family
+        window.apply_theme(themed)
+        dimensions = self.dimensions(DEFAULT_DESIGN)
         style = imgui.get_style()
-        style.font_size_base = DESIGN.body_size * shell.s
-        style.frame_rounding = DESIGN.control_radius * shell.s
-        style.window_rounding = DESIGN.container_radius * shell.s
-        style.window_padding = (DESIGN.panel_padding_x * shell.s, DESIGN.panel_padding_y * shell.s)
-        style.item_spacing = (DESIGN.item_spacing_x * shell.s, DESIGN.row_gap * shell.s)
+        style.font_size_base = dimensions.body_size * scale
+        style.frame_rounding = dimensions.control_radius * scale
+        style.window_rounding = dimensions.container_radius * scale
+        style.popup_rounding = self.value("radius_popup") * scale
+        style.child_rounding = dimensions.child_radius * scale
+        style.window_padding = (
+            dimensions.panel_padding_x * scale,
+            dimensions.panel_padding_y * scale,
+        )
+        style.frame_padding = (
+            dimensions.frame_padding_x * scale,
+            dimensions.frame_padding_y * scale,
+        )
+        style.item_spacing = (dimensions.item_spacing_x * scale, dimensions.row_gap * scale)
+        return themed
 
     def value(self, token, family=None):
         return (
@@ -216,13 +310,6 @@ class DesignRuntime:
                     self.spec["layout"][default["layout"]] != BASELINE["layout"][default["layout"]]
                 )
         return False
-
-    def changed(self, parts, family=None):
-        return any(
-            self.edited(part, field, family=family)
-            for part in parts
-            for field in self.catalog.get(part, {}).get("fields", {})
-        )
 
     def metric(self, part, field, fallback, *, family=None):
         self.consume(part, field)
@@ -328,6 +415,7 @@ class DesignRuntime:
 
         with use_design(self.dimensions), part_scope("application"):
             if self._theme_revision != self.revision:
+                self.prepare_fonts(shell.ui)
                 theme_key = (
                     tuple(self.spec["tokens"].items()),
                     shell.s,

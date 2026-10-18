@@ -10,6 +10,7 @@ FIELD = f"height {TEXT} {PADDING} {MARGIN} radius textAlign widthMode width"
 BUTTON = f"height {TEXT} {PADDING} {MARGIN} gap radius iconSize align alignItems widthMode width"
 HEADER = f"height {TEXT} {PADDING} {MARGIN} gap iconSize alignItems columnGap"
 CONTAINER = f"{PADDING} {MARGIN} {SPACING}"
+TOOLBAR_SEPARATOR = "separatorThickness separatorInset separatorGap separatorColor"
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,8 @@ def contract(source, fields):
 # A field appears here only when its production painter or parent measurement
 # consumes it. Parsing the specification and reference samples are not consumers.
 PRODUCTION_CONTRACTS = {
+    "window_title": contract("ui/workspace/window_chrome.py", "fontSize paddingX paddingY"),
+    "dock_tabs": contract("ui/workspace/window_chrome.py", "fontSize paddingX paddingY gap"),
     "button": contract("design/native/controls.py", BUTTON),
     "icon_button": contract(
         "design/native/controls.py",
@@ -98,9 +101,9 @@ PRODUCTION_CONTRACTS = {
     ),
     "tab": contract("design/native/controls.py", BUTTON),
     "settings_layout": contract(
-        "ui/workspace/settings_layout.py", f"navWidth minHeight {MARGIN} {SPACING}"
+        "ui/workspace/settings_layout.py", f"windowWidth navWidth minHeight {MARGIN} {SPACING}"
     ),
-    "settings_nav": contract("ui/workspace/settings_layout.py", f"{CONTAINER} radius"),
+    "settings_nav": contract("ui/workspace/settings_layout.py", f"navWidth {CONTAINER} radius"),
     "settings_page": contract(
         "ui/workspace/settings_layout.py", f"{TEXT} {PADDING} {MARGIN} titleSize titleGap rowGap"
     ),
@@ -108,7 +111,9 @@ PRODUCTION_CONTRACTS = {
         "ui/workspace/material_library.py",
         f"height {TEXT} {PADDING} {MARGIN} gap columnGap radius swatchSize iconSize alignItems",
     ),
-    "material_list": contract("ui/workspace/material_library.py", "gap rowGap"),
+    "material_list": contract(
+        "ui/workspace/material_library.py", f"{PADDING} {MARGIN} gap rowGap actionGap"
+    ),
     "sensor": contract(
         "ui/workspace/sensors_panel.py",
         f"height {TEXT} {PADDING} {MARGIN} gap columnGap radius iconSize alignItems valueSize detailSize",
@@ -132,7 +137,7 @@ PRODUCTION_CONTRACTS = {
     ),
     "tree_label": contract(
         "design/native/controls.py",
-        f"height {TEXT} {PADDING} {MARGIN} gap iconSize align alignItems",
+        f"widthMode width height {TEXT} {PADDING} {MARGIN} gap iconSize align alignItems",
     ),
     "tree_expander": contract(
         "design/native/controls.py", f"height width {PADDING} {MARGIN} iconSize align alignItems"
@@ -149,11 +154,12 @@ PRODUCTION_CONTRACTS = {
         "ui/workspace/viewport_controls.py", f"{PADDING} {MARGIN} gap columnGap top left alignItems"
     ),
     "toolbox": contract(
-        "ui/workspace/viewport.py", f"{PADDING} {MARGIN} gap rowGap radius left slotSize iconSize"
+        "ui/workspace/viewport_controls.py",
+        f"{PADDING} {MARGIN} gap rowGap radius left slotSize iconSize {TOOLBAR_SEPARATOR}",
     ),
     "transport": contract(
-        "ui/workspace/viewport_controls.py",
-        f"{PADDING} {MARGIN} gap columnGap radius top alignItems",
+        "ui/workspace/viewport.py",
+        f"{PADDING} {MARGIN} gap columnGap radius top alignItems {TOOLBAR_SEPARATOR}",
     ),
     "nav_widget": contract("ui/workspace/viewcube.py", "size right top"),
     "pending_edits": contract(
@@ -201,6 +207,9 @@ PRODUCTION_CONTRACTS = {
         "ui/workspace/menus.py",
         f"widthMode width heightMode height {TEXT} {PADDING} {MARGIN} radius rowGap",
     ),
+    "form_popup": contract(
+        "ui/workspace/form_popup.py", f"fontSize {PADDING} radius rowGap columnGap groupGap"
+    ),
     "menu_item": contract("ui/workspace/menus.py", BUTTON),
     "menu_item_content": contract("ui/workspace/menu_rows.py", "gap columnGap"),
     "select_popup": contract(
@@ -222,7 +231,9 @@ PRODUCTION_CONTRACTS = {
         "ui/workspace/status_components.py", f"gap columnGap {PADDING} {MARGIN}"
     ),
     "status_metrics": contract(
-        "ui/workspace/status_components.py", f"gap columnGap {PADDING} {MARGIN}"
+        "ui/workspace/status_components.py",
+        f"gap columnGap {PADDING} {MARGIN} labelGap unitGap deltaValueWidth physicsValueWidth "
+        "stepsValueWidth timeValueWidth renderValueWidth tooltipPaddingX tooltipPaddingY tooltipRowGap",
     ),
     "status_separator": contract(
         "ui/workspace/status_components.py",
@@ -280,6 +291,8 @@ PRODUCTION_CONTRACTS = {
     ),
     "separator": contract("ui/workspace/widgets.py", "thickness margin"),
     "panel_tools": contract("ui/workspace/navigation.py", "gap rowGap columnGap"),
+    "scene_tools": contract("ui/workspace/navigation.py", "gap rowGap columnGap"),
+    "pose_tools": contract("ui/workspace/navigation.py", "gap rowGap"),
 }
 
 

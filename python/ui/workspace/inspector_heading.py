@@ -2,13 +2,19 @@
 
 from imgui_bundle import imgui
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import DESIGN, TITLE_SIZE
 from mojive.ui.workspace.widget_style import ACCENT, MUTED, TEXT
 
 
 def draw_heading(workspace, entity, x, y, width):
+    bottom = _draw_heading(workspace, entity, x, y, width)
+    return bottom if entity is None else draw_tabs(workspace, x, bottom, width)
+
+
+@part_scope("inspector_header", inherit=False)
+def _draw_heading(workspace, entity, x, y, width):
     ui, s = workspace.ui, workspace.s
     style = ui.component_style("inspector_header")
     font = style.get("fontSize", TITLE_SIZE)
@@ -128,15 +134,16 @@ def draw_heading(workspace, entity, x, y, width):
     )
     if entity is None:
         return box.outer.bottom + 14 * s
-    return _tabs(workspace, box.outer.x, box.outer.bottom + 8 * s, box.outer.width)
+    return box.outer.bottom + 8 * s
 
 
-def _tabs(workspace, x, y, width):
+@part_scope("tabs", inherit=False)
+def draw_tabs(workspace, x, y, width):
     ui, s = workspace.ui, workspace.s
     style = ui.component_style("tabs")
     tab_style = ui.component_style(("button", "tab"))
     labels = ("Properties", "Physics", "Material", "Joint")
-    icons = ("inspect", "body", "shading", "pose")
+    icons = ("inspect", "body", "shading", "joint")
     font = tab_style.get("fontSize", DESIGN.body_size)
     gap = style.get("columnGap", style.get("gap", 0)) * s
     pads = style.edges("padding", s)

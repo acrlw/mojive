@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 from imgui_bundle import imgui
 
+from mojive.design.groups import scoped_parts
 from mojive.design.native.controls import NativePrimitives
 from mojive.design.native.geometry import (
     CURRENT_NATIVE_PARTS,
@@ -22,6 +23,8 @@ PANEL_FAMILIES = {
     "Cameras": "navigation",
     "Viewport": "viewport",
     "Application": "chrome",
+    "Navigation": "chrome",
+    "application_status": "chrome",
 }
 
 
@@ -49,10 +52,12 @@ class DesignPresentation:
         )
         if window is None:
             return None
-        while window.parent_window is not None:
+        while window is not None:
+            name = window.name.split("###")[-1]
+            if name in PANEL_FAMILIES:
+                return PANEL_FAMILIES[name]
             window = window.parent_window
-        name = window.name.split("###")[-1]
-        return PANEL_FAMILIES.get(name)
+        return None
 
     @contextmanager
     def family_scope(self, family):
@@ -78,17 +83,11 @@ class DesignPresentation:
             chosen = ("filter",)
         return (("button", *chosen)) if chosen != ("button",) and label else chosen
 
-    def modified(self, parts):
-        return self.runtime.changed(parts, self.family()) or any(
-            self.runtime.edited(part, field)
-            for part in CURRENT_NATIVE_PARTS.get()
-            for field in ("fontSize", "iconSize", "lineHeightMode", "lineHeight")
-        )
-
     def box(self, part, rect):
         return self.style(part).box(*rect, scale=self.ui.s)
 
     def record(self, key, parts, rect, kind, *, draw=None, **geometry):
+        parts = scoped_parts(parts)
         if not self.runtime.observes(parts):
             return
         context = imgui.get_current_context()
@@ -97,7 +96,9 @@ class DesignPresentation:
         )
         if window is None:
             return
-        current = self.ui.draw
+        # Reading ImGui's implicit draw list outside a window activates its
+        # fallback Debug window. Observation must not create a UI surface.
+        current = window.draw_list
         target = current if draw is None else draw
         foreground = (
             draw is not None
@@ -143,6 +144,7 @@ class DesignPresentation:
                 "icon_role",
                 "align",
                 "width_limit",
+                "radius",
             )
         }
         engine = self.runtime.paint_context
@@ -184,9 +186,19 @@ class DesignPresentation:
     def switch(self, key, x, y, value, *, width=None):
         style = self.style("switch")
         natural_width = (style.get("switchWidth", DESIGN.switch_track_width) + 4) * self.ui.s
+        padding = style.edges("padding", self.ui.s)
+        natural_width += padding[0] + padding[2]
         margin = style.edges("margin", self.ui.s)
         outer_width = natural_width + margin[0] + margin[2]
         if width is not None:
             outer_width = min(outer_width, max(0, width))
         height = self.primitives._field_height(style) * self.ui.s + margin[1] + margin[3]
-        return self.primitives.switch(key, Rect(x, y, outer_width, height), value).value
+        box = self.primitives.field_box(style, Rect(x, y, outer_width, height), (0, 0, 0, 0))
+        return self.primitives.switch(
+            key,
+            box.frame,
+            value,
+            layout_box=box,
+            control_x=box.content.right
+            - style.get("switchWidth", DESIGN.switch_track_width) * self.ui.s,
+        ).value

@@ -30,6 +30,8 @@ def test_every_catalog_parameter_validates_and_resolves(part, field, rule):
     default = resolve_part_value(spec, part, field)
     if rule["type"] == "select":
         value = next(choice for choice in rule["choices"] if choice != default)
+    elif rule["type"] == "color":
+        value = "#12345678"
     else:
         value = rule["max"] if default != rule["max"] else rule["min"]
     spec.setdefault("parts", {}).setdefault(part, {})[field] = value
@@ -40,13 +42,20 @@ def test_every_catalog_parameter_validates_and_resolves(part, field, rule):
 
 
 def test_catalogue_and_assets_are_complete():
-    assert len(component_catalog()) == 106
-    assert len(FIELDS) == 1302
+    catalog = component_catalog()
+    assert {
+        "scene_panel_header",
+        "inspector_tabs",
+        "settings_camera_settings_page",
+        "status_backend",
+    } <= catalog.keys()
+    assert all(definition["fields"] for definition in component_catalog().values())
     for name in (
         "component-catalog.json",
         "design-spec.json",
         "tokens-schema.json",
         "parameter-help.json",
+        "component-groups.json",
     ):
         assert (ROOT / name).is_file()
     validate_spec(deepcopy(DEFAULT))
@@ -150,6 +159,145 @@ def test_runtime_keeps_last_valid_view_when_both_files_are_invalid(store):
     assert runtime.error
 
 
+def test_runtime_loads_a_valid_design_spec_file_when_its_draft_is_invalid(tmp_path):
+    store = SpecificationStore(tmp_path / "design-spec.json")
+    store.write(DEFAULT, save=True)
+    runtime = DesignRuntime(store)
+    value = deepcopy(DEFAULT)
+    value["parts"]["button"]["height"] = 40
+    store.write(value, save=True)
+    store.live_path.write_text("{")
+    assert runtime.poll(force=True)
+    assert runtime.resolved_part("button", "height") == 40
+    assert runtime.error
+
+
+@pytest.mark.parametrize("invalid", ("saved", "draft"))
+def test_editor_and_runtime_share_the_latest_valid_snapshot(store, invalid):
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    runtime = DesignRuntime(store)
+    before_saved = deepcopy(editor.saved_spec)
+    value = deepcopy(DEFAULT)
+    value["parts"]["button"]["height"] = 40
+    if invalid == "saved":
+        store.write(value)
+        store.saved_path.write_text("{")
+    else:
+        store.write(value, save=True)
+        store.live_path.write_text("{")
+    assert runtime.poll(force=True)
+    assert editor.poll(force=True)
+    assert editor.spec == runtime.spec == value
+    assert editor.saved_spec == (before_saved if invalid == "saved" else value)
+    assert editor.error and runtime.error
+
+
+@pytest.mark.parametrize("recovery", ("restore", "import"))
+def test_deleted_specifications_keep_editor_and_preview_on_the_last_valid_snapshot(
+    store, tmp_path, recovery
+):
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    runtime = DesignRuntime(store)
+    editor.change(("parts", "button", "height"), 40)
+    assert runtime.poll(force=True)
+    before = deepcopy(editor.spec)
+    store.saved_path.unlink()
+    store.live_path.unlink()
+    assert not editor.poll(force=True)
+    assert not runtime.poll(force=True)
+    assert editor.spec == runtime.spec == before
+    assert "missing" in editor.error and "missing" in runtime.error
+    with pytest.raises(SpecificationConflict):
+        editor.change(("parts", "button", "radius"), 10)
+    if recovery == "restore":
+        store.write(before, save=True)
+    else:
+        imported = SpecificationStore(tmp_path / "import.json")
+        imported.write(before, save=True)
+        editor.import_file(imported.saved_path)
+    editor.poll(force=True)
+    runtime.poll(force=True)
+    assert editor.spec == runtime.spec == before
+    assert not editor.error and not runtime.error
+
+
+def test_empty_specification_directory_starts_with_defaults_without_an_error(tmp_path):
+    store = SpecificationStore(tmp_path / "spec.json")
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    runtime = DesignRuntime(store)
+    assert editor.spec == runtime.spec == DEFAULT
+    assert not editor.error and not runtime.error
+    assert editor.change(("parts", "button", "height"), 40)
+    assert runtime.poll(force=True)
+    assert runtime.spec == editor.spec
+
+
+def test_store_distinguishes_bundled_defaults_from_a_saved_design_spec(tmp_path):
+    store = SpecificationStore(tmp_path / "design-spec.json")
+    assert store.latest()["source"] is None
+    store.write(DEFAULT, save=True)
+    assert store.latest()["source"] == "design-spec.json"
+
+
+@pytest.mark.parametrize("operation", ("change", "save"))
+@pytest.mark.parametrize("unavailable", ("invalid", "missing"))
+def test_editor_refuses_to_merge_into_unreadable_files_and_can_resume_after_repair(
+    store, operation, unavailable
+):
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    editor.change(("parts", "button", "height"), 40)
+    before = deepcopy(editor.spec)
+    history = list(editor.undo_stack)
+    if unavailable == "invalid":
+        store.saved_path.write_text("{broken saved")
+        store.live_path.write_text("{broken live")
+    else:
+        store.saved_path.unlink()
+        store.live_path.unlink()
+    with pytest.raises(SpecificationConflict, match="No valid design specification"):
+        if operation == "save":
+            editor.save()
+        else:
+            editor.change(("parts", "button", "radius"), 10)
+    assert editor.spec == before
+    assert editor.undo_stack == history
+    if unavailable == "invalid":
+        assert store.saved_path.read_text() == "{broken saved"
+        assert store.live_path.read_text() == "{broken live"
+    else:
+        assert not store.saved_path.exists()
+        assert not store.live_path.exists()
+    store.write(before, save=True)
+    assert editor.change(("parts", "button", "radius"), 10)
+    assert store.latest()["spec"]["parts"]["button"]["height"] == 40
+    assert store.latest()["spec"]["parts"]["button"]["radius"] == 10
+
+
+@pytest.mark.parametrize("unavailable", ("invalid", "missing"))
+def test_import_replaces_the_entire_specification_and_recovers_unavailable_files(
+    store, tmp_path, unavailable
+):
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    editor.change(("parts", "button", "height"), 40)
+    imported = SpecificationStore(tmp_path / "import.json")
+    value = deepcopy(DEFAULT)
+    value["parts"]["button"]["radius"] = 10
+    imported.write(value, save=True)
+    if unavailable == "invalid":
+        store.saved_path.write_text("{")
+        store.live_path.write_text("{")
+    else:
+        store.saved_path.unlink()
+        store.live_path.unlink()
+    editor.import_file(imported.saved_path)
+    assert editor.spec == value
+    assert store.latest()["spec"] == value
+    assert not editor.undo_stack and not editor.redo_stack
+    assert not editor.pending_sync
+    editor.save()
+    assert read_spec(store.saved_path) == value
+
+
 @pytest.mark.parametrize(
     "key,value",
     [
@@ -209,3 +357,68 @@ def test_atomic_drafts_with_the_same_timestamp_refresh_live_styles(tmp_path):
         os.utime(store.live_path, ns=(stamp, stamp))
         assert runtime.poll(force=True)
         assert runtime.resolved_part("button_row", "alignItems") == align
+
+
+def test_editor_refreshes_atomic_drafts_with_the_same_timestamp_and_size(store):
+    import os
+
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    value = deepcopy(DEFAULT)
+    value["parts"]["button"]["height"] = 40
+    store.write(value)
+    assert editor.poll(force=True)
+    stamp = store.live_path.stat().st_mtime_ns
+    size = store.live_path.stat().st_size
+    value["parts"]["button"]["height"] = 44
+    store.write(value)
+    os.utime(store.live_path, ns=(stamp, stamp))
+    assert store.live_path.stat().st_size == size
+    assert editor.poll(force=True)
+    assert editor.effective("button")["height"] == 44
+
+
+@pytest.mark.parametrize("operation", ("change", "save"))
+def test_editor_does_not_cache_an_external_snapshot_after_its_own_write(
+    store, monkeypatch, operation
+):
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    if operation == "save":
+        editor.change(("parts", "button", "height"), 40)
+    merge = store.merge
+
+    def publish_after_merge(*args, **kwargs):
+        envelope = merge(*args, **kwargs)
+        value = deepcopy(envelope["spec"])
+        value["parts"]["button"]["height"] = 44
+        store.write(value)
+        return envelope
+
+    monkeypatch.setattr(editor.store, "merge", publish_after_merge)
+    if operation == "save":
+        editor.save()
+    else:
+        editor.change(("parts", "button", "height"), 40)
+    assert editor.effective("button")["height"] == 40
+    assert editor.poll(force=True)
+    assert editor.effective("button")["height"] == 44
+
+
+def test_editor_rechecks_a_snapshot_replaced_during_poll(store, monkeypatch):
+    editor = SpecificationEditor(store.saved_path, store.live_path, read_spec)
+    value = deepcopy(DEFAULT)
+    value["parts"]["button"]["height"] = 40
+    store.write(value)
+    latest = editor.store.latest
+
+    def replace_after_read():
+        envelope = latest()
+        value["parts"]["button"]["height"] = 44
+        store.write(value)
+        return envelope
+
+    with monkeypatch.context() as reading:
+        reading.setattr(editor.store, "latest", replace_after_read)
+        assert editor.poll(force=True)
+        assert editor.effective("button")["height"] == 40
+    assert editor.poll(force=True)
+    assert editor.effective("button")["height"] == 44

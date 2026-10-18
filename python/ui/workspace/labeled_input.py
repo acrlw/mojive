@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,7 @@ class LabeledInputLayout:
     stacked: bool
 
 
+@part_scope("range_bounds")
 def measure_labeled_input(ui, available, label, number_size, *, label_width=None):
     s, style = ui.s, ui.component_style("range_bounds")
     padding, margin = style.edges("padding", s), style.edges("margin", s)
@@ -39,6 +40,7 @@ def measure_labeled_input(ui, available, label, number_size, *, label_width=None
     )
 
 
+@part_scope("range_bounds")
 def draw_labeled_input(ui, key, x, y, layout, label, value, *, format="%.2f s", speed=0.01):
     from mojive.ui.workspace.widgets import TEXT
 

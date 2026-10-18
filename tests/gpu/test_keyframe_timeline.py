@@ -83,7 +83,7 @@ def test_ruler_numbers_are_left_aligned_and_ink_centered(tmp_path, monkeypatch, 
         viewer.sync()
         lo, hi = _item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
         actual_scale = viewer.window.style_scale
-        left = lo[0] + timeline_channel_width(hi[0] - lo[0], actual_scale)
+        left = lo[0] + timeline_channel_width(hi[0] - lo[0], actual_scale) + 12 * actual_scale
         center_y = lo[1] + 16 * actual_scale
         texts = []
         original = ImguiDraw2D.text

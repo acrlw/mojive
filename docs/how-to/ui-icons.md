@@ -4,16 +4,99 @@ Mojive draws compact UI icons from filled vector contours. Treat an icon family 
 system: its members share a canvas, proportions, weight, cap style, alignment, and scaling rules.
 Changing one contour in isolation usually produces a visible mismatch at Output-row sizes.
 
-This guide applies to panel icons, filter pills, viewport controls, status glyphs, and diagnostic
-symbols. For drawing ownership and submission APIs, see [Extend UI drawing](ui-drawing.md). For the
-shared corner and cap profiles, see [G3 UI corners](ui-corners.md).
+The adopted workspace family contains 120 SVG entries on a 24-unit grid, with a
+1.5-unit round stroke. Pinned Lucide sources cover general symbols;
+`examples/ui_design/native/svg/mojive/` owns the domain and transport designs.
+`examples/ui_design/native/svg/sources.json` records the source, license and stroke policy;
+`make ui-design-icons` regenerates the shared vector inventory.
 
-Production placement and visible bounds are generated in `ui/icon_presets.json`.
-After applying reviewed defaults, run `make icon-presets`; `make check` verifies
-every preset against the dynamic painter. The installed package includes these
-presets, so its first frame does not fit strokes or measure enclosing circles.
-Icon Library candidates remain dynamic. If development parameters change before
-regeneration, unmatched presets use dynamic fitting to preserve correct geometry.
+Workspace context IDs resolve through aliases to the same master. Viewport and timeline
+playback, transform controls, activity navigation, panel headers and scene rows therefore
+share one drawing pipeline. Scene hierarchy uses a tree silhouette; hinge joints use a
+mechanical pivot; snapshots have a distinct symbol from body or link identity.
+Pose adjustment uses a tilted rounded object outline and a short rotation arrow above it.
+The object and arrow retain separate visible contours, with no axes or internal box edges.
+The generic joint category retains its separate articulated-chain symbol.
+Runtime statistics use a performance gauge. Snap uses a filled horseshoe with two separated
+poles; small outlined cells are avoided in its arms. Joint symbols retain their established
+translation and rotation cues. Content visualization uses a body, reference plane and normal
+arrow; the layer stack is reserved for Layers. Projection frames use circular corner fillets,
+with rounded stroke caps and joins. Filled silhouettes and round outlines share the same optical scale.
+Sensors use a central sensing point between two rounded reception arcs. Curves and actions
+that open plotted data retain the separate waveform symbol.
+Mature mouse-button silhouettes and diagnostic symbols retain their reviewed painters.
+The Settings entry uses a gear. Its General category uses a dedicated rounded preference
+panel with two rows; category navigation does not repeat the window's gear.
+Camera view controls have separate front, back, left, right, top, bottom and isometric
+symbols. Their compact view planes and direction markers share one optical envelope.
+Top and bottom views use closed observation planes and external direction arrows, distinct
+from the open tray of the export action; their visible strokes retain a 2.5-unit gap.
+The isometric entry uses an oblique observation arrow rather than a primitive box.
+Body-frame orientation uses a local axis corner beside a body marker. State snapshots use
+a bookmark outline for a saved instant, distinct from camera objects, image capture,
+keyframe diamonds, preset flags and the performance gauge. Its caption and tooltip identify
+the saved scene state and its restore action.
+Image capture uses a framed landscape; scene, viewport and window captures share that action
+symbol. Projection controls display the current projection frame rather than a camera object.
+Primitive creation uses distinct box, sphere, cylinder, capsule, cone, ellipsoid and plane
+silhouettes. Round tangent seams meet the shell centerline so their terminal cap is contained
+in the shell's existing round join. Offsetting these terminals inward exposes a cap lobe inside
+the opening. Box and cone internal edges stay within the continuous outer silhouette.
+Cube and box aliases share the creation master.
+Collision visibility uses two contacting body outlines, distinct from box creation and the
+intersecting circles used by the combined geometry view. The locally adapted trash master keeps
+its source and license in the manifest; its handle and lid share a continuous path, with the
+body and interior slots separated by grid-relative clearances.
+Default geometry visibility uses a preset flag, indicating the scene source's visible groups.
+The flag is distinct from the Visual, Collision and Overlay display symbols.
+Layers uses a compact stack whose visible height matches neighboring toolbar
+symbols; a common canvas size alone does not ensure equal visual weight.
+
+Scene camera and light markers use those same SVG masters. `make ui-design-icons`
+also generates the backend-neutral `interaction/resources/scene_icons.json` subset,
+which ships in the Python package. The viewport uses a 24-point canvas, slightly larger
+than toolbar icons; its stroke width, rounded endpoints and gaps scale together.
+Cached stroke unions preserve the complete silhouette when projected into the scene.
+Editor helpers retain their picking, selection colors and selected frustum or light influence.
+Explicit Camera and Light render flags remain separate diagnostic layers.
+
+Optical placement belongs to the authored 24-unit grid. Do not fit each silhouette to its
+own bounding box or recenter its ink at draw time: that makes asymmetric symbols change
+size and removes their intentional alignment. Stroke caps and joins are tessellated on the
+canonical grid before uniform scaling. Only the antialias fringe budget depends on display
+size. The same masters appear in `make ui-design-guide`, `make ui-design-native` and
+`make ui-design-reference ARGS='--icons --portable-fonts'`.
+The reference capture includes `icon-rounding.png`, which compares Settings, General,
+camera, mouse and follow boundaries at 14, 24, 56 and 112 points.
+`icon-views.png` and `icon-shapes.png` cover the directional and primitive families at the
+same sizes.
+`icon-junctions.png` checks outer shells, internal connections and detached marks at those sizes.
+Keep attached line caps inside the outer shell; reserve at least one canonical stroke width
+of visible clearance for marks that must remain separate. Measure the expanded strokes, not
+only their centerlines. Adjacent opaque strokes with the same paint are tessellated as one union,
+with antialiasing only on the combined boundary. Filled and translucent layers keep their order.
+
+### Construct and inspect the final silhouette
+
+The production pipeline follows the same geometric operation as
+[outlining a stroke](https://help.figma.com/hc/en-us/articles/33052305733015-Convert-strokes-to-vector-paths)
+and [uniting overlapping shapes](https://help.figma.com/hc/en-us/articles/360039957534-Boolean-operations):
+expand the authored paths, merge compatible opaque coverage, preserve intentional openings,
+and triangulate the resulting boundaries. The editable SVG paths remain the source of truth.
+This removes internal antialias seams; it does not repair an incorrect source contour.
+
+A [round cap](https://www.w3.org/TR/SVG2/painting.html#LineCaps) extends half a stroke width
+beyond its endpoint. At an attached curved seam, inspect the full cap against both sides of the
+shell. Moving an endpoint inward can replace an outer protrusion with an inner lobe. Correct
+the path's tangent and attachment position before combining its coverage. Detached marks need
+a measured gap between their expanded outlines. Verify the actual production mesh at small
+sizes and inspect enlarged inner boundaries; an unchanged outer bounding box is insufficient.
+
+The earlier `ui/icons/` G3 icon exploration remains a separate candidate library in
+`make ui-feasibility`. Its fitted contours and editable optical-offset controls, documented
+below, do not replace the adopted workspace SVG masters. Shared G3 control surfaces and
+capsules default to circular corners; the optional G3 mode uses the geometry described in [G3 UI corners](ui-corners.md).
+For drawing ownership and submission APIs, see [Extend UI drawing](ui-drawing.md).
 
 ## Author one canonical grid
 
@@ -38,21 +121,29 @@ Do not clamp one authored dimension with `max(minimum_pixels, value * scale)`. A
 floor changes the icon's proportions at the threshold. In particular, a minimum stroke width makes
 the stem and dot consume more of a small circle while its safe area continues to shrink.
 
-The antialias fringe is different from authored geometry. `ImguiDraw2D` normally keeps that fringe
-one logical pixel wide. Icons use `ImguiIconDraw`: both open and closed strokes are filled
-contours, with an outward fringe limited to half the rendered canonical stroke and at most one
-logical pixel. Mixing native ImGui outlines with outward-fringed internal lines makes their weights
+The antialias fringe is different from authored geometry. Workspace meshes and the retained
+`ImguiIconDraw` candidate adapter submit filled stroke contours. Their outward fringe is limited
+to half the rendered canonical stroke and at most one logical pixel. Mixing native ImGui outlines with outward-fringed internal lines makes their weights
 differ; keeping a fixed fringe also makes small icons disproportionately heavy. The shared budget
 applies in production and Icon Library, without changing layout, stroke defaults or font size.
-Rotation additionally limits its fringe to half the rendered crossing gap. Reviewed Output symbols
-and mouse hints retain their existing painters.
+The feasibility Rotation candidate also limits its fringe to half the rendered crossing gap.
+Reviewed Output symbols and mouse hints retain their existing painters.
 
 Closed stroke meshes remove inward offset loops at tight corners before triangulation and
 antialiasing. Geometry and native vertex arrays are cached by path, width and placement; an
-unchanged frame only submits the cached data. Check the actual raster output at UI scales 0.65,
-1.0, 1.25 and 1.5, including world/body spokes versus frames and the Keyframes toolbar.
-`make ui-icon-scales BACKEND=bgfx` captures these scales in `output/ui-icon-scales/`;
-`BACKEND=opengl` uses the same specimens.
+unchanged frame only submits the cached data. Check workspace raster output with
+`make ui-design-reference ARGS='--icons --portable-fonts'` and the guide's actual-size plates.
+The separate `make ui-icon-scales BACKEND=bgfx` candidate gallery records UI scales 0.65,
+1.0, 1.25 and 1.5 under `output/ui-icon-scales/`; `BACKEND=opengl` uses the same specimens.
+
+## Feasibility candidate library
+
+The following fitting and alignment controls describe the retained G3 icon candidates.
+They are independent of the workspace SVG authoring grid described above.
+Candidate placement and visible bounds are generated in `ui/icon_presets.json`.
+After changing reviewed candidate defaults, run `make icon-presets`; `make check` verifies
+every preset against its dynamic painter. Cached presets avoid fitting work on the first
+frame, while unmatched development parameters use dynamic fitting.
 
 ### Use explicit geometric centers
 
@@ -242,17 +333,19 @@ one continuous neck.
 
 ## Keep a family visibly related
 
-The production Keyframe follow icons use box-centered 24-unit masters: Off and Page
-share a G3 viewport rim with an isolated dash or integrated arrow. Locked uses that same rim and
-an integrated triangular playhead/stem: it means holding the playhead's relative screen position
-while time scrolls underneath, not preventing edits. The centered symbol is illustrative; the
-actual mode preserves the position at activation. No rim/mark parts overlap. Their default padding is
-0.5 units and stroke is 1.5 units, with independent per-glyph controls and parameter export in
-`Icon library > Keyframe follow`. The toolbar uses square icon-only segments without a Follow
-heading. Each icon is centered in its segment; localized per-item tooltips explain the modes.
-The selected fill, native click targets, and keyboard focus remain shared with captioned
-segmented controls. `make ui-keyframe-follow`
-captures the family and the production toolbar without enabling Icon Library preview.
+The production timeline retains the native workspace follow symbols used before the
+interactive design guide: Off uses a simple upright pin, Page uses a plain right arrow,
+and Locked uses a rounded closed lock without a keyhole. Standalone Follow uses the same
+right-arrow motif. Their source geometry is retained under `svg/mojive/follow*.svg` with
+one 1.5-unit stroke, round caps and round joins. The native toolbar and guide both resolve
+`follow-off`, `follow-page`, and `follow-locked` to those masters. Locked holds the playhead's
+relative screen position while time scrolls underneath; the concise tooltip explains that
+behavior. The three square segments share their selected fill, click targets and keyboard
+focus with captioned segmented controls.
+
+The viewport-rim follow family in `python/ui/icons/glyphs.py` belongs to the earlier
+`ui-feasibility` exploration. It is not the production reference and must not replace the
+native workspace symbols when updating the guide.
 
 Members of one family use the same outer bounds, baseline, frame weight, internal stroke class,
 round-cap profile, and semantic color behavior. Derive related symbols instead of tuning them

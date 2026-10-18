@@ -2,13 +2,16 @@
 
 from imgui_bundle import imgui
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Box, Rect, corner_radius_scope, part_scope
 from mojive.ui.preview_geometry import preview_surface
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
+from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.menu_geometry import native_edges, native_unit
+from mojive.ui.workspace.panel_geometry import corner_inset
 from mojive.ui.workspace.widgets import MUTED, PANEL
 
 HEADER_HEIGHT = 30.0
-IMAGE_PADDING = 6.0
+IMAGE_PADDING = 8.0
 
 
 def preview_region(
@@ -25,16 +28,21 @@ def preview_region(
     right_inset=0,
     bottom_inset=0,
     row_gap=0,
+    image_padding=IMAGE_PADDING,
     aspect=16 / 9,
 ):
     """Choose the largest unobstructed budget for the measured preview surface."""
     x, y, width, height = viewport
     margin, gap = 8 * scale, 6 * scale
     left, top = x + margin + margins[0], y + margin + margins[1]
-    right = x + width - right_inset * scale - margins[2]
-    bottom = y + height - bottom_inset * scale - margins[3]
+    right = x + width - margin - right_inset * scale - margins[2]
+    bottom = y + height - margin - bottom_inset * scale - margins[3]
     if right <= left or bottom <= top:
         return None
+    if position is not None:
+        # Automatic placement avoids tools. A captured user anchor instead owns
+        # its position across obstacles, while remaining inside the viewport.
+        return left, top, right - left, bottom - top
     blocked, edges = [], {left, right}
     for ox, oy, ow, oh in obstacles:
         a, b = max(left, ox - gap), min(right, ox + ow + gap)
@@ -44,10 +52,10 @@ def preview_region(
             edges.update((a, b))
     edges, best, best_score = sorted(edges), None, None
     insets = (
-        IMAGE_PADDING * scale + body_margin[0],
+        image_padding * scale + body_margin[0],
         body_margin[1],
-        IMAGE_PADDING * scale + body_margin[2],
-        IMAGE_PADDING * scale + body_margin[3],
+        image_padding * scale + body_margin[2],
+        image_padding * scale + body_margin[3],
     )
     for i, a in enumerate(edges[:-1]):
         for b in edges[i + 1 :]:
@@ -86,33 +94,74 @@ class WorkspaceCameraPreview:
     def __init__(self, workspace):
         self.workspace = workspace
         self._region_key = self._region = None
+        self._frame = None
+        self._radius = 0
+        self._image_radius = 0
+        self._corner_inset = 0
 
+    @part_scope("camera_header")
     def _header_height(self):
         ui, scale = self.workspace.ui, self.workspace.s
         style = ui.component_style("camera_header")
-        padding, margin = style.edges("padding", scale, (6, 3, 6, 3)), style.edges("margin", scale)
         font, icon = style.get("fontSize", 14), style.get("iconSize", 14)
-        actions = max(
-            control_size(ui, "camera-preview-" + key, 24, 24, icon=key, icon_role="subtle")[1]
-            for key in ("pin", "lock", "close", "more")
-        )
+        actions = max(size[1] for size in self._action_sizes(style).values())
         return (
             max(actions, style.line_height(font * 1.4) * scale, icon * scale)
-            + padding[1]
-            + padding[3]
-            + margin[1]
-            + margin[3]
+            + 2 * self._corner_inset
         ) / scale
+
+    def _action_sizes(self, style):
+        ui, scale = self.workspace.ui, self.workspace.s
+        inner = max(0, self._radius - self._corner_inset)
+        # ImGui clamps a rounded rectangle to half its shorter side minus one.
+        # Grow an explicitly larger parent rather than silently clipping its child arc.
+        slot = max(24, (2 * inner + 2) / scale)
+        return {
+            key: control_size(ui, "camera-preview-" + key, slot, slot, icon=key, icon_role="subtle")
+            for key in ("pin", "lock", "close", "more")
+        }
 
     def draw(self, preview_name):
         workspace, app, ui = self.workspace, self.workspace.app, self.workspace.ui
         preview, scale = app.camera_preview, workspace.s
+        preview.update_drag_position()
         workspace.rects.pop("camera_preview", None)
-        if not app.viewport_layers.viewport_ui:
+        if not preview.enabled or preview._image is None or not app.viewport_layers.viewport_ui:
             preview.draw(workspace.window, (0, 0, 0, 0), preview_name)
             return
         style, body = ui.component_style("camera_preview"), ui.component_style("camera_body")
-        margins, body_margin = style.edges("margin", scale), body.edges("margin", scale)
+        margins, body_margin = (
+            native_edges(style, "margin", scale),
+            native_edges(body, "margin", scale),
+        )
+        header = ui.component_style("camera_header")
+        header_padding = native_edges(header, "padding", scale, (8,) * 4)
+        header_margin = native_edges(header, "margin", scale)
+        image_padding = native_unit(IMAGE_PADDING * scale)
+        self._corner_inset = max(
+            *(a + b for a, b in zip(header_padding, header_margin, strict=True)),
+            *(image_padding + body_margin[index] for index in (0, 2, 3)),
+        )
+        self._radius = (
+            max(0, style.get("radius", 14) * scale)
+            if style.explicit("radius")
+            else DESIGN.control_radius * scale + self._corner_inset
+        )
+        sizes = self._action_sizes(header)
+        limit = min(
+            max(
+                0,
+                min(control_frame_size(ui, "camera-preview-" + key, width, height, icon=key))
+                * scale
+                / 2
+                - 1,
+            )
+            for key, (width, height) in sizes.items()
+        )
+        self._corner_inset = corner_inset(self._radius, self._corner_inset, limit)
+        # Adjacent header and image corners share the same physical offset.
+        # Independent side edits enlarge that uniform budget instead of breaking it.
+        body_margin = (0, body_margin[1], 0, 0)
         header_height = self._header_height()
         body_height = (
             body.get("height", 163) * scale if body.get("heightMode", "auto") == "fixed" else None
@@ -132,6 +181,7 @@ class WorkspaceCameraPreview:
             "right_inset": style.get("right", 0),
             "bottom_inset": style.get("bottom", 0),
             "row_gap": style.get("rowGap", 0),
+            "image_padding": self._corner_inset / scale,
             "aspect": preview._image.aspect if preview._image is not None else 16 / 9,
         }
         key = (
@@ -156,14 +206,16 @@ class WorkspaceCameraPreview:
                 draw_header=self._header,
                 margin_pt=0,
                 header_height_pt=header_height,
-                image_padding_pt=IMAGE_PADDING,
+                image_padding_pt=options["image_padding"],
                 maximum_width_pt=options["maximum_width"],
                 image_height_pt=None if body_height is None else body_height / scale,
                 body_margin_pt=tuple(v / scale for v in body_margin),
                 row_gap_pt=options["row_gap"],
                 image_fit=body.get("fit", "contain"),
-                draw_frame=lambda x, y, w, h: ui.rect(x, y, w, h, PANEL, style.get("radius", 8)),
+                draw_frame=self._draw_frame,
+                draw_image=self._draw_image,
                 record_image=self._record_image,
+                native_layout=True,
             )
         finally:
             imgui.pop_style_color()
@@ -186,7 +238,28 @@ class WorkspaceCameraPreview:
                         d - b + margins[1] + margins[3],
                     ],
                     margin=list(margins),
+                    radius=self._radius,
+                    cornerInset=self._corner_inset,
                 )
+
+    def _draw_frame(self, x, y, width, height):
+        self._frame = Rect(x, y, width, height)
+        self.workspace.ui.rect(x, y, width, height, PANEL, self._radius / self.workspace.s)
+
+    def _draw_image(self, texture, destination, uv0, uv1):
+        rect, frame = Rect(*destination), self._frame
+        gaps = (rect.x - frame.x, frame.right - rect.right, frame.bottom - rect.bottom)
+        self._image_radius = max(0, self._radius - min(gaps))
+        imgui.get_window_draw_list().add_image_rounded(
+            texture,
+            (rect.x, rect.y),
+            (rect.right, rect.bottom),
+            uv0,
+            uv1,
+            0xFFFFFFFF,
+            self._image_radius,
+        )
+        imgui.dummy((rect.width, rect.height))
 
     def _record_image(self, frame, destination, uv0, uv1):
         ui = self.workspace.ui
@@ -208,28 +281,26 @@ class WorkspaceCameraPreview:
                 margin=list(margin),
                 uv0=list(uv0),
                 uv1=list(uv1),
+                radius=self._image_radius,
+                cornerInsets=[
+                    destination[0] - self._frame.x,
+                    self._frame.right - destination[0] - destination[2],
+                    self._frame.bottom - destination[1] - destination[3],
+                ],
             )
 
+    @part_scope("camera_header")
     def _header(self, camera_name, height):
         workspace, ui, scale = self.workspace, self.workspace.ui, self.workspace.s
         preview = workspace.app.camera_preview
         pos, width = imgui.get_cursor_screen_pos(), imgui.get_content_region_avail().x
-        box = ui.component_box(
-            "camera_header",
-            pos.x,
-            pos.y,
-            width,
-            height,
-            key="camera-preview-header",
-            padding=(6 * scale, 3 * scale, 6 * scale, 3 * scale),
-        )
+        frame = Rect(pos.x, pos.y, width, height)
+        pads = (self._corner_inset,) * 4
+        box = Box(frame, frame, frame.inset(*pads), pads, (0,) * 4)
         style, content = ui.component_style("camera_header"), box.content
         gap = style.get("columnGap", style.get("gap", 6)) * scale
         keys = ("pin", "lock", "close")
-        sizes = {
-            key: control_size(ui, "camera-preview-" + key, 24, 24, icon=key, icon_role="subtle")
-            for key in (*keys, "more")
-        }
+        sizes = self._action_sizes(style)
         icon = style.get("iconSize", 14) * scale
         compact = content.width < sum(sizes[k][0] for k in keys) + 3 * gap + icon + 32 * scale
         keys = ("more", "close") if compact else keys
@@ -241,7 +312,7 @@ class WorkspaceCameraPreview:
             imgui.set_cursor_screen_pos((title.x, title.y))
             imgui.invisible_button("##camera-preview-title", (title.width, title.height))
             ui.hits["camera-preview-title"] = title.tuple()
-            dragging = imgui.is_item_active() and imgui.is_mouse_dragging(0)
+            dragging = imgui.is_item_active()
             glyph = style.align_rect(title, icon, icon, horizontal="start")
             ui.icon("camera", glyph.x, glyph.y, icon / scale, MUTED)
             caption = title.inset(icon + gap)
@@ -256,30 +327,33 @@ class WorkspaceCameraPreview:
         with ui.component_scope("camera_header"):
             for key in keys:
                 aw, ah = sizes[key]
-                placement = style.align_rect(
-                    Rect(action_x, content.y, aw, content.height), aw, ah, horizontal="start"
-                )
+                # The image-height rounding remainder belongs below the action
+                # row; centering it would break the top/right corner offset.
+                placement = Rect(action_x, content.y, aw, ah)
                 fw, fh = control_frame_size(ui, "camera-preview-" + key, aw, ah, icon=key)
                 active = (
                     preview.pinned if key == "pin" else preview.locked if key == "lock" else False
                 )
-                clicked = ui.button(
-                    "camera-preview-" + key,
-                    placement.x,
-                    placement.y,
-                    fw,
-                    fh,
-                    icon=key,
-                    icon_role="subtle",
-                    width_limit=fw * scale,
-                    active=active,
-                    tooltip={
-                        "pin": "Pin",
-                        "lock": "Lock",
-                        "more": "Camera Preview",
-                        "close": "Close Camera Preview",
-                    }[key],
-                )
+                inset = min(placement.y - self._frame.y, self._frame.right - placement.right)
+                inner_radius = max(0, self._radius - inset)
+                with corner_radius_scope(inner_radius, ("icon_button", "button")):
+                    clicked = ui.button(
+                        "camera-preview-" + key,
+                        placement.x,
+                        placement.y,
+                        fw,
+                        fh,
+                        icon=key,
+                        icon_role="subtle",
+                        width_limit=fw * scale,
+                        active=active,
+                        tooltip={
+                            "pin": "Freeze the preview viewpoint and panel position. Scene motion continues.",
+                            "lock": "Follow this camera even when selection changes. The camera can still move.",
+                            "more": "Camera Preview",
+                            "close": "Close Camera Preview",
+                        }[key],
+                    )
                 if clicked:
                     if key == "more":
                         imgui.open_popup(popup)
@@ -288,6 +362,14 @@ class WorkspaceCameraPreview:
                     else:
                         (preview.set_pinned if key == "pin" else preview.set_locked)(not active)
                 action_x += aw + gap
+        ui.record_component_box(
+            "camera_header",
+            box,
+            key="camera-preview-header",
+            radius=self._radius,
+            actions=[list(ui.hits["camera-preview-" + key]) for key in keys],
+            actionRadius=max(0, self._radius - box.padding[1]),
+        )
         with workspace.menus.local_popup(popup) as opened:
             if opened:
                 for key, label, active, callback in (
@@ -295,7 +377,11 @@ class WorkspaceCameraPreview:
                     ("lock", "Lock", preview.locked, preview.set_locked),
                 ):
                     clicked, _ = workspace.menus.local_item(
-                        label, checked=active, key="camera-preview-" + key, icon=key
+                        label,
+                        checked=active,
+                        checkable=True,
+                        key="camera-preview-" + key,
+                        icon=key,
                     )
                     if clicked:
                         callback(not active)

@@ -387,9 +387,9 @@ def test_existing_capsule_ink_matches_geometry_and_reset_stays_in_bound(rig, mon
             # hover/selection backgrounds and capsule cap, without shortcut badges.
             # The redesign intentionally disables stepping while playing; compare
             # the selected Pause button separately from the disabled Previous glyph.
-            region = (
-                np.s_[96:286, 96:204] if vertical else np.s_[96:204, 192 if selected else 96 : 286]
-            )
+            bounds = (96, 96, 204, 286) if vertical else (192 if selected else 96, 96, 286, 204)
+            left, top, right, bottom = map(round, rig.window.points_to_pixels(bounds))
+            region = np.s_[top:bottom, left:right]
             np.testing.assert_array_equal(actual[region], baseline[region])
     for stroke in (1.0, OVERLAY_GEOMETRY.tool_stroke, 2.2):
         for smoothing in (0.0, rig.probe.playback_smoothing, CORNER_SMOOTHING, 1.0):

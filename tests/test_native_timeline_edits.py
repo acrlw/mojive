@@ -55,7 +55,7 @@ def timeline_edits(request):
             ui.numeric_edits.clear()
             rows = _ToolbarRows(imgui.get_cursor_screen_pos(), 700 * ui.s, ui.s)
             if state.mode == "recording":
-                toolbar._draw_recording_fields(ctx, rows)
+                toolbar._draw_recording_fields(ctx)
             else:
                 toolbar._draw_range(editor, ctx, session.state_take_times, rows)
             imgui.end()

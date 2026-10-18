@@ -75,10 +75,16 @@ class SpecificationEditor:
         self.poll(force=True)
 
     def stamps(self):
-        return tuple(
-            (p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None
-            for p in (self.saved_path, self.live_path)
-        )
+        stamps = []
+        for path in (self.saved_path, self.live_path):
+            try:
+                stat = path.stat()
+            except FileNotFoundError:
+                stamps.append(None)
+            else:
+                # Atomic replacement can preserve both modification time and size.
+                stamps.append((stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns))
+        return tuple(stamps)
 
     def poll(self, *, force=False):
         if not force and time.monotonic() - self._poll_at < 0.12:
@@ -87,29 +93,24 @@ class SpecificationEditor:
         stamps = self.stamps()
         if stamps == self._stamps:
             return False
-        files = [p for p in (self.saved_path, self.live_path) if p.exists()]
-        if not files:
-            self._stamps = stamps
+        envelope = self.store.latest()
+        errors = "; ".join(f"{item['source']}: {item['error']}" for item in envelope["errors"])
+        if envelope["source"] is None:
+            if errors or self.spec != DEFAULT:
+                self.error = "规范读取失败：" + (
+                    errors or "The saved specification and draft are missing"
+                )
             return False
-        latest = max(enumerate(files), key=lambda item: (item[1].stat().st_mtime_ns, item[0]))[1]
-        try:
-            spec = validate_spec(self.reader(latest))
-            saved = (
-                validate_spec(self.reader(self.saved_path))
-                if self.saved_path.exists()
-                else deepcopy(DEFAULT)
-            )
-        except (OSError, ValueError, TypeError, KeyError) as exc:
-            self.error = "规范读取失败：" + str(exc)
-            return False
+        spec = envelope["spec"]
         if self._last_gesture is not None and path_value(
             self.spec, self._last_gesture
         ) != path_value(spec, self._last_gesture):
             self._last_gesture = None
         self.spec = spec
-        self.saved_spec = saved
+        if envelope["savedSpec"] is not None:
+            self.saved_spec = envelope["savedSpec"]
         self._stamps = stamps
-        self.error = ""
+        self.error = "规范读取失败：" + errors if errors else ""
         return True
 
     def effective(self, part, *, family=None):
@@ -122,11 +123,16 @@ class SpecificationEditor:
         envelope = self.store.merge(
             self.spec, candidate, durable=not gesture and self._draft_sync is None
         )
+        self._accept_write(envelope["spec"], gesture=gesture)
+
+    def _accept_write(self, spec, *, gesture=False):
         self.pending_sync = gesture
         if self._draft_sync is not None and not gesture:
             self._draft_sync.dirty = True
-        self.spec = envelope["spec"]
-        self._stamps = self.stamps()
+        self.spec = spec
+        # Another editor can publish after merge releases the store lock. Its
+        # file stamps must never be cached alongside this earlier snapshot.
+        self._stamps = None
         self.writes += 1
         self.error = ""
 
@@ -227,7 +233,7 @@ class SpecificationEditor:
         self.spec = self.store.merge(self.spec, self.spec, save=True)["spec"]
         self.saved_spec = deepcopy(self.spec)
         self.pending_sync = False
-        self._stamps = self.stamps()
+        self._stamps = None
         self.last_change = "规范已保存；下次原生启动继续读取。"
 
     def export(self, path):
@@ -238,7 +244,7 @@ class SpecificationEditor:
     def import_file(self, path):
         self.poll(force=True)
         value = validate_spec(self.reader(Path(path).expanduser()))
-        self.write(value)
+        self._accept_write(self.store.write(value)["spec"])
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.last_change = "规范已导入并应用。"

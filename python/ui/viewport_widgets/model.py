@@ -56,6 +56,7 @@ class ViewportLabels:
     steps: str = "Steps"
     physics: str = "Physics"
     render: str = "Render"
+    backend: str = "Backend"
     passive: str = "Passive"
     recording_finalizing: str = "Finalizing recording"
     recording_scene: str = "SCENE"
@@ -113,6 +114,16 @@ class ToolHint:
 
 
 @dataclass(frozen=True)
+class StatusMetric:
+    """A read-only telemetry field with its full value and interactive bounds."""
+
+    key: str
+    label: str
+    exact: str
+    rect: tuple[float, float, float, float]
+
+
+@dataclass(frozen=True)
 class StatusLayout:
     """Interactive geometry emitted while drawing the application status bar."""
 
@@ -122,23 +133,7 @@ class StatusLayout:
     recording_stop_rect: tuple[float, float, float, float] | None = None
     message_rect: tuple[float, float, float, float] | None = None
     passive_rect: tuple[float, float, float, float] | None = None
-
-
-@dataclass(frozen=True)
-class _StatusPerformanceLayout:
-    """Compact, progressively collapsible right-edge telemetry columns."""
-
-    backend_text: str
-    metric_text: str
-    delta_text: str
-    fps_text: str
-    backend_x: float
-    metric_x: float
-    metric_width: float
-    delta_x: float
-    fps_x: float
-    dividers: tuple[float, ...]
-    left: float
+    metrics: tuple[StatusMetric, ...] = ()
 
 
 DEFAULT_VIEWPORT_OVERLAY_SCALE = 1.25

@@ -8,9 +8,7 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
-from mojive.render.geometry import GeometryView, geometry_view, set_geometry_view
 from mojive.ui.compound_fields import draw_focus_frame
-from mojive.ui.controls import segmented_control_width
 from mojive.ui.panels import (
     activate_edit_gizmo,
     copy_state_vector,
@@ -22,12 +20,17 @@ from mojive.ui.panels.filters import node_filter_color
 from mojive.ui.panels.hierarchy import _TYPE_FILTERS
 from mojive.ui.panels.joints import filter_joints, sort_joints
 from mojive.ui.pointer_bindings import PointerAction
-
-from .pose_panel import NativePoseEditor, joint_icon
-from .widgets import DIM, INPUT, MUTED
-
-GEOMETRY_VIEWS = (GeometryView.VISUAL, GeometryView.COLLISION, GeometryView.BOTH)
-GEOMETRY_ICONS = ("visual", "collision", "both")
+from mojive.ui.workspace.geometry_view import (
+    GEOMETRY_ICONS as GEOMETRY_ICONS,
+)
+from mojive.ui.workspace.geometry_view import (
+    GEOMETRY_VIEWS as GEOMETRY_VIEWS,
+)
+from mojive.ui.workspace.geometry_view import (
+    geometry_selector,
+)
+from mojive.ui.workspace.pose_panel import NativePoseEditor, joint_icon
+from mojive.ui.workspace.widgets import DIM, INPUT, MUTED
 
 NODE_ICONS = {
     "world": "world",
@@ -172,33 +175,7 @@ class Navigation:
                 "##search", self.study.query, hint=ctx.tr("Search scene")
             )
             y += 38 * s
-        labels = tuple(ctx.tr(view.value.title()) for view in GEOMETRY_VIEWS)
-        current = geometry_view(ctx.backend)
-        imgui.push_font(u.body, 13 * s)
-        imgui.push_style_var(imgui.StyleVar_.frame_padding, (6 * s, 7.5 * s))
-        show_labels = segmented_control_width(labels, icons=GEOMETRY_ICONS, layout="content") <= w
-        imgui.pop_style_var()
-        imgui.pop_font()
-        chosen = u.segmented(
-            "scene-geometry",
-            x,
-            y,
-            w / s,
-            labels,
-            GEOMETRY_VIEWS.index(current) if current in GEOMETRY_VIEWS else -1,
-            keys=tuple("scene-geometry-" + view.value for view in GEOMETRY_VIEWS),
-            icons=GEOMETRY_ICONS,
-            show_labels=show_labels,
-            layout="content",
-            tooltips=(
-                "Show visual geometry",
-                "Show collision geometry",
-                "Show visual and collision geometry",
-            ),
-        )
-        if chosen >= 0 and GEOMETRY_VIEWS[chosen] != current:
-            set_geometry_view(ctx.backend, GEOMETRY_VIEWS[chosen])
-        y += u.hits["scene-geometry"][3] + 8 * s
+        y += geometry_selector(u, ctx, x, y, w, key="scene-geometry") + 8 * s
         xx = x
         for kind, count in self.scene_filters(ctx):
             width = min(w / s, u.measure(str(count), 13, translate=False) / s + 35)

@@ -15,15 +15,16 @@ from mojive.tools.ui_runtime import _click, _item_rect
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 
 
+@pytest.mark.parametrize("ui", ("native", "classic"))
 @pytest.mark.parametrize("language,scale", [("en", 1.0), ("zh_CN", 2.25)])
 def test_layers_acceptance_scrolls_controls_and_records_visible_changes(
-    tmp_path, monkeypatch, language, scale
+    tmp_path, monkeypatch, language, scale, ui
 ):
     monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
     monkeypatch.setenv("MOJIVE_LANGUAGE", language)
     monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
     config = ViewerConfig(
-        ui="classic",
+        ui=ui,
         panels={"layers": PanelConfig(open=True), "inspector": PanelConfig(open=False)},
         recording=RecordingConfig(copy_to_clipboard=False),
     )

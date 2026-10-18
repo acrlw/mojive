@@ -66,9 +66,7 @@ class HelpPanel(Panel):
             return
         if not imgui.collapsing_header(ctx.tr("panels"), imgui.TreeNodeFlags_.default_open):
             return
-        imgui.set_item_tooltip(
-            ctx.tr("Open or close panels from the Window menu; shortcuts are optional.")
-        )
+        self._tooltip(ctx.tr("Open or close panels from the Window menu; shortcuts are optional."))
         if not imgui.begin_table("help_panels", 3, _FLAGS):
             return
         imgui.table_setup_column(ctx.tr("Shortcut"))

@@ -1,11 +1,38 @@
 """Sample submitted production triangles from their owning native draw list."""
 
 import ctypes
+import hashlib
 
 import numpy as np
 from imgui_bundle import imgui
 
 VERTEX_DTYPE = np.dtype([("position", "f4", 2), ("uv", "f4", 2), ("color", "u4")])
+
+
+class _FontTexture:
+    """Compare rendered glyph pixels independently of atlas growth and packing."""
+
+    def __init__(self, texture):
+        self.size = np.array((texture.width, texture.height))
+        self.pixels = np.asarray(texture.get_pixels_array(), np.uint8).reshape(
+            texture.height, texture.width, texture.bytes_per_pixel
+        )
+        self.signatures = {}
+
+    def signature(self, uv):
+        points = np.rint(uv * self.size).astype(int)
+        left, top = points.min(axis=0)
+        right, bottom = points.max(axis=0)
+        if left == right or top == bottom:
+            return (0, 0)
+        key = (left, top, right, bottom)
+        if key not in self.signatures:
+            tile = self.pixels[top:bottom, left:right]
+            digest = hashlib.blake2b(digest_size=8)
+            digest.update(np.asarray(tile.shape, np.uint32).tobytes())
+            digest.update(tile.tobytes())
+            self.signatures[key] = tuple(np.frombuffer(digest.digest(), dtype=np.uint32))
+        return self.signatures[key]
 
 
 def triangle_overlap(points, rect):
@@ -33,13 +60,19 @@ def triangle_overlap(points, rect):
 
 
 class NativeDrawSamples:
-    """Resolve logical owners after Render, when each buffer has its final address."""
+    """Resolve logical owners after Render, when each buffer has its final address.
 
-    def __init__(self, workbench):
+    The caller supplies any scissor scale applied in place by its renderer.
+    Vertices and observation rectangles remain in logical ImGui coordinates.
+    """
+
+    def __init__(self, workbench, *, clip_scale=(1.0, 1.0)):
         self.workbench = workbench
         self.windows = {}
         self.descendants = {}
-        font_textures = {texture.get_tex_id() for texture in imgui.get_io().fonts.tex_list}
+        font_textures = {
+            texture.get_tex_id(): _FontTexture(texture) for texture in imgui.get_io().fonts.tex_list
+        }
         self.excluded = set()
         context = imgui.get_current_context()
         for window in context.windows:
@@ -90,8 +123,13 @@ class NativeDrawSamples:
                         positions,
                         positions.min(axis=1),
                         positions.max(axis=1),
-                        (clip.x, clip.y, clip.z, clip.w),
-                        command.get_tex_id() in font_textures,
+                        (
+                            clip.x / clip_scale[0],
+                            clip.y / clip_scale[1],
+                            clip.z / clip_scale[0],
+                            clip.w / clip_scale[1],
+                        ),
+                        font_textures.get(command.get_tex_id()),
                     )
                 )
             self.batches[address] = vertices, commands
@@ -101,12 +139,12 @@ class NativeDrawSamples:
         if owner == "foreground":
             viewport = self.viewports.get(record.get("viewportId"))
             if viewport is None:
-                return np.empty((0, 4)), {"sourceError": "Foreground record has no viewport"}
+                return np.empty((0, 6)), {"sourceError": "Foreground record has no viewport"}
             address = imgui.get_foreground_draw_list(viewport).vtx_buffer.data_address()
         elif owner == "window":
             address = self.windows.get(record.get("windowId"))
         else:
-            return np.empty((0, 4)), {"sourceError": "Unknown logical draw-list owner"}
+            return np.empty((0, 6)), {"sourceError": "Unknown logical draw-list owner"}
         children = set()
         if record.get("kind") not in (
             "button",
@@ -131,12 +169,12 @@ class NativeDrawSamples:
             if source in self.batches
         ]
         if not sampled:
-            return np.empty((0, 4)), {
+            return np.empty((0, 6)), {
                 "sourceError": "Production owner and native children have no submitted draw list"
             }
         vertices = [rows for rows, _ in sampled if len(rows)]
         return (
-            np.concatenate(vertices) if vertices else np.empty((0, 4)),
+            np.concatenate(vertices) if vertices else np.empty((0, 6)),
             {
                 "source": owner,
                 "nativeChildWindowIds": sorted(children),
@@ -165,6 +203,7 @@ class NativeDrawSamples:
             )
         selected = []
         text_vertices = []
+        texture_evidence = vertices["uv"].astype(np.float64)
         triangles_count = 0
         for triangles, positions, minimum, maximum, clip, font_texture in commands:
             clipped = (
@@ -188,9 +227,13 @@ class NativeDrawSamples:
                 selected.append(triangles[visible].reshape(-1))
                 if font_texture:
                     text_vertices.append(triangles[visible].reshape(-1))
+                    for triangle in triangles[visible]:
+                        texture_evidence[triangle] = font_texture.signature(
+                            vertices["uv"][triangle]
+                        )
                 triangles_count += len(visible)
         if not selected:
-            return np.empty((0, 4)), 0
+            return np.empty((0, 6)), 0
         indices = np.unique(np.concatenate(selected))
         white = imgui.get_io().fonts.tex_uv_white_pixel
         font_vertex = np.zeros(len(vertices), dtype=bool)
@@ -202,6 +245,13 @@ class NativeDrawSamples:
             & np.any(np.abs(vertices["uv"][indices] - (white.x, white.y)) > 1e-7, axis=1)
         )
         observed = np.column_stack(
-            (np.round(vertices["position"][indices], 3), vertices["color"][indices], glyph)
+            # Atlas growth can repack glyphs. Their bitmap content, geometry
+            # and ink remain invariant; distinct rendered faces still differ.
+            (
+                np.round(vertices["position"][indices], 3),
+                vertices["color"][indices],
+                glyph,
+                texture_evidence[indices],
+            )
         )
         return observed, triangles_count

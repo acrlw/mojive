@@ -3,11 +3,11 @@
 from types import SimpleNamespace
 
 import pytest
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.localization import Language, Localizer
+from mojive.ui.workspace.widgets import UI
 
 
 @pytest.fixture(params=(1.0, 2.0, 2.25))
@@ -98,11 +98,12 @@ def numeric(request):
         return x + w / 2, y + h / 2
 
     def text_input(text):
-        event("add_key_event", imgui.Key.mod_ctrl, True)
+        modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        event("add_key_event", modifier, True)
         event("add_mouse_pos_event", *point())
         event("add_mouse_button_event", 0, True)
         event("add_mouse_button_event", 0, False)
-        event("add_key_event", imgui.Key.mod_ctrl, False)
+        event("add_key_event", modifier, False)
         event("add_input_characters_utf8", text)
 
     state.frame, state.event, state.point, state.text_input = frame, event, point, text_input
@@ -225,16 +226,16 @@ def test_disabled_axis_badge_preserves_value(numeric):
 
 
 def test_axis_badge_has_distinct_hover_and_press_colors(numeric, monkeypatch):
-    from examples.ui_design.native import widgets
+    from mojive.ui.workspace import numeric_fields
 
     colors = []
-    painter = widgets.draw_joined_field_frame
+    painter = numeric_fields.draw_joined_field_frame
 
     def observe(*args, **kwargs):
         colors.append(kwargs["badge_color"])
         return painter(*args, **kwargs)
 
-    monkeypatch.setattr(widgets, "draw_joined_field_frame", observe)
+    monkeypatch.setattr(numeric_fields, "draw_joined_field_frame", observe)
     numeric.frame()
     base = colors[-1]
     numeric.event("add_mouse_pos_event", *numeric.point("##number-reset"))
@@ -257,20 +258,25 @@ def test_vector_badge_reset_uses_per_axis_defaults(numeric):
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
-@pytest.mark.parametrize(
-    "width,columns", ((180, 1), (228, 1), (280, 1), (296, 3), (320, 3), (520, 3), (700, 3))
-)
+@pytest.mark.parametrize("columns,inline_label", ((1, False), (3, False), (3, True)))
 @pytest.mark.parametrize(
     "values,format,shown",
     (
-        ((0.0041472, -90.0, 1.728), "%.7f", ("0.0041472", "-90", "1.728")),
-        ((0.2, 0.000123, -0.000123), "%.7f", ("0.2", "0.000123", "-0.000123")),
+        ((0.0041472, -90.0, 1.728), "%.7f", ("0.0041472", "-90.0000000", "1.7280000")),
+        ((0.2, 0.000123, -0.000123), "%.7f", ("0.2000000", "0.0001230", "-0.0001230")),
         ((0.0533713, 0.00288568, 0.000123), "%.6g", ("0.0533713", "0.00288568", "0.000123")),
     ),
 )
 def test_vector_layout_keeps_common_values_visible_in_equal_native_fields(
-    numeric, monkeypatch, language, width, columns, values, format, shown
+    numeric, monkeypatch, language, columns, inline_label, values, format, shown
 ):
+    from mojive.ui.workspace.design import DESIGN
+
+    ui, s = numeric.ui, numeric.ui.s
+    minimum = ui.numeric_minimum(format=format)
+    width = (columns * minimum + (columns - 1) * DESIGN.numeric_gap * s + s) / s
+    if inline_label:
+        width += DESIGN.label_width + DESIGN.label_gap
     numeric.vector, numeric.vector_width = True, width
     numeric.values, numeric.format = list(values), format
     painted = []
@@ -282,10 +288,10 @@ def test_vector_layout_keeps_common_values_visible_in_equal_native_fields(
 
     monkeypatch.setattr(ImguiDraw2D, "text", text)
     numeric.frame(3)
-    ui, s = numeric.ui, numeric.ui.s
-    layout = ui.vector_layout(width * s)
+    layout = ui.vector_layout(width * s, format=format)
     frames = [ui.hits["##vector" + axis + "-frame"] for axis in "XYZ"]
     assert layout.columns == columns
+    assert layout.label_above is not inline_label
     assert len({round(field[2], 4) for field in frames}) == 1
     assert all(field[3] == pytest.approx(28 * s, abs=1) for field in frames)
     assert all(value in painted for value in shown)
@@ -329,7 +335,7 @@ def test_stacked_xyz_fields_keep_real_drag_and_badge_reset(numeric, language):
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
 @pytest.mark.parametrize("axis", ("X", "R", "A", None))
-def test_long_numeric_display_uses_padded_clipped_ellipsis_and_full_hover(
+def test_long_numeric_display_uses_padded_compact_caption_and_full_hover(
     numeric, monkeypatch, language, axis
 ):
     numeric.axis, numeric.width, numeric.value = axis, 82, -1234567890123.456
@@ -368,7 +374,9 @@ def test_long_numeric_display_uses_padded_clipped_ellipsis_and_full_hover(
     assert shown.endswith("…") and shown != numeric.format % numeric.value
     assert clip[0] >= x + 8 * s - 0.5
     assert clip[2] <= x + width - 8 * s + 0.5
-    assert position[0] == pytest.approx(clip[0], abs=0.5)
+    assert position[0] + imgui.calc_text_size(shown).x / 2 == pytest.approx(
+        (clip[0] + clip[2]) / 2, abs=0.5
+    )
     assert vertices
     for vx, vy in vertices:
         assert clip[0] - 0.5 <= vx <= clip[2] + 0.5
@@ -378,6 +386,8 @@ def test_long_numeric_display_uses_padded_clipped_ellipsis_and_full_hover(
         assert clip[0] >= badge_x + badge_width + 8 * s - 0.5
     before = numeric.value
     numeric.event("add_mouse_pos_event", *numeric.point())
+    assert not hints
+    numeric.frame(round(imgui.get_style().hover_delay_normal / numeric.io.delta_time) + 2)
     assert hints[-1] == str(before)
     assert numeric.value == before and not numeric.changed
 
@@ -405,7 +415,7 @@ def test_short_numeric_display_is_centered_inside_padded_content(
     numeric.frame(3)
     shown, text_x, text_width, clip_lo, clip_hi = painted[-1]
     x, _, width, _ = numeric.ui.hits["##number"]
-    assert shown == f"{value:g}"
+    assert shown == numeric.format % value
     assert clip_lo == pytest.approx(x + 8 * numeric.ui.s, abs=0.5)
     assert clip_hi == pytest.approx(x + width - 8 * numeric.ui.s, abs=0.5)
     assert text_x + text_width / 2 == pytest.approx((clip_lo + clip_hi) / 2, abs=0.5)
@@ -427,15 +437,18 @@ def test_disabled_ctrl_click_preserves_padded_idle_display(numeric, monkeypatch,
 
     monkeypatch.setattr(ImguiDraw2D, "text", text)
     numeric.frame(3)
-    numeric.event("add_key_event", imgui.Key.mod_ctrl, True)
+    modifier = imgui.Key.mod_super if numeric.io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+    numeric.event("add_key_event", modifier, True)
     numeric.event("add_mouse_pos_event", *numeric.point())
     painted.clear()
     numeric.event("add_mouse_button_event", 0, True)
-    assert painted and painted[-1].endswith("…")
+    assert painted
+    shown = painted[-1]
+    assert shown == "…" or ("e" in shown and float(shown) != 0)
     assert not numeric.ui.numeric_edits["##number"].active
     assert numeric.value == -1234567890123.456
     numeric.event("add_mouse_button_event", 0, False)
-    numeric.event("add_key_event", imgui.Key.mod_ctrl, False)
+    numeric.event("add_key_event", modifier, False)
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
@@ -470,15 +483,15 @@ def test_narrow_text_editor_keeps_native_text_cursor_and_horizontal_scroll(
 @pytest.mark.parametrize(
     "value,format,expected",
     (
-        (0.0, "%.5f", "0"),
-        (12.34, "%.5f", "12.34"),
+        (0.0, "%.5f", "0.00000"),
+        (12.34, "%.5f", "12.34000"),
         (0.004147, "%.6f", "0.004147"),
-        (1000.0, "%.2f", "1000"),
+        (1000.0, "%.2f", "1000.00"),
         (12.34, "%.5f kg", "12.34000 kg"),
         (0.0, "mass: %.5f", "mass: 0.00000"),
     ),
 )
-def test_idle_fixed_numbers_drop_only_fractional_zeroes(
+def test_idle_fixed_numbers_retain_authored_fractional_precision(
     numeric, monkeypatch, value, format, expected
 ):
     numeric.value, numeric.format, numeric.width = value, format, 230
@@ -508,3 +521,83 @@ def test_zero_stays_readable_in_a_narrow_axis_field(numeric, monkeypatch):
     numeric.frame(3)
     assert painted[-1] == "0"
     assert numeric.value == 0.0
+
+
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+@pytest.mark.parametrize("presentation", (False, True))
+@pytest.mark.parametrize("value", (-1234567890123.0, 0.000000000001234))
+def test_compact_numeric_caption_keeps_complete_exponent_inside_real_field(
+    numeric, tmp_path, monkeypatch, language, presentation, value
+):
+    if presentation:
+        from mojive.design.native.presentation import DesignPresentation
+        from mojive.design.runtime import DesignRuntime
+        from mojive.design.store import SpecificationStore
+
+        numeric.ui.design = DesignPresentation(
+            numeric.ui, DesignRuntime(SpecificationStore(tmp_path / "design.json"))
+        )
+    numeric.value, numeric.width, numeric.format = value, 110, "%.12f"
+    painted = []
+    original = ImguiDraw2D.text
+
+    def observe(draw, position, color, shown, **kwargs):
+        original(draw, position, color, shown, **kwargs)
+        if shown != "X":
+            lo, hi = draw._dl.get_clip_rect_min(), draw._dl.get_clip_rect_max()
+            painted.append((shown, position[0], imgui.calc_text_size(shown).x, lo.x, hi.x))
+
+    monkeypatch.setattr(ImguiDraw2D, "text", observe)
+    numeric.frame(3)
+    shown, x, width, left, right = painted[-1]
+    assert "e" in shown and "…" not in shown
+    assert float(shown) == pytest.approx(value, rel=0.2)
+    assert left - 0.5 <= x and x + width <= right + 0.5
+    assert numeric.value == value and not numeric.changed
+
+
+@pytest.mark.parametrize("width", (180, 330, 600))
+@pytest.mark.parametrize("presentation", (False, True))
+def test_live_vector_values_never_change_the_responsive_layout(
+    numeric, tmp_path, width, presentation
+):
+    if presentation:
+        from mojive.design.native.presentation import DesignPresentation
+        from mojive.design.runtime import DesignRuntime
+        from mojive.design.store import SpecificationStore
+
+        numeric.ui.design = DesignPresentation(
+            numeric.ui, DesignRuntime(SpecificationStore(tmp_path / "design.json"))
+        )
+    numeric.vector, numeric.vector_width, numeric.format = True, width, "%.6g"
+    numeric.frame(3)
+    expected = tuple(numeric.ui.hits["##vector" + axis + "-frame"] for axis in "XYZ")
+    for values in ((1e12, -1e-12, 0.00288568), (-9999.999, 0, 0.0533713), (1, 2, 3)):
+        numeric.values = list(values)
+        numeric.frame(2)
+        assert tuple(numeric.ui.hits["##vector" + axis + "-frame"] for axis in "XYZ") == expected
+        assert numeric.values == list(values)
+        assert not numeric.changed
+
+
+@pytest.mark.parametrize("presentation", (False, True))
+def test_drag_precision_is_independent_of_the_idle_caption(numeric, tmp_path, presentation):
+    if presentation:
+        from mojive.design.native.presentation import DesignPresentation
+        from mojive.design.runtime import DesignRuntime
+        from mojive.design.store import SpecificationStore
+
+        numeric.ui.design = DesignPresentation(
+            numeric.ui, DesignRuntime(SpecificationStore(tmp_path / "design.json"))
+        )
+    numeric.format, numeric.value = "%.0f", 1.234567
+    numeric.frame(2)
+    x, y = numeric.point()
+    numeric.event("add_mouse_pos_event", x, y)
+    numeric.event("add_mouse_button_event", 0, True)
+    numeric.event("add_mouse_pos_event", x + 20 * numeric.ui.s, y)
+    assert numeric.changed
+    assert numeric.value > 1.234567
+    assert numeric.value != pytest.approx(round(numeric.value), abs=0.01)
+    numeric.event("add_mouse_button_event", 0, False)
+    assert numeric.ui.numeric_edits["##number"].committed

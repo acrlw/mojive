@@ -5,8 +5,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from examples.ui_design.native.timeline_details import NativeTimelineDetails
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
@@ -19,6 +17,8 @@ from mojive.ui.app import ViewerApp
 from mojive.ui.keyframe_editor.controller import TimelineEditor
 from mojive.ui.keyframe_editor.properties import draw_selected
 from mojive.ui.panels import PanelContext
+from mojive.ui.workspace.timeline_details import NativeTimelineDetails
+from mojive.ui.workspace.widgets import UI
 
 pytestmark = pytest.mark.physics
 
@@ -48,7 +48,7 @@ def details(request, tmp_path, monkeypatch):
     style.item_spacing = (6 * scale, 6 * scale)
     style.font_size_base = 14 * scale
     ui = UI.__new__(UI)
-    ui.s, ui.translate, ui.hits = scale, str, {}
+    ui.s, ui.translate, ui.hits, ui.numeric_edits = scale, str, {}, {}
     ui.body = ui.bold = ui.mono = io.fonts.add_font_default()
     study = SimpleNamespace(ui=ui, s=scale)
     ctx = PanelContext(session, NullBackend(), style_scale=scale)
@@ -80,6 +80,7 @@ def details(request, tmp_path, monkeypatch):
             imgui.set_next_window_size(io.display_size)
             imgui.begin("Timeline details", flags=imgui.WindowFlags_.no_title_bar)
             ui.hits.clear()
+            ui.numeric_edits.clear()
             pos, avail = imgui.get_cursor_screen_pos(), imgui.get_content_region_avail()
             state.origin, state.available = (pos.x, pos.y), avail.x
             state.height = state.drawer.height(editor, ctx, avail.x)
@@ -102,8 +103,14 @@ def details(request, tmp_path, monkeypatch):
         frame(3)
 
     def text(key, value):
-        click(key)
+        numeric = key == "timeline-detail-time"
         modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        if numeric:
+            event("add_key_event", modifier, True)
+        click(key)
+        if numeric:
+            event("add_key_event", modifier, False)
+        assert io.want_text_input
         event("add_key_event", modifier, True)
         event("add_key_event", imgui.Key.a, True)
         event("add_key_event", imgui.Key.a, False)
@@ -145,7 +152,7 @@ def test_native_details_reflow_without_overlapping_fields_or_actions(details, wi
     if width >= 280:
         assert len({round(rect[1], 2) for rect in rectangles}) == 1
         assert state.height == pytest.approx(28 * state.ui.s)
-        assert state.ui.hits["timeline-detail-name"][2] >= 54 * state.ui.s - 0.5
+        assert state.ui.hits["timeline-detail-name"][2] >= state.ui.measure(state.editor.name)
         assert state.ui.hits["timeline-detail-delete"][2] == pytest.approx(28 * state.ui.s)
     if 280 <= width < 440:
         assert state.ui.hits["timeline-detail-apply"][2] == pytest.approx(28 * state.ui.s)

@@ -32,7 +32,7 @@ def draw(panel, ctx: PanelContext) -> None:
             index,
             labels,
         )
-        imgui.set_item_tooltip(t("A key already in use swaps the two actions"))
+        panel._tooltip(t("A key already in use swaps the two actions"))
         if changed and ctx.set_input_binding is not None:
             try:
                 ctx.apply_setting(ctx.set_input_binding, action, identifiers[index])

@@ -1,11 +1,29 @@
 """Compact operation notices using the same native specification and text boxes."""
 
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.design_palette import rgba as palette_rgba
 from mojive.ui.panels.filters import severity_color, severity_group
 from mojive.ui.workspace.design import BODY_SIZE, CONTROL_RADIUS
+from mojive.ui.workspace.group_corners import action_corner_scope, action_corners, inset_action_box
 
 
+def _notice_surface(ui, frame, level, radius, draw):
+    background = (
+        (0.20, 0.10, 0.11, 0.94)
+        if level == "error"
+        else (0.19, 0.15, 0.09, 0.94)
+        if level == "warning"
+        else (*palette_rgba("child")[:3], 0.94)
+    )
+    ui.rect(
+        *frame.tuple(),
+        tuple(round(channel * 255) for channel in background),
+        radius / ui.s,
+        draw=draw,
+    )
+
+
+@part_scope("notice")
 def draw_operation_notice(app, overlay, message):
     ui, scale = app.workspace.ui, app.workspace.s
     x, y, width, height = app._viewport_rect
@@ -45,19 +63,7 @@ def draw_operation_notice(app, overlay, message):
     )
     level = severity_group(message.level)
     foreground = severity_color(app.theme, level)
-    background = (
-        (0.20, 0.10, 0.11, 0.94)
-        if level == "error"
-        else (0.19, 0.15, 0.09, 0.94)
-        if level == "warning"
-        else (*palette_rgba("child")[:3], 0.94)
-    )
-    overlay.rect_filled(
-        (box.frame.x, box.frame.y),
-        (box.frame.right, box.frame.bottom),
-        background,
-        rounding=style.get("radius", CONTROL_RADIUS) * scale,
-    )
+    _notice_surface(ui, box.frame, level, style.get("radius", CONTROL_RADIUS) * scale, overlay._dl)
     rgba = tuple(round(channel * 255) for channel in foreground)
     icon_y = box.content.y + max(0, (box.content.height - icon_size) / 2)
     ui.icon(
@@ -99,6 +105,7 @@ def draw_operation_notice(app, overlay, message):
     app._status_notice_bounds = (box.frame.x, box.frame.y, box.frame.right, box.frame.bottom)
 
 
+@part_scope("empty")
 def draw_center_notice(app, overlay, message, *, border=False):
     """Show the existing empty/drop message with catalogue spacing and alignment."""
     ui, scale = app.workspace.ui, app.workspace.s
@@ -164,7 +171,9 @@ def draw_center_notice(app, overlay, message, *, border=False):
         cursor += line_height + gap
 
 
-def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
+@part_scope("file_receipt")
+@action_corner_scope("file_receipt", (4,) * 4)
+def draw_file_receipt(app, overlay, message, path, *, padding_pt=4):
     """Keep the existing file actions within one measured receipt container."""
     from imgui_bundle import imgui
 
@@ -174,7 +183,7 @@ def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
         control_size,
         flow_layout,
     )
-    from mojive.ui.workspace.widgets import PANEL, TEXT
+    from mojive.ui.workspace.widgets import TEXT
 
     ui, scale = app.workspace.ui, app.workspace.s
     style = ui.component_style("file_receipt")
@@ -184,7 +193,8 @@ def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
             text = text.replace(spelling, path.name)
             break
     x, y, width, _height = app._viewport_rect
-    padding = style.edges("padding", scale, (padding_pt,) * 4)
+    corners = action_corners(ui, "file_receipt", (padding_pt,) * 4)
+    padding = corners.padding
     margin = style.edges("margin", scale)
     gap = style.get("columnGap", style.get("gap", 8)) * scale
     font = style.get("fontSize", BODY_SIZE)
@@ -200,7 +210,7 @@ def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
     natural_width = (
         ui.measure(text, font, translate=False)
         + action_width
-        + 2 * gap
+        + 3 * gap
         + padding[0]
         + padding[2]
         + margin[0]
@@ -210,7 +220,7 @@ def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
     if style.get("widthMode", "auto") == "fixed":
         budget = min(width - 28 * scale, style.get("width", budget / scale) * scale)
     content_width = max(0, budget - margin[0] - margin[2] - padding[0] - padding[2])
-    inline = ui.measure(text, font, translate=False) + gap + action_width <= content_width
+    inline = ui.measure(text, font, translate=False) + 2 * gap + action_width <= content_width
     sizes = [(min(content_width, w), h) for w, h in sizes]
     actions = flow_layout(
         Rect(0, 0, content_width, 0), sizes, column_gap=gap, row_gap=gap, align="end"
@@ -232,34 +242,74 @@ def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
     imgui.set_next_window_size((budget, box_height))
     imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
     imgui.push_style_var(imgui.StyleVar_.window_min_size, (0, 0))
+    imgui.push_style_var(imgui.StyleVar_.window_border_size, 0)
+    imgui.push_style_var(imgui.StyleVar_.window_rounding, 0)
     imgui.push_style_color(imgui.Col_.window_bg, (0, 0, 0, 0))
     visible, _ = imgui.begin("##viewport-file-status", None, flags)
     if visible:
         pos = imgui.get_window_pos()
         box = ui.component_box(
-            "file_receipt", pos.x, pos.y, budget, box_height, key="file-receipt", padding=padding
+            "file_receipt",
+            pos.x,
+            pos.y,
+            budget,
+            box_height,
+            key="file-receipt",
+            padding=padding,
+            observe=False,
         )
-        ui.rect(*box.frame.tuple(), PANEL, style.get("radius", 8))
+        box = inset_action_box(box, corners)
+        # The transparent input window truncates its native size and inner clip.
+        # Only the custom plate needs the viewport clip, including its AA fringe.
+        draw = ui.draw
+        draw.push_clip_rect((x, y), (x + width, y + _height), False)
+        try:
+            _notice_surface(
+                ui,
+                box.frame,
+                severity_group(getattr(message, "level", "info")),
+                corners.radius,
+                draw,
+            )
+        finally:
+            draw.pop_clip_rect()
         text_width = max(0, box.content.width - action_width - gap) if inline else box.content.width
-        text_rect = Rect(box.content.x, box.content.y, text_width, line_height)
+        # Text has no button padding; its leading inset is separate from the corner budget.
+        text_rect = Rect(
+            box.content.x, box.content.y, text_width, box.content.height if inline else line_height
+        ).inset(gap)
         ui.component_text("file_receipt", text_rect, text, TEXT, translate=False)
         app._status_path_bounds = (text_rect.x, text_rect.y, text_rect.right, text_rect.bottom)
         app._status_notice_bounds = (box.frame.x, box.frame.y, box.frame.right, box.frame.bottom)
         if imgui.is_mouse_hovering_rect(
             (text_rect.x, text_rect.y), (text_rect.right, text_rect.bottom)
         ):
-            if ui.measure(text, font, translate=False) > text_width:
+            if ui.measure(text, font, translate=False) > text_rect.width:
                 ui.tooltip(str(path), translate=False)
             io = imgui.get_io()
             if (io.key_ctrl or io.key_super) and imgui.is_mouse_clicked(0):
                 reveal_path(path)
         action_rect = Rect(
-            box.content.right - action_width if inline else box.content.x,
-            box.content.y if inline else box.content.y + line_height + gap,
-            min(action_width, box.content.width),
+            box.content.x,
+            box.content.y + max(0, (box.content.height - actions.height) / 2)
+            if inline
+            else box.content.y + line_height + gap,
+            box.content.width,
             actions.height,
         )
         placements = flow_layout(action_rect, sizes, column_gap=gap, row_gap=gap, align="end")
+        if ui.design is not None and ui.design.runtime.observes(style.part_ids):
+            ui.record_component_box(
+                "file_receipt",
+                box,
+                key="file-receipt",
+                radius=corners.radius,
+                childRadius=corners.inner_radius,
+                inline=inline,
+                textRect=text_rect.tuple(),
+                actionRects=tuple(rect.tuple() for rect in placements.rectangles),
+                surfaceClip=(x, y, x + width, y + _height),
+            )
         for index, (label, rect) in enumerate(zip(labels, placements.rectangles, strict=True)):
             key = "receipt-open-folder" if index == 0 else "receipt-copy-path"
             fw, fh = control_frame_size(ui, key, rect.width, rect.height, label=label)
@@ -278,4 +328,4 @@ def draw_file_receipt(app, overlay, message, path, *, padding_pt=12):
                     imgui.set_clipboard_text(str(path))
     imgui.end()
     imgui.pop_style_color()
-    imgui.pop_style_var(2)
+    imgui.pop_style_var(4)

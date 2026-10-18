@@ -3,7 +3,7 @@
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.panels.settings import render_flag_label
 from mojive.ui.workspace.component_layout import component_flow
 from mojive.ui.workspace.design import DESIGN
@@ -23,19 +23,24 @@ def _label(ui, key, rect, text):
     box = ui.component_box("form_label", *rect.tuple(), key=key)
     ui.component_text("form_label", box.content, text, MUTED, translate=False)
     font = ui.component_style("form_label").get("fontSize", DESIGN.body_size)
-    if (
-        ui.measure(text, font, font_resolved=True, translate=False) > box.content.width
-        and imgui.is_window_hovered()
-        and imgui.is_mouse_hovering_rect((rect.x, rect.y), (rect.right, rect.bottom))
-    ):
-        ui.tooltip(text, translate=False)
+    if ui.measure(text, font, font_resolved=True, translate=False) > box.content.width:
+        imgui.internal.item_add(
+            imgui.internal.ImRect((rect.x, rect.y), (rect.right, rect.bottom)), 0
+        )
+        if imgui.is_item_hovered(
+            imgui.HoveredFlags_.delay_normal | imgui.HoveredFlags_.allow_when_disabled
+        ):
+            ui.tooltip(text, translate=False)
 
 
+@part_scope("visual_group", "visual_group_item")
 def flag_table(panel, ctx, key, flags, groups):
     ui, s = panel.workspace.ui, panel.workspace.s
     pos, width = imgui.get_cursor_screen_pos(), imgui.get_content_region_avail().x
     item = ui.component_style("visual_group_item")
     gap = item.get("columnGap", item.get("gap", DESIGN.label_gap)) * s
+    group = ui.component_style("visual_group")
+    spacing = group.get("columnGap", group.get("gap", DESIGN.label_gap * 2)) * s
     size = ui.metric("checkbox", "size", DESIGN.checkbox_size) * s
     font, label_margin, label_height = _label_geometry(ui)
     labels = tuple(render_flag_label(flag, ctx.tr, localized=True) for flag in flags)
@@ -49,8 +54,7 @@ def flag_table(panel, ctx, key, flags, groups):
         + size
         + gap
     )
-    columns = max(1, min(groups, int(width / max(s, required))))
-    spacing = ui.metric("visual_group", "columnGap", DESIGN.item_spacing_x) * s
+    columns = max(1, min(groups, int((width + spacing) / max(s, required + spacing))))
     cell = max(s, (width - spacing * (columns - 1)) / columns)
     height = max(DESIGN.control_height * s, size, label_height)
     box, flow = component_flow(
@@ -65,9 +69,9 @@ def flag_table(panel, ctx, key, flags, groups):
         row_gap=DESIGN.row_gap,
     )
     for flag, label, rect in zip(flags, labels, flow.rectangles, strict=True):
-        label_rect = Rect(rect.x, rect.y, max(0, rect.width - size - gap), rect.height)
+        label_rect = Rect(rect.x + size + gap, rect.y, max(0, rect.width - size - gap), rect.height)
         _label(ui, key + "/label/" + flag.value, label_rect, label)
-        imgui.set_cursor_screen_pos((rect.right - size, rect.y + (rect.height - size) / 2))
+        imgui.set_cursor_screen_pos((rect.x, rect.y + (rect.height - size) / 2))
         panel._flag_row(ctx, flag, label)
         if ui.design is not None:
             ui.design.record(
@@ -76,6 +80,7 @@ def flag_table(panel, ctx, key, flags, groups):
     advance(ui, pos.x, box.outer.bottom + DESIGN.row_gap * s)
 
 
+@part_scope("visual_group", "visual_group_item")
 def visual_groups(panel, ctx):
     families = ctx.session.visual_groups()
     if not families or not panel._collapsing_header(
@@ -123,7 +128,9 @@ def visual_groups(panel, ctx):
             changed, value = panel._checkbox(
                 f"##visual_group_{family.category}_{index}", visible, ctx.theme
             )
-            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+            if imgui.is_item_hovered(
+                imgui.HoveredFlags_.delay_normal | imgui.HoveredFlags_.allow_when_disabled
+            ):
                 ui.tooltip(f"{ctx.tr('visual group')} {index}", translate=False)
             if changed:
                 ctx.submit(cmd.SetVisualGroup(family.category, index, value))

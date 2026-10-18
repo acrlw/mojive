@@ -65,9 +65,8 @@ Canvas2D using the DebugDraw render pass. Do not add a second 2D renderer or a g
 package. Gizmo screen overlays are implemented in `ui/gizmo/overlay.py`.
 
 `ui/imgui_draw.py` implements the ImGui adapter. `ui/text_layout.py` and `ui/drag_link.py` implement
-label layout and drag-link submission without depending on a renderer. `ui/draw2d.py` re-exports
-existing names for compatibility; new code should import from the modules that define them.
-The package root contains shared types and compatibility exports. The
+label layout and drag-link submission without depending on a renderer. Import drawing interfaces
+from their defining modules. The package root contains shared types and compatibility exports. The
 [Python module map (Chinese)](python-layout.zh.md) lists the modules and their tests.
 
 `ui/preferences.py` owns persistent desktop preferences. `ui/app/settings.py` resolves startup
@@ -160,6 +159,31 @@ rollback message describes the symptom; trace the first failed operation before 
 Retain a focused regression that fails on the previous implementation. Check the successful
 path and the affected failure/recovery path, including undo/redo for document transactions.
 Use the [verification matrix](testing.md#change-mapping) for the applicable completion gates.
+
+Native menus measure text and lay out rows through the shared popup implementation. ImGui
+truncates window and cursor dimensions to its native layout grid, so quantize popup insets,
+row heights, gaps and separators together before allocating the window. Do not put the
+rounding remainder into one edge. Adjacent nested corners share one native geometry budget:
+`inner_radius = max(0, outer_radius - actual_inset)`. The parent corner constrains its local
+children without mutating generic control styles. Uniform corner insets are resolved before
+radii; do not independently round the two radii. At scale 1, ordinary floats and form/color
+popups use a 14-point outer corner, 8-point inset and 6-point control corner. Timeline and
+Settings use a 14-point host, 6-point inset, 8-point body, 4-point inset and 4-point contained
+controls. Square corners remain square when an offset consumes the radius; spacing is retained. The navigation
+rail's OS-facing radius uses native window points, including authored fractional values,
+independent of application UI zoom. Its default approximates the measured compositor contour at
+16 window points; derive the contained corner from its real equal leading and bottom inset.
+Search fields retain their capsule silhouette; they do not inherit a container's corner radius.
+Text fitting and its diagnostics must use the same coordinate-precision contract. Verify
+the actual named menu at fractional scales including 1.2 and 1.25, with system and portable
+fonts and Retina density, rather than checking only ideal layout values.
+
+Grouped property panels own one scoped content column. Section heading text and ordinary
+body labels share its leading edge; the header's hover frame retains its internal padding.
+Resolve that column on the native cursor grid, including at fractional scales. Manual rows,
+tables, checkbox grids and raw text use the same body bounds. Restore the parent bounds on
+scope exit and do not accumulate indentation between sibling sections. Icon-bearing joint
+rows align their body with the leading content icon; the name retains its intentional icon gap.
 
 ## Public control operations
 
@@ -307,6 +331,14 @@ C++ owns rendering and runtime infrastructure; application algorithms and extens
 remain in Python.
 
 ## Shared UI controls
+
+UI performance changes preserve measured rectangles, nested corner budgets, typography and
+native input/transaction state. Cache style preparation with explicit revision, scope and
+typography invalidation; keep raw layout styles separate from inherited painter styles.
+For clipped fields, skip only custom ink after native item submission so keyboard navigation,
+active edits and scroll extents remain valid. Use `make inspector-profile` to distinguish an
+expanded-panel workload from state that grows after repeated selection and section changes.
+Compare actual pixels and hit geometry before accepting a drawing optimization.
 
 Keep reusable ImGui controls in `python/ui/controls.py`, independent of panel
 and session state. Use `segmented_control` for N-way exclusive choices; it owns connected

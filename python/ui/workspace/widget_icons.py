@@ -19,7 +19,8 @@ ROOT = Path(__file__).parent
 GLYPHS = json.loads((ROOT / "icons.json").read_text())
 
 ICON_GRID = 24
-ICON_STROKE = 1.75
+# Compiled from the canonical family's stroke in svg/sources.json.
+ICON_STROKE = GLYPHS["camera"]["contours"][0]["width"]
 IconRole = Literal["activity", "title", "toolbar", "subtle", "inline", "status"]
 
 
@@ -40,6 +41,65 @@ ICON_ROLES: dict[IconRole, IconRoleSpec] = {
     "status": IconRoleSpec(12, 20),
 }
 
+# Mouse hints retain the authored shell and button cutouts used by the status bar.
+PRODUCTION_GLYPHS = {
+    name: name for name in ("status-mouse-left", "status-mouse-right", "status-mouse-wheel")
+}
+
+# Context identifiers select a semantic master, never a different fitting algorithm.
+COMPILED_ALIASES = {
+    "tool-move": "move",
+    "tool-rotate": "rotate",
+    "tool-scale": "scale",
+    "tool-world": "world",
+    "tool-body": "body-frame",
+    "tool-snap": "snap",
+    **{
+        prefix + name: name
+        for prefix in ("playback-", "transport-")
+        for name in (
+            "previous",
+            "next",
+            "play",
+            "pause",
+            "reset",
+            "record",
+            "stop",
+            "first",
+            "last",
+            "loop",
+        )
+    },
+    "playback-more": "down",
+    "transport-more": "down",
+    "key-snapshot": "snapshot",
+    "key-keyframe": "diamond",
+    "key-add": "plus",
+    "key-clear": "delete",
+    "key-previous": "first",
+    "key-next": "last",
+    "key-fit": "fit",
+    "key-follow": "follow",
+    "key-follow-off": "follow-off",
+    "key-follow-page": "follow-page",
+    "key-follow-locked": "follow-locked",
+    "key-view": "gear",
+    "panel-search": "search",
+    "panel-sort": "sort",
+    "panel-clear": "close",
+    "panel-visible": "eye",
+    "panel-hidden": "eyeoff",
+    "panel-perspective": "perspective",
+    "panel-orthographic": "orthographic",
+    "panel-right": "right",
+    "panel-down": "down",
+    "helper-camera": "camera",
+    "helper-light": "light",
+    "status-info": "info",
+    "status-warning": "warn",
+    "status-error": "err",
+}
+
 
 def icon_role_canvas(role: IconRole) -> float:
     """Keep one family scale; a small authored mark remains small beside its peers."""
@@ -49,17 +109,14 @@ def icon_role_canvas(role: IconRole) -> float:
 @lru_cache(maxsize=512)
 def icon_geometry(name, size):
     """Retain local vertices; moving a dock window only translates the submitted range."""
+    name = COMPILED_ALIASES.get(name, name)
     scale = size / ICON_GRID
-    left, top, right, bottom = GLYPHS[name]["bounds"]
-    dx = (ICON_GRID / 2 - (left + right) / 2) * scale
-    dy = (ICON_GRID / 2 - (top + bottom) / 2) * scale
     result = []
     for contour in GLYPHS[name]["contours"]:
-        points = tuple((x * scale + dx, y * scale + dy) for x, y in contour["points"])
+        points = tuple((x * scale, y * scale) for x, y in contour["points"])
         paths = (
             tuple(
-                tuple((x * scale + dx, y * scale + dy) for x, y in path)
-                for path in contour["stroke_paths"]
+                tuple((x * scale, y * scale) for x, y in path) for path in contour["stroke_paths"]
             )
             if "stroke_paths" in contour
             else (points,)
@@ -70,12 +127,13 @@ def icon_geometry(name, size):
 
 def draw_icon(draw, name, x, y, size, tint, scale):
     """Paint one glyph in a screen-positioned canonical canvas."""
-    if name in ("transport-first", "transport-last"):
+    name = COMPILED_ALIASES.get(name, name)
+    if name in PRODUCTION_GLYPHS:
         draw_production_icon(
             ImguiDraw2D(draw),
             (x + size * scale / 2, y + size * scale / 2),
             size * scale,
-            name,
+            PRODUCTION_GLYPHS[name],
             tuple(channel / 255 for channel in tint),
         )
         return

@@ -6,6 +6,7 @@ from imgui_bundle import imgui
 
 from mojive.design.native.geometry import Rect
 from mojive.ui.controls import search_input
+from mojive.ui.workspace.menu_geometry import native_edges
 from mojive.ui.workspace.menu_item import Item
 from mojive.ui.workspace.menu_rows import advance_menu_row, paint_menu_row
 from mojive.ui.workspace.popup_style import POPUP_ROWS, menu_popup_content, menu_popup_style
@@ -73,7 +74,10 @@ class ChoicePopup:
 
     def end(self, *, close_combo=True):
         style = self.ui.component_style("select_popup")
-        padding, margin = style.edges("padding", self.ui.s), style.edges("margin", self.ui.s)
+        padding, margin = (
+            (max(native_edges(style, "padding", self.ui.s)),) * 4,
+            native_edges(style, "margin", self.ui.s),
+        )
         self._widths[self._key] = self._width + padding[0] + padding[2] + margin[0] + margin[2]
         try:
             self._scope.close()

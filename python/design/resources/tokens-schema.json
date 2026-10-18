@@ -39,7 +39,7 @@
       "min": null,
       "max": null,
       "step": null,
-      "description": "系统字体使用本机字体；便携字体使用随稿件提供的 Roboto 和中文回退字体。",
+      "description": "系统字体使用本机字体；便携字体使用随应用提供的 MiSans 真实字重，统一中英文字形。",
       "choices": [
         "system",
         "portable"
@@ -197,10 +197,10 @@
       "min": 0,
       "max": 24,
       "step": 0.5,
-      "description": "原生窗口和视口浮层容器的圆角半径。"
+      "description": "Corner radius for nested content surfaces and viewport containers; floating windows use their own panel radius."
     },
     "radius_popup": {
-      "default": 8,
+      "default": 14,
       "group": "圆角",
       "label": "弹出层圆角",
       "type": "number",
@@ -448,6 +448,26 @@
       "max": null,
       "step": null,
       "description": "原生语义颜色；明确设置的悬停和按下状态颜色保持其既有值。"
+    },
+    "floating_color": {
+      "default": "#252A2F",
+      "group": "颜色",
+      "label": "浮窗背景颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "未停靠窗口的表面；与停靠内容和弹出菜单分层。"
+    },
+    "popup_color": {
+      "default": "#2D353D",
+      "group": "颜色",
+      "label": "弹出层背景颜色",
+      "type": "color",
+      "min": null,
+      "max": null,
+      "step": null,
+      "description": "临时菜单与选项列表的表面；保留独立部件及模块覆盖。"
     }
   },
   "componentFamilies": [
@@ -554,5 +574,65 @@
     "navigation": "场景导航",
     "viewport": "视口",
     "chrome": "应用框架"
+  },
+  "componentAppearance": {
+    "text": {
+      "fontFamily": {
+        "label": "字体家族",
+        "type": "select",
+        "default": "inherit",
+        "choices": [
+          "inherit",
+          "system",
+          "portable",
+          "mono"
+        ],
+        "choiceLabels": {
+          "inherit": "继承全局",
+          "system": "系统无衬线",
+          "portable": "Roboto",
+          "mono": "等宽数字"
+        },
+        "description": "同类组件的字体家族；继承时保留正文、标题与数值的语义字体。"
+      },
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 0.5,
+        "default": {
+          "token": "body_font_size"
+        },
+        "description": "同类组件的文字字号；组内子项继承，明确设置的专用文字组件可单独覆盖。"
+      },
+      "textColor": {
+        "label": "文字颜色",
+        "type": "color",
+        "default": "inherit",
+        "inherit": true,
+        "description": "同类组件的文字颜色。inherit 保留全局语义颜色与选中、警告、禁用状态；恢复此项重新继承。"
+      }
+    },
+    "icon": {
+      "iconSize": {
+        "label": "图标大小",
+        "type": "number",
+        "min": 6,
+        "max": 64,
+        "step": 1,
+        "default": {
+          "token": "icon_toolbar_canvas"
+        },
+        "description": "此组内图标的统一画布尺寸，线条、点与空隙一同缩放；不改变其他组。"
+      },
+      "iconColor": {
+        "label": "图标颜色",
+        "type": "color",
+        "default": "inherit",
+        "inherit": true,
+        "description": "同类组件的图标颜色。inherit 保留图标语义色与交互状态；恢复此项重新继承。"
+      }
+    }
   }
 }

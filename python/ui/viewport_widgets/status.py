@@ -11,8 +11,6 @@ from mojive.ui.text_layout import fit_text
 from mojive.ui.theme import Theme
 from mojive.ui.viewport_widgets.hints import (
     _inline_text,
-    _key_width,
-    _keycap,
     draw_tool_hints,
     fitting_tool_hints,
     tool_hints_height,
@@ -21,9 +19,14 @@ from mojive.ui.viewport_widgets.model import (
     DEFAULT_VIEWPORT_LABELS,
     OVERLAY_GEOMETRY,
     StatusLayout,
+    StatusMetric,
     ToolHint,
     ViewportLabels,
-    _StatusPerformanceLayout,
+)
+from mojive.ui.viewport_widgets.status_metrics import (
+    METRIC_GROUP_GAP,
+    _status_performance_layout,
+    _StatusNumbers,
 )
 
 
@@ -52,11 +55,15 @@ def format_simulation_steps(value: int) -> str:
     """Format large step counts with a stable compact suffix."""
 
     count = max(0, int(value))
-    for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")):
-        if count >= threshold:
-            compact = f"{count / threshold:.1f}".rstrip("0").rstrip(".")
-            return f"{compact}{suffix}"
-    return str(count)
+    if count < 1000:
+        return str(count)
+    threshold = 1000
+    for suffix in ("k", "M", "B", "T", "P", "E"):
+        scaled = round(count / threshold, 1)
+        if scaled < 1000 or suffix == "E":
+            return f"{scaled:.1f}".rstrip("0").rstrip(".") + suffix
+        threshold *= 1000
+    raise AssertionError("Unreachable step unit")
 
 
 def format_simulation_metric(
@@ -73,105 +80,6 @@ def format_simulation_metric(
     return f"{labels.time} {format_simulation_time(value)}", f"{value:.17g} s"
 
 
-def _status_performance_layout(
-    draw: Draw2D,
-    right: float,
-    scale: float,
-    backend: str,
-    dt: float,
-    fps: float,
-    *,
-    metric_text: str = "",
-    max_width: float | None = None,
-    physics_hz: float | None = None,
-    show_physics: bool = False,
-    labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS,
-    group_gap: float | None = None,
-    keycap=None,
-) -> _StatusPerformanceLayout:
-    """Pack telemetry by its displayed width and collapse it before it can overlap.
-
-    The visual order is backend, simulation metric, delta time, and rates.
-    Preserve the physics/render pair when it fits. Otherwise prioritize the
-    simulation metric and delta time, then use remaining space for render FPS.
-    """
-
-    backend_text = str(backend)
-    delta_text = f"Δt {max(0.0, float(dt)):.6g} s"
-    fps_text = f"{labels.render} {max(0.0, float(fps)):.1f} FPS"
-    if show_physics:
-        rate = "—" if physics_hz is None else f"{max(0.0, physics_hz):.0f}"
-        fps_text = f"{labels.physics} {rate} Hz · {fps_text}"
-    metric_text = str(metric_text)
-
-    widths = {
-        "backend": draw.text_size(backend_text)[0],
-        "metric": (
-            _key_width(draw, metric_text, scale, presentation=keycap) if metric_text else 0.0
-        ),
-        "delta": draw.text_size(delta_text)[0],
-        "fps": draw.text_size(fps_text)[0],
-    }
-    gap = 22.0 * scale if group_gap is None else max(0, group_gap)
-
-    def required(names: set[str]) -> float:
-        count = sum(1 for name in ("backend", "metric", "delta", "fps") if name in names)
-        return sum(widths[name] for name in names) + max(0, count - 1) * gap
-
-    limit = float("inf") if max_width is None else max(0.0, float(max_width))
-    visible: set[str] = set()
-    if show_physics and widths["fps"] <= limit:
-        visible.add("fps")
-        for name in ("metric", "delta", "backend"):
-            candidate = {*visible, name}
-            if widths[name] > 0.0 and required(candidate) <= limit:
-                visible = candidate
-    elif widths["delta"] <= limit:
-        visible.add("delta")
-    else:
-        compact = f"Δt {max(0.0, float(dt)):.4g}s"
-        compact_width = draw.text_size(compact)[0]
-        if compact_width <= limit:
-            delta_text = compact
-            widths["delta"] = compact_width
-            visible.add("delta")
-
-    # Preserve the simulation metric beside delta time before spending scarce
-    # width on FPS or the backend label.
-    if "delta" in visible:
-        for name in ("metric", "fps", "backend"):
-            if widths[name] <= 0.0:
-                continue
-            candidate = {*visible, name}
-            if required(candidate) <= limit:
-                visible = candidate
-
-    order = [name for name in ("backend", "metric", "delta", "fps") if name in visible]
-    positions = {name: float(right) for name in ("backend", "metric", "delta", "fps")}
-    dividers: list[float] = []
-    cursor = float(right)
-    for reverse_index, name in enumerate(reversed(order)):
-        positions[name] = cursor - widths[name]
-        cursor -= widths[name]
-        if reverse_index < len(order) - 1:
-            dividers.append(cursor - gap * 0.5)
-            cursor -= gap
-
-    return _StatusPerformanceLayout(
-        backend_text if "backend" in visible else "",
-        metric_text if "metric" in visible else "",
-        delta_text if "delta" in visible else "",
-        fps_text if "fps" in visible else "",
-        positions["backend"],
-        positions["metric"],
-        widths["metric"] if "metric" in visible else 0.0,
-        positions["delta"],
-        positions["fps"],
-        tuple(dividers),
-        cursor,
-    )
-
-
 @dataclass(frozen=True)
 class _RecordingStatusLayout:
     text: str = ""
@@ -179,6 +87,7 @@ class _RecordingStatusLayout:
     button_size: float = 0.0
     pause: bool = False
     stop: bool = False
+    caption_width: float = 0.0
 
 
 def _recording_status_layout(
@@ -191,6 +100,8 @@ def _recording_status_layout(
     countdown: float,
     surface: str,
     labels: ViewportLabels,
+    *,
+    icon_size=None,
 ) -> _RecordingStatusLayout:
     """Reserve recording actions before spending the remaining width on their label."""
     if phase not in {"countdown", "recording", "paused", "finalizing"}:
@@ -212,9 +123,22 @@ def _recording_status_layout(
         if phase == "countdown"
         else f"{surface_label} {seconds // 60:02d}:{seconds % 60:02d}"
     )
-    text = fit_text(draw, text, max(0.0, available - controls_width - 18.0 * scale))
-    text_width = draw.text_size(text)[0] + 18.0 * scale if text else 0.0
-    return _RecordingStatusLayout(text, text_width + controls_width, button_size, pause, stop)
+    sample = (
+        labels.recording_finalizing
+        if phase == "finalizing"
+        else f"{surface_label} 88 s"
+        if phase == "countdown"
+        else f"{surface_label} 888:88"
+    )
+    indicator_width = (7 * scale if icon_size is None else icon_size) + 11 * scale
+    caption_width = min(
+        draw.text_size(sample)[0], max(0.0, available - controls_width - indicator_width)
+    )
+    text = fit_text(draw, text, caption_width)
+    text_width = caption_width + indicator_width if text else 0.0
+    return _RecordingStatusLayout(
+        text, text_width + controls_width, button_size, pause, stop, caption_width
+    )
 
 
 def _draw_recording_status(
@@ -225,13 +149,19 @@ def _draw_recording_status(
     scale: float,
     phase: str,
     layout: _RecordingStatusLayout,
+    *,
+    icon_size=None,
+    icon_color=None,
 ) -> tuple[float, tuple | None, tuple | None]:
     """Paint the fitted recording group and return its exact interactive rectangles."""
     accent = theme.warning if phase in {"countdown", "paused"} else theme.danger
+    glyph = accent if icon_color is None else icon_color
+    diameter = 7 * scale if icon_size is None else icon_size
     if layout.text:
-        draw.circle_filled((cursor + 3.5 * scale, cy), 3.5 * scale, accent, segments=20)
-        cursor += 11.0 * scale
-        cursor += _inline_text(draw, cursor, cy, layout.text, accent) + 7.0 * scale
+        draw.circle_filled((cursor + diameter / 2, cy), diameter / 2, glyph, segments=20)
+        cursor += diameter + 4 * scale
+        _inline_text(draw, cursor, cy, layout.text, accent)
+        cursor += layout.caption_width + 7.0 * scale
     button_size = layout.button_size
     button_y = cy - button_size * 0.5
     pause_rect = None
@@ -244,13 +174,13 @@ def _draw_recording_status(
             draw.line(
                 (center_x - 2.0 * scale, cy - 4.0 * scale),
                 (center_x + 3.5 * scale, cy),
-                accent,
+                glyph,
                 1.6 * scale,
             )
             draw.line(
                 (center_x + 3.5 * scale, cy),
                 (center_x - 2.0 * scale, cy + 4.0 * scale),
-                accent,
+                glyph,
                 1.6 * scale,
             )
         else:
@@ -258,7 +188,7 @@ def _draw_recording_status(
                 draw.line(
                     (center_x + offset * scale, cy - 4.0 * scale),
                     (center_x + offset * scale, cy + 4.0 * scale),
-                    accent,
+                    glyph,
                     1.8 * scale,
                 )
         cursor += button_size + 4.0 * scale
@@ -269,7 +199,7 @@ def _draw_recording_status(
         draw.rect_filled(
             (cursor + inset, button_y + inset),
             (cursor + button_size - inset, button_y + button_size - inset),
-            accent,
+            glyph,
             rounding=1.0 * scale,
         )
         cursor += button_size
@@ -317,27 +247,50 @@ def draw_status(
     separator_margin=None,
     record_group=None,
     presentation=None,
+    surface_rect=None,
 ) -> StatusLayout:
     x, y = origin
+    context_draw = presentation.text_draw(draw, "status_context") if presentation else draw
+    hints_draw = presentation.text_draw(draw, "status_hints") if presentation else draw
+    metrics_draw = presentation.text_draw(draw, "status_metrics") if presentation else draw
+    metric_styles = presentation.metric_styles(draw, metric_mode) if presentation else {}
+    context_theme = presentation.theme_for("status_context", theme) if presentation else theme
+    hints_theme = presentation.theme_for("status_hints", theme) if presentation else theme
+    dot_size = 7.0 * scale if icon_size is None else max(0, icon_size)
+    mouse_scale = scale
+    hint_ink = None
+    if presentation is not None:
+        dot_size = presentation.icon_size("status_context", dot_size)
+        mouse_scale = (
+            presentation.icon_size("status_hints", OVERLAY_GEOMETRY.hint_control_height * scale)
+            / OVERLAY_GEOMETRY.hint_control_height
+        )
+        hint_ink = presentation.icon_color("status_hints")
     running = state in {"running", "replaying"}
     recording = recording_phase in {"countdown", "recording", "paused", "finalizing"}
-    draw.rect_filled((x, y), (x + width, y + height), (*theme.bg_child[:3], 1.0))
-    top_divider_width = 1.0 * scale
-    top_divider_y = y + top_divider_width * 0.5
+    sx, sy, sw, sh = surface_rect if surface_rect is not None else (x, y, width, height)
+    draw.rect_filled((sx, sy), (sx + sw, sy + sh), (*theme.bg_child[:3], 1.0))
+    # The divider belongs to the outer surface, not the padded content row.
+    # Painting it at content.y makes equal layout gutters look unequal.
+    top_divider_width = pixel_size
+    top_divider_y = sy + top_divider_width * 0.5
     draw.line(
-        (x, top_divider_y),
-        (x + width, top_divider_y),
+        (sx, top_divider_y),
+        (sx + sw, top_divider_y),
         theme.warning if recording else theme.primary_dim if running else theme.border,
         top_divider_width,
     )
-    hint_height = tool_hints_height(draw, scale, tool_hints, keycap=keycap)
+    hint_height = tool_hints_height(
+        hints_draw, scale, tool_hints, keycap=keycap, mouse_scale=mouse_scale
+    )
     line = min(
         height,
         max(
             height if line_height is None else max(0, line_height),
-            draw.text_size("M")[1],
+            max(group.text_size("M")[1] for group in (context_draw, hints_draw, metrics_draw)),
+            max((item.draw.text_size("M")[1] for item in metric_styles.values()), default=0),
             hint_height,
-            icon_size or 7 * scale,
+            dot_size,
             keycap.size("Esc")[1] if keycap is not None else 0,
         ),
     )
@@ -384,7 +337,6 @@ def draw_status(
     context_gap = presentation.gap("status_context", gap / scale) if presentation else gap
     boundary_gap = gap if presentation else 18 * scale
     status_gap = gap if presentation else 22 * scale
-    dot_size = 7.0 * scale if icon_size is None else max(0, icon_size)
 
     def separator() -> None:
         nonlocal cursor
@@ -394,7 +346,7 @@ def draw_status(
             presentation.record_gap((cursor - context_gap / 2, y, context_gap, height))
         cursor += context_gap / 2
 
-    state_color = theme.primary if running else theme.text_disabled
+    state_color = context_theme.primary if running else context_theme.text_disabled
     state_text = activity or (
         ""
         if state == "external"
@@ -410,7 +362,7 @@ def draw_status(
         state_text = f"{labels.passive} · {state_text}" if state_text else labels.passive
     available = max(0.0, width - 2 * edge - context_edges[0] - context_edges[2])
     recording_layout = _recording_status_layout(
-        draw,
+        context_draw,
         available,
         height,
         scale,
@@ -419,22 +371,27 @@ def draw_status(
         countdown_remaining,
         recording_surface,
         labels,
+        icon_size=dot_size,
     )
     recording_reserve = recording_layout.width + context_gap if recording_layout.width else 0.0
-    state_text = fit_text(draw, state_text, max(0.0, available - recording_reserve - 12.0 * scale))
+    state_text = fit_text(
+        context_draw, state_text, max(0.0, available - recording_reserve - dot_size - 5.0 * scale)
+    )
     passive_rect = None
     if state_text:
         draw.circle_filled(
             (cursor + dot_size / 2, context_cy),
             dot_size / 2,
-            state_color,
+            presentation.icon_color("status_context", state_color) if presentation else state_color,
             segments=20,
         )
         cursor += dot_size + 5.0 * scale
         if passive:
-            passive_width = min(draw.text_size(labels.passive)[0], draw.text_size(state_text)[0])
+            passive_width = min(
+                context_draw.text_size(labels.passive)[0], context_draw.text_size(state_text)[0]
+            )
             passive_rect = (cursor, y, cursor + passive_width, y + height)
-        cursor += _inline_text(draw, cursor, context_cy, state_text, state_color)
+        cursor += _inline_text(context_draw, cursor, context_cy, state_text, state_color)
 
     if state_text:
         record("state", (context_x, context_cy - line / 2, cursor - context_x, line))
@@ -446,7 +403,22 @@ def draw_status(
             separator()
         recording_x = cursor
         cursor, recording_pause_rect, recording_stop_rect = _draw_recording_status(
-            draw, cursor, context_cy, theme, scale, recording_phase, recording_layout
+            context_draw,
+            cursor,
+            context_cy,
+            context_theme,
+            scale,
+            recording_phase,
+            recording_layout,
+            icon_size=dot_size,
+            icon_color=presentation.icon_color(
+                "status_context",
+                context_theme.warning
+                if recording_phase in {"countdown", "paused"}
+                else context_theme.danger,
+            )
+            if presentation
+            else None,
         )
         right_edge = x + width
         if recording_pause_rect is not None:
@@ -474,7 +446,7 @@ def draw_status(
             step,
             labels,
         )
-    selected_width = draw.text_size(selected)[0]
+    selected_width = context_draw.text_size(selected)[0]
     # Reserve a useful selection fragment on ordinary windows. At genuinely
     # narrow sizes selection yields to the stable simulation telemetry instead
     # of colliding with it.
@@ -494,37 +466,41 @@ def draw_status(
         - metrics_edges[2],
     )
     performance = _status_performance_layout(
-        draw,
+        metrics_draw,
         x + width - edge - metrics_edges[2],
         scale,
         backend,
         dt,
         fps,
         metric_text=metric_text,
+        metric_mode=metric_mode,
+        step=step,
+        sim_time=sim_time,
         max_width=telemetry_budget if show_metrics else 0,
         physics_hz=physics_hz,
         show_physics=show_physics,
         labels=labels,
-        group_gap=presentation.gap("status_metrics") if presentation else gap,
-        keycap=keycap,
+        group_gap=presentation.gap("status_metrics")
+        if presentation
+        else group_gap
+        if group_gap is not None
+        else METRIC_GROUP_GAP * scale,
+        text_budget=presentation.text_budget if presentation else None,
+        metric_styles=metric_styles,
+        **(presentation.metric_options() if presentation else {}),
     )
-    telemetry_fields = (
-        performance.backend_text,
-        performance.metric_text,
-        performance.delta_text,
-        performance.fps_text,
-    )
+    telemetry_fields = performance.fields
     metrics_left = performance.left - metrics_edges[0]
     left_limit = metrics_left - (boundary_gap if any(telemetry_fields) else 0.0)
 
     selection_available = left_limit - cursor - context_edges[2] - context_gap
-    if selection_available >= draw.text_size("…")[0]:
-        selected_shown = fit_text(draw, selected, selection_available)
+    if selection_available >= context_draw.text_size("…")[0]:
+        selected_shown = fit_text(context_draw, selected, selection_available)
         if selected_shown:
             separator()
             selection_x = cursor
             cursor += _inline_text(
-                draw,
+                context_draw,
                 cursor,
                 context_cy,
                 selected_shown,
@@ -542,8 +518,10 @@ def draw_status(
     if compact_status and available > 48.0 * scale:
         # A transient report remains readable without evicting every context
         # hint from a wide status bar.
-        shown = fit_text(draw, compact_status, min(available, width * 0.28), middle=status_path)
-        shown_width, _ = draw.text_size(shown)
+        shown = fit_text(
+            context_draw, compact_status, min(available, width * 0.28), middle=status_path
+        )
+        shown_width, _ = context_draw.text_size(shown)
         status_x = metrics_left - status_gap - shown_width
 
     hint_right = status_x - (14.0 * scale if shown else 0.0)
@@ -551,22 +529,23 @@ def draw_status(
         hint_right - cursor - context_edges[2] - context_gap - hints_edges[0] - hints_edges[2]
     )
     fitted_hints = fitting_tool_hints(
-        draw,
+        hints_draw,
         scale,
         tool_hints,
         hint_available,
         labels=labels,
         group_gap=hints_gap,
         keycap=keycap,
+        mouse_scale=mouse_scale,
     )
     if fitted_hints:
         separator()
         hints_x = cursor
         hint_fields = []
         hint_width = draw_tool_hints(
-            draw,
+            hints_draw,
             (cursor + hints_edges[0], hint_cy),
-            theme,
+            hints_theme,
             scale,
             fitted_hints,
             labels=labels,
@@ -578,10 +557,14 @@ def draw_status(
             separator_margin=separator_margin,
             record_item=hint_fields.append if presentation else None,
             separator_draw=(lambda at_x: divider(at_x, hint_cy)) if presentation else None,
+            mouse_scale=mouse_scale,
+            icon_color=hint_ink,
         )
         hint_width += hints_edges[0] + hints_edges[2]
         left_neighbor_end = hints_x + hint_width + context_edges[2]
-        painted_height = tool_hints_height(draw, scale, fitted_hints, keycap=keycap)
+        painted_height = tool_hints_height(
+            hints_draw, scale, fitted_hints, keycap=keycap, mouse_scale=mouse_scale
+        )
         outer_height = painted_height + hints_edges[1] + hints_edges[3]
         record(
             "status_hints",
@@ -605,7 +588,7 @@ def draw_status(
             "success": theme.text_disabled,
         }
         _inline_text(
-            draw,
+            context_draw,
             status_x,
             cy,
             shown,
@@ -620,60 +603,37 @@ def draw_status(
     if telemetry_present and 0.0 < leading_gap <= 30.0 * scale:
         divider_x = left_neighbor_end + leading_gap * 0.5
         divider(divider_x)
-    if performance.backend_text:
-        _inline_text(
-            draw, performance.backend_x, metric_cy, performance.backend_text, theme.text_disabled
+    numbers = (
+        (
+            presentation.number_painter(metrics_draw)
+            if presentation
+            else _StatusNumbers(metrics_draw)
         )
-        group_fields.append(
-            (
-                performance.backend_x,
-                metric_cy - line / 2,
-                draw.text_size(performance.backend_text)[0],
-                line,
+        if performance.fields
+        else None
+    )
+    metrics = []
+    for field in performance.fields:
+        item = metric_styles.get(field.key)
+        (presentation.number_painter(item.draw) if item else numbers).paint(
+            field, metric_cy, theme.text_disabled
+        )
+        if presentation:
+            presentation.record_readout(
+                field, (field.x, metric_cy - line / 2, field.width, line), metric_mode
             )
-        )
-    if performance.metric_text:
-        metric_height = (
-            OVERLAY_GEOMETRY.hint_control_height * scale
-            if keycap is None
-            else keycap.size(metric_text)[1]
-        )
-        metric_rect = (
-            performance.metric_x,
-            metric_cy - metric_height * 0.5,
-            performance.metric_x + performance.metric_width,
-            metric_cy + metric_height * 0.5,
-        )
-        _keycap(
-            draw,
-            performance.metric_x,
-            metric_cy,
-            metric_text,
-            theme,
-            scale,
-            muted=True,
-            presentation=keycap,
-        )
-    if metric_rect is not None:
-        mx, my, mr, mb = metric_rect
-        group_fields.append((mx, my, mr - mx, mb - my))
-    if performance.delta_text:
-        _inline_text(
-            draw, performance.delta_x, metric_cy, performance.delta_text, theme.text_disabled
-        )
-        group_fields.append(
-            (
-                performance.delta_x,
-                metric_cy - line / 2,
-                draw.text_size(performance.delta_text)[0],
-                line,
+        group_fields.append((field.x, metric_cy - line / 2, field.width, line))
+        if field.key == "metric":
+            metric_rect = (field.x, y, field.x + field.width, y + height)
+        else:
+            metrics.append(
+                StatusMetric(
+                    field.key,
+                    field.label or labels.backend,
+                    field.exact,
+                    (field.x, y, field.x + field.width, y + height),
+                )
             )
-        )
-    if performance.fps_text:
-        _inline_text(draw, performance.fps_x, metric_cy, performance.fps_text, theme.text_disabled)
-        group_fields.append(
-            (performance.fps_x, metric_cy - line / 2, draw.text_size(performance.fps_text)[0], line)
-        )
     for divider_x in performance.dividers:
         divider(divider_x, metric_cy)
     if group_fields:
@@ -691,4 +651,5 @@ def draw_status(
         recording_stop_rect=recording_stop_rect,
         message_rect=(status_x, y, status_x + shown_width, y + height) if shown else None,
         passive_rect=passive_rect,
+        metrics=tuple(metrics),
     )

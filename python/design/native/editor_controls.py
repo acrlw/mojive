@@ -229,9 +229,6 @@ class EditorControls:
         help = help or {}
         condition = condition or {"enabled": True, "reason": "", "enable": ""}
         enabled = condition["enabled"]
-        if path[0] == "parts" and path[1] == "workspace_presets":
-            enabled = False
-            condition = {"enabled": False, "reason": "当前主界面已移除旧布局预设。", "enable": ""}
         key, s = "/".join(path), workspace.s
         kind = rule.get("type", "number")
         short = {
@@ -252,7 +249,7 @@ class EditorControls:
             ("statusbar", "columnGap"): "状态组间距",
             ("status_context", "columnGap"): "状态与提示间距",
             ("status_hints", "columnGap"): "提示条目间距",
-            ("status_metrics", "columnGap"): "指标条目间距",
+            ("status_metrics", "columnGap"): "分隔线单侧默认间距",
             ("output_row", "columnGap"): "图标与正文间距",
             ("output_row", "gap"): "基础图文间距",
             ("output_list", "rowGap"): "条目间距",
@@ -331,15 +328,27 @@ class EditorControls:
                 width=control_width,
             )
         elif kind == "color":
-            channels = [int(value[n : n + 2], 16) / 255 for n in range(1, len(value), 2)]
+            fallback = (
+                self.runtime.value("muted_color" if path[-1] == "iconColor" else "text_color")
+                if value == "inherit"
+                else value
+            )
+            channels = [int(fallback[n : n + 2], 16) / 255 for n in range(1, len(fallback), 2)]
             if len(channels) == 3:
                 channels.append(1)
-            g.set_next_item_width(control_width)
-            entered, channels = g.color_edit4(
-                "##value", channels, g.ColorEditFlags_.no_inputs | g.ColorEditFlags_.no_tooltip
+            swatch = min(g.get_frame_height(), control_width)
+            g.set_next_item_width(max(1, control_width - swatch - gap))
+            entered, manual = g.input_text_with_hint(
+                "##value", "inherit / #RRGGBB", value, g.InputTextFlags_.enter_returns_true
             )
-            manual = "#" + "".join(f"{round(c * 255):02x}" for c in channels)
             self.record_item("value/" + key)
+            g.same_line()
+            picked, channels = g.color_edit4(
+                "##swatch", channels, g.ColorEditFlags_.no_inputs | g.ColorEditFlags_.no_tooltip
+            )
+            if picked:
+                entered = True
+                manual = "#" + "".join(f"{round(c * 255):02x}" for c in channels)
         else:
             entered, manual = g.checkbox("##value", value)
             self.record_item("value/" + key)
@@ -412,14 +421,6 @@ class EditorControls:
             note = note or support.get("condition", "")
             if support["status"] == "reference":
                 note = support["description"]
-        typography = getattr(self, "preview_typography", None)
-        if (
-            path[0] == "parts"
-            and path[-1] == "fontSize"
-            and typography is not None
-            and typography.size_for((path[1],)) is not None
-        ):
-            note = "字号由设置覆盖；切回“设计规范默认值”后生效。"
         if note and (not enabled or getattr(self, "selected_field", None) == tuple(path)):
             g.text_disabled(self.fit_label(note.splitlines()[0], available))
             self.tooltip(note, shown=self.fit_label(note.splitlines()[0], available))

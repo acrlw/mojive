@@ -237,15 +237,17 @@ def test_camera_and_light_entities_reach_the_debug_pass(backend_name, request):
         frame = adapter.frame(FrameNeeds(poses=True, diagnostics=True))
         backend.update(frame)
 
-        assert backend.debug.layer("scene.cameras").count_of(PrimitiveType.LINE) == 24 * len(
-            source.cameras
-        )
+        from mojive.interaction.scene_icons import scene_icon_geometry
+
+        assert backend.debug.layer("scene.cameras").count_of(PrimitiveType.TRIANGLE) == len(
+            scene_icon_geometry("camera")
+        ) * len(source.cameras)
         light_set = frame.lights if frame.lights is not None else source.lights
         active_lights = [light for light in light_set.lights if light.active]
         directional_lights = [light for light in active_lights if light.type.value != "point"]
-        assert backend.debug.layer("scene.lights").count_of(PrimitiveType.POINT) == len(
-            active_lights
-        )
+        assert backend.debug.layer("scene.lights").count_of(PrimitiveType.TRIANGLE) == len(
+            scene_icon_geometry("light")
+        ) * len(active_lights)
         assert backend.debug.layer("scene.lights").count_of(PrimitiveType.ARROW) == len(
             directional_lights
         )

@@ -220,6 +220,7 @@ def test_material_axis_click_restores_load_time_color_and_undo(scale, axis):
     ui.s = scale
     ui.body = ui.bold = ui.mono = io.fonts.add_font_default()
     ui.hits, ui.numeric_edits, ui.translate = {}, {}, str
+    ui._section_columns = []
     app = ViewerApp(session, NullBackend())
     projection = EntityProjection(app)
     app.initial_entities, app.entities = projection.initial_entities, projection.entities

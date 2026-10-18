@@ -161,7 +161,11 @@ class _GizmoInput:
         )
         imgui.text(shown_title)
         if shown_title != title:
-            imgui.set_item_tooltip(title)
+            ui = getattr(getattr(self, "workspace", None), "ui", None)
+            if ui is None:
+                imgui.set_item_tooltip(title)
+            elif imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+                ui.tooltip(title, translate=False)
         imgui.separator()
         modes = (
             (

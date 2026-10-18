@@ -20,6 +20,7 @@ from mojive.ui.camera import (
     oblique_axis_view_directions,
 )
 from mojive.ui.camera_tracking import can_track_node, tracking_position
+from mojive.ui.gizmo import _JOINT_RANGE_EPSILON, _basis_from_z
 from mojive.ui.perturb import (
     cursor_grab_point,
 )
@@ -441,11 +442,31 @@ class _Navigation:
         camera_right = camera_basis(current_view)[0]
         elevated_direction = elevated_focus_view_direction(eye_offset, camera_right)
         if joint.type == "hinge":
+            marker_directions = ()
+            lower, upper = map(float, joint.range)
+            if (
+                joint.limited
+                and np.isfinite((lower, upper)).all()
+                and upper > lower
+                and frame.qpos is not None
+                and 0 <= joint.qpos_adr < len(frame.qpos)
+                and np.isfinite(frame.qpos[joint.qpos_adr])
+            ):
+                angles = [float(frame.qpos[joint.qpos_adr])]
+                if upper - lower < 2.0 * np.pi - _JOINT_RANGE_EPSILON:
+                    angles.extend((lower, upper))
+                # Match the rendered dial's fixed world basis, including its
+                # sign for vertical axes; body rotation is not the dial frame.
+                basis = _basis_from_z(axis)
+                marker_directions = (
+                    np.cos(angles)[:, None] * basis[:, 0] + np.sin(angles)[:, None] * basis[:, 1]
+                )
             candidates = oblique_axis_view_directions(
                 axis,
                 eye_offset,
                 camera_right,
                 JOINT_FOCUS_OBLIQUE_DEGREES,
+                marker_directions=marker_directions,
             )
         elif joint.type == "slide":
             nearest = closest_perpendicular_view_direction(

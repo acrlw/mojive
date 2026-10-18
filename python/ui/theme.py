@@ -269,7 +269,8 @@ def apply_colors(imgui: Any, theme: Theme = THEME) -> None:
     put(col.title_bg_active, theme.bg_header)
     put(col.title_bg_collapsed, theme.bg_child)
     put(col.menu_bar_bg, theme.bg_child)
-    put(col.scrollbar_bg, theme.bg_child)
+    # Reveal only the thumb; the track retains its containing panel's surface.
+    put(col.scrollbar_bg, (0.0, 0.0, 0.0, 0.0))
     put(col.scrollbar_grab, theme.bg_frame_active)
     put(col.scrollbar_grab_hovered, theme.primary_dim)
     put(col.scrollbar_grab_active, theme.primary)

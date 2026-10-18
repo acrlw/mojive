@@ -11,10 +11,30 @@ from pathlib import Path
 from mojive.design.specification import DEFAULT, validate_spec
 
 _LOCK = threading.RLock()
+_SURFACE_TOKENS = ("floating_color", "popup_color")
+
+
+def _validate_loaded_spec(value):
+    """Read the known v1 shape from before independent surface colors were added."""
+    if (
+        isinstance(value, dict)
+        and type(value.get("version")) is int
+        and value["version"] == 1
+        and isinstance(value.get("tokens"), dict)
+        and set(value["tokens"]) == set(DEFAULT["tokens"]).difference(_SURFACE_TOKENS)
+    ):
+        value = {
+            **value,
+            "tokens": {
+                **value["tokens"],
+                **{name: DEFAULT["tokens"][name] for name in _SURFACE_TOKENS},
+            },
+        }
+    return validate_spec(value)
 
 
 def read_spec(path):
-    return validate_spec(json.loads(Path(path).read_text(encoding="utf-8")))
+    return _validate_loaded_spec(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
 def default_spec_path():
@@ -114,7 +134,7 @@ class SpecificationStore:
             try:
                 with path.open(encoding="utf-8") as stream:
                     stat = os.fstat(stream.fileno())
-                    value = validate_spec(json.load(stream))
+                    value = _validate_loaded_spec(json.load(stream))
                 candidates.append(
                     (stat.st_mtime_ns, order, path.name, value, stat.st_ino, stat.st_ctime_ns)
                 )
@@ -125,9 +145,10 @@ class SpecificationStore:
         if candidates:
             stamp, _, name, value, inode, changed = max(candidates, key=lambda item: item[:2])
         else:
-            stamp, name, value, inode, changed = 0, "design-spec.json", deepcopy(DEFAULT), 0, 0
+            stamp, name, value, inode, changed = 0, None, deepcopy(DEFAULT), 0, 0
         return {
             "spec": value,
+            "savedSpec": next((item[3] for item in candidates if item[1] == 0), None),
             "source": name,
             # Rapid atomic replacements can share a filesystem modification time.
             # Include the replaced file identity so a new draft cannot be skipped.
@@ -156,6 +177,12 @@ class SpecificationStore:
         absent = object()
         with file_lock(self.lock_path):
             latest = self.latest()
+            if latest["source"] is None and (latest["errors"] or before != DEFAULT):
+                errors = (
+                    "; ".join(f"{item['source']}: {item['error']}" for item in latest["errors"])
+                    or "The saved specification and draft are missing"
+                )
+                raise SpecificationConflict("No valid design specification is available: " + errors)
             result = deepcopy(latest["spec"])
             for path, value, remove in delta:
                 base, remote, target = before, latest["spec"], result

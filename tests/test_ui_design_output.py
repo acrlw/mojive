@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 from examples.ui_design.native import output_panel as native_output
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive.ui.messages import OutputBuffer
 from mojive.ui.panels import output as shared_output
 from mojive.ui.theme import THEME
+from mojive.ui.workspace.widgets import UI
 
 
 def _panel():
@@ -93,6 +93,7 @@ def test_multiline_rows_and_auto_scroll_use_the_shared_renderer(monkeypatch):
         end_child=lambda: child_ends.append(True),
         ImVec2=imgui.ImVec2,
         get_font_size=lambda: 14,
+        get_font=lambda: SimpleNamespace(font_id=1),
         get_content_region_avail=lambda: imgui.ImVec2(400, 200),
         calc_text_size=lambda text, **_kwargs: imgui.ImVec2(100, 14 * (text.count("\n") + 1)),
         is_rect_visible=lambda _size: True,

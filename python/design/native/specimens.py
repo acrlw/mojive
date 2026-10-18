@@ -2,12 +2,15 @@
 
 from imgui_bundle import imgui
 
+from mojive.design.groups import group_scope
 from mojive.design.native.controls import NativePrimitives
 from mojive.design.native.geometry import (
     Box,
     NativePartStyle,
     Rect,
+    part_scope,
 )
+from mojive.design.specification import component_catalog
 
 
 class ReferenceValues:
@@ -34,12 +37,48 @@ class ComponentSpecimens:
 
     def measure(self, ui, part, width):
         """Return a specimen's logical content extent before placing it on a plate."""
+        definition = component_catalog()[part]
+        if "controlGroup" in definition:
+            with part_scope(definition["controlGroup"], inherit=False):
+                return self.measure(ui, definition["basePart"], width)
+        if "statusKey" in definition:
+            from mojive.design.native.specimen_groups import status_readout_geometry
+
+            field, draw, groups = status_readout_geometry(ui, part)
+            separators = int(field.key != "backend") + int(field.key != "render")
+            return (
+                field.left_gap
+                + field.width
+                + field.right_gap
+                + separators * groups.metric_options()["separator_width"],
+                max(24 * ui.s, draw.text_size("M")[1]) + 12 * ui.s,
+            )
+        if "basePart" in definition:
+            with group_scope(definition["groupOwner"]):
+                return self.measure(ui, definition["basePart"], width)
+        if part == "settings_nav":
+            requested = ui.metric(part, "navWidth", ui.metric("settings_layout", "navWidth", 0))
+            if requested:
+                width = min(width, requested * ui.s)
+        elif part == "settings_layout":
+            requested = ui.metric(part, "windowWidth", 0)
+            if requested:
+                width = min(width, requested * ui.s)
         from mojive.design.native.specimen_groups import ACTIONS
         from mojive.ui.workspace.button_rows import measure_button_row
         from mojive.ui.workspace.labeled_input import measure_labeled_input
 
         s = ui.s
         engine = NativePrimitives(ui, self.runtime)
+        if part == "form_popup":
+            from mojive.design.native.specimen_forms import form_reference
+
+            _toolbar, _ctx, layout = form_reference(self, ui)
+            return layout.width, layout.height
+        if part in ("scene_tools", "pose_tools"):
+            from mojive.design.native.specimen_groups import filter_geometry
+
+            return filter_geometry(ui, part, width)[:2]
         if part in (
             "statusbar",
             "status_context",
@@ -47,9 +86,14 @@ class ComponentSpecimens:
             "status_metrics",
             "status_separator",
         ):
-            from mojive.ui.workspace.status_components import StatusGroups
+            from mojive.ui.workspace.status_components import (
+                StatusGroups,
+                resolve_status_bar_layout,
+            )
 
             style = ui.component_style(part)
+            if part == "statusbar":
+                return width, resolve_status_bar_layout(ui).height
             if part == "status_separator":
                 height = (
                     style.get("height", 18)
@@ -59,11 +103,6 @@ class ComponentSpecimens:
                 return min(width, 160 * s), height * s
             edges = StatusGroups(ui).edges(part) if part != "statusbar" else (0, 0, 0, 0)
             minimum = 24 * s + edges[1] + edges[3]
-            if part == "statusbar":
-                minimum = StatusGroups(ui).minimum_height(minimum)
-                padding, margin = style.edges("padding", s), style.edges("margin", s)
-                minimum += padding[1] + padding[3] + margin[1] + margin[3]
-                minimum = max(minimum, style.get("height", 28) * s)
             return width, minimum
         if part == "button_row":
             geometry = measure_button_row(ui, width, [x[0] for x in ACTIONS[part]])
@@ -93,6 +132,12 @@ class ComponentSpecimens:
             from mojive.ui.workspace.status_components import StatusBadge
 
             return StatusBadge(ui).size("已暂停")
+        if part == "control_metadata":
+            style = ui.component_style(part)
+            padding = style.edges("padding", s, (8, 3, 8, 3))
+            return width, style.line_height(style.get("fontSize", 12) * 1.4) * s + padding[
+                1
+            ] + padding[3]
         if part in ("rgba", "color_channels"):
             layout = ui.numeric_layout(width, 4, parts=("rgba", part), column_options=(4, 2, 1))
             return width, layout.height
@@ -176,6 +221,7 @@ class ComponentSpecimens:
             "camera_body": 220,
             "nav_widget": 150,
             "timeline_sheet": 190,
+            "timeline_body": 206,
             "timeline_ruler": 190,
             "timeline_lane": 100,
             "lane_label": 100,
@@ -183,7 +229,6 @@ class ComponentSpecimens:
             "separator": 20,
             "empty": 108,
             "notice": 40,
-            "statusbar": 40,
             "status_context": 40,
             "status_hints": 40,
             "status_metrics": 40,
@@ -228,12 +273,31 @@ class ComponentSpecimens:
             imgui.end_child()
 
     def paint(self, ui, part, bounds):
+        definition = component_catalog()[part]
+        if "controlGroup" in definition:
+            with part_scope(definition["controlGroup"], inherit=False):
+                result = {**self.paint(ui, definition["basePart"], bounds), "part": part}
+                self.last[part] = result
+                return result
+        if "basePart" in definition:
+            with group_scope(definition["groupOwner"]):
+                result = {**self.paint(ui, definition["basePart"], bounds), "part": part}
+                self.last[part] = result
+                return result
         engine = NativePrimitives(ui, self.runtime)
         style = NativePartStyle(self.runtime, part)
         s = ui.s
         key = "reference-" + part
         self.runtime.paint_context.paint_depth += 1
         try:
+            if part == "form_popup":
+                from mojive.design.native.specimen_forms import paint_form_reference
+
+                start = len(ui.design.primitives.observed)
+                box, children = paint_form_reference(self, ui, bounds)
+                record = self._record(part, box, engine, children)
+                record["controls"] = ui.design.primitives.observed[start:]
+                return record
             if part in ("select_popup", "select_option", "menu", "menu_item", "menu_item_content"):
                 from mojive.design.native.specimen_groups import choices
 
@@ -406,12 +470,34 @@ class ComponentSpecimens:
                 return self._record(part, box, engine, [ui.hits[key]])
             if part in ("color_editor", "color_picker", "color_input"):
                 return self._native_color(ui, engine, style, part, bounds)
+            if part == "control_metadata":
+                from mojive.ui.workspace.scene_panels import _control_detail
+
+                _control_detail(ui, key, bounds.x, bounds.y, bounds.width, "hinge_motor · -1 … 1")
+                frame = Rect(*ui.hits[key])
+                padding = ui.component_style(part).edges("padding", s, (8, 3, 8, 3))
+                box = Box(bounds, frame, frame.inset(*padding), padding, style.edges("margin", s))
+                return self._record(part, box, engine, [frame.tuple()])
             from mojive.design.native.specimen_groups import GROUP_RENDERERS
             from mojive.design.native.specimen_surfaces import SURFACE_RENDERERS
 
             renderer = {**GROUP_RENDERERS, **SURFACE_RENDERERS}[part]
+            if part == "statusbar":
+                from mojive.ui.workspace.status_components import resolve_status_bar_layout
+
+                with part_scope("statusbar"):
+                    children = renderer(self, ui, engine, style, part, bounds)
+                    box = resolve_status_bar_layout(ui).box(bounds.x, bounds.y, bounds.width)
+                return self._record(part, box, engine, children)
             children = renderer(self, ui, engine, style, part, bounds)
-            return self._record(part, style.box(*bounds.tuple(), scale=s), engine, children)
+            box = style.box(*bounds.tuple(), scale=s)
+            if part == "timeline_body":
+                from mojive.ui.workspace.timeline_body import body_geometry
+
+                geometry = body_geometry(ui)
+                padding = (*geometry.padding, *geometry.padding)
+                box = Box(box.outer, box.frame, box.frame.inset(*padding), padding, box.margin)
+            return self._record(part, box, engine, children)
         finally:
             self.runtime.paint_context.paint_depth -= 1
 
@@ -508,7 +594,7 @@ class ComponentSpecimens:
         return self._record(part, box, engine, [rect.tuple() for rect in layout["fields"]])
 
     def _native_color(self, ui, engine, style, part, bounds):
-        from mojive.ui.workspace.color_editor import ColorEditor, ColorField
+        from mojive.ui.workspace.color_editor import ColorEditor, ColorField, color_popup_geometry
 
         editor = self.color_editors.get(part)
         if editor is None:
@@ -516,16 +602,22 @@ class ComponentSpecimens:
                 ColorField() if part == "color_input" else ColorEditor()
             )
         box = style.box(*bounds.tuple(), scale=ui.s)
-        imgui.set_cursor_screen_pos((box.content.x, box.content.y))
+        if part == "color_editor":
+            padding = color_popup_geometry(ui).padding
+            box = Box(box.outer, box.frame, box.frame.inset(*padding), padding, box.margin)
         values = self.values.get(part, (0.55, 0.68, 0.80, 1.0))
         key = "reference-" + part
         if part == "color_input":
+            imgui.set_cursor_screen_pos((box.content.x, box.content.y))
             _, self.values[part] = editor.draw(ui, key, values, width=box.content.width)
         else:
-            _, self.values[part] = editor.draw(ui, key, values, box.content.width)
-        if part != "color_input":
+            # The production editor consumes its own margins and padding. Keep
+            # the reference box for observation without insetting its input twice.
+            imgui.set_cursor_screen_pos((box.outer.x, box.outer.y))
+            _, self.values[part] = editor.draw(ui, key, values, box.outer.width)
+            padding = color_popup_geometry(ui).padding
             self.color_heights[part, bounds.width] = (
-                imgui.get_cursor_screen_pos().y - bounds.y + box.padding[3] + box.margin[3]
+                imgui.get_cursor_screen_pos().y - bounds.y + padding[3]
             )
         children = [hit for name, hit in ui.hits.items() if name.startswith(key)]
         return self._record(part, box, engine, children)

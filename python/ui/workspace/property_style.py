@@ -2,6 +2,7 @@
 
 import math
 from contextlib import contextmanager
+from dataclasses import replace
 
 from imgui_bundle import imgui
 
@@ -16,7 +17,14 @@ from mojive.ui.workspace.widgets import MUTED, SWITCH_WIDTH, TEXT
 @contextmanager
 def property_controls(ui):
     """Match field height, font and table row spacing across native panels."""
-    imgui.push_font(ui.body, DESIGN.body_size * ui.s)
+    style = ui.component_style("section_body")
+    imgui.push_font(ui.resolve_font(style), style.get("fontSize", DESIGN.body_size) * ui.s)
+    ink = ui.style_color(
+        style,
+        "textColor",
+        tuple(round(channel * 255) for channel in imgui.get_style_color_vec4(imgui.Col_.text)),
+    )
+    imgui.push_style_color(imgui.Col_.text, tuple(channel / 255 for channel in ink))
     imgui.push_style_var(
         imgui.StyleVar_.frame_padding,
         (DESIGN.frame_padding_x * ui.s, DESIGN.control_padding_y(DESIGN.body_size) * ui.s),
@@ -35,15 +43,19 @@ def property_controls(ui):
         imgui.StyleVar_.item_spacing, (DESIGN.item_spacing_x * ui.s, DESIGN.row_gap * ui.s)
     )
     try:
-        yield
+        with ui.component_scope("section_body"):
+            yield
     finally:
         imgui.pop_style_var(3)
+        imgui.pop_style_color()
         imgui.pop_font()
 
 
 def advance(ui, x, y):
     """Publish the extent of manually positioned controls to ImGui."""
-    imgui.set_cursor_screen_pos((x, y))
+    # ImGui truncates CursorMaxPos when calculating the scrollable content size.
+    # Round the published endpoint outward so the final fractional row remains reachable.
+    imgui.set_cursor_screen_pos((x, math.ceil(y)))
     imgui.push_style_var(imgui.StyleVar_.item_spacing, (imgui.get_style().item_spacing.x, 0))
     imgui.dummy((0, 0))
     imgui.pop_style_var()
@@ -59,7 +71,7 @@ def property_label(ui, key, text, x, y, width, *, above, row_height=None, parent
         painter = ui.design.primitives
         painter.family = ui.design.family()
         inherit = {}
-        for field in ("fontSize", "lineHeightMode", "lineHeight"):
+        for field in ("fontSize", "fontFamily", "textColor", "lineHeightMode", "lineHeight"):
             if ui.design.runtime.edited(parent, field):
                 inherit[field] = (ui.design.runtime.resolved_part(parent, field), parent)
         box = painter.label(
@@ -75,7 +87,7 @@ def property_label(ui, key, text, x, y, width, *, above, row_height=None, parent
     return width, height
 
 
-def property_section(ui, label, flags, *, item_id=None):
+def property_section(ui, label, flags, *, item_id=None, divider=True):
     """Use one section painter and native persistent open state in every panel."""
     pos = imgui.get_cursor_screen_pos()
     width = imgui.get_content_region_avail().x
@@ -88,7 +100,7 @@ def property_section(ui, label, flags, *, item_id=None):
     ):
         opened = next_item.open_val
         storage.set_int(key, int(opened))
-    if ui.section(label, pos.x, pos.y, width, opened):
+    if ui.section(label, pos.x, pos.y, width, opened, divider=divider):
         opened = not opened
         storage.set_int(key, int(opened))
     advance(ui, pos.x, pos.y + ui.section_offset(38 if opened else 34) * ui.s)
@@ -136,13 +148,15 @@ def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
         )
         * scale
     )
+    padding = switch.edges("padding", scale)
     minimum = (switch.get("switchWidth", DESIGN.switch_track_width) + 4) * scale
+    minimum += padding[0] + padding[2]
     above = (
         desired + gap + minimum + switch_margins[0] + switch_margins[2] > available
         if label_above is None
         else label_above
     )
-    return ui.form_layout(
+    layout = ui.form_layout(
         width,
         label_width=desired,
         label_gap=gap,
@@ -150,6 +164,12 @@ def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
         field_part="switch",
         field_minimum=minimum,
         minimum=minimum + switch_margins[0] + switch_margins[2],
+    )
+    _, field_y, field_width, field_height = layout.fields[0]
+    field_width = min(field_width, minimum + switch_margins[0] + switch_margins[2])
+    return replace(
+        layout,
+        fields=((width - layout.row_margin[2] - field_width, field_y, field_width, field_height),),
     )
 
 
@@ -175,13 +195,33 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
         clicked = imgui.invisible_button(
             key + "-label", (max(1, layout.label_width), layout.label_height)
         )
-        value = ui.switch(
-            key,
-            control_x,
-            pos.y + layout.fields[0][1],
-            not value if clicked else value,
-            width=max(0, width - layout.fields[0][0] - layout.row_margin[2]),
-        )
+        if tooltip and imgui.is_item_hovered(
+            imgui.HoveredFlags_.delay_normal | imgui.HoveredFlags_.allow_when_disabled
+        ):
+            ui.tooltip(tooltip, translate=False)
+        value = not value if clicked else value
+        if ui.design is not None:
+            painter = ui.design.primitives
+            painter.family = ui.design.family()
+            style = painter.style("switch")
+            margin = style.edges("margin", ui.s)
+            _, field_y, field_width, field_height = layout.fields[0]
+            box = painter.field_box(
+                style,
+                Rect(control_x, pos.y + field_y, field_width, field_height + margin[1] + margin[3]),
+                (0, 0, 0, 0),
+            )
+            value = painter.switch(
+                key,
+                box.frame,
+                value,
+                layout_box=box,
+                tooltip=tooltip,
+                control_x=box.content.right
+                - style.get("switchWidth", DESIGN.switch_track_width) * ui.s,
+            ).value
+        else:
+            value = ui.switch(key, control_x, pos.y + layout.fields[0][1], value)
         advance(ui, pos.x, pos.y + layout.height + DESIGN.row_gap * ui.s)
         return value
     if ui.design is not None:
@@ -194,7 +234,12 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
         height = row_height - margin[1] - margin[3]
         box = painter.field_box(
             style,
-            Rect(pos.x, pos.y, width, row_height),
+            Rect(
+                pos.x + layout.row_margin[0],
+                pos.y + layout.row_margin[1],
+                max(0, width - layout.row_margin[0] - layout.row_margin[2]),
+                row_height,
+            ),
             (0, 0, 0, 0),
             minimum_height=height / ui.s,
         )
@@ -206,9 +251,14 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
             label_style=label_style,
             layout_box=box,
             tooltip=tooltip,
-            control_x=control_x,
+            control_x=box.content.right
+            - style.get("switchWidth", DESIGN.switch_track_width) * ui.s,
         )
-        advance(ui, pos.x, pos.y + box.outer.height + DESIGN.row_gap * ui.s)
+        advance(
+            ui,
+            pos.x,
+            box.outer.bottom + layout.row_margin[3] + DESIGN.row_gap * ui.s,
+        )
         return result.value
     shown = ui.translate(label)
     clicked = ui.button(
@@ -242,6 +292,10 @@ class NativePropertyPresentation:
 
     def _field_width(self):
         return imgui.calc_item_width() if self._control_width is None else self._control_width
+
+    def tooltip(self, text, *, hovered=False):
+        if hovered or imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+            self.ui.tooltip(text, translate=False)
 
     def section(self, label, flags=0):
         self._control_width = None
@@ -450,7 +504,7 @@ class NativePropertyPresentation:
         def begin(shown):
             return ui.begin_combo(key, pos.x, pos.y, width, shown, popup_width=popup_width)
 
-        imgui.push_font(ui.body, style.get("fontSize", BODY_SIZE) * ui.s)
+        imgui.push_font(ui.resolve_font(style), style.get("fontSize", BODY_SIZE) * ui.s)
         imgui.push_style_var(imgui.StyleVar_.frame_padding, (style.edges("padding", ui.s)[0], 0))
         try:
             with clearable_combo(
@@ -493,7 +547,7 @@ class NativePropertyPresentation:
             width_limit=limit,
         )
 
-    def numeric(self, item_id, value, speed, low, high, fmt):
+    def numeric(self, item_id, value, speed, low, high, fmt, *, integer=False):
         pos = imgui.get_cursor_screen_pos()
         return self.ui.input(
             item_id,
@@ -505,6 +559,7 @@ class NativePropertyPresentation:
             lo=low,
             hi=high,
             format=fmt,
+            integer=integer,
         )
 
     def numbers(self, item_id, values, speed, low, high, fmt):
@@ -626,6 +681,61 @@ class NativePropertyPresentation:
                 (available - DESIGN.row_gap * self.ui.s * max(0, count - 1)) / max(1, count),
             ),
         )
+
+    @contextmanager
+    def numeric_text_style(self, size_scale=1.0):
+        """Keep numeric readouts proportional to their owning group's caption size."""
+        imgui.push_font(self.ui.numeric_font, imgui.get_font_size() * size_scale)
+        try:
+            yield
+        finally:
+            imgui.pop_font()
+
+    def multi_select(self, key, labels, values):
+        """Use the shared choice rows for compact visibility controls."""
+        from mojive.ui.workspace.popup_style import menu_choice_width
+
+        selected = list(values)
+        width = menu_choice_width(self.ui, labels, -1)
+        if self.begin_combo(key, self.ui.translate("Channels"), popup_width=width):
+            self.choices.begin(key)
+            try:
+                for index, label in enumerate(labels):
+                    changed, value = self.choices.choice(label, selected[index])
+                    if changed:
+                        selected[index] = value
+            finally:
+                self.choices.end()
+        return tuple(selected)
+
+    def action_menu(self, key, label, actions):
+        """Present enabled actions in the shared measured menu without a selected value."""
+        from mojive.ui.workspace.popup_style import menu_choice_width
+
+        chosen = None
+        width = menu_choice_width(self.ui, tuple(label for label, _ in actions), -1)
+        imgui.begin_disabled(not any(enabled for _, enabled in actions))
+        opened = self.begin_combo(key, label, popup_width=width)
+        if opened:
+            self.choices.begin(key)
+            try:
+                for index, (caption, enabled) in enumerate(actions):
+                    if self.choices.choice(caption, enabled=enabled)[0]:
+                        chosen = index
+            finally:
+                self.choices.end()
+        imgui.end_disabled()
+        return chosen
+
+    def choice_height(self):
+        style = self.ui.component_style("select")
+        margin = style.edges("margin", self.ui.s)
+        height = (
+            self.ui.design.primitives.field_height("select", DESIGN.control_height) * self.ui.s
+            if self.ui.design is not None
+            else imgui.get_frame_height()
+        )
+        return height + margin[1] + margin[3]
 
     def labeled(self, label, value):
         self.readonly_value(label, value, muted=False)

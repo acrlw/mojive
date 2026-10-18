@@ -14,6 +14,20 @@ LAYER_LABELS = (
     ("debug_2d", "2D canvas drawings"),
 )
 
+LAYER_SECTIONS = (
+    (
+        "Editing aids",
+        (
+            ("viewport_ui", "Viewport controls"),
+            ("gizmos", "Gizmos"),
+            ("helpers", "Camera/light helpers"),
+            ("perturbation", "Perturbation guides"),
+        ),
+    ),
+    ("Selection feedback", (("selection", "Selection highlight"),)),
+    ("Debug display", (("debug_3d", "3D drawings"), ("debug_2d", "2D drawings"))),
+)
+
 _DEFAULT_LAYERS = ViewportLayers()
 
 

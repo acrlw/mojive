@@ -62,6 +62,14 @@ and disabling the last owner are covered by `tests/native/test_native_lod.py`.
 Chinese at narrow, standard and HiDPI sizes, checks that Help remains visible in the real menu
 bar, and captures the resulting panels. Inspect the captures under `output/geometry-ui`.
 
+`make scene-entities BACKEND=opengl` and `BACKEND=bgfx` capture camera and light markers
+from the shared UI SVG masters, including selected camera frustums and each supported
+light influence. Add `ARGS='--diagnostic-only --overview-only'` to verify the explicit
+Camera and Light render flags with editor helpers disabled. Inspect rounded endpoints,
+scene size, selected colors and direction/range cues. `tests/test_scene_icon_masters.py`
+checks packaged source agreement and uniform projection at small and enlarged sizes,
+both UI scales, camera projections and depths without creating a GPU context.
+
 `make inspector` also edits contact and joint solver fields through real window input in English
 at normal scale and Chinese at 2.25 scale. It checks that joint drafts commit once and a single
 Undo restores the source values. Inspect the idle, edited, applied and undone controls under
@@ -140,6 +148,20 @@ Use the existing target that demonstrates the behavior: examples include `make g
 `make outline`, `make gizmo`, `make perturb`, and `make settings` open interactive viewers. Exercise
 the relevant behavior, capture the result under `output/`, and close only the viewer you started.
 A scripted gallery can supply the evidence when it covers the same behavior.
+
+For actual native-window inspection of a floating production Timeline, run:
+
+```bash
+MOJIVE_UI_SCALE=1.2 make ui-native-workspace BACKEND=opengl ARGS='--float-panel Timeline --float-with Output'
+```
+
+Omit `--float-with Output` for a single floating panel; use `BACKEND=bgfx` for the other renderer.
+This opens the ordinary workspace and uses native docking after initialization. Inspect dragging,
+resizing, tab selection and popup dismissal. Save an actual OS window or desktop screenshot under
+`output/`, retaining the window edges and surrounding desktop. On macOS, include the composed
+window corners and inspect them alongside the floating panel's corners. Framebuffer readback from
+`make ui-native-capture` verifies rendered content but does not establish OS presentation, native
+window corners or desktop compositing; it cannot replace this screen evidence.
 
 `make ui-layout-audit` captures Camera, Settings, Inspector, Keyframes, and menus in English
 and Chinese at normal and 150% UI scale. It checks horizontal containment, complete Shadow
@@ -416,6 +438,27 @@ predicates during fading, without relying on machine-dependent timing thresholds
 
 ## Composed-model editor latency
 
+`make ui-design-runtime` traverses all built-in panels and Settings categories,
+checks panel-owned groups and isolated heading edits, and exercises independent
+status readout widths and right-hand gaps. Inspect the captures and coverage
+inventory under `output/panel-groups/<backend>/<scale>x/`. The fixture also opens
+asset forms, physical and material properties, named drawing layers, model
+components and a real spatial-path editor. Every declared panel-owned group must
+be observed; remaining unobserved groups fail acceptance. Catalogue support alone
+is not evidence that a production control is wired.
+
+`make ui-design-profile` alternates default and independently customized component
+groups in the production workspace. It measures warmed `sync()` wall and thread
+CPU times with selected Inspector fields, visible timeline and viewport tools.
+The hidden window disables VSync and uses isolated settings; captures and design
+changes are outside the timed samples. The run also verifies that warmed frames
+do not change font faces or atlas pixels, and records the first application separately, including
+any newly requested font loading. The customized case also enables module palette
+overrides. Use `BACKEND=bgfx` for the native backend. Inspect the paired
+captures and `report.json` under `output/design-profile/<backend>/`; run this separately from
+other GPU work. These timings are diagnostics, not portable performance limits or
+display scanout latency.
+
 `make hierarchy-benchmark` checks browsing and filtering of 1,500 authored objects (3,002
 hierarchy nodes), scrolls to the last object, clicks it, and captures the resulting Inspector.
 It records panel CPU time, submitted rows, and whole `sync()` time under
@@ -497,6 +540,25 @@ other backends include color readback, so those values are not directly comparab
 GPU pass timestamps are included when available. Reports, profiles and a final window capture
 go under `output/editor-profile/`. Run timed workloads separately from other checks, and preserve
 backend, framebuffer scale, asset and window dimensions when comparing versions.
+
+For the same workspace composition as `make joint-gizmo`, use
+`make editor-profile ARGS="--workspace --asset joint_gizmo --width 1600 --height 1000"`.
+Add `--joint 01_revolute_y` to include the selected joint's rotation gizmo and Inspector.
+Use `--cases idle orbit --timing-only` for repeated frame timing without the separate stage
+and cProfile phases. The report includes the UI scale, framebuffer dimensions, design digest,
+and ImGui command/vertex/index counts. Keep UI scale and design digest equal in comparisons;
+close other viewer instances before collecting performance evidence.
+Add `--visible --vsync` for the presented window's display-paced cadence; keep these settings
+equal in the paired runs and separate those numbers from uncapped application throughput.
+Profiling uses isolated preferences and disables layout persistence in both modes.
+
+`make inspector-profile ARGS="--cycles 6 --frames 120 --profile"` selects geometry, body,
+and joint entities, clicks the production Inspector tabs, and toggles every available section
+twice per visit. It measures the initial, expanded, post-interaction, collapsed and deselected
+states, recording font/style counts and captures to distinguish persistent growth from the
+cost of an expanded panel. Add `--visible --vsync` to match presented window cadence.
+Run each comparison in a fresh process at the same `MOJIVE_UI_SCALE`; never time it beside
+another viewer or test suite.
 
 `make timeline-benchmark ARGS="--editable --markers 20000"` uses real MuJoCo presets
 and measures held drag, area selection, and release separately from static browsing. Edit completion

@@ -2,7 +2,7 @@
 
 from imgui_bundle import imgui
 
-from .widgets import MUTED, PANEL
+from mojive.ui.workspace.widgets import MUTED, PANEL
 
 HEADER_HEIGHT = 30.0
 IMAGE_PADDING = 6.0
@@ -10,44 +10,17 @@ TITLE_PADDING = 8.0
 
 
 def preview_region(viewport, obstacles, scale, position=None):
-    """Fit a 16:9 preview below its header without covering viewport controls."""
-    x, y, width, height = viewport
-    margin, gap = 8 * scale, 6 * scale
-    left, top, right, bottom = x + margin, y + margin, x + width - margin, y + height - margin
-    if right <= left or bottom <= top:
-        return None
-    blocked = []
-    edges = {left, right}
-    for ox, oy, ow, oh in obstacles:
-        a, b = max(left, ox - gap), min(right, ox + ow + gap)
-        c, d = max(top, oy - gap), min(bottom, oy + oh + gap)
-        if a < b and c < d:
-            blocked.append((a, c, b, d))
-            edges.update((a, b))
-    edges = sorted(edges)
-    best, best_score = None, None
-    header, padding = HEADER_HEIGHT * scale, IMAGE_PADDING * scale
-    for i, a in enumerate(edges[:-1]):
-        for b in edges[i + 1 :]:
-            intervals = sorted((c, d) for ox, c, ex, d in blocked if ox < b and ex > a)
-            cursor = top
-            for c, d in (*intervals, (bottom, bottom)):
-                if c > cursor:
-                    panel_width = min(
-                        340 * scale,
-                        b - a,
-                        (c - cursor - header - padding) * 16 / 9 + 2 * padding,
-                    )
-                    if panel_width >= 56 * scale:
-                        panel_height = header + (panel_width - 2 * padding) * 9 / 16 + padding
-                        px, py = position or (right, bottom)
-                        px = min(max(px, a), b - panel_width)
-                        py = min(max(py, cursor), c - panel_height)
-                        score = (panel_width, px + panel_width, py + panel_height)
-                        if best_score is None or score > best_score:
-                            best, best_score = (a, cursor, b - a, c - cursor), score
-                cursor = max(cursor, d)
-    return best
+    """Use the production viewport and manual-anchor bounds for this legacy header."""
+    from mojive.ui.workspace.camera_preview import preview_region as native_region
+
+    return native_region(
+        viewport,
+        obstacles,
+        scale,
+        position,
+        header_height=HEADER_HEIGHT,
+        image_padding=IMAGE_PADDING,
+    )
 
 
 class ReferenceCameraPreview:
@@ -60,6 +33,7 @@ class ReferenceCameraPreview:
     def draw(self, preview_name):
         study, app = self.study, self.study.preview
         preview = app.camera_preview
+        preview.update_drag_position()
         study.rects.pop("camera_preview", None)
         if not app.viewport_layers.viewport_ui:
             preview.draw(study.window, (0, 0, 0, 0), preview_name)
@@ -70,7 +44,7 @@ class ReferenceCameraPreview:
             if bounds is not None:
                 a, b, c, d = bounds
                 obstacles.append((a, b, c - a, d - b))
-        key = (app._viewport_rect, tuple(obstacles), study.s)
+        key = (app._viewport_rect, tuple(obstacles), study.s, preview._position)
         if key != self._region_key:
             self._region = preview_region(app._viewport_rect, obstacles, study.s, preview._position)
             self._region_key = key
@@ -118,7 +92,7 @@ class ReferenceCameraPreview:
                 24,
                 tooltip=camera_name,
             )
-            dragging = imgui.is_item_active() and imgui.is_mouse_dragging(0)
+            dragging = imgui.is_item_active()
             u.text(
                 x + inset + TITLE_PADDING * s,
                 y + (height - 14 * s) / 2,

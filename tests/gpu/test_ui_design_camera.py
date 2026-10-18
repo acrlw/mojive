@@ -1,5 +1,6 @@
 """Native preview pixels and keyboard navigation through actual viewport inputs."""
 
+import time
 from dataclasses import replace
 
 import numpy as np
@@ -11,6 +12,7 @@ from tests.gpu.test_ui_design_runtime import runtime as runtime
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
+from mojive.ui.preview_geometry import preview_origin
 
 pytestmark = pytest.mark.gpu
 
@@ -46,6 +48,27 @@ def _scene_point(study):
     raise AssertionError("The viewport has no free navigation point")
 
 
+def _wait_for_viewport_render(study, timeout=3):
+    """Wait for debounced render geometry before selecting a pointer target."""
+    deadline = time.monotonic() + timeout
+    while True:
+        study.frame()
+        target = tuple(
+            max(1, int(value))
+            for value in study.window.points_to_pixels(study.preview.viewport_surface.size)
+        )
+        image = study.preview._viewport_image
+        rendered = None if image is None else (image.width, image.height)
+        if study.window.latch.committed == target and rendered == target:
+            return
+        assert time.monotonic() < deadline, (
+            "Viewport render resize did not settle",
+            target,
+            study.window.latch.committed,
+            rendered,
+        )
+
+
 def test_camera_preview_toggle_presents_peer_pixels_and_shared_pin_lock(runtime, monkeypatch):
     study, app = runtime, runtime.preview
     session = app.session
@@ -75,10 +98,13 @@ def test_camera_preview_toggle_presents_peer_pixels_and_shared_pin_lock(runtime,
     assert (x - px, end_x - right, end_y - bottom) == pytest.approx((6 * study.s,) * 3, abs=0.001)
     assert y - py == pytest.approx(30 * study.s)
     assert (right - x) / (bottom - y) == pytest.approx(peer.shape[1] / peer.shape[0])
-    rendered = Image.fromarray(peer).resize(
-        (round(right) - round(x), round(bottom) - round(y)), Image.Resampling.BILINEAR
+    left_px, top_px, right_px, bottom_px = map(
+        round, study.window.points_to_pixels((x, y, right, bottom))
     )
-    actual = pixels[round(y) : round(bottom), round(x) : round(right), :3]
+    rendered = Image.fromarray(peer).resize(
+        (right_px - left_px, bottom_px - top_px), Image.Resampling.BILINEAR
+    )
+    actual = pixels[top_px:bottom_px, left_px:right_px, :3]
     expected = np.asarray(rendered)
     assert expected.std() > 3
     assert np.mean(np.abs(actual[3:-3, 3:-3].astype(float) - expected[3:-3, 3:-3])) < 20
@@ -106,7 +132,26 @@ def test_camera_preview_toggle_presents_peer_pixels_and_shared_pin_lock(runtime,
     before = app.camera_preview.bounds
     study.event("add_mouse_pos_event", *start)
     study.event("add_mouse_button_event", 0, True)
-    study.event("add_mouse_pos_event", start[0] - 12 * study.s, start[1] - 8 * study.s)
+    offset = app.camera_preview._drag_offset
+    assert offset is not None
+    for dx, dy in ((-12, -8), (-80, -60), (-140, -180), (-35, -20)):
+        target = start[0] + dx * study.s, start[1] + dy * study.s
+        study.event("add_mouse_pos_event", *target)
+        pointer = imgui.get_io().mouse_pos
+        assert (pointer.x, pointer.y) == pytest.approx(target, abs=1)
+        desired = pointer.x + offset[0], pointer.y + offset[1]
+        assert app.camera_preview._position == pytest.approx(desired)
+        x, y, right, bottom = app.camera_preview.bounds
+        expected = preview_origin(
+            app._reference_camera_preview._region,
+            (right - x, bottom - y),
+            desired=desired,
+            margin=0,
+        )
+        assert (x, y) == pytest.approx(expected)
+        held = app.camera_preview.bounds
+        study.frame(2)
+        assert app.camera_preview.bounds == pytest.approx(held)
     study.event("add_mouse_button_event", 0, False)
     study.frame(3)
     assert app.camera_preview.bounds != before
@@ -120,6 +165,7 @@ def test_camera_preview_toggle_presents_peer_pixels_and_shared_pin_lock(runtime,
         app.camera_preview._image,
         app.session.selected_node,
     )
+    _wait_for_viewport_render(study)
     study.click_hit("camera-preview-close")
     study.frame(3)
     assert not app.camera_preview.enabled and app.camera_preview.bounds is None

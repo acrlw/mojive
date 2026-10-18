@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from imgui_bundle import imgui
 
 from mojive.render.backend import DebugView, FrameMode, LabelMode, RenderFlag, ShadowQuality
@@ -83,6 +85,26 @@ def flag_groups() -> tuple[tuple[str, tuple[RenderFlag, ...]], ...]:
 def draw(panel, ctx: PanelContext) -> None:
     t = ctx.tr
     caps = ctx.backend.caps
+    panel._group_heading(t("Viewport appearance"))
+    if panel._begin_properties("settings_ground_appearance"):
+        panel._property(t("Editor ground"), control_part="segment")
+        style = ctx.backend.get_geometry_style()
+        selected = panel._segmented(
+            "ground-appearance",
+            (t("Scene appearance"), t("Low contrast")),
+            int(style.quiet_ground),
+            theme=ctx.theme,
+        )
+        panel._tooltip(
+            t("Use a neutral surface for infinite planes. Scene materials are preserved.")
+        )
+        if bool(selected) != style.quiet_ground:
+            value = replace(style, quiet_ground=bool(selected))
+            if ctx.set_geometry_style is not None:
+                ctx.apply_setting(ctx.set_geometry_style, value)
+            else:
+                ctx.backend.set_geometry_style(value)
+        panel._end_properties()
     if caps.shadows:
         panel._group_heading(t("Shadows"))
         if panel._begin_properties("settings_shadow_quality"):
@@ -101,7 +123,7 @@ def draw(panel, ctx: PanelContext) -> None:
                 theme=ctx.theme,
             )
             imgui.end_group()
-            imgui.set_item_tooltip(
+            panel._tooltip(
                 t("Higher quality smooths close-up shadow edges but costs more GPU time")
             )
             selected = qualities[index]
@@ -147,12 +169,10 @@ def flag_row(panel, ctx: PanelContext, flag: RenderFlag, display_label: str) -> 
     changed, value = panel._checkbox(f"##rf_{flag.value}", ctx.backend.get_flag(flag), ctx.theme)
     imgui.end_disabled()
     if not supported:
-        imgui.set_item_tooltip(f"{caps.name} {ctx.tr('does not implement')} “{display_label}”")
+        panel._tooltip(f"{caps.name} {ctx.tr('does not implement')} “{display_label}”")
         return
     if flag == RenderFlag.MESH_LOD:
-        imgui.set_item_tooltip(
-            ctx.tr("Adaptive display detail; depth and picking use the displayed mesh")
-        )
+        panel._tooltip(ctx.tr("Adaptive display detail; depth and picking use the displayed mesh"))
     if changed and not ctx.backend.set_flag(flag, value):
         panel._message = f"{display_label} · {ctx.tr('backend refused the change')} ({caps.name})"
 

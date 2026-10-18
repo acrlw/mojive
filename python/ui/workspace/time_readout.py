@@ -10,35 +10,43 @@ def draw_time_readout(ui, key, x, y, value, *, width=80):
     rect = (x, y, width * scale, 28 * scale)
     ui.hits[key] = rect
     ui.rect(*rect, (24, 27, 30, 255))
-    gap = ui.metric("time_field", "columnGap", ui.metric("time_field", "gap", 4)) * scale
-    unit_width = ui.measure("s", 14, translate=False, mono=True)
+    style = ui.component_style("time_field")
+    font_size = style.get("fontSize", 14)
+    gap = style.get("columnGap", style.get("gap", 4)) * scale
+    unit_width = ui.measure("s", font_size, translate=False, mono=True, style=style)
     available = max(0, (width - 16) * scale - unit_width - gap)
     caption = f"{value:.0e}"
     for digits in (3, 2, 1, 0):
         candidate = f"{value:.{digits}f}"
-        if ui.measure(candidate, 14, translate=False, mono=True) <= available:
+        if ui.measure(candidate, font_size, translate=False, mono=True, style=style) <= available:
             caption = candidate
             break
-    numeric_width = min(available, ui.measure(caption, 14, translate=False, mono=True))
+    numeric_width = available
     total = numeric_width + gap + unit_width
-    left = x + max(0, (width * scale - total) / 2)
+    left = x + (width * scale - total) / 2
+    text_width = min(
+        available, ui.measure(caption, font_size, translate=False, mono=True, style=style)
+    )
+    text_y = y + (28 - font_size) * scale / 2
     ui.text(
-        left,
-        y + 7 * scale,
+        left + numeric_width - text_width,
+        text_y,
         caption,
-        size=14,
+        size=font_size,
         mono=True,
-        max_width=numeric_width,
+        max_width=text_width,
         translate=False,
+        style=style,
     )
     ui.text(
         left + numeric_width + gap,
-        y + 7 * scale,
+        text_y,
         "s",
-        size=14,
+        size=font_size,
         mono=True,
         max_width=unit_width,
         translate=False,
+        style=style,
     )
     if ui.design is not None:
         ui.design.record(
@@ -47,6 +55,6 @@ def draw_time_readout(ui, key, x, y, value, *, width=80):
             rect,
             "number-unit",
             gap=gap,
-            content=[left, y + 7 * scale, total, 14 * scale],
+            content=[left, text_y, total, font_size * scale],
         )
     return rect

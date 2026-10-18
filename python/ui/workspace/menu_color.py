@@ -1,11 +1,87 @@
 """Native material color popup and its Session edit transaction."""
 
+from dataclasses import dataclass
+
+import numpy as np
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.design.native.geometry import Rect
+from mojive.ui.workspace.color_editor import color_popup, color_popup_width, place_color_popup
+from mojive.ui.workspace.component_layout import control_size
 from mojive.ui.workspace.design import BODY_SIZE, MONO_SIZE
 from mojive.ui.workspace.widgets import DIM, MUTED, TEXT
+
+
+@dataclass
+class _ColorEdit:
+    document_id: str
+    entity_identity: tuple
+    structure_generation: int
+    session_checkpoint: object
+    draft_checkpoint: object
+    history: bool
+    colors: tuple
+
+    def owns(self, app):
+        return (
+            app.session.document_id == self.document_id
+            and app.session._edit_before is self.session_checkpoint
+            and app.model_edits._checkpoint is self.draft_checkpoint
+        )
+
+
+def _begin_color_edit(menu, entity):
+    from mojive.scene.queries import node_geometry_indices
+    from mojive.ui.workspace.entities import EntityProjection
+
+    app, session = menu.workspace.app, menu.workspace.app.session
+    history = session.adapter.caps.edit_history
+    if session.editing or app.model_edits._checkpoint is not None:
+        session._record_result(cmd.CommandResult.bad("An edit transaction is already active"))
+        return False
+    if history and not session.submit(cmd.BeginEditTransaction("Edit color")).ok:
+        return False
+    node = session.node(entity["node_id"])
+    indices = node_geometry_indices(session, node)
+    colors = {}
+    for index in indices:
+        node_id = int(session.source.geom_node[index])
+        target = session.node(node_id)
+        colors.setdefault(
+            node_id,
+            (node_id, EntityProjection._identity(target), session.source.geom_rgba[index].copy()),
+        )
+    menu.color_edit = _ColorEdit(
+        session.document_id,
+        entity["identity"],
+        session.structure_generation,
+        session._edit_before,
+        app.model_edits._checkpoint,
+        history,
+        tuple(colors.values()),
+    )
+    return True
+
+
+def _restore_colors(menu, edit):
+    from mojive.ui.workspace.entities import EntityProjection
+
+    session = menu.workspace.app.session
+    for node_id, identity, _ in edit.colors:
+        node = session.node(node_id)
+        if node is None or EntityProjection._identity(node) != identity:
+            result = cmd.CommandResult.bad("The scene changed; the color edit cannot be restored")
+            session._record_result(result)
+            return result
+    for node_id, _, rgba in edit.colors:
+        instances = np.flatnonzero(session.source.geom_node == node_id)
+        if np.all(session.source.geom_rgba[instances] == rgba):
+            continue
+        result = session.submit(cmd.SetGeometryColor(node_id, rgba))
+        if not result.ok:
+            return result
+    return cmd.CommandResult.good()
 
 
 def color_control(menu, entity, x, y, width):
@@ -73,57 +149,99 @@ def color_control(menu, entity, x, y, width):
             minimumTextWidth=u.measure(entity["color"], MONO_SIZE, mono=True, translate=False),
         )
     with menu.style(controls=True):
+        edit = menu.color_edit
+        if edit is not None and (
+            not edit.owns(menu.workspace.app)
+            or edit.structure_generation != menu.workspace.app.session.structure_generation
+            or edit.entity_identity != entity["identity"]
+        ):
+            # Changing the inspected entity ends the old gesture before its
+            # picker can write through the new entity's projected fields.
+            finish_color_edit(menu)
+            with color_popup(u, "Color") as opened:
+                if opened:
+                    imgui.close_current_popup()
+            return
         if (clicked or menu.requested_path == ("Color",)) and not imgui.is_popup_open("Color"):
-            menu.color_before = True
-            menu.workspace.app.session.submit(cmd.BeginEditTransaction("Edit color"))
-            menu.color_entity = entity
+            if not _begin_color_edit(menu, entity):
+                return
             menu.color_editor.begin(entity["rgba"])
             imgui.open_popup("Color")
         if not imgui.is_popup_open("Color"):
             return
         vp = imgui.get_main_viewport()
-        content_w = min(300 * s, max(136 * s, vp.work_size.x - 48 * s))
-        popup_w = content_w + 32 * s
-        popup_h = min(vp.work_size.y - 16 * s, content_w + 248 * s)
-        px = min(x, vp.pos.x + vp.size.x - popup_w - 8 * s)
-        py = y + 56 * s
-        if py + popup_h > vp.pos.y + vp.size.y - 8 * s:
-            py = max(vp.pos.y + 8 * s, y - popup_h)
+        popup_w = color_popup_width(u, len(entity["rgba"]))
+        px = min(x, vp.work_pos.x + vp.work_size.x - popup_w - 8 * s)
+        py = vp.work_pos.y + 8 * s
         imgui.set_next_window_pos((px, py))
-        imgui.set_next_window_size_constraints((popup_w, 0), (popup_w, vp.size.y - 16 * s))
-        if not imgui.begin_popup("Color"):
-            return
-        menu.color_visible = True
-        record = menu.shadow_and_record("Color", ("Color",))
-        record["controls"] = {}
-        imgui.text_unformatted(u.translate("Base color"))
-        content_w = imgui.get_content_region_avail().x
-        changed, values = menu.color_editor.draw(u, "color-editor", entity["rgba"], content_w)
-        record["controls"]["picker"] = list(u.hits["color-editor-picker"])
-        if "color-editor-hex" in u.hits:
-            record["controls"]["hex"] = list(u.hits["color-editor-hex"])
-        if changed:
-            entity["rgba"] = values
-            entity["color"] = "#" + "".join(f"{round(value * 255):02x}" for value in values[:3])
-        p = imgui.get_cursor_screen_pos()
-        u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, BODY_SIZE)
-        if u.button(
-            "done-color",
-            p.x + content_w - 64 * s,
-            p.y,
-            64,
-            28,
-            label="Done",
-            active=True,
-            enabled=not menu.color_editor.error,
-        ):
-            imgui.close_current_popup()
-        record["controls"]["done"] = list(u.hits["done-color"])
-        imgui.end_popup()
+        imgui.set_next_window_size_constraints((popup_w, 0), (popup_w, vp.work_size.y - 16 * s))
+        place_color_popup(u, "Color", position=(px, py))
+        with color_popup(u, "Color") as opened:
+            if not opened:
+                return
+            if menu.color_edit is None:
+                imgui.close_current_popup()
+                return
+            menu.color_visible = True
+            record = menu.shadow_and_record("Color", ("Color",))
+            record["controls"] = {}
+            content_w = imgui.get_content_region_avail().x
+            changed, values = menu.color_editor.draw(
+                u,
+                "color-editor",
+                entity["rgba"],
+                content_w,
+                footer_height=control_size(u, "done-color", 64, 28, label="Done")[1],
+            )
+            record["controls"]["picker"] = list(u.hits["color-editor-picker"])
+            if "color-editor-hex" in u.hits:
+                record["controls"]["hex"] = list(u.hits["color-editor-hex"])
+            if changed:
+                entity["rgba"] = values
+                entity["color"] = "#" + "".join(f"{round(value * 255):02x}" for value in values[:3])
+                menu.workspace.app.apply_document_edits()
+                menu.color_edit.session_checkpoint = menu.workspace.app.session._edit_before
+                menu.color_edit.structure_generation = (
+                    menu.workspace.app.session.structure_generation
+                )
+            content_w = menu.color_editor.content_width
+            p = imgui.get_cursor_screen_pos()
+            u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, BODY_SIZE)
+            if u.button(
+                "done-color",
+                p.x + content_w - 64 * s,
+                p.y,
+                64,
+                28,
+                label="Done",
+                active=True,
+                enabled=not menu.color_editor.error,
+            ):
+                imgui.close_current_popup()
+            record["controls"]["done"] = list(u.hits["done-color"])
 
 
-def finish_color_edit(menu):
-    if menu.color_before is not None and not menu.color_visible:
-        menu.workspace.app.session.submit(cmd.EndEditTransaction())
-        menu.color_before = None
-        menu.color_entity = None
+def finish_color_edit(menu, *, cancel=False):
+    edit = menu.color_edit
+    if edit is None or (menu.color_visible and not cancel):
+        return
+    app = menu.workspace.app
+    if not edit.owns(app):
+        menu.color_edit = None
+        return
+    compatible = edit.structure_generation == app.session.structure_generation
+    if edit.history:
+        result = app.session.submit(
+            cmd.CancelEditTransaction() if cancel and compatible else cmd.EndEditTransaction()
+        )
+    else:
+        result = _restore_colors(menu, edit) if cancel and compatible else cmd.CommandResult.good()
+    if not compatible and result.ok:
+        result = app.session._record_result(
+            cmd.CommandResult.bad("The scene changed; the color editor was closed")
+        )
+    if result.ok or not edit.owns(app) or not edit.history:
+        menu.color_edit = None
+    if cancel and result.ok:
+        app.refresh_document()
+    return result

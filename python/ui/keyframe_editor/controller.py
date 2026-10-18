@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Protocol
 from mojive import commands as cmd
 from mojive.adapters.base import KeyframeInfo, KeyframeProperties
 from mojive.interaction.input import InputClaim
-from mojive.interaction.timeline import TimelineMarkerIndex
+from mojive.interaction.timeline import TimelineMarkerIndex, valid_timeline_range
 from mojive.interaction.timeline_edit import TimelineEditorState
 from mojive.ui.pointer_bindings import PointerFrame
 from mojive.ui.timeline import (
@@ -80,6 +80,7 @@ class TimelineEditor(TimelineEditorState):
         self.view_start = 0.0
         self.view_end = 1.0
         self.view_needs_fit = True
+        self.manual_view_range: tuple[float, float] | None = None
         self.playhead = 0.0
         self.seen_active_id = -2
         self.seen_take_cursor = -2
@@ -141,6 +142,14 @@ class TimelineEditor(TimelineEditorState):
             self.locked_fraction = fraction if 0.05 <= fraction <= 0.95 else 0.15
         self.follow_mode = mode
         self.last_followed_playhead = None
+
+    def set_view_range(self, start: float, end: float) -> bool:
+        """Retain a deliberately entered range independently of wheel navigation limits."""
+        if not valid_timeline_range(start, end):
+            return False
+        self.view_start, self.view_end, self.view_needs_fit = start, end, False
+        self.manual_view_range = (start, end)
+        return True
 
     def seek_time(self, ctx: TimelineCommands, take_times: Sequence[float], time: float) -> None:
         if ctx.session.state_take_recording or ctx.take_video_active:
@@ -495,6 +504,7 @@ class TimelineEditor(TimelineEditorState):
         self.keyframe_by_id = {}
         self.view_needs_fit = True
         self.view_model_id = -1
+        self.manual_view_range = None
         self.seen_active_id = -2
         self.seen_take_cursor = -2
         self.pointer_mode = ""

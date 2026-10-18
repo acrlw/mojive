@@ -18,23 +18,27 @@ def draw_geometry_view(
     current = (
         geometry_view(backend) if node is None else (node.geometry_view or GeometryView.DEFAULT)
     )
-    first = "Default" if node is None else "Follow scene"
-    labels = tuple(t(label) for label in (first, "Visual", "Collision", "Both"))
-    selected = views.index(current)
+    names = ("Visual", "Collision", "Both")
+    labels = tuple(
+        t(label) for label in ("Follow scene" if node is not None else "Default", *names)
+    )
+    selected = views.index(current) if current in views else -1
     available = imgui.get_content_region_avail().x
     if compact and available < segmented_control_width(labels):
         imgui.set_next_item_width(-1)
         _, selected = (combo or imgui.combo)("##geometry_view", selected, labels)
     else:
         selected = segmented_control("geometry_view", labels, selected, theme=theme)
-    if views[selected] != current:
+    if selected >= 0 and views[selected] != current:
         if node is None:
             set_geometry_view(backend, views[selected])
         else:
             submit(cmd.SetGeometryView(node.node_id, views[selected] if selected else None))
     if imgui.is_item_hovered():
         hint = (
-            "Scene geometry"
+            "Use scene visibility groups"
+            if node is None and current is GeometryView.DEFAULT
+            else "Scene geometry"
             if node is None
             else "Only this geometry"
             if node.type is NodeType.GEOM

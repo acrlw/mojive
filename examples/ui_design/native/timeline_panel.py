@@ -11,10 +11,10 @@ from mojive.ui.keyframe_editor.controls import FOLLOW_MODE_TOOLTIPS, _draw_comma
 from mojive.ui.keyframe_editor.toolbar import TimelineToolbar
 from mojive.ui.keyframe_editor.track import draw_dope_sheet
 from mojive.ui.timeline import nearest_take_frame
+from mojive.ui.workspace.timeline_details import NativeTimelineDetails
+from mojive.ui.workspace.widgets import BODY_SIZE, SWITCH_WIDTH
 
-from .timeline_details import NativeTimelineDetails
 from .timeline_track import NativeTimelineTrack, measure_layout
-from .widgets import BODY_SIZE, SWITCH_WIDTH
 
 _COMMAND_ICONS = {
     "first": "previous",
@@ -38,9 +38,9 @@ _COMMAND_ICONS = {
     "key-keyframe": "diamond",
 }
 _FOLLOW_ICONS = {
-    "key-follow-off": "pin",
-    "key-follow-page": "follow",
-    "key-follow-locked": "lock",
+    "key-follow-off": "follow-off",
+    "key-follow-page": "follow-page",
+    "key-follow-locked": "follow-locked",
 }
 _FOLLOW_MODES = ("off", "page", "locked")
 _NATIVE_FOLLOW_ICONS = tuple(_FOLLOW_ICONS.values())
@@ -101,6 +101,10 @@ class NativeTimelineToolbar(TimelineToolbar):
     def __init__(self, study):
         self.study = study
         super().__init__(self.draw_follow_icon, command_icon_drawer=self.draw_command_icon)
+
+    def _video_width(self):
+        ui, scale = self.study.ui, self.study.s
+        return max(76, *(ui.measure(label) / scale + 37 for label in ("Video", "Stop")))
 
     def _icon(self, name, center, color, scale):
         size = 28 * scale
@@ -176,7 +180,7 @@ class NativeTimelineToolbar(TimelineToolbar):
                 icons_width
                 - 56
                 + max(100, self.study.ui.measure("Snapshot") / scale + 37)
-                + max(76, self.study.ui.measure("Video") / scale + 37)
+                + self._video_width()
             )
             self._inline = width >= prefix + icons_width + 68
             self._inline_capture_labels = width >= prefix + labels_width + 68
@@ -229,7 +233,7 @@ class NativeTimelineToolbar(TimelineToolbar):
             capture_widths = (
                 (
                     max(100, ui.measure("Snapshot") / scale + 37),
-                    max(76, ui.measure("Stop" if ctx.take_video_active else "Video") / scale + 37),
+                    self._video_width(),
                 )
                 if capture_labels
                 else (28, 28)
@@ -394,29 +398,9 @@ class NativeTimelineToolbar(TimelineToolbar):
         return offset - 2
 
     def _draw_time(self, editor, ctx, x, y, *, width=80):
-        scale = ctx.style_scale
-        imgui.set_cursor_screen_pos((x, y))
-        imgui.dummy((width * scale, 28 * scale))
-        self.study.ui.hits["timeline-time"] = (x, y, width * scale, 28 * scale)
-        self.study.ui.rect(x, y, width * scale, 28 * scale, (24, 27, 30, 255))
-        imgui.push_font(self.study.ui.mono, 14 * scale)
-        try:
-            caption = f"{editor.playhead:.0e}s"
-            for digits in (3, 2, 1, 0):
-                candidate = f"{editor.playhead:.{digits}f} s"
-                if imgui.calc_text_size(candidate).x <= max(0, width - 16) * scale:
-                    caption = candidate
-                    break
-        finally:
-            imgui.pop_font()
-        self.study.ui.text(
-            x + 8 * scale,
-            y + 7 * scale,
-            caption,
-            size=14,
-            mono=True,
-            max_width=max(0, width - 16) * scale,
-        )
+        from mojive.ui.workspace.time_readout import draw_time_readout
+
+        draw_time_readout(self.study.ui, "timeline-time", x, y, editor.playhead, width=width)
         imgui.set_item_tooltip(ctx.tr("Timeline time") + f": {editor.playhead:.6f} s")
 
     def _draw_record(self, editor, ctx, x, y, *, compact=False):
@@ -534,12 +518,16 @@ class NativeTimelineToolbar(TimelineToolbar):
             imgui.end_combo()
         imgui.end_disabled()
 
-    def _numeric_field(self, rows, key, label, value, *, format, speed=0.01, label_width=None):
+    def _numeric_field(
+        self, rows, key, label, value, *, format, speed=0.01, label_width=None, fill=False
+    ):
         ui, scale = self.study.ui, self.study.s
         label_width = ui.measure(label) / scale if label_width is None else label_width
         available = (rows.right - rows.left) / scale
         above = label_width + 6 + 82 > available
-        width, height = (available, 50) if above else (label_width + 6 + 82, 28)
+        width, height = (
+            (available, 50) if above else (available if fill else label_width + 6 + 82, 28)
+        )
         x, y, _ = rows.place(width, height)
         ui.text(x, y + (0 if above else 7.5) * scale, label)
         field_x, field_y = (x, y + 22 * scale) if above else (x + (label_width + 6) * scale, y)
@@ -547,7 +535,7 @@ class NativeTimelineToolbar(TimelineToolbar):
             key,
             field_x,
             field_y,
-            (width if above else 82) * scale,
+            (width if above else width - label_width - 6) * scale,
             value,
             speed=speed,
             format=format,
@@ -638,7 +626,13 @@ class NativeTimelineToolbar(TimelineToolbar):
         for field, label in zip(("countdown", "end_hold"), labels, strict=True):
             key = "##timeline-" + field
             changed, value = self._numeric_field(
-                rows, key, label, getattr(config, field), format="%.1f", label_width=label_width
+                rows,
+                key,
+                label,
+                getattr(config, field),
+                format="%.1f",
+                label_width=label_width,
+                fill=True,
             )
             if changed:
                 config = replace(config, **{field: value})

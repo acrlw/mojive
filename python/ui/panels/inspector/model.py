@@ -26,6 +26,7 @@ from mojive.ui.panels.inspector.fields import (
     _property_end_combo,
     _property_input_text,
     _property_section,
+    _property_tooltip,
     _vector_fields,
 )
 from mojive.ui.panels.inspector.support import (
@@ -76,7 +77,7 @@ class _Model:
             begin_placement = _property_button(ctx, ctx.tr("Edit Placement"))
             if not can_edit:
                 imgui.end_disabled()
-                imgui.set_item_tooltip(ctx.tr("Locked to avoid accidental model rebuilds."))
+                _property_tooltip(ctx, ctx.tr("Locked to avoid accidental model rebuilds."))
             if begin_placement and gizmo is not None:
                 result = gizmo.begin_model_placement(ctx.session, info.model_id)
                 if result.ok:
@@ -115,8 +116,8 @@ class _Model:
             if not ctx.live_model_updates:
                 return
             apply = _property_button(ctx, ctx.tr("Apply Placement"))
-            imgui.set_item_tooltip(
-                ctx.tr("Preview only; applying rebuilds the composed model once.")
+            _property_tooltip(
+                ctx, ctx.tr("Preview only; applying rebuilds the composed model once.")
             )
             imgui.same_line()
             cancel = _property_button(ctx, f"{ctx.tr('Cancel')}##model-placement")
@@ -214,7 +215,7 @@ class _Model:
                         imgui.align_text_to_frame_padding()
                         label = f"{component.name}  ({component.subtype})"
                         imgui.text(label)
-                        imgui.set_item_tooltip(label)
+                        _property_tooltip(ctx, label)
                         imgui.table_next_column()
                         if not editable:
                             imgui.begin_disabled()
@@ -261,7 +262,7 @@ class _Model:
             _property_end_combo(ctx)
         if not editable:
             imgui.end_disabled()
-            imgui.set_item_tooltip(ctx.tr("Pause the simulation before editing model components"))
+            _property_tooltip(ctx, ctx.tr("Pause the simulation before editing model components"))
 
     def _refresh_component_cache(self, ctx: PanelContext, model_id: int) -> None:
         generation = ctx.session.structure_generation
@@ -508,8 +509,8 @@ class _Model:
             imgui.ImVec2(-1.0, -70.0 * ctx.style_scale),
             imgui.InputTextFlags_.allow_tab_input.value,
         )
-        imgui.set_item_tooltip(
-            ctx.tr("MjSpec validates and recompiles the model when changes are applied.")
+        _property_tooltip(
+            ctx, ctx.tr("MjSpec validates and recompiles the model when changes are applied.")
         )
         if self._source_error:
             imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
@@ -537,5 +538,10 @@ class _Model:
         imgui.text_wrapped(text)
         imgui.pop_style_color()
         imgui.pop_font()
-        copyable_name_item(ctx, text, imgui.get_content_region_avail().x)
+        copyable_name_item(
+            ctx,
+            text,
+            imgui.get_content_region_avail().x,
+            tooltip=lambda value: _property_tooltip(ctx, value, hovered=True),
+        )
         imgui.separator()

@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from examples.ui_design.native import docking_study, fonts, reference_menus
+from examples.ui_design.native import docking_study, reference_menus
+
+from mojive.ui.workspace import fonts
 
 
 def test_portable_fonts_work_without_system_fonts_or_cached_downloads(monkeypatch):
@@ -28,7 +30,7 @@ def test_portable_fonts_work_without_system_fonts_or_cached_downloads(monkeypatc
 def test_portable_fonts_can_be_selected_on_macos():
     resolved = fonts.resolve_fonts(portable=True)
     assert all(source.path != "/System/Library/Fonts/SFNS.ttf" for source, _ratio in resolved)
-    assert resolved[0][0].label == "Roboto Regular"
+    assert resolved[0][0].label == "MiSans Regular"
 
 
 def test_native_cjk_family_matches_latin_and_heading_weight(tmp_path, monkeypatch):
@@ -50,7 +52,7 @@ def test_native_cjk_family_matches_latin_and_heading_weight(tmp_path, monkeypatc
     assert body[0].label == "Noto Sans CJK SC Regular"
     assert heading[0].label == "Noto Sans CJK SC Bold"
     portable = fonts.resolve_fonts(cjk=source, portable=True)
-    assert portable[0][0].label == "Roboto Regular"
+    assert portable[0][0].label == "MiSans Regular"
 
 
 def test_cjk_heading_retains_weight_when_only_regular_face_exists(tmp_path):
@@ -63,7 +65,7 @@ def test_cjk_heading_retains_weight_when_only_regular_face_exists(tmp_path):
 
 def test_missing_cjk_does_not_change_bundled_font_resolution():
     assert fonts.resolve_cjk_faces(None) == (None, None)
-    assert fonts.resolve_fonts(cjk=None, portable=True)[0][0].label == "Roboto Regular"
+    assert fonts.resolve_fonts(cjk=None, portable=True)[0][0].label == "MiSans Regular"
 
 
 @pytest.fixture

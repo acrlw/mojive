@@ -2,10 +2,11 @@
 
 import json
 import math
+import re
 from functools import lru_cache
 
+from mojive.design.groups import add_group_definitions
 from mojive.design.resources import ROOT
-from mojive.design.retired import current_parts
 
 SCHEMA = json.loads((ROOT / "tokens-schema.json").read_text())
 DEFAULT = json.loads((ROOT / "design-spec.json").read_text())
@@ -41,7 +42,14 @@ def component_catalog():
             raise ValueError("部件目录的标识无效")
         if entry["id"] in catalog or not isinstance(entry.get("fields"), dict):
             raise ValueError("部件目录含重复标识或无效字段")
+        # Shared appearance rules keep each component's capabilities explicit
+        # without duplicating font and color metadata throughout the catalogue.
+        appearance = {}
+        for kind in entry.get("appearance", ()):
+            appearance.update(SCHEMA["componentAppearance"][kind])
+        entry["fields"] = {**appearance, **entry["fields"]}
         catalog[entry["id"]] = entry
+    add_group_definitions(catalog)
     return catalog
 
 
@@ -77,6 +85,9 @@ def validate_parts(parts):
                     type(value) is type(choice) and value == choice for choice in rule["choices"]
                 ):
                     raise ValueError(f"{name}：需要从有效选项中选择")
+            elif rule["type"] == "color":
+                if not _valid_color(value, inherit=rule.get("inherit", False)):
+                    raise ValueError(f"{name}：需要 inherit 或六位、八位十六进制颜色值")
             else:
                 raise ValueError(f"{name}：目录字段类型无效")
     return parts
@@ -111,8 +122,14 @@ def resolve_part_value(spec, part_id, field, *, family=None, catalog=None, seen=
     return default
 
 
+def _valid_color(value, *, inherit=False):
+    return isinstance(value, str) and (
+        (inherit and value == "inherit")
+        or re.fullmatch(r"#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?", value) is not None
+    )
+
+
 def validate_tokens(tokens):
-    import re
 
     if not isinstance(tokens, dict):
         raise ValueError("参数必须为对象")
@@ -128,9 +145,7 @@ def validate_tokens(tokens):
             ):
                 raise ValueError(f"{rule['label']}：需要 {rule['min']} 至 {rule['max']}")
         elif rule["type"] == "color":
-            if not isinstance(value, str) or not re.fullmatch(
-                r"#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?", value
-            ):
+            if not _valid_color(value):
                 raise ValueError(f"{rule['label']}：需要六位或八位十六进制颜色值")
         elif value not in rule["choices"]:
             raise ValueError(f"{rule['label']}：需要从有效选项中选择")
@@ -219,5 +234,5 @@ def validate_spec(value):
     return {
         **value,
         "native": native,
-        "parts": validate_parts(current_parts(value.get("parts", {}))),
+        "parts": validate_parts(value.get("parts", {})),
     }

@@ -7,6 +7,8 @@ from mojive.ui.app.support import _model_filters
 
 from .menu_item import Item
 
+TOP_MENUS = ("File", "Edit", "Add", "View", "Simulate", "Window", "Help")
+
 
 def items(menu, name):
     st = menu.workspace
@@ -55,7 +57,7 @@ def items(menu, name):
         ]
     if name == "Capture":
         return [
-            Item(label, "capture:" + surface.value, "camera")
+            Item(label, "capture:" + surface.value, "capture-image")
             for label, surface in (
                 ("Scene Image", CaptureSurface.SCENE),
                 ("Viewport with UI", CaptureSurface.VIEWPORT),
@@ -96,6 +98,7 @@ def items(menu, name):
                 "visibility",
                 "eye",
                 enabled=bool(e),
+                checkable=True,
                 checked=bool(e) and not e["hidden"],
             ),
         ]
@@ -103,10 +106,11 @@ def items(menu, name):
         return [
             Item(
                 n,
-                icon="sphere" if n == "Sphere" else "geom",
+                icon="shape-" + n.lower(),
                 action="create:" + n,
+                enabled=n != "Capsule" or caps.topology_editing,
             )
-            for n in ("Box", "Sphere", "Cylinder", "Capsule")
+            for n in ("Box", "Sphere", "Cylinder", "Capsule", "Cone", "Ellipsoid", "Plane")
         ]
     if name == "View":
         phase = st.app.recording.phase
@@ -128,28 +132,34 @@ def items(menu, name):
             recording = [Item("Record", submenu="Record", icon="video")]
         return [
             Item("Frame all", "frame", "frame", "F"),
-            Item("Capture", submenu="Capture", icon="camera"),
+            Item("Capture", submenu="Capture", icon="capture-image"),
             *recording,
             Item("Recording Settings...", "recording-settings", "video"),
             None,
-            Item("Projection", icon="camera", submenu="Projection"),
+            Item(
+                "Projection",
+                icon="orthographic" if st.app.camera.orthographic else "perspective",
+                submenu="Projection",
+            ),
             Item("Transform tool", icon=st.app.tool, submenu="Transform tool"),
             Item("Gizmo orientation", icon="world", submenu="Gizmo orientation"),
             None,
-            Item("Transform handles", "gizmos", "move", checked=st.app.gizmos),
+            Item("Transform handles", "gizmos", "move", checkable=True, checked=st.app.gizmos),
         ]
     if name in ("Camera", "Projection"):
         rows = [
             Item(
                 "Perspective",
                 "projection:perspective",
-                "camera",
+                "perspective",
+                checkable=True,
                 checked=not st.app.camera.orthographic,
             ),
             Item(
                 "Orthographic",
                 "projection:orthographic",
-                "body",
+                "orthographic",
+                checkable=True,
                 checked=st.app.camera.orthographic,
             ),
         ]
@@ -162,7 +172,7 @@ def items(menu, name):
         return rows
     if name == "Transform tool":
         return [
-            Item(n.title(), "tool:" + n, n, key, checked=st.app.tool == n)
+            Item(n.title(), "tool:" + n, n, key, checkable=True, checked=st.app.tool == n)
             for n, key in [("select", "V"), ("move", "W"), ("rotate", "E"), ("scale", "R")]
         ]
     if name == "Gizmo orientation":
@@ -170,7 +180,8 @@ def items(menu, name):
             Item(
                 n + " frame",
                 "space:" + n,
-                "world" if n == "World" else "body",
+                "world" if n == "World" else "body-frame",
+                checkable=True,
                 checked=st.space == n,
             )
             for n in ("World", "Body")
@@ -191,19 +202,20 @@ def items(menu, name):
                 "record",
                 icon="record",
                 enabled=st.app.session.adapter.caps.simulation,
+                checkable=True,
                 checked=st.app.session.state_take_recording,
             ),
             Item("Physics adapter", "panel:Control", "control"),
             Item(
                 "Physics Options...",
                 "physics-options",
-                "settings",
+                "control",
                 enabled=caps.simulation or caps.supports("physics.options"),
             ),
         ]
     if name == "Playback speed":
         return [
-            Item(f"{v:g}× speed", "speed:" + str(v), checked=st.speed == v)
+            Item(f"{v:g}× speed", "speed:" + str(v), checkable=True, checked=st.speed == v)
             for v in (0.25, 0.5, 1, 2)
         ]
     if name == "Playback":
@@ -216,6 +228,7 @@ def items(menu, name):
                 "Loop playback",
                 "loop",
                 "loop",
+                checkable=True,
                 checked=st.loop,
                 enabled=bool(st.app.session.state_take_times),
                 reason="Record a take first.",
@@ -236,7 +249,13 @@ def items(menu, name):
             ),
             Item("Reset Layout", "layout:reset", "reset"),
             None,
-            Item("Show Viewport tab", "viewport-tab", "inspect", checked=st.show_viewport_tab),
+            Item(
+                "Show Viewport tab",
+                "viewport-tab",
+                "inspect",
+                checkable=True,
+                checked=st.show_viewport_tab,
+            ),
             Item("Settings", "panel:Settings", "settings", "F9"),
             Item(
                 "Physics Options...",
@@ -251,6 +270,7 @@ def items(menu, name):
                 n,
                 "toggle:" + n,
                 icon,
+                checkable=True,
                 checked=st.open[n],
                 enabled=st.app.panels.get(n) is not None and st.app.panels.get(n).enabled,
             )
@@ -258,7 +278,7 @@ def items(menu, name):
             if n != "Settings"
         ] + [
             *(
-                Item(p.name, "extra-panel:" + p.id, checked=p.open)
+                Item(p.name, "extra-panel:" + p.id, checkable=True, checked=p.open)
                 for p in st.app.panels
                 if p.id
                 not in (
@@ -278,8 +298,14 @@ def items(menu, name):
                 and p.enabled
             ),
             None,
-            Item("Inspector", "toggle:Inspector", "inspect", checked=st.open["Inspector"]),
-            Item("Timeline", "timeline", "key", "T", checked=st.open["Timeline"]),
+            Item(
+                "Inspector",
+                "toggle:Inspector",
+                "inspect",
+                checkable=True,
+                checked=st.open["Inspector"],
+            ),
+            Item("Timeline", "timeline", "key", "T", checkable=True, checked=st.open["Timeline"]),
         ]
     if name == "Inspector position":
         return [
@@ -289,7 +315,7 @@ def items(menu, name):
         ]
     if name == "Shading":
         return [
-            Item(n, "shading:" + n, "shading", checked=menu.shading == n)
+            Item(n, "shading:" + n, "shading", checkable=True, checked=menu.shading == n)
             for n in ("Solid", "Wireframe")
         ]
     if name == "Help":

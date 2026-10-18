@@ -4,10 +4,104 @@ from __future__ import annotations
 
 import bisect
 import math
+import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
 
 MIN_TIMELINE_SPAN = 1e-6
+MIN_INTERACTIVE_TIMELINE_SPAN = 1e-3
+_MAX_TIMELINE_SPAN = sys.float_info.max / 4
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineViewLimits:
+    """Navigation context, without changing any authored or recorded timestamps."""
+
+    lower: float
+    upper: float
+    max_span: float
+    min_span: float = MIN_INTERACTIVE_TIMELINE_SPAN
+
+
+def valid_timeline_range(start: float, end: float) -> bool:
+    """Accept finite increasing ranges whose difference remains representable."""
+    return (
+        math.isfinite(start)
+        and math.isfinite(end)
+        and math.isfinite(end - start)
+        and end - start >= MIN_TIMELINE_SPAN
+    )
+
+
+def timeline_navigation_limits(
+    times: Sequence[float], manual_range: tuple[float, float] | None = None
+) -> TimelineViewLimits:
+    """Keep scrolling near content while retaining explicitly entered long ranges."""
+    finite = [value for value in times if math.isfinite(value)]
+    minimum = MIN_INTERACTIVE_TIMELINE_SPAN
+    if manual_range is not None and valid_timeline_range(*manual_range):
+        finite.extend(manual_range)
+        minimum = min(minimum, manual_range[1] - manual_range[0])
+    lo, hi = (min(finite), max(finite)) if finite else (0.0, 0.0)
+    span = min(_MAX_TIMELINE_SPAN / 4, hi - lo)
+    maximum = max(60.0, span * 4, _minimum_view_span(lo, hi))
+    # Following can put the playhead near either edge. Leave one complete view
+    # of context on each side so a later wheel gesture preserves that fraction.
+    margin = maximum
+    return TimelineViewLimits(
+        max(-sys.float_info.max, lo - margin),
+        min(sys.float_info.max, hi + margin),
+        maximum,
+        minimum,
+    )
+
+
+def timeline_range_format(start: float, end: float, *, suffix: str = "") -> str:
+    """Show milliseconds normally and preserve deliberately entered finer ranges."""
+    precision = 3
+    if valid_timeline_range(start, end):
+        # One ULP per endpoint covers rounding in their representation and
+        # subtraction. Compare decimal quanta directly to avoid log10 rounding.
+        budget = end - start + math.ulp(start) + math.ulp(end)
+        for precision in range(3, 10):
+            format = f"%.{precision}f"
+            if 10.0**-precision <= budget and float(format % start) != float(format % end):
+                break
+    return f"%.{precision}f" + suffix
+
+
+def _minimum_view_span(start: float, end: float) -> float:
+    return max(MIN_TIMELINE_SPAN, 8 * math.ulp(max(abs(start), abs(end))))
+
+
+def clamp_timeline_range(
+    start: float, end: float, limits: TimelineViewLimits
+) -> tuple[float, float]:
+    """Bound view navigation and recover an old runaway range around its content."""
+    if not valid_timeline_range(start, end):
+        start, end = limits.lower, limits.upper
+    original_span = end - start
+    minimum = max(limits.min_span, _minimum_view_span(start, end))
+    span = min(limits.max_span, max(minimum, original_span))
+    if original_span > limits.max_span:
+        start = limits.lower / 2 + limits.upper / 2 - span / 2
+    elif span != original_span:
+        start = start / 2 + end / 2 - span / 2
+    start = max(limits.lower, min(start, limits.upper - span))
+    return start, start + span
+
+
+def pan_timeline_range(
+    start: float, end: float, shift: float, limits: TimelineViewLimits
+) -> tuple[float, float]:
+    """Apply a finite pan, keeping the scale unchanged within the navigation bounds."""
+    start, end = clamp_timeline_range(start, end, limits)
+    if not math.isfinite(shift):
+        return start, end
+    span = end - start
+    shifted = max(limits.lower, min(start + shift, limits.upper - span))
+    return shifted, shifted + span
 
 
 def fitted_timeline_range(times: tuple[float, ...], fallback: float = 0.0) -> tuple[float, float]:
@@ -28,9 +122,14 @@ def fitted_timeline_range(times: tuple[float, ...], fallback: float = 0.0) -> tu
 def nice_timeline_step(span: float, pixel_width: float, target_pixels: float = 90.0) -> float:
     """Choose a stable 1/2/5 ruler step for the visible time range."""
 
-    if not math.isfinite(span) or not math.isfinite(pixel_width) or pixel_width <= 0.0:
+    if (
+        not all(math.isfinite(value) for value in (span, pixel_width, target_pixels))
+        or pixel_width <= 0.0
+        or target_pixels <= 0.0
+    ):
         return 1.0
-    raw = max(float(span), MIN_TIMELINE_SPAN) * target_pixels / pixel_width
+    raw = max(float(span), MIN_TIMELINE_SPAN) * (target_pixels / pixel_width)
+    raw = max(MIN_TIMELINE_SPAN * 1e-6, min(_MAX_TIMELINE_SPAN / 10, raw))
     exponent = math.floor(math.log10(raw))
     fraction = raw / (10.0**exponent)
     nice = 1.0 if fraction <= 1.0 else 2.0 if fraction <= 2.0 else 5.0 if fraction <= 5.0 else 10.0
@@ -38,15 +137,34 @@ def nice_timeline_step(span: float, pixel_width: float, target_pixels: float = 9
 
 
 def zoom_timeline_range(
-    start: float, end: float, anchor: float, wheel: float
+    start: float,
+    end: float,
+    anchor: float,
+    wheel: float,
+    *,
+    max_span: float = 60.0,
+    min_span: float = MIN_INTERACTIVE_TIMELINE_SPAN,
 ) -> tuple[float, float]:
     """Zoom around ``anchor`` while keeping it at the same screen position."""
-
-    span = max(float(end) - float(start), MIN_TIMELINE_SPAN)
-    ratio = min(1.0, max(0.0, (float(anchor) - float(start)) / span))
-    new_span = min(1e12, max(MIN_TIMELINE_SPAN, span * math.exp(-float(wheel) * 0.18)))
-    new_start = float(anchor) - ratio * new_span
-    return new_start, new_start + new_span
+    if not valid_timeline_range(start, end):
+        start, end = 0.0, 1.0
+    if not all(math.isfinite(value) for value in (anchor, wheel, max_span, min_span)) or not (
+        0 < min_span <= max_span
+    ):
+        return start, end
+    span = end - start
+    anchor = min(end, max(start, anchor))
+    ratio = (anchor - start) / span
+    # A trackpad can batch many deltas into one frame. Limit the gesture before
+    # exponentiation; clamping an overflowed result would be too late.
+    factor = math.exp(-min(4.0, max(-4.0, wheel)) * 0.18)
+    maximum = min(_MAX_TIMELINE_SPAN, max_span)
+    new_span = min(
+        maximum, max(min_span, _minimum_view_span(start, end), min(span, maximum) * factor)
+    )
+    new_start = anchor - ratio * new_span
+    result = new_start, new_start + new_span
+    return result if valid_timeline_range(*result) else (start, end)
 
 
 def timeline_channel_width(available: float, scale: float) -> float:
@@ -368,6 +486,7 @@ class TimelineMarkerIndex:
     def __init__(self, markers: Sequence[tuple[int, float]]):
         self._markers = tuple(sorted(markers, key=lambda marker: (marker[1], marker[0])))
         self._times = tuple(time for _, time in self._markers)
+        self.time_bounds = (self._times[0], self._times[-1]) if self._times else ()
         self._order = {key: i for i, (key, _) in enumerate(self._markers)}
         self._view_key = None
         self._projection = MarkerProjection({})

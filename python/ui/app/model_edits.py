@@ -201,7 +201,11 @@ class _ModelEdits:
             label = t("Pending model edits")
             imgui.text(fit_text(ImguiDraw2D(), label, max(1.0, hint_width - 2 * padding)))
             if self.model_edits.error:
-                imgui.set_item_tooltip(self.model_edits.error)
+                ui = getattr(getattr(self, "workspace", None), "ui", None)
+                if ui is None:
+                    imgui.set_item_tooltip(self.model_edits.error)
+                elif imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+                    ui.tooltip(self.model_edits.error, translate=False)
             if not stacked:
                 imgui.same_line()
             remaining = imgui.get_content_region_avail().x

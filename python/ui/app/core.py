@@ -200,6 +200,7 @@ class ViewerApp(
         self._frame_index = 0
         self._last_time = time.perf_counter()
         self._viewport_rect = (0.0, 0.0, 640.0, 480.0)
+        self._status_path_bounds = self._status_notice_bounds = None
         self.viewport_surface = ViewportSurface()
         self._viewport_image: ViewportImage | None = None
         self._dt = 0.0
@@ -687,7 +688,7 @@ class ViewerApp(
         self._draw_main_menu()
         self._draw_application_status_bar()
         self._draw_collapsed_output()
-        window.begin_dockspace()
+        self._begin_dockspace()
         self._begin_viewport_panel()
         self._sync_viewport_size()
         self._poll_input_handler()
@@ -791,12 +792,15 @@ class ViewerApp(
         self._present_frame(elapsed)
         self._frame_index += 1
 
+    def _begin_dockspace(self) -> None:
+        self.window.begin_dockspace()
+
     def _draw_model_loading_frame(self) -> None:
         """Keep the native window responsive without reading a mutating Session."""
 
         self._draw_loading_main_menu()
         self._draw_application_status_bar(loading=True)
-        self.window.begin_dockspace()
+        self._begin_dockspace()
         self.panels.draw_shells(self.localizer.text, self.window.style_scale)
         self._begin_viewport_panel()
         self._sync_viewport_size()

@@ -128,7 +128,7 @@ def precise_input_settings(panel, ctx: PanelContext) -> None:
         bool(ctx.gizmo.remember_precise_input_choices),
         ctx.theme,
     )
-    imgui.set_item_tooltip(
+    panel._tooltip(
         ctx.tr("Reuse the last relative/absolute mode and angle unit across editor sessions")
     )
     if changed:

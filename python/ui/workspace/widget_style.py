@@ -52,11 +52,12 @@ def font_config(em_ratio, face_index=0, *, embolden=False, vertical_offset=0):
     return config
 
 
-def install_fonts(window, *, portable=False):
+def install_fonts(window, *, portable=False, clear=True, cache=None):
     """Replace the atlas once and return the sources and body, heading, numeric fonts."""
     scale = window.style_scale
     io = imgui.get_io()
-    io.fonts.clear()
+    if clear:
+        io.fonts.clear()
     report = window.font_report
     cjk = (
         FontSource(report.cjk_path, report.cjk_index, getattr(report, "cjk", "CJK"))
@@ -64,7 +65,12 @@ def install_fonts(window, *, portable=False):
         else None
     )
     sources = resolve_fonts(portable=portable, cjk=cjk)
-    regular, heading = resolve_cjk_faces(cjk)
+    # MiSans already contains Latin and Chinese; merging another CJK family can
+    # accidentally supply punctuation or headings from an unrelated face.
+    if portable:
+        regular, heading = (source for source, _ratio in sources[:2])
+    else:
+        regular, heading = resolve_cjk_faces(cjk)
     fonts = []
     for (source, em_ratio), size, fallback in zip(
         sources,
@@ -72,7 +78,15 @@ def install_fonts(window, *, portable=False):
         (regular, heading, regular),
         strict=True,
     ):
+        identity = (source, em_ratio, size * scale, fallback)
+        if cache is not None and identity in cache:
+            fonts.append(cache[identity])
+            continue
         config = font_config(em_ratio, source.index, embolden=getattr(source, "embolden", False))
+        if getattr(source, "embolden", False):
+            # FreeType synthesis expands the advance as well as the ink. CJK
+            # headings retain the same nominal em grid as the regular face.
+            config.glyph_max_advance_x = size * scale
         config.glyph_offset = (0, font_vertical_offset(source, size * scale, config))
         fonts.append(
             io.fonts.add_font_from_file_ttf(
@@ -86,8 +100,12 @@ def install_fonts(window, *, portable=False):
             fallback.index,
         ):
             merged = font_config(
-                font_em_ratio(fallback), fallback.index, embolden=fallback.embolden
+                font_em_ratio(fallback),
+                fallback.index,
+                embolden=getattr(fallback, "embolden", False),
             )
+            if getattr(fallback, "embolden", False):
+                merged.glyph_max_advance_x = size * scale
             merged.glyph_offset = (
                 0,
                 font_vertical_offset(
@@ -101,6 +119,8 @@ def install_fonts(window, *, portable=False):
             )
             merged.merge_mode = True
             io.fonts.add_font_from_file_ttf(fallback.path, size * scale, merged)
+        if cache is not None:
+            cache[identity] = fonts[-1]
     body, bold, mono = fonts
     io.font_default = body
     return sources, (body, bold, mono)
@@ -127,7 +147,8 @@ def install_style(scale):
     st.docking_separator_size = 2 * scale
     st.tab_bar_border_size = 0
     st.tab_bar_overline_size = 0
-    st.scrollbar_size = 7 * scale
+    st.scrollbar_padding = DESIGN.scrollbar_padding * scale
+    st.scrollbar_size = (DESIGN.scrollbar_grab_width + 2 * DESIGN.scrollbar_padding) * scale
     st.scrollbar_rounding = 4 * scale
     colors = {
         "text": TEXT,

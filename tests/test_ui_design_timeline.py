@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from examples.ui_design.native.timeline_panel import ReferenceTimeline
-from examples.ui_design.native.widgets import UI
 from imgui_bundle import imgui
 
 from mojive import Scene
@@ -27,6 +26,9 @@ from mojive.ui.keyframe_editor.toolbar import draw_model_header
 from mojive.ui.localization import Language, Localizer
 from mojive.ui.panels import PanelContext, PanelManager
 from mojive.ui.timeline import take_frame_bounds, timeline_time_to_x
+from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.timeline_panel import NativeTimelineToolbar
+from mojive.ui.workspace.widgets import UI
 
 pytestmark = pytest.mark.physics
 
@@ -42,7 +44,10 @@ def timeline(request, monkeypatch):
     io.config_flags |= imgui.ConfigFlags_.nav_enable_keyboard
     style = imgui.get_style()
     style.window_padding = (10 * request.param, 10 * request.param)
-    style.scrollbar_size = 7 * request.param
+    style.scrollbar_padding = DESIGN.scrollbar_padding * request.param
+    style.scrollbar_size = (
+        DESIGN.scrollbar_grab_width + 2 * DESIGN.scrollbar_padding
+    ) * request.param
     if request.node.callspec.params.get("native_fonts", False):
         sources = resolve_font_sources(allow_download=False)
         cjk = sources[1] if len(sources) > 1 else None
@@ -51,7 +56,10 @@ def timeline(request, monkeypatch):
         )
         ui = UI(SimpleNamespace(style_scale=request.param, font_report=report))
         style.window_padding = (10 * request.param, 10 * request.param)
-        style.scrollbar_size = 7 * request.param
+        style.scrollbar_padding = DESIGN.scrollbar_padding * request.param
+        style.scrollbar_size = (
+            DESIGN.scrollbar_grab_width + 2 * DESIGN.scrollbar_padding
+        ) * request.param
     else:
         ui = UI.__new__(UI)
         ui.s = request.param
@@ -223,16 +231,18 @@ def timeline(request, monkeypatch):
         frame(3)
 
     def text(key, value):
-        numeric = key.startswith("##timeline-") and key in ui.numeric_edits
+        numeric = key in ui.numeric_edits
+        modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
         if numeric:
-            event("add_key_event", imgui.Key.mod_ctrl, True)
+            event("add_key_event", modifier, True)
         click(key)
         if numeric:
-            event("add_key_event", imgui.Key.mod_ctrl, False)
-        event("add_key_event", imgui.Key.mod_ctrl, True)
+            event("add_key_event", modifier, False)
+        assert io.want_text_input
+        event("add_key_event", modifier, True)
         event("add_key_event", imgui.Key.a, True)
         event("add_key_event", imgui.Key.a, False)
-        event("add_key_event", imgui.Key.mod_ctrl, False)
+        event("add_key_event", modifier, False)
         io.add_input_characters_utf8(value)
         frame()
         event("add_key_event", imgui.Key.enter, True)
@@ -399,6 +409,7 @@ def test_track_wheel_after_loop_reveal_zooms_without_scrolling_body(timeline, he
 
 def test_recording_options_preview_and_commit_through_context(timeline):
     state = timeline
+    state.panel.panel.toolbar._draw_settings = NativeTimelineToolbar(state.study)._draw_settings
     state.ctx.recording_config = RecordingConfig()
 
     def update(value, *, persist=True):
@@ -425,6 +436,7 @@ def test_settings_labels_share_left_edge_and_fields_fill_compact_popup(
     timeline, native_fonts, language, monkeypatch
 ):
     state, ui = timeline, timeline.study.ui
+    state.panel.panel.toolbar._draw_settings = NativeTimelineToolbar(state.study)._draw_settings
     ui.translate = state.ctx.translate = Localizer(Language(language)).text
     state.ctx.recording_config = RecordingConfig()
     labels, popup = {}, {}
@@ -446,13 +458,13 @@ def test_settings_labels_share_left_edge_and_fields_fill_compact_popup(
     state.frame(3)
     state.click("timeline-settings")
     scale = ui.s
-    left = popup["x"] + 10 * scale
+    left = popup["x"] + 12 * scale
     for caption in ("Pause at last frame", "Start delay (s)", "End hold (s)"):
         assert labels[state.ctx.tr(caption)][0] == pytest.approx(left)
     for key in ("timeline-pause-at-end", "##timeline-countdown", "##timeline-end_hold"):
         x, _, width, _ = ui.hits[key]
-        assert x + width == pytest.approx(popup["x"] + popup["width"] - 10 * scale)
-    assert popup["width"] / scale < 260
+        assert x + width == pytest.approx(popup["x"] + popup["width"] - 12 * scale)
+    assert popup["width"] <= imgui.get_io().display_size.x - 16 * scale
     assert popup["height"] / scale < 140
     before = state.session.state_take_pause_at_end
     state.click("##timeline-pause-label")
@@ -657,7 +669,8 @@ def test_primary_transport_stays_fixed_above_direct_editor_controls(timeline, wi
     time = ui.hits["timeline-time"]
     record = ui.hits["timeline-record"]
     assert play[2] == 72 * ui.s
-    assert record[2] == 88 * ui.s
+    # The narrow case reserves the native scrollbar track and uses the icon caption.
+    assert record[2] == (28 if width == 210 else 88) * ui.s
     assert 40 * ui.s <= time[2] <= 80 * ui.s
     assert play[1] == time[1] == toolbar[1]
     assert record[1] > play[1]
@@ -716,12 +729,15 @@ def test_video_stop_action_updates_visible_caption_and_icon(timeline, width, mon
 
 def test_long_time_readout_reduces_precision_without_ellipsis(timeline, monkeypatch):
     state, ui = timeline, timeline.study.ui
-    original, seen = ui.text, []
+    original, seen, units = ui.text, [], []
 
     def text(x, y, value, *args, **kwargs):
         time = ui.hits.get("timeline-time")
-        if time is not None and (x, y) == (time[0] + 8 * ui.s, time[1] + 7 * ui.s):
-            seen.append(value)
+        if time is not None and y == time[1] + 7 * ui.s:
+            if value == "s":
+                units.append((x, y))
+            else:
+                seen.append(value)
         return original(x, y, value, *args, **kwargs)
 
     monkeypatch.setattr(ui, "text", text)
@@ -729,7 +745,8 @@ def test_long_time_readout_reduces_precision_without_ellipsis(timeline, monkeypa
         state.panel.editor.playhead = value
         state.frame()
         assert "…" not in seen[-1]
-        assert float(seen[-1][:-1].strip()) == pytest.approx(value, abs=0.5)
+        assert float(seen[-1]) == pytest.approx(value, abs=0.5)
+        assert units[-1] == units[0]
     assert ui.hits["timeline-time"][2] == 80 * ui.s
 
 

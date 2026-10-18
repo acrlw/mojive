@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import replace
+from math import ceil
 from pathlib import Path
 
 import numpy as np
@@ -19,13 +20,9 @@ from mojive.ui.panels import activate_edit_gizmo, pointer_pressed, publish_focus
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.viewcube import BACKDROP_RADIUS_PT, widget_center
 from mojive.ui.window import WindowConfig
-
-from .inspector_components import draw_component
-from .localization import reference_text
-from .reference_menus import Menus
-from .scene_preview import Preview
-from .settings_panel import ReferenceSettings
-from .widgets import (
+from mojive.ui.workspace.inspector_components import draw_component
+from mojive.ui.workspace.settings_panel import WorkspaceSettings
+from mojive.ui.workspace.widgets import (
     AMBER,
     DIM,
     GLYPHS,
@@ -39,6 +36,10 @@ from .widgets import (
     UI,
     color,
 )
+
+from .localization import reference_text
+from .reference_menus import Menus
+from .scene_preview import Preview
 
 ROOT = Path(__file__).parent
 OUTPUT = Path("output/ui_design/native")
@@ -60,10 +61,10 @@ ICONS = (
     "control",
     "assets",
     "camera",
-    "chart",
+    "sensor",
     "layers",
     "terminal",
-    "chart",
+    "performance",
     "settings",
 )
 LEFT_PANELS = PANELS[:7]
@@ -78,6 +79,11 @@ VIEWPORT_TOOLS = (
 
 
 class Study:
+    @property
+    def app(self):
+        """Expose the reference's application through the production workspace contract."""
+        return self.preview
+
     def __init__(
         self,
         window,
@@ -128,7 +134,7 @@ class Study:
         self.timeline_panel = None
         self.expanded = {"TRANSFORM": True, "DISPLAY": True, "IDENTITY": False}
         self.events = []
-        self.settings = ReferenceSettings(self)
+        self.settings = WorkspaceSettings(self)
         self.rects = {}
         self.input_overlays = []
         self.widths = {}
@@ -1774,6 +1780,11 @@ def frames(window, study, path=None, count=8):
     snapshot = study.snapshot()
     vx, vy, vw, vh = snapshot["viewport_content"]
     rectangles = snapshot["overlays"]
+    manual_preview = (
+        study.rects.get("camera_preview")
+        if study.preview.camera_preview._position is not None
+        else None
+    )
     for n, (x, y, w, h) in enumerate(rectangles):
         assert x >= vx and y >= vy and x + w <= vx + vw + 0.01 and y + h <= vy + vh + 0.01, (
             "Overlay outside viewport",
@@ -1782,6 +1793,13 @@ def frames(window, study, path=None, count=8):
             snapshot["viewport_content"],
         )
         for other in rectangles[:n]:
+            # A user-positioned preview may cross toolbar regions. Automatic
+            # placement and every other overlay pair retain collision checks.
+            if manual_preview is not None and (
+                tuple(rectangles[n]) == tuple(manual_preview)
+                or tuple(other) == tuple(manual_preview)
+            ):
+                continue
             a, b, c, d = other
             assert x >= a + c or a >= x + w or y >= b + d or b >= y + h, (
                 "Overlapping viewport controls",
@@ -1809,7 +1827,7 @@ def icon_gallery(window, path, *, portable_fonts=False):
             11,
         )
         for n, name in enumerate(GLYPHS):
-            x, y = (24 + n % 12 * 116) * s, (88 + n // 12 * 96) * s
+            x, y = (24 + n % 12 * 116) * s, (88 + n // 12 * 90) * s
             ui.text(x, y, name, DIM, 11)
             for size, offset in [(14, 0), (16, 24), (18, 50), (24, 80)]:
                 ui.icon(name, x + offset * s, y + (37 - size / 2) * s, size, TEXT)
@@ -1817,9 +1835,9 @@ def icon_gallery(window, path, *, portable_fonts=False):
         pixels = window.end_frame(readback=True)
     Image.fromarray(np.asarray(pixels)[::-1], "RGB").save(path)
     focus = (
-        "visual",
-        "collision",
-        "both",
+        "performance",
+        "snap",
+        "move",
         "joint-hinge",
         "joint-slide",
         "joint-ball",
@@ -1827,38 +1845,112 @@ def icon_gallery(window, path, *, portable_fonts=False):
         "perspective",
         "orthographic",
         "pose",
-        "eye",
-        "layers",
+        "rotate",
+        "scale",
     )
-    for _ in range(6):
-        window.begin_frame()
-        imgui.set_next_window_pos((0, 0))
-        imgui.set_next_window_size(imgui.get_io().display_size)
-        imgui.begin("Icon geometry", None, imgui.WindowFlags_.no_decoration)
-        ui.text(24 * s, 22 * s, "Instrument 08 · icon geometry", TEXT, 17, bold=True)
-        ui.text(
-            24 * s,
-            50 * s,
-            "14 / 24 / 56 / 112 px · square slots, original silhouette proportions · guides stay outside the painter",
-            MUTED,
-            11,
-        )
-        for n, name in enumerate(focus):
-            x, y = (24 + n % 3 * 464) * s, (90 + n // 3 * 195) * s
-            ui.text(x, y, name, TEXT, 12)
-            for size, offset in ((14, 0), (24, 45), (56, 104), (112, 210)):
-                xx, yy = x + offset * s, y + (38 + (112 - size) / 2) * s
-                ui.draw.add_rect(
-                    (xx, yy), (xx + size * s, yy + size * s), color((75, 83, 90, 160)), 0
-                )
-                ui.draw.add_circle(
-                    (xx + size * s / 2, yy + size * s / 2), size * s / 2, color((100, 91, 66, 100))
-                )
-                ui.icon(name, xx, yy, size, TEXT)
-                ui.text(xx, y + 159 * s, str(size), DIM, 11)
-        imgui.end()
-        pixels = window.end_frame(readback=True)
-    Image.fromarray(np.asarray(pixels)[::-1], "RGB").save(path.with_name("icon-geometry.png"))
+    rounding = (
+        "settings",
+        "general",
+        "camera",
+        "mouse",
+        "shading",
+        "video",
+        "follow",
+        "follow-off",
+        "follow-page",
+        "follow-locked",
+        "circle",
+        "mujoco-visuals",
+    )
+    for filename, title, names in (
+        ("icon-geometry.png", "Icon geometry · domain symbols", focus),
+        ("icon-rounding.png", "Icon geometry · round boundaries and follow modes", rounding),
+        (
+            "icon-views.png",
+            "Icon geometry · camera directions",
+            tuple(
+                "view-" + name
+                for name in ("front", "back", "left", "right", "top", "bottom", "iso")
+            ),
+        ),
+        (
+            "icon-semantics.png",
+            "Icon geometry · objects, projection and capture actions",
+            (
+                "camera",
+                "capture-image",
+                "snapshot",
+                "perspective",
+                "orthographic",
+                "view-iso",
+                "body-frame",
+                "shape-box",
+                "pose",
+            ),
+        ),
+        (
+            "icon-shapes.png",
+            "Icon geometry · scene primitives",
+            tuple(
+                "shape-" + name
+                for name in ("box", "sphere", "cylinder", "capsule", "cone", "ellipsoid", "plane")
+            ),
+        ),
+        (
+            "icon-junctions.png",
+            "Icon geometry · continuous shells and clear internal gaps",
+            (
+                "shape-box",
+                "shape-sphere",
+                "shape-ellipsoid",
+                "view-iso",
+                "delete",
+                "pose",
+                "shape-cylinder",
+                "shape-cone",
+                "performance",
+            ),
+        ),
+        *(
+            (
+                f"icon-detail-{index // 12 + 1:02d}.png",
+                f"Icon geometry · inventory {index + 1}–{min(index + 12, len(GLYPHS))}",
+                tuple(GLYPHS)[index : index + 12],
+            )
+            for index in range(0, len(GLYPHS), 12)
+        ),
+    ):
+        for _ in range(6):
+            window.begin_frame()
+            imgui.set_next_window_pos((0, 0))
+            imgui.set_next_window_size(imgui.get_io().display_size)
+            imgui.begin("Icon geometry", None, imgui.WindowFlags_.no_decoration)
+            ui.text(24 * s, 22 * s, title, TEXT, 17, bold=True)
+            ui.text(
+                24 * s,
+                50 * s,
+                "14 / 24 / 56 / 112 px · square slots, original silhouette proportions · guides stay outside the painter",
+                MUTED,
+                11,
+            )
+            for n, name in enumerate(names):
+                x, y = (24 + n % 3 * 464) * s, (90 + n // 3 * 195) * s
+                ui.text(x, y, name, TEXT, 12)
+                for size, offset in ((14, 0), (24, 45), (56, 104), (112, 210)):
+                    xx, yy = x + offset * s, y + (38 + (112 - size) / 2) * s
+                    ui.draw.add_rect(
+                        (xx, yy), (xx + size * s, yy + size * s), color((75, 83, 90, 160)), 0
+                    )
+                    ui.draw.add_circle(
+                        (xx + size * s / 2, yy + size * s / 2),
+                        size * s / 2,
+                        color((100, 91, 66, 100)),
+                    )
+                    ui.icon(name, xx, yy, size, TEXT)
+                    ui.text(xx, y + 159 * s, str(size), DIM, 11)
+            imgui.end()
+            pixels = window.end_frame(readback=True)
+        Image.fromarray(np.asarray(pixels)[::-1], "RGB").save(path.with_name(filename))
     for _ in range(6):
         window.begin_frame()
         imgui.set_next_window_pos((0, 0))
@@ -1952,6 +2044,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.interactive and args.review_density != 1:
         parser.error("--review-density is an offscreen acceptance fixture")
+    if args.icons:
+        args.width = max(args.width, ceil(1440 * args.ui_scale))
+        args.height = max(
+            args.height, ceil((88 + ceil(len(GLYPHS) / 12) * 90 + 24) * args.ui_scale)
+        )
     args.output.mkdir(parents=True, exist_ok=True)
     config = WindowConfig(
         title="Mojive · Instrument reference · 08",

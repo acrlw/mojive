@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +41,50 @@ def capture(viewer, path: Path):
     return viewer.app.workspace.snapshot()
 
 
+def float_panel(viewer, name, *, with_panel=None):
+    """Float existing production panels inside the actual native work viewport."""
+    from imgui_bundle import imgui
+
+    workspace = viewer.app.workspace
+    names = (name,) if with_panel is None else (name, with_panel)
+    for panel_name in names:
+        workspace.activate(panel_name)
+    for panel_name in names:
+        workspace.open[panel_name] = True
+    for _ in range(4):
+        viewer.sync()
+    windows = [imgui.internal.find_window_by_name(panel_name) for panel_name in names]
+    if any(window is None for window in windows):
+        raise RuntimeError(f"Production panels did not initialize: {', '.join(names)}")
+    viewport, scale = imgui.get_main_viewport(), viewer.window.style_scale
+    margin = min(24 * scale, viewport.work_size.x / 4, viewport.work_size.y / 4)
+    preferred = (1000, 560) if "Timeline" in names else (560, 640)
+    size = tuple(
+        min(value * scale, available - margin * 2)
+        for value, available in zip(preferred, viewport.work_size, strict=True)
+    )
+    position = (
+        viewport.work_pos.x + (viewport.work_size.x - size[0]) / 2,
+        viewport.work_pos.y + (viewport.work_size.y - size[1]) / 2,
+    )
+    if with_panel is None:
+        imgui.internal.dock_context_queue_undock_window(imgui.get_current_context(), windows[0])
+        viewer.sync()
+        imgui.internal.set_window_pos(windows[0], position)
+        imgui.internal.set_window_size(windows[0], size)
+        imgui.internal.set_window_collapsed(windows[0], False)
+    else:
+        node_id = imgui.internal.dock_builder_add_node()
+        imgui.internal.dock_builder_set_node_pos(node_id, position)
+        imgui.internal.dock_builder_set_node_size(node_id, size)
+        for window in windows:
+            imgui.internal.dock_builder_dock_window(window.name, node_id)
+        imgui.internal.dock_builder_finish(node_id)
+    workspace.focus_next = name
+    for _ in range(4):
+        viewer.sync()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -55,14 +99,41 @@ def main(argv=None):
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--language", choices=("en", "zh_CN"), default="zh_CN")
     parser.add_argument("--panel", choices=(*PANELS, "Inspector", "Timeline", "Plot"))
+    parser.add_argument(
+        "--float-panel",
+        choices=(*PANELS, "Inspector", "Timeline", "Plot"),
+        help="Undock a production panel for interactive native-window inspection",
+    )
+    parser.add_argument(
+        "--float-with",
+        choices=(*PANELS, "Inspector", "Timeline", "Plot"),
+        help="Group another existing panel with --float-panel in a floating dock",
+    )
+    parser.add_argument(
+        "--review", action="store_true", help="Capture production UI regression scenarios"
+    )
     args = parser.parse_args(argv)
+    if args.review and not args.capture:
+        parser.error("--review requires --capture")
+    if args.float_panel and args.capture:
+        parser.error("--float-panel requires interactive mode")
+    if args.float_with and not args.float_panel:
+        parser.error("--float-with requires --float-panel")
+    if args.float_with and args.float_with == args.float_panel:
+        parser.error("--float-with must name a different panel")
+    if args.float_with and "Settings" in (args.float_panel, args.float_with):
+        parser.error("Settings is a standalone window and cannot join a floating dock")
     if args.capture:
         args.output.mkdir(parents=True, exist_ok=True)
         os.environ["MOJIVE_SETTINGS"] = str(args.output / "settings.json")
     viewer = build_workspace(
         resolve(args.asset),
         renderer=args.backend,
-        config=ViewerConfig(layout=LayoutConfig(persistence=False), debug_server=False),
+        config=ViewerConfig(
+            layout=LayoutConfig(persistence=False),
+            debug_server=False,
+            threaded_physics=not args.review,
+        ),
         width=args.width,
         height=args.height,
         show_window=not args.capture,
@@ -88,9 +159,17 @@ def main(argv=None):
         if not args.capture:
             if args.panel is not None:
                 viewer.app.workspace.activate(args.panel)
+            if args.float_panel is not None:
+                float_panel(viewer, args.float_panel, with_panel=args.float_with)
             viewer.run()
             return 0
         args.output.mkdir(parents=True, exist_ok=True)
+        if args.review:
+            from mojive.tools.native_ui_review import capture_regressions
+
+            capture_regressions(viewer, args.output)
+            print(f"Captured production UI review to {args.output}")
+            return 0
         workspace = viewer.app.workspace
         report = {
             "backend": args.backend,
@@ -101,6 +180,12 @@ def main(argv=None):
         }
         states = report["states"]
         states["workspace"] = capture(viewer, args.output / "workspace.png")
+        ground_style = viewer.app.backend.get_geometry_style()
+        try:
+            viewer.app.set_geometry_style(replace(ground_style, quiet_ground=True), persist=False)
+            states["Quiet ground"] = capture(viewer, args.output / "workspace-quiet-ground.png")
+        finally:
+            viewer.app.set_geometry_style(ground_style, persist=False)
         for name in ("Control", "Assets", "Pose", "Cameras", "Sensors", "Layers", "Settings"):
             workspace.activate(name)
             states[name] = capture(viewer, args.output / (name.lower() + ".png"))

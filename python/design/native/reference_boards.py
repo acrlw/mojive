@@ -21,7 +21,7 @@ def foundation_board(ui, runtime):
     title(ui, "视觉基础", "低亮度背景 · 绿色强调 · 清晰的内容层级")
     groups = (
         ("品牌与强调", ("brand", "primary", "primary_bright", "primary_dim", "selected")),
-        ("表面与边界", ("background", "child", "popup", "field", "border")),
+        ("表面与边界", ("background", "floating", "popup", "field", "border")),
         ("交互与文本", ("field_hovered", "field_active", "text", "secondary", "disabled")),
         ("语义状态", ("info", "success", "warning", "danger", "purple")),
     )

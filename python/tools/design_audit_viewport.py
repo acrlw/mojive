@@ -209,6 +209,6 @@ def recover_instances(audit, before, after, effect, *, additional_targets=()):
             [after["instanceVertices"][key] for key in sorted(after["instanceVertices"])]
         )
         if after["instanceVertices"]
-        else np.empty((0, 4))
+        else np.empty((0, 6))
     )
     return recovery

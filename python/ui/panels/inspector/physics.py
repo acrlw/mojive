@@ -17,6 +17,8 @@ from mojive.adapters.base import (
 )
 from mojive.ui.panels import (
     PanelContext,
+    pointer_hint,
+    pointer_pressed,
 )
 from mojive.ui.panels.inspector.fields import (
     _begin_property_table,
@@ -25,17 +27,41 @@ from mojive.ui.panels.inspector.fields import (
     _property_button,
     _property_combo,
     _property_control_row,
+    _property_input_text,
     _property_numbers,
     _property_numeric,
     _property_section,
     _property_solver_rows,
     _property_toggle,
+    _property_tooltip,
     _property_vector_row,
     _vector_fields,
 )
 from mojive.ui.panels.inspector.support import (
     _nearest_euler_degrees,
 )
+from mojive.ui.pointer_bindings import PointerAction
+
+
+def _derived_inertial_value(ctx, key, label, values, unit):
+    _property_control_row(ctx, label, unit=unit, control_part="input_text")
+    exact = ", ".join(repr(float(value)) for value in values)
+    _property_input_text(
+        ctx,
+        key,
+        exact,
+        imgui.InputTextFlags_.read_only | imgui.InputTextFlags_.auto_select_all,
+        mono=True,
+    )
+    if imgui.is_item_hovered():
+        if pointer_pressed(ctx, PointerAction.PROPERTY_COPY):
+            imgui.set_clipboard_text(exact)
+        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+            _property_tooltip(
+                ctx,
+                exact + "\n" + pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy value")),
+                hovered=True,
+            )
 
 
 def _joint_dynamics_rows(
@@ -111,10 +137,11 @@ def _joint_actuator_rows(
         1000000000.0,
         "%.6g N",
     )
-    imgui.set_item_tooltip(
+    _property_tooltip(
+        ctx,
         ctx.tr(
             "Auto enables the limit when a valid range is configured; unlimited ignores the range"
-        )
+        ),
     )
     if changed:
         edited = replace(
@@ -186,9 +213,6 @@ class _Physics:
             ctx.session.adapter.caps.model_properties
             and (not ctx.session.adapter.caps.simulation or ctx.session.paused)
         )
-        if not editable:
-            imgui.begin_disabled()
-
         inertia_modes = ("auto from geoms", "diagonal", "full tensor")
         mode_values = ("auto", "diagonal", "full")
         mode = mode_values.index(properties.inertia_mode)
@@ -213,96 +237,125 @@ class _Physics:
         sleep_policy = (
             sleep_values.index(edited.sleep_policy) if edited.sleep_policy in sleep_values else 0
         )
+        if inertia_mode == "auto":
+            imgui.text_wrapped(
+                ctx.tr(
+                    "Calculated from geometry"
+                    if current.inertia_mode == "auto"
+                    else "Apply to calculate from geometry"
+                )
+            )
         if _begin_property_table("body_inertial_properties", ctx=ctx):
+            imgui.begin_disabled(not editable)
             _property_control_row(ctx, "inertia mode", control_part="select")
             mode_changed, mode = _property_combo(
                 ctx, "##body-inertia-mode", mode, tuple(ctx.tr(label) for label in inertia_modes)
             )
+            imgui.end_disabled()
             inertia_mode = mode_values[mode]
             edited = replace(properties, inertia_mode=inertia_mode) if mode_changed else properties
 
             derived = inertia_mode == "auto"
             if derived:
-                imgui.begin_disabled()
-            _property_control_row(ctx, "mass", unit="kg")
-            mass_changed, mass = _property_numeric(
-                ctx, "##body-mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
-            )
-            position_changed, inertial_position = _property_vector_row(
-                ctx,
-                node,
-                "inertial position",
-                "body_inertial_position",
-                edited.inertial_position,
-                editable=not derived,
-                speed=0.001,
-                lo=-1000000.0,
-                hi=1000000.0,
-                fmt="%.5f m",
-                unit="m",
-                reset_values=current.inertial_position,
-            )
-            rotation_disabled = derived or inertia_mode == "full"
-            rotation_changed, inertial_euler = _property_vector_row(
-                ctx,
-                node,
-                "inertial rotation",
-                "body_inertial_rotation",
-                self._body_inertial_euler,
-                editable=not rotation_disabled,
-                speed=0.25,
-                lo=-360000.0,
-                hi=360000.0,
-                fmt="%.2f°",
-                unit="°",
-                reset_values=_nearest_euler_degrees(
-                    math3d.quat_to_mat3(current.inertial_quaternion), None
-                ),
-            )
-            imgui.set_item_tooltip(
-                ctx.tr(
-                    "Body-frame rotation of diagonal principal axes; full tensors derive this rotation"
+                for label, key, values, unit in (
+                    ("mass", "##body-derived-mass", (edited.mass,), "kg"),
+                    ("inertial position", "##body-derived-position", edited.inertial_position, "m"),
+                    (
+                        "inertial rotation",
+                        "##body-derived-rotation",
+                        self._body_inertial_euler,
+                        "°",
+                    ),
+                    (
+                        "diagonal inertia",
+                        "##body-derived-inertia",
+                        edited.diagonal_inertia,
+                        "kg·m²",
+                    ),
+                ):
+                    _derived_inertial_value(ctx, key, label, values, unit)
+            else:
+                imgui.begin_disabled(not editable)
+                _property_control_row(ctx, "mass", unit="kg")
+                mass_changed, mass = _property_numeric(
+                    ctx, "##body-mass", float(edited.mass), 0.01, 0.000001, 1000000000.0, "%.6g kg"
                 )
-            )
-            if inertia_mode in ("auto", "diagonal"):
-                diagonal_changed, diagonal_inertia = _property_vector_row(
+                position_changed, inertial_position = _property_vector_row(
                     ctx,
                     node,
-                    "diagonal inertia",
-                    "body_diagonal_inertia",
-                    edited.diagonal_inertia,
+                    "inertial position",
+                    "body_inertial_position",
+                    edited.inertial_position,
                     editable=not derived,
                     speed=0.001,
-                    lo=0.000000001,
-                    hi=1000000000000.0,
-                    fmt="%.6g",
-                    unit="kg·m²",
-                    reset_values=current.diagonal_inertia,
+                    lo=-1000000.0,
+                    hi=1000000.0,
+                    fmt="%.5f m",
+                    unit="m",
+                    reset_values=current.inertial_position,
                 )
-            else:
-                _property_control_row(ctx, "tensor xx / yy / zz", unit="kg·m²", components=3)
-                full_diagonal_changed, full_diagonal = _property_numbers(
+                rotation_disabled = derived or inertia_mode == "full"
+                rotation_changed, inertial_euler = _property_vector_row(
                     ctx,
-                    "##body-full-diagonal",
-                    np.asarray(edited.full_inertia[:3], np.float32),
-                    0.001,
-                    -1000000000000.0,
-                    1000000000000.0,
-                    "%.6g",
+                    node,
+                    "inertial rotation",
+                    "body_inertial_rotation",
+                    self._body_inertial_euler,
+                    editable=not rotation_disabled,
+                    speed=0.25,
+                    lo=-360000.0,
+                    hi=360000.0,
+                    fmt="%.2f°",
+                    unit="°",
+                    reset_values=_nearest_euler_degrees(
+                        math3d.quat_to_mat3(current.inertial_quaternion), None
+                    ),
                 )
-                _property_control_row(ctx, "tensor xy / xz / yz", unit="kg·m²", components=3)
-                full_cross_changed, full_cross = _property_numbers(
+                _property_tooltip(
                     ctx,
-                    "##body-full-cross",
-                    np.asarray(edited.full_inertia[3:], np.float32),
-                    0.001,
-                    -1000000000000.0,
-                    1000000000000.0,
-                    "%.6g",
+                    ctx.tr(
+                        "Body-frame rotation of diagonal principal axes; full tensors derive this rotation"
+                    ),
                 )
-            if derived:
+                if inertia_mode in ("auto", "diagonal"):
+                    diagonal_changed, diagonal_inertia = _property_vector_row(
+                        ctx,
+                        node,
+                        "diagonal inertia",
+                        "body_diagonal_inertia",
+                        edited.diagonal_inertia,
+                        editable=not derived,
+                        speed=0.001,
+                        lo=0.000000001,
+                        hi=1000000000000.0,
+                        fmt="%.6g",
+                        unit="kg·m²",
+                        reset_values=current.diagonal_inertia,
+                    )
+                else:
+                    _property_control_row(ctx, "tensor xx / yy / zz", unit="kg·m²", components=3)
+                    full_diagonal_changed, full_diagonal = _property_numbers(
+                        ctx,
+                        "##body-full-diagonal",
+                        np.asarray(edited.full_inertia[:3], np.float32),
+                        0.001,
+                        -1000000000000.0,
+                        1000000000000.0,
+                        "%.6g",
+                    )
+                    _property_control_row(ctx, "tensor xy / xz / yz", unit="kg·m²", components=3)
+                    full_cross_changed, full_cross = _property_numbers(
+                        ctx,
+                        "##body-full-cross",
+                        np.asarray(edited.full_inertia[3:], np.float32),
+                        0.001,
+                        -1000000000000.0,
+                        1000000000000.0,
+                        "%.6g",
+                    )
                 imgui.end_disabled()
 
+            imgui.begin_disabled(not editable)
             _property_control_row(ctx, "gravity compensation")
             gravity_changed, gravity_compensation = _property_numeric(
                 ctx,
@@ -326,17 +379,23 @@ class _Physics:
             )
             if not movable_root:
                 imgui.end_disabled()
-                imgui.set_item_tooltip(
-                    ctx.tr("MuJoCo sleep policies apply only to movable root bodies")
+                _property_tooltip(
+                    ctx, ctx.tr("MuJoCo sleep policies apply only to movable root bodies")
                 )
+            imgui.end_disabled()
             _end_property_table(ctx)
         derived = inertia_mode == "auto"
         rotation_disabled = derived or inertia_mode == "full"
         sleep_policy_value = sleep_values[sleep_policy]
 
         if not editable:
-            imgui.end_disabled()
-            imgui.text_disabled(ctx.tr("Pause the simulation to edit model body properties"))
+            imgui.text_wrapped(
+                ctx.tr(
+                    "Backend does not support body property editing"
+                    if not ctx.session.adapter.caps.model_properties
+                    else "Pause the simulation to edit model body properties"
+                )
+            )
 
         if mass_changed:
             edited = replace(edited, mass=float(mass))
@@ -394,7 +453,7 @@ class _Physics:
                 self._body_property_error = ""
             else:
                 self._body_property_error = result.message
-        imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
+        _property_tooltip(ctx, ctx.tr("Apply rebuilds the model once"))
         if not editable or not dirty:
             imgui.end_disabled()
         imgui.same_line()
@@ -636,7 +695,7 @@ class _Physics:
             if not editable or not dirty or invalid_force_range:
                 imgui.begin_disabled()
             apply_clicked = _property_button(ctx, f"{ctx.tr('Apply')}##joint-advanced")
-            imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
+            _property_tooltip(ctx, ctx.tr("Apply rebuilds the model once"))
             if not editable or not dirty or invalid_force_range:
                 imgui.end_disabled()
             imgui.same_line()
@@ -731,7 +790,7 @@ class _Physics:
             )
             if not supports_endpoints:
                 imgui.end_disabled()
-                imgui.set_item_tooltip(ctx.tr("Endpoints apply only to capsule and cylinder sites"))
+                _property_tooltip(ctx, ctx.tr("Endpoints apply only to capsule and cylinder sites"))
             _end_property_table(ctx)
         from_to = np.asarray(properties.from_to, np.float32)
         first_changed = second_changed = False
@@ -792,7 +851,7 @@ class _Physics:
                 self._site_property_error = ""
             else:
                 self._site_property_error = result.message
-        imgui.set_item_tooltip(ctx.tr("Apply rebuilds the model once"))
+        _property_tooltip(ctx, ctx.tr("Apply rebuilds the model once"))
         if not editable or not dirty or invalid_endpoints:
             imgui.end_disabled()
         imgui.same_line()

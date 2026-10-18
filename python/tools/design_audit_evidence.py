@@ -2,7 +2,9 @@
 
 from mojive.design.consumer_support import UNAVAILABLE_FIELDS, UNAVAILABLE_PARTS
 
-TEXT_FIELDS = frozenset(("fontSize", "lineHeight", "lineHeightMode", "textAlign"))
+TEXT_FIELDS = frozenset(
+    ("fontFamily", "fontSize", "textColor", "lineHeight", "lineHeightMode", "textAlign")
+)
 BUTTON_PARTS = frozenset(
     (
         "button",
@@ -85,7 +87,7 @@ def inactive_reason(before, after, part, field, spec, scale):
     if kind == "button":
         if field in TEXT_FIELDS and not before.get("label"):
             return "此实例仅显示图标，没有文字。"
-        if field == "iconSize" and not before.get("icon"):
+        if field in ("iconSize", "iconColor") and not before.get("icon"):
             return "此实例没有图标。"
         if (
             field in ("gap", "columnGap")

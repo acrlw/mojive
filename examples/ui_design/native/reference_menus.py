@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
 from math import ceil, floor
 
 from imgui_bundle import imgui
@@ -11,32 +10,26 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.input_bindings import InputAction
+from mojive.ui.workspace import menu_color
+from mojive.ui.workspace.color_editor import ColorEditor
+from mojive.ui.workspace.menu_catalog import TOP_MENUS
+from mojive.ui.workspace.menu_item import Item
+from mojive.ui.workspace.menus import Menus as WorkspaceMenus
+from mojive.ui.workspace.widgets import DIM, MUTED, TEXT, color
+from mojive.ui.workspace.window_chrome import surface_ink
 
-from .color_editor import ColorEditor
-from .widgets import DIM, MUTED, SAGE, TEXT, color
-
-MENU_BG = (39, 45, 53, 255)
 DISABLED = (126, 136, 149, 255)
-TOP_MENUS = ("File", "Edit", "Add", "View", "Simulate", "Window", "Help")
 SAVED_SCENE = "saved-scene.mojive.json"
 EXPORTED_SCENE = "exported-scene.mojive.json"
 
 
-@dataclass(frozen=True)
-class Item:
-    label: str
-    action: str = ""
-    icon: str = ""
-    shortcut: str = ""
-    enabled: bool = True
-    checked: bool = False
-    submenu: str = ""
-    reason: str = ""
-
-
 class Menus:
+    local_rows = WorkspaceMenus.local_rows
+    local_separator = WorkspaceMenus.local_separator
+    _begin_local_row = WorkspaceMenus._begin_local_row
+
     def __init__(self, study, panels):
-        self.study = study
+        self.study = self.workspace = study
         self.panels = panels
         self.ui = study.ui
         self.s = study.s
@@ -45,7 +38,7 @@ class Menus:
         self.observed = {}
         self.dialog = None
         self.dialog_pending = None
-        self.color_before = None
+        self.color_edit = None
         self.color_visible = False
         self.color_editor = ColorEditor()
         self.shading = "Solid"
@@ -70,9 +63,8 @@ class Menus:
             imgui.push_style_var(key, tuple(v * s for v in value))
         imgui.push_style_var(imgui.StyleVar_.popup_rounding, 8 * s)
         imgui.push_style_var(imgui.StyleVar_.menu_item_rounding, 4.8 * s)
-        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, 6 * s)
         colors = [
-            (imgui.Col_.popup_bg, MENU_BG),
+            (imgui.Col_.popup_bg, surface_ink(self.ui, "menu", "popup")),
             (imgui.Col_.border, (76, 86, 99, 150)),
             (imgui.Col_.header, (156, 191, 141, 24)),
             (imgui.Col_.header_hovered, (255, 255, 255, 13)),
@@ -86,7 +78,7 @@ class Menus:
         finally:
             imgui.pop_font()
             imgui.pop_style_color(len(colors))
-            imgui.pop_style_var(len(values) + 3)
+            imgui.pop_style_var(len(values) + 2)
 
     def items(self, name):
         st = self.study
@@ -129,6 +121,7 @@ class Menus:
                     "visibility",
                     "eye",
                     enabled=bool(e),
+                    checkable=True,
                     checked=bool(e) and not e["hidden"],
                 ),
             ]
@@ -136,33 +129,42 @@ class Menus:
             return [
                 Item(
                     n,
-                    icon="sphere" if n == "Sphere" else "geom",
+                    icon="shape-" + n.lower(),
                     action="create:" + n,
+                    enabled=n != "Capsule" or st.preview.session.adapter.caps.topology_editing,
                 )
-                for n in ("Box", "Sphere", "Cylinder", "Capsule")
+                for n in ("Box", "Sphere", "Cylinder", "Capsule", "Cone", "Ellipsoid", "Plane")
             ]
         if name == "View":
             return [
                 Item("Frame all", "frame", "frame", "F"),
                 None,
-                Item("Projection", icon="camera", submenu="Projection"),
+                Item(
+                    "Projection",
+                    icon="orthographic" if st.preview.camera.orthographic else "perspective",
+                    submenu="Projection",
+                ),
                 Item("Transform tool", icon=st.preview.tool, submenu="Transform tool"),
                 Item("Gizmo orientation", icon="world", submenu="Gizmo orientation"),
                 None,
-                Item("Transform handles", "gizmos", "move", checked=st.preview.gizmos),
+                Item(
+                    "Transform handles", "gizmos", "move", checkable=True, checked=st.preview.gizmos
+                ),
             ]
         if name in ("Camera", "Projection"):
             rows = [
                 Item(
                     "Perspective",
                     "projection:perspective",
-                    "camera",
+                    "perspective",
+                    checkable=True,
                     checked=not st.preview.camera.orthographic,
                 ),
                 Item(
                     "Orthographic",
                     "projection:orthographic",
-                    "body",
+                    "orthographic",
+                    checkable=True,
                     checked=st.preview.camera.orthographic,
                 ),
             ]
@@ -175,7 +177,7 @@ class Menus:
             return rows
         if name == "Transform tool":
             return [
-                Item(n.title(), "tool:" + n, n, key, checked=st.preview.tool == n)
+                Item(n.title(), "tool:" + n, n, key, checkable=True, checked=st.preview.tool == n)
                 for n, key in [("select", "V"), ("move", "W"), ("rotate", "E"), ("scale", "R")]
             ]
         if name == "Gizmo orientation":
@@ -183,7 +185,8 @@ class Menus:
                 Item(
                     n + " frame",
                     "space:" + n,
-                    "world" if n == "World" else "body",
+                    "world" if n == "World" else "body-frame",
+                    checkable=True,
                     checked=st.space == n,
                 )
                 for n in ("World", "Body")
@@ -206,13 +209,14 @@ class Menus:
                     "record",
                     icon="record",
                     enabled=st.preview.session.adapter.caps.simulation,
+                    checkable=True,
                     checked=st.preview.session.state_take_recording,
                 ),
                 Item("Physics adapter", "panel:Control", "control"),
             ]
         if name == "Playback speed":
             return [
-                Item(f"{v:g}× speed", "speed:" + str(v), checked=st.speed == v)
+                Item(f"{v:g}× speed", "speed:" + str(v), checkable=True, checked=st.speed == v)
                 for v in (0.25, 0.5, 1, 2)
             ]
         if name == "Playback":
@@ -225,6 +229,7 @@ class Menus:
                     "Loop playback",
                     "loop",
                     "loop",
+                    checkable=True,
                     checked=st.loop,
                     enabled=bool(st.preview.session.state_take_times),
                     reason="Record a take first.",
@@ -246,23 +251,37 @@ class Menus:
                 ),
                 Item("Reset layout", "layout:reset", "reset"),
                 None,
-                Item("Show Viewport tab", "viewport-tab", "inspect", checked=st.show_viewport_tab),
+                Item(
+                    "Show Viewport tab",
+                    "viewport-tab",
+                    "inspect",
+                    checkable=True,
+                    checked=st.show_viewport_tab,
+                ),
                 Item("Settings", "panel:Settings", "settings", "F9"),
             ]
         if name == "Workspace":
             return [
-                Item(n, "workspace:" + n, checked=st.workspace == n)
+                Item(n, "workspace:" + n, checkable=True, checked=st.workspace == n)
                 for n in ("Edit", "Author", "Review")
             ]
         if name == "Panels":
             return [
-                Item(n, "toggle:" + n, icon, checked=st.open[n])
+                Item(n, "toggle:" + n, icon, checkable=True, checked=st.open[n])
                 for n, icon in self.panels
                 if n != "Settings"
             ] + [
                 None,
-                Item("Inspector", "toggle:Inspector", "inspect", checked=st.open["Inspector"]),
-                Item("Timeline", "timeline", "key", "T", checked=st.open["Timeline"]),
+                Item(
+                    "Inspector",
+                    "toggle:Inspector",
+                    "inspect",
+                    checkable=True,
+                    checked=st.open["Inspector"],
+                ),
+                Item(
+                    "Timeline", "timeline", "key", "T", checkable=True, checked=st.open["Timeline"]
+                ),
             ]
         if name == "Inspector position":
             return [
@@ -272,7 +291,7 @@ class Menus:
             ]
         if name == "Shading":
             return [
-                Item(n, "shading:" + n, "shading", checked=self.shading == n)
+                Item(n, "shading:" + n, "shading", checkable=True, checked=self.shading == n)
                 for n in ("Solid", "Wireframe")
             ]
         if name == "Help":
@@ -283,22 +302,9 @@ class Menus:
         raise ValueError(name)
 
     def limits(self, name):
-        rows = self.items(name)
-        measured = max(
-            (
-                self.ui.measure(r.label)
-                + (self.ui.measure(r.shortcut) + 16 * self.s if r.shortcut else 0)
-                for r in rows
-                if r
-            ),
-            default=0,
-        )
-        width = max(224 * self.s, measured + 88 * self.s)
-        available = imgui.get_main_viewport().size
-        return min(width, available.x - 16 * self.s), min(
-            12 * self.s + sum(round((30 if r else 10) * self.s) for r in rows),
-            available.y - 16 * self.s,
-        )
+        from mojive.ui.workspace.menus import Menus as WorkspaceMenus
+
+        return WorkspaceMenus.limits(self, name)
 
     def constrain(self, name):
         width, _ = self.limits(name)
@@ -318,10 +324,8 @@ class Menus:
     def begin_frame(self):
         self.observed.clear()
         self.color_visible = False
-        if self.color_before is not None and imgui.is_key_pressed(imgui.Key.escape):
-            self.study.preview.session.submit(cmd.CancelEditTransaction())
-            self.study.preview.refresh_document()
-            self.color_before = None
+        if self.color_edit is not None and imgui.is_key_pressed(imgui.Key.escape):
+            menu_color.finish_color_edit(self, cancel=True)
         if self.reset_pending:
             if imgui.is_popup_open(
                 "", imgui.PopupFlags_.any_popup_id | imgui.PopupFlags_.any_popup_level
@@ -450,94 +454,38 @@ class Menus:
         return record
 
     def content(self, name, path):
-        record = self.shadow_and_record(name, path)
-        for row in self.items(name):
-            if row is None:
-                p = imgui.get_cursor_screen_pos()
-                height = round(10 * self.s)
-                gap = imgui.get_style().item_spacing.y
-                self.ui.line(p.x, p.y - gap / 2 + height / 2, imgui.get_content_region_avail().x)
-                imgui.push_style_var(imgui.StyleVar_.item_spacing, (12 * self.s, 0))
-                imgui.dummy((1, height))
-                imgui.pop_style_var()
-                continue
-            self.item(row, path, record)
+        from mojive.ui.workspace.menus import Menus as WorkspaceMenus
+
+        return WorkspaceMenus.content(self, name, path)
 
     def item(self, row, path, record):
-        u, s = self.ui, self.s
-        p = imgui.get_cursor_screen_pos()
-        dl = imgui.get_window_draw_list()
-        right = p.x + imgui.get_content_region_avail().x
+        from mojive.ui.workspace.menu_rows import advance_menu_row, paint_menu_row
+
+        self._begin_local_row()
+        submenu = None
         if row.submenu:
             self.reveal((*path, row.submenu))
             self.constrain(row.submenu)
-        # MenuItemEx/BeginMenuEx retain native navigation, hover corridors and popup ownership.
-        imgui.push_style_color(imgui.Col_.text, (0, 0, 0, 0))
-        imgui.push_style_color(imgui.Col_.text_disabled, (0, 0, 0, 0))
-        if row.submenu:
-            activated = imgui.internal.begin_menu_ex(row.label, "     ", row.enabled)
-        else:
-            activated = imgui.internal.menu_item_ex(
-                row.label, "     ", row.shortcut, row.checked, row.enabled
-            )
-        imgui.pop_style_color(2)
-        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        visible = imgui.is_item_visible()
-        c = TEXT if row.enabled else DISABLED
-        text_x = p.x + 28 * s
-        tail_x = right - 12 * s
-        if visible:
-            if row.icon:
-                u.role_icon(
-                    row.icon,
-                    p.x,
-                    p.y - 7 * s,
-                    16 * s,
-                    28 * s,
-                    role="toolbar",
-                    c=MUTED if row.enabled else DISABLED,
-                    draw=dl,
-                )
-            u.text(text_x, p.y, row.label, c, draw=dl)
-            if row.shortcut:
-                width = u.measure(row.shortcut, 13)
-                tail_x = right - 24 * s - width
-                u.text(tail_x, p.y + s, row.shortcut, DIM if row.enabled else DISABLED, 13, draw=dl)
-            if row.submenu or row.checked:
-                u.role_icon(
-                    "right" if row.submenu else "check",
-                    right - 12 * s,
-                    p.y,
-                    12 * s,
-                    14 * s,
-                    role="inline",
-                    c=DIM if row.submenu else SAGE,
-                    draw=dl,
-                )
-        record["rows"].append(
-            {
-                "label": row.label,
-                "enabled": row.enabled,
-                "checked": row.checked,
-                "rect": [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y],
-                "label_rect": [text_x, p.y, u.measure(row.label), 13 * s],
-                "tail_x": tail_x,
-                "visible": visible,
-            }
+
+            def submenu(_native_label):
+                return imgui.internal.begin_menu_ex(row.label, "     ", row.enabled)
+
+        result = paint_menu_row(
+            self.ui,
+            row,
+            "menu-item-" + "/".join(path) + "/" + row.label,
+            content_right=getattr(self, "_content_right", None),
+            open_submenu=submenu,
+            columns=getattr(self, "_columns", None),
         )
-        if (
-            not row.enabled
-            and row.reason
-            and imgui.is_item_hovered(
-                imgui.HoveredFlags_.allow_when_disabled | imgui.HoveredFlags_.delay_normal
-            )
-        ):
-            u.tooltip(row.reason)
-        if row.submenu and activated:
+        record["rows"].append(result.observation)
+        if row.submenu and result.activated:
             self.content(row.submenu, (*path, row.submenu))
             imgui.end_menu()
-        elif activated:
+        elif result.activated:
             self.dispatch(row.action)
+        advance_menu_row(self.ui, result)
+        self._last_row_bottom = result.box.outer.bottom
 
     def dispatch(self, action):
         st = self.study
@@ -577,7 +525,13 @@ class Menus:
         elif prefix == "create":
             from mojive.types import MeshShape
 
-            app._add_scene_object(MeshShape(value.lower()), value.lower())
+            if value == "Capsule":
+                if session.adapter.caps.topology_editing:
+                    app._add_model_primitive("capsule", "capsule")
+            elif value == "Ellipsoid":
+                app._add_scene_object(MeshShape.SPHERE, "ellipsoid", size=(0.65, 0.45, 0.35))
+            else:
+                app._add_scene_object(MeshShape(value.lower()), value.lower())
         elif prefix == "dialog":
             self.dialog_pending = value
         elif action == "play":
@@ -726,71 +680,7 @@ class Menus:
             imgui.end_popup()
 
     def color_control(self, entity, x, y, width):
-        from .scene_preview import rgba
-
-        u, s = self.ui, self.s
-        u.text(x, y, "Base color", MUTED, 13)
-        clicked = u.button("material-color", x, y + 22 * s, width / s, 30, filled=True)
-        u.rect(
-            x + 7 * s,
-            y + 29 * s,
-            16 * s,
-            16 * s,
-            tuple(int(v * 255) for v in rgba(entity["color"])),
-            3,
-        )
-        u.text(x + 34 * s, y + 31 * s, entity["color"].upper(), TEXT, 13, mono=True)
-        u.role_icon("down", x + width - 23 * s, y + 23 * s, 12 * s, 28 * s, role="inline", c=DIM)
-        with self.style(controls=True):
-            if (clicked or self.requested_path == ("Color",)) and not imgui.is_popup_open("Color"):
-                self.color_before = True
-                self.study.preview.session.submit(cmd.BeginEditTransaction("Edit color"))
-                self.color_entity = entity
-                self.color_editor.begin(entity["rgba"])
-                imgui.open_popup("Color")
-            if not imgui.is_popup_open("Color"):
-                return
-            vp = imgui.get_main_viewport()
-            content_w = min(300 * s, max(136 * s, vp.work_size.x - 48 * s))
-            popup_w = content_w + 32 * s
-            popup_h = min(vp.work_size.y - 16 * s, content_w + 248 * s)
-            px = min(x, vp.pos.x + vp.size.x - popup_w - 8 * s)
-            py = y + 56 * s
-            if py + popup_h > vp.pos.y + vp.size.y - 8 * s:
-                py = max(vp.pos.y + 8 * s, y - popup_h)
-            imgui.set_next_window_pos((px, py))
-            imgui.set_next_window_size_constraints((popup_w, 0), (popup_w, vp.size.y - 16 * s))
-            if not imgui.begin_popup("Color"):
-                return
-            self.color_visible = True
-            record = self.shadow_and_record("Color", ("Color",))
-            record["controls"] = {}
-            imgui.text_unformatted(u.translate("Base color"))
-            changed, values = self.color_editor.draw(u, "color-editor", entity["rgba"], content_w)
-            record["controls"]["picker"] = list(u.hits["color-editor-picker"])
-            if "color-editor-hex" in u.hits:
-                record["controls"]["hex"] = list(u.hits["color-editor-hex"])
-            if changed:
-                entity["rgba"] = values
-                entity["color"] = "#" + "".join(f"{round(value * 255):02x}" for value in values[:3])
-            p = imgui.get_cursor_screen_pos()
-            u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, 13)
-            if u.button(
-                "done-color",
-                p.x + content_w - 64 * s,
-                p.y,
-                64,
-                28,
-                label="Done",
-                active=True,
-                enabled=not self.color_editor.error,
-            ):
-                imgui.close_current_popup()
-            record["controls"]["done"] = list(u.hits["done-color"])
-            imgui.end_popup()
+        return menu_color.color_control(self, entity, x, y, width)
 
     def finish_color_edit(self):
-        if self.color_before is not None and not self.color_visible:
-            self.study.preview.session.submit(cmd.EndEditTransaction())
-            self.color_before = None
-            self.color_entity = None
+        return menu_color.finish_color_edit(self)

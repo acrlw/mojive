@@ -11,8 +11,7 @@ from mojive.ui.panels.filters import severity_color
 from mojive.ui.panels.output import OutputPanel
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.viewport_widgets import pointer_tool_hint
-
-from .widgets import MUTED
+from mojive.ui.workspace.widgets import MUTED
 
 
 class ReferenceOutput(OutputPanel):

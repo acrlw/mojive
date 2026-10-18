@@ -15,6 +15,7 @@ from mojive.app.ui.window import create_window
 from mojive.interaction.gizmo import (
     AXIS_END,
     SCREEN_RING_RADIUS,
+    SIZE_PT,
     GizmoHandle,
     GizmoStyle,
     project,
@@ -123,7 +124,7 @@ def test_pose_and_actuator_value_rails_write_session_values(reference):
 
     hinge = next(joint for joint in app.session.joints if joint.name == "hinge_limited")
     before = app.session.frame.qpos.copy()
-    drag_rail("##pose-hinge")
+    drag_rail(f"##pose-joint-{hinge.joint_id}")
     after = app.session.frame.qpos.copy()
     assert after[hinge.qpos_adr] > before[hinge.qpos_adr] + 0.1
     assert after[hinge.qpos_adr] < np.radians(60)
@@ -171,7 +172,7 @@ def test_flat_drag_feedback_and_undo(reference, tool, handle):
     gizmo = app.gizmo
     frame, camera, rect = gizmo._frame, app._camera_view(), app._viewport_rect
     assert frame.style is GizmoStyle.FLAT and app.backend._gizmo is None
-    length = world_scale(camera, frame.position, rect[3], frame.size_px)
+    length = world_scale(camera, frame.position, rect[3], SIZE_PT * study.s)
     center = project(camera, (frame.position,), rect)[0, :2]
     if tool == "rotate":
         radius = length * SCREEN_RING_RADIUS
@@ -193,7 +194,15 @@ def test_flat_drag_feedback_and_undo(reference, tool, handle):
         end = start + direction * 30 * study.s
     study.event("add_mouse_pos_event", *start)
     study.frame(2)
-    assert gizmo.hovered_handle is handle
+    if gizmo.hovered_handle is not handle:
+        save(study, f"{tool}-hover-target-{study.s:g}")
+    assert gizmo.hovered_handle is handle, (
+        start,
+        rect,
+        tuple(imgui.get_io().mouse_pos),
+        app.router.claim,
+        app._state,
+    )
     study.event("add_mouse_button_event", 0, True)
     assert gizmo.using
     feedback = study.event("add_mouse_pos_event", *end)

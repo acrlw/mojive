@@ -23,19 +23,23 @@ class GeometryView(enum.StrEnum):
 
 @dataclass(frozen=True)
 class GeometryStyle:
-    """Display colors and opacity for geometry comparisons.
+    """Display colors, opacity and ground appearance without changing scene assets.
 
     Colors are sRGB values in [0, 1]. In Both, ``visual_opacity`` multiplies
     authored appearance alpha and ``collision_opacity`` controls collision
     coverage. Shared primitives are drawn once with their authored material.
-    Collision-only view stays opaque. Physics materials remain unchanged.
+    Collision-only view stays opaque. ``quiet_ground`` gives infinite planes a
+    neutral, untextured display surface. Scene and physics materials remain unchanged.
     """
 
     collision_color: tuple[float, float, float] = (0.8, 0.45, 0.12)
     visual_opacity: float = 0.65
     collision_opacity: float = 0.35
+    quiet_ground: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.quiet_ground, bool):
+            raise ValueError("quiet_ground must be a bool")
         color = tuple(float(value) for value in self.collision_color)
         if len(color) != 3 or not all(np.isfinite(v) and 0 <= v <= 1 for v in color):
             raise ValueError("collision_color must contain three finite values in [0, 1]")

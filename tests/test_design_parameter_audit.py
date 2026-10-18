@@ -13,7 +13,12 @@ from mojive.tools.design_audit import (
     child_bounds_changes,
     rectangle_issues,
 )
-from mojive.tools.design_audit_draw import VERTEX_DTYPE, NativeDrawSamples, triangle_overlap
+from mojive.tools.design_audit_draw import (
+    VERTEX_DTYPE,
+    NativeDrawSamples,
+    _FontTexture,
+    triangle_overlap,
+)
 from mojive.tools.design_audit_evidence import (
     field_effect_status,
     inactive_reason,
@@ -354,7 +359,15 @@ def test_overlapping_workbench_draw_list_cannot_change_production_sample(monkeyp
         "get_io",
         lambda: SimpleNamespace(
             fonts=SimpleNamespace(
-                tex_list=[SimpleNamespace(get_tex_id=lambda: 7)],
+                tex_list=[
+                    SimpleNamespace(
+                        get_tex_id=lambda: 7,
+                        width=512,
+                        height=512,
+                        bytes_per_pixel=1,
+                        get_pixels_array=lambda: np.zeros((512, 512), np.uint8),
+                    )
+                ],
                 tex_uv_white_pixel=SimpleNamespace(x=0, y=0),
             )
         ),
@@ -392,3 +405,71 @@ def test_overlapping_workbench_draw_list_cannot_change_production_sample(monkeyp
         SimpleNamespace(_editor_window=lambda window: window.id_ == 2)
     ).sample({**content, "visibleHit": [0, 0, 10, 10]})
     assert len(transparent) == source["triangleCount"] == 0
+
+
+def test_font_texture_pixels_are_evidence_when_glyph_quads_and_ink_are_identical(monkeypatch):
+    vertices = np.zeros(3, dtype=VERTEX_DTYPE)
+    vertices["position"] = [[1, 1], [9, 1], [1, 9]]
+    vertices["uv"] = [[0.1, 0.1], [0.2, 0.1], [0.1, 0.2]]
+    vertices["color"] = 0xFFFFFFFF
+    triangles = np.array([[0, 1, 2]])
+    positions = vertices["position"][triangles]
+    texture = _FontTexture(
+        SimpleNamespace(
+            width=512,
+            height=512,
+            bytes_per_pixel=1,
+            get_pixels_array=lambda: np.arange(512 * 512, dtype=np.uint8),
+        )
+    )
+    commands = [
+        (
+            triangles,
+            positions,
+            positions.min(axis=1),
+            positions.max(axis=1),
+            (0, 0, 10, 10),
+            texture,
+        )
+    ]
+    monkeypatch.setattr(
+        imgui,
+        "get_io",
+        lambda: SimpleNamespace(
+            fonts=SimpleNamespace(tex_uv_white_pixel=SimpleNamespace(x=0, y=0))
+        ),
+    )
+    record = {"key": "caption", "windowId": 1, "kind": "button", "visibleHit": [0, 0, 10, 10]}
+    initial = NativeDrawSamples.sample_batch((vertices, commands), record)[0]
+    vertices["uv"] += 0.25
+    changed = NativeDrawSamples.sample_batch((vertices, commands), record)[0]
+    np.testing.assert_array_equal(initial[:, :4], changed[:, :4])
+    assert not np.array_equal(initial[:, 4:], changed[:, 4:])
+    before, after = snapshot(record), snapshot(record)
+    before["instanceVertices"] = {"1:caption": initial}
+    after["instanceVertices"] = {"1:caption": changed}
+    assert ParameterAudit.differences(before, after)["changedDrawKeys"] == ["1:caption"]
+
+
+def test_identical_glyph_bitmap_survives_atlas_growth_and_repacking():
+    glyph = np.arange(16, dtype=np.uint8).reshape(4, 4)
+    original = np.zeros((16, 16), np.uint8)
+    original[1:5, 2:6] = glyph
+    repacked = np.zeros((32, 32), np.uint8)
+    repacked[10:14, 20:24] = glyph
+
+    def texture(pixels):
+        return _FontTexture(
+            SimpleNamespace(
+                width=pixels.shape[1],
+                height=pixels.shape[0],
+                bytes_per_pixel=1,
+                get_pixels_array=lambda: pixels,
+            )
+        )
+
+    before = texture(original).signature(np.array([[2, 1], [6, 1], [2, 5]]) / 16)
+    uv_after = np.array([[20, 10], [24, 10], [20, 14]]) / 32
+    assert texture(repacked).signature(uv_after) == before
+    repacked[11, 21] += 1
+    assert texture(repacked).signature(uv_after) != before

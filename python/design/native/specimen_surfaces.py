@@ -9,6 +9,7 @@ from mojive.design.native.specimen_groups import actions, tree
 from mojive.ui.design_palette import rgba8
 from mojive.ui.workspace.timeline_header import model_header_layout
 from mojive.ui.workspace.widgets import color
+from mojive.ui.workspace.window_chrome import surface_ink
 
 
 def heading(owner, ui, engine, style, part, bounds):
@@ -82,7 +83,7 @@ def form(owner, ui, engine, style, part, bounds):
 
 def panels(owner, ui, engine, style, part, bounds):
     s = ui.s
-    ui.rect(*bounds.tuple(), rgba8("child"), r=8)
+    ui.rect(*bounds.tuple(), surface_ink(ui, part, "background"), r=8, color_resolved=True)
     inner = bounds.inset(16 * s, 16 * s, 16 * s, 16 * s)
     if part in ("panel_body", "dialog_body", "settings_page"):
         return form(owner, ui, engine, style, part, inner)
@@ -90,7 +91,7 @@ def panels(owner, ui, engine, style, part, bounds):
         boxes = []
         for i, (label, icon) in enumerate(
             (
-                ("常规", "settings"),
+                ("常规", "general"),
                 ("相机", "camera"),
                 ("交互", "mouse"),
                 ("渲染", "shading"),
@@ -119,7 +120,10 @@ def panels(owner, ui, engine, style, part, bounds):
             "dialog_header",
             Rect(inner.x, inner.y, inner.width, 48 * s),
         )
-        nav_w = min(126 * s, inner.width * 0.28)
+        requested = ui.metric(
+            "settings_nav", "navWidth", ui.metric("settings_layout", "navWidth", 0)
+        )
+        nav_w = min(requested * s or 126 * s, inner.width / 2)
         y = inner.y + 52 * s
         children += panels(
             owner,
@@ -158,16 +162,36 @@ def panels(owner, ui, engine, style, part, bounds):
 
 
 def timeline(owner, ui, engine, style, part, bounds):
+    if part == "timeline_body":
+        from mojive.ui.workspace.timeline_body import body_corner_scope
+
+        with body_corner_scope(ui):
+            return _timeline(owner, ui, engine, style, part, bounds)
+    return _timeline(owner, ui, engine, style, part, bounds)
+
+
+def _timeline(owner, ui, engine, style, part, bounds):
     s = ui.s
     box = style.box(*bounds.tuple(), scale=s)
     c = box.content
+    if part == "timeline_body":
+        from mojive.ui.workspace.timeline_body import body_geometry
+
+        geometry = body_geometry(ui)
+        c = box.frame.inset(*geometry.padding, *geometry.padding)
+        ui.rect(
+            *box.frame.tuple(),
+            surface_ink(ui, "timeline_body", "background"),
+            r=geometry.radius / s,
+            color_resolved=True,
+        )
     label_width = min(ui.metric("timeline_sheet", "labelWidth", 154) * s, c.width * 0.4)
     header, model = model_header_layout(ui, c.x, c.y, label_width, observe=True)
     header_height = max(header.outer.height, ui.metric("timeline_ruler", "height", 28) * s)
     header_gap = ui.metric("timeline_sheet", "headerGap", 8) * s
     row_height = ui.metric("timeline_lane", "height", 36) * s
     rows = []
-    if part in ("timeline_model_group", "timeline_sheet", "timeline_ruler"):
+    if part in ("timeline_body", "timeline_model_group", "timeline_sheet", "timeline_ruler"):
         r = engine.select(
             "reference-model",
             model.rectangles[0],
@@ -429,7 +453,14 @@ SURFACE_RENDERERS = {
         panels,
     ),
     **dict.fromkeys(
-        ("timeline_model_group", "timeline_sheet", "timeline_ruler", "timeline_lane", "lane_label"),
+        (
+            "timeline_body",
+            "timeline_model_group",
+            "timeline_sheet",
+            "timeline_ruler",
+            "timeline_lane",
+            "lane_label",
+        ),
         timeline,
     ),
     **dict.fromkeys(

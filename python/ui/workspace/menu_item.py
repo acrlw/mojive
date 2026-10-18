@@ -13,3 +13,8 @@ class Item:
     checked: bool = False
     submenu: str = ""
     reason: str = ""
+    checkable: bool = False
+
+    def __post_init__(self):
+        if self.checked and not self.checkable:
+            object.__setattr__(self, "checkable", True)

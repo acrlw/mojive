@@ -43,13 +43,19 @@ _CATEGORY_SEARCH_TERMS = {
         "backend graphics device scene lights shadow casters quality performance balanced high",
         "debug view labels frames",
         "renderer render flags outline tonemap msaa mesh lod detail",
+        "viewport appearance editor ground scene low contrast plane 地面 外观 低对比 平面",
     ),
     "MuJoCo Visuals": (
-        "visual groups bvh depth geometry both collision color opacity",
+        "content visualization 内容 可视化 visual groups bvh depth geometry both collision color opacity",
         "mjt rnd flag shadow wireframe reflection additive skybox fog haze cull face",
         "mjt vis flag joint actuator camera light contact force split inertia bvh contact color shape sphere cylinder point 接触点 颜色 样式 球 圆柱",
     ),
 }
+
+
+def settings_category_label(category: str) -> str:
+    """Keep persisted group identities stable while exposing backend-neutral labels."""
+    return "Content visualization" if category == "MuJoCo Visuals" else category
 
 
 def settings_category_matches(category: str, query: str) -> bool:
@@ -58,7 +64,9 @@ def settings_category_matches(category: str, query: str) -> bool:
     tokens = query.casefold().split()
     if not tokens:
         return True
-    searchable = " ".join((category, *_CATEGORY_SEARCH_TERMS.get(category, ()))).casefold()
+    searchable = " ".join(
+        (category, settings_category_label(category), *_CATEGORY_SEARCH_TERMS.get(category, ()))
+    ).casefold()
     return all(token in searchable for token in tokens)
 
 

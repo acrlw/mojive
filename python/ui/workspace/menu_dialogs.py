@@ -153,14 +153,17 @@ def dialogs(menu):
         )
         footer_pad = footer_style.edges("padding", s, (16, 8, 16, 14))
         footer_margin = footer_style.edges("margin", s)
-        done_style = u.component_style("button")
-        done_padding = done_style.edges("padding", s, (6, 0, 6, 0))
-        done_font = done_style.get("fontSize", BODY_SIZE)
-        done_width = max(
-            72 * s,
-            u.measure("Done", done_font, font_resolved=True) + done_padding[0] + done_padding[2],
-        )
-        done_size = control_size(u, "done-guide", done_width / s, 28, label="Done")
+        with u.component_scope("dialog_footer"):
+            done_style = u.component_style("button")
+            done_padding = done_style.edges("padding", s, (6, 0, 6, 0))
+            done_font = done_style.get("fontSize", BODY_SIZE)
+            done_width = max(
+                72 * s,
+                u.measure("Done", done_font, font_resolved=True)
+                + done_padding[0]
+                + done_padding[2],
+            )
+            done_size = control_size(u, "done-guide", done_width / s, 28, label="Done")
         footer_height = (
             done_size[1] + footer_pad[1] + footer_pad[3] + footer_margin[1] + footer_margin[3]
         )
@@ -190,7 +193,11 @@ def dialogs(menu):
         body_font = body_style.get("fontSize", style.get("fontSize", BODY_SIZE))
         body_line = max(body_font, body_style.line_height(body_font * 1.4)) * s
         body_gap = (body_style.get("rowGap") if u.design is not None else 12) * s
-        imgui.push_font(u.body, body_font * s)
+        imgui.push_font(u.resolve_font(body_style), body_font * s)
+        for slot, fallback in ((imgui.Col_.text, TEXT), (imgui.Col_.text_disabled, DIM)):
+            fallback = u.ink(fallback, body_style)
+            tint = u.style_color(body_style, "textColor", fallback)
+            imgui.push_style_color(slot, tuple(channel / 255 for channel in tint))
         imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * s, body_gap))
         imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
         imgui.begin_child("Guide content", (w, body.content.height))
@@ -247,11 +254,13 @@ def dialogs(menu):
                 q = imgui.get_cursor_screen_pos()
                 column = w * 0.47
                 if (
-                    u.measure(title, body_font) + 12 * s > column
-                    or u.measure(value, body_font) > w - column
+                    u.measure(title, body_font, style=body_style) + 12 * s > column
+                    or u.measure(value, body_font, style=body_style) > w - column
                 ):
                     imgui.push_text_wrap_pos(0)
-                    imgui.text_colored(tuple(v / 255 for v in MUTED), u.translate(title))
+                    fallback = u.ink(MUTED, body_style)
+                    tint = u.style_color(body_style, "textColor", fallback)
+                    imgui.text_colored(tuple(v / 255 for v in tint), u.translate(title))
                     imgui.text_wrapped(u.translate(value))
                     imgui.pop_text_wrap_pos()
                     imgui.dummy((0, body_gap))
@@ -275,23 +284,24 @@ def dialogs(menu):
         imgui.end_child()
         imgui.pop_style_var()
         imgui.pop_font()
-        imgui.pop_style_color()
+        imgui.pop_style_color(3)
         u.line(footer.frame.x, footer.frame.y, footer.frame.width)
         button_width = min(footer.content.width, done_size[0])
         button = footer_style.align_rect(
             footer.content, button_width, done_size[1], horizontal=footer_style.get("align", "end")
         )
-        button_frame = control_frame_size(
-            u, "done-guide", button.width, button.height, label="Done"
-        )
-        if u.button(
-            "done-guide",
-            button.x,
-            button.y,
-            *button_frame,
-            label="Done",
-            active=True,
-            width_limit=button_frame[0] * s,
-        ):
-            imgui.close_current_popup()
+        with u.component_scope("dialog_footer"):
+            button_frame = control_frame_size(
+                u, "done-guide", button.width, button.height, label="Done"
+            )
+            if u.button(
+                "done-guide",
+                button.x,
+                button.y,
+                *button_frame,
+                label="Done",
+                active=True,
+                width_limit=button_frame[0] * s,
+            ):
+                imgui.close_current_popup()
         imgui.end_popup()

@@ -1,5 +1,7 @@
 """Native Inspector component appearance and real input at the desktop window size."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from examples.ui_design.native.appearance_review import _inspector_size
@@ -195,6 +197,11 @@ def test_physics_and_joint_fields_reflow_as_uniform_groups(runtime, monkeypatch,
         study.inspector_tab = "Physics"
         painted.clear()
         study.frame(4)
+        inspector = study.preview.panels.get("inspector")
+        inspector._body_property_edit = replace(
+            session.body_properties(body.node_id), inertia_mode="diagonal"
+        )
+        study.frame(3)
         if width >= 344:
             for tab in ("Properties", "Physics", "Material", "Joint"):
                 assert study.ui.translate(tab) in painted, ("Inspector tab was truncated", tab)

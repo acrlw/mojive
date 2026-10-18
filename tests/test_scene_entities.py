@@ -10,32 +10,28 @@ from mojive import commands as cmd
 from mojive import math3d
 from mojive.adapters.base import FrameNeeds, NodeType, SceneFrame, SceneNode, SceneSource
 from mojive.adapters.static import StaticSceneAdapter
-from mojive.interaction.gizmo import camera_icon_segments, project
-from mojive.render.backend import BackendCaps
+from mojive.interaction.gizmo import camera_icon_segments, project, scene_icon_triangles
+from mojive.interaction.scene_icons import SCENE_ICON_GRID, scene_icon_geometry, scene_icon_strokes
+from mojive.render.backend import BackendCaps, FrameMode, LabelMode, RenderFlag
 from mojive.render.debugdraw import DebugDraw, Occlusion, PrimitiveType
+from mojive.render.overlay import OverlayPublisher, OverlayState
 from mojive.scene import Scene
 from mojive.scene.queries import node_world_pose
 from mojive.session import Session
 from mojive.types import CameraView, Light, LightSet, LightType
 from mojive.ui.gizmo import ObjectGizmo, _set_camera_from_world, _set_light_from_world
-from mojive.ui.icons import (
-    ICON_GRID,
-    production_helper_strokes,
-    production_icon_metrics,
-    production_icon_offset,
-)
 from mojive.ui.scene_entities import (
     CAMERA_HELPER_SIZE_PT,
     HELPER_ICON_LAYER,
     HELPER_LAYER,
     SceneEntityHelpers,
-    _production_helper_geometry,
     camera_frustum_segments,
     camera_rotation,
     light_icon_segments,
     spot_cone_segments,
     spot_helper_length,
 )
+from mojive.ui.workspace.widget_icons import GLYPHS
 
 
 def test_static_light_composition_reuses_authored_values_and_observes_edits():
@@ -85,11 +81,12 @@ def test_camera_helper_is_a_screen_facing_camera_glyph() -> None:
 
     starts, ends = camera_icon_segments(views, editor, 800.0, 26.0)
 
-    assert starts.shape == ends.shape == (48, 3)
+    count = sum(len(path.points) for path in scene_icon_strokes("camera"))
+    assert starts.shape == ends.shape == (2 * count, 3)
     # The editor glyph does not collapse or turn into a projection triangle
     # when the represented camera points in a different direction.
-    assert starts[:24] == pytest.approx(starts[24:])
-    assert ends[:24] == pytest.approx(ends[24:])
+    assert starts[:count] == pytest.approx(starts[count:])
+    assert ends[:count] == pytest.approx(ends[count:])
 
 
 def test_spot_influence_uses_range_and_cutoff() -> None:
@@ -244,9 +241,7 @@ def test_helpers_publish_selected_frustum_and_pick_camera_anchor() -> None:
     assert layer.occlusion is Occlusion.GHOST
     assert icon_layer.occlusion is Occlusion.ALWAYS
     assert layer.count_of(PrimitiveType.LINE) == 12
-    assert icon_layer.count_of(PrimitiveType.STROKE) == sum(
-        len(path.points) for path in production_helper_strokes("helper-camera")
-    )
+    assert icon_layer.count_of(PrimitiveType.TRIANGLE) == len(scene_icon_geometry("camera"))
     assert layer.count_of(PrimitiveType.POINT) == 0
 
     hit = helpers.pick(session, editor_camera, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0)
@@ -376,6 +371,7 @@ def test_view_through_camera_hides_editor_helpers() -> None:
     assert layer.count_of(PrimitiveType.POINT) == 0
     assert icon_layer.count_of(PrimitiveType.LINE) == 0
     assert icon_layer.count_of(PrimitiveType.STROKE) == 0
+    assert icon_layer.count_of(PrimitiveType.TRIANGLE) == 0
     assert helpers.pick(session, view, (0.0, 0.0, 1000.0, 800.0), (500.0, 400.0), 1.0, True) == 0
 
 
@@ -400,16 +396,9 @@ def test_unselected_light_helpers_use_semantic_icons_without_direction_clutter()
     assert layer.count_of(PrimitiveType.POINT) == 0
     assert layer.count_of(PrimitiveType.ARROW) == 0
     assert layer.count_of(PrimitiveType.LINE) == 0
-    paths = production_helper_strokes("helper-light")
-    assert icon_layer.count_of(PrimitiveType.LINE) == 3 * sum(not path.closed for path in paths)
-    assert icon_layer.count_of(PrimitiveType.STROKE) == 3 * sum(
-        len(path.points) for path in paths if path.closed
-    )
-    assert set(icon_layer._index) == {
-        f"light:{object_id}:{part}"
-        for object_id in (node.object_id for node in session.nodes if node.type is NodeType.LIGHT)
-        for part in ("ring", "details")
-    }
+    assert icon_layer.count_of(PrimitiveType.LINE) == 0
+    assert icon_layer.count_of(PrimitiveType.TRIANGLE) == 3 * len(scene_icon_geometry("light"))
+    assert set(icon_layer._index) == {"lights:glyph"}
 
 
 def test_selected_spot_light_publishes_icon_direction_and_influence() -> None:
@@ -438,15 +427,14 @@ def test_selected_spot_light_publishes_icon_direction_and_influence() -> None:
     layer = backend.debug.layer(HELPER_LAYER)
     icon_layer = backend.debug.layer(HELPER_ICON_LAYER)
     assert {"lights:directions", f"light:{node.object_id}:range"} <= set(layer._index)
-    assert {f"light:{node.object_id}:ring", f"light:{node.object_id}:details"} == set(
-        icon_layer._index
-    )
+    assert set(icon_layer._index) == {"lights:glyph"}
 
 
 def test_light_helper_icon_geometry_is_screen_facing_and_batched() -> None:
     positions = np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)), np.float32)
     starts, ends = light_icon_segments(positions, CameraView(), 800.0)
-    assert starts.shape == ends.shape == (44, 3)
+    count = sum(len(path.points) - int(not path.closed) for path in scene_icon_strokes("light"))
+    assert starts.shape == ends.shape == (2 * count, 3)
     assert np.all(np.isfinite(starts))
 
 
@@ -490,18 +478,15 @@ def test_scene_entity_icon_geometry_scales_with_its_stroke_width() -> None:
 
 
 def test_camera_and_light_helper_sizes_are_visually_balanced() -> None:
-    camera = production_icon_metrics("helper-camera")
-    light = production_icon_metrics("helper-light")
-    camera_size = max(camera.bounds[2] - camera.bounds[0], camera.bounds[3] - camera.bounds[1])
-    light_size = max(light.bounds[2] - light.bounds[0], light.bounds[3] - light.bounds[1])
-
-    assert camera.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
-    assert light.center_offset == pytest.approx((0.0, 0.0), abs=1e-6)
-    assert 0.9 < camera_size / light_size < 1.1
-    assert max(camera_size, light_size) <= ICON_GRID - 1.0 + 1e-6
+    bounds = [np.asarray(GLYPHS[name]["bounds"]) for name in ("camera", "light")]
+    sizes = [max(box[2:] - box[:2]) for box in bounds]
+    for box in bounds:
+        assert (box[:2] + box[2:]) / 2 == pytest.approx((12, 12))
+    assert sizes[0] == pytest.approx(sizes[1])
+    assert max(sizes) <= SCENE_ICON_GRID - 1.0
 
 
-@pytest.mark.parametrize("name", ("helper-camera", "helper-light"))
+@pytest.mark.parametrize("name", ("camera", "light"))
 def test_production_scene_helper_uses_reviewed_optical_placement(name: str) -> None:
     camera = CameraView(
         eye=np.array((0.0, -5.0, 2.0), np.float32),
@@ -509,16 +494,57 @@ def test_production_scene_helper_uses_reviewed_optical_placement(name: str) -> N
         aspect=1.5,
     )
     position = np.array(((0.0, 0.0, 1.0),), np.float32)
-    paths = _production_helper_geometry(name, position, camera, 800.0, 1.0)
+    triangles = scene_icon_triangles(name, position, camera, 800.0, CAMERA_HELPER_SIZE_PT)
     screen = project(
         camera,
-        np.concatenate(tuple(points[0] for points, _width, _closed in paths)),
+        triangles,
         (0.0, 0.0, 1200.0, 800.0),
     )
     anchor = project(camera, position, (0.0, 0.0, 1200.0, 800.0))[0]
     box_center = (screen[:, :2].min(axis=0) + screen[:, :2].max(axis=0)) * 0.5
 
-    assert box_center == pytest.approx(anchor[:2] + production_icon_offset(name), abs=0.05)
+    assert box_center == pytest.approx(anchor[:2], abs=0.05)
+
+
+def test_editor_and_diagnostic_icon_layers_keep_independent_switches_and_shared_geometry():
+    scene = Scene()
+    scene.add_camera("shot", CameraView(eye=np.array((0.0, 0.0, 1.0), np.float32)))
+    scene.add_light("key", Light(type=LightType.POINT))
+    session = Session(StaticSceneAdapter(scene))
+    session.tick(FrameNeeds.none())
+    debug = DebugDraw()
+    flags = {}
+    publisher = OverlayPublisher(debug, flags)
+    publisher.set_scene(session.source)
+    camera = CameraView()
+    state = OverlayState(camera, 800, 0, LabelMode.NONE, FrameMode.NONE, 0)
+    helpers = SceneEntityHelpers()
+    helpers.publish(SimpleNamespace(debug=debug), session, camera, 800, 1)
+    publisher._publish_scene_icons(session.frame, state)
+    icons = debug.layer(HELPER_ICON_LAYER)
+    assert icons.count_of(PrimitiveType.TRIANGLE) > 0
+    assert debug.layer("scene.cameras").primitives == 0
+    assert debug.layer("scene.lights").primitives == 0
+
+    expected = {}
+    for kind in ("cameras", "lights"):
+        entry = icons._index[f"{kind}:glyph"]
+        store = icons._stores[PrimitiveType.TRIANGLE]
+        expected[kind] = store.positions[entry.start : entry.start + entry.count].copy()
+    flags.update({RenderFlag.CAMERA: True, RenderFlag.LIGHT: True})
+    helpers.publish(SimpleNamespace(debug=debug), session, camera, 800, 1, enabled=False)
+    publisher._publish_scene_icons(session.frame, state)
+    assert icons.primitives == 0
+    for kind in ("cameras", "lights"):
+        layer = debug.layer(f"scene.{kind}")
+        assert layer.occlusion is Occlusion.GHOST
+        store = layer._stores[PrimitiveType.TRIANGLE]
+        np.testing.assert_array_equal(store.positions[: store.count], expected[kind])
+        assert layer.count_of(PrimitiveType.POINT) == 0
+
+    helpers.publish(SimpleNamespace(debug=debug), session, camera, 800, 1)
+    assert icons.count_of(PrimitiveType.TRIANGLE) > 0
+    assert debug.layer("scene.cameras").primitives > 0
 
 
 def test_scene_entity_helpers_index_large_hierarchies_once_per_structure() -> None:

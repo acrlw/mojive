@@ -5,6 +5,41 @@ from mojive.design.help import condition_help, get_field_help, get_part_help
 from mojive.design.specification import SCHEMA
 from mojive.ui.design_palette import rgba
 
+_PARAMETER_GROUPS = ("尺寸与形状", "排版与间距", "文字", "图标")
+_EDGE_FIELDS = frozenset(
+    prefix + edge for prefix in ("padding", "margin") for edge in ("Left", "Right", "Top", "Bottom")
+)
+
+
+def _parameter_group(field, rule):
+    if group := rule.get("group"):
+        return {"边距与间距": "排版与间距", "尺寸": "尺寸与形状"}.get(group, group)
+    if field in (
+        "fontSize",
+        "fontFamily",
+        "textColor",
+        "lineHeightMode",
+        "lineHeight",
+        "textAlign",
+        "detailSize",
+        "valueSize",
+        "unitSize",
+    ):
+        return "文字"
+    name = field.lower()
+    if "icon" in name or "thumb" in name:
+        return "图标"
+    if any(
+        word in name for word in ("gap", "padding", "margin", "align", "layout", "columns", "label")
+    ):
+        return "排版与间距"
+    return "尺寸与形状"
+
+
+def _parameter_groups(fields):
+    declared = dict.fromkeys(_parameter_group(field, rule) for field, rule in fields.items())
+    return _PARAMETER_GROUPS + tuple(group for group in declared if group not in _PARAMETER_GROUPS)
+
 
 class EditorPages:
     def draw_contents(self, workspace):
@@ -55,6 +90,8 @@ class EditorPages:
         from imgui_bundle import imgui as g
 
         related = {
+            "assets_material": ("assets_material_list",),
+            "assets_material_list": ("assets_material",),
             "output_row": ("output_list", "output_toolbar", "output_layout"),
             "output_list": ("output_row", "output_toolbar", "output_layout"),
             "output_toolbar": ("output_layout", "output_list", "output_row"),
@@ -66,7 +103,20 @@ class EditorPages:
             "status_metrics": ("statusbar", "status_hints", "status_separator"),
             "status_separator": ("statusbar", "status_hints", "status_metrics"),
         }
-        parts = list(dict.fromkeys((*self.selection_parts, *related.get(self.part, ()))))
+        definition = self.editor.catalog[self.part]
+        controls = definition.get("controlParts", {}).values()
+        parent = definition.get("controlGroup")
+        parts = list(
+            dict.fromkeys(
+                (
+                    *controls,
+                    *((parent,) if parent else ()),
+                    *((definition["basePart"],) if parent else ()),
+                    *self.selection_parts,
+                    *related.get(self.part, ()),
+                )
+            )
+        )
         owner = self.spacing_owner()
         if owner is not None:
             parts.insert(0, owner[0])
@@ -75,10 +125,18 @@ class EditorPages:
                 part for part in parts if part in self.editor.catalog and part != self.part
             )
         )
-        if not parts:
+        shared = [
+            part for part in parts if self.editor.catalog[part].get("selectionScope") != "group"
+        ]
+        parts = [part for part in parts if part not in shared]
+        if not parts and not shared:
             return
-        g.text_disabled("关联分组")
-        for index, part in enumerate(parts[:3]):
+        # Short native windows reserve the remaining space for parameter input.
+        # Related owners remain reachable in the same menu used for overflow.
+        visible_parts = parts[:3] if g.get_content_region_avail().y >= 360 * workspace.s else []
+        if visible_parts:
+            g.text_disabled("关联分组")
+        for index, part in enumerate(visible_parts):
             label = self.editor.catalog[part]["label"]
             if index:
                 self.next_button_on_row(label)
@@ -87,13 +145,16 @@ class EditorPages:
                 self.selected_field = None
                 self.field_search = ""
                 self.field_group = "全部参数"
-        if len(parts) > 3:
-            self.next_button_on_row("更多分组")
-            if self.button("更多分组", "more-parents"):
+        remaining_parts = parts[len(visible_parts) :]
+        if remaining_parts:
+            caption = "更多分组" if visible_parts else "关联分组"
+            if visible_parts:
+                self.next_button_on_row(caption)
+            if self.button(caption, "more-parents"):
                 g.open_popup("关联分组")
             if g.begin_popup("关联分组"):
                 try:
-                    for part in parts[3:]:
+                    for part in remaining_parts:
                         if g.selectable(self.editor.catalog[part]["label"] + "##" + part, False)[0]:
                             self.part = part
                             self.selected_field = None
@@ -102,6 +163,19 @@ class EditorPages:
                         self.record_item("parent/" + part)
                 finally:
                     g.end_popup()
+        if shared:
+            opened = g.tree_node("全局控件类（影响所有分组）##shared-classes")
+            self.record_item("shared-classes")
+            if opened:
+                try:
+                    for part in shared:
+                        if self.button(self.editor.catalog[part]["label"], "parent/" + part):
+                            self.part = part
+                            self.selected_field = None
+                            self.field_search = ""
+                            self.field_group = "全部参数"
+                finally:
+                    g.tree_pop()
 
     def draw_parameter_list(self, workspace):
         from imgui_bundle import imgui as g
@@ -125,10 +199,13 @@ class EditorPages:
         self.tooltip("按参数名称筛选，例如：行间距、字号、图标、对齐。")
         if filter_width:
             g.same_line()
+            groups = ("全部参数", *_parameter_groups(self.editor.catalog[self.part]["fields"]))
+            if self.field_group not in groups:
+                self.field_group = "全部参数"
             _, self.field_group = self.combo(
                 "##field-group",
                 self.field_group,
-                ("全部参数", "排版与间距", "文字", "图标", "尺寸与形状"),
+                groups,
                 key="field-group",
                 width=filter_width,
             )
@@ -235,6 +312,10 @@ class EditorPages:
             str(len(definition["fields"])) + " 项 · " + str(len(self.native_instances)) + " 个实例"
         )
         g.pop_style_color()
+        if definition.get("selectionScope") == "group":
+            g.text_disabled("独立分组 · " + definition["label"])
+        else:
+            g.text_disabled("全局控件类 · 影响所有分组")
         if self.button("定位到原生界面", "locate", tooltip=info["preview"]["steps"]):
             self.request_navigation(workspace)
         self.next_button_on_row("恢复此部件")
@@ -310,7 +391,8 @@ class EditorPages:
         if self.tool_button(workspace, "target", "locate", "定位到原生界面"):
             self.request_navigation(workspace)
         g.align_text_to_frame_padding()
-        g.text_disabled(f"{definition['category']} · {len(self.native_instances)} 处实例")
+        scope = "当前分组" if definition.get("selectionScope") == "group" else "全局控件类"
+        g.text_disabled(f"{scope} · {len(self.native_instances)} 处实例")
         reset_width = g.calc_text_size("恢复部件").x + 2 * g.get_style().frame_padding.x
         g.same_line(left + available - reset_width)
         if self.button(
@@ -318,8 +400,19 @@ class EditorPages:
         ):
             self.change(("parts", self.part), MISSING)
         g.spacing()
+        g.text_wrapped(definition["label"].replace(" · ", "  ›  "))
+        self.record_item("selection-path")
+        g.spacing()
 
     def spacing_owner(self):
+        control_group = self.editor.catalog[self.part].get("controlGroup")
+        if control_group is not None:
+            entry = self.editor.catalog[control_group]
+            layout = entry.get("layoutSpacing", {})
+            axes = ("rowGap",) if layout.get("kind") == "column" else ("columnGap", "rowGap")
+            fields = tuple(field for field in axes if field in entry["fields"])
+            if fields:
+                return control_group, fields
         owners = {
             "status_context": ("statusbar", ("columnGap",)),
             "status_hints": ("status_context", ("columnGap",)),
@@ -336,6 +429,8 @@ class EditorPages:
         }
         if self.part in owners:
             return owners[self.part]
+        if self.editor.catalog[self.part].get("selectionScope") != "group":
+            return None
         for parent in self.selection_parts:
             if parent in (self.part, "application") or parent not in self.editor.catalog:
                 continue
@@ -366,7 +461,8 @@ class EditorPages:
         if not matches:
             return
         g.spacing()
-        g.text_colored(rgba("primary"), "所属分组 · " + entry["label"])
+        g.text_disabled("组内间距")
+        self.tooltip(entry["label"], shown="组内间距")
         values = self.editor.effective(parent)
         for field, rule, label in matches:
             self.field(
@@ -376,6 +472,16 @@ class EditorPages:
                 values[field],
                 help={**get_field_help(parent, field), "shortLabel": label},
             )
+
+    def draw_part_field(self, workspace, field, fields, effective):
+        self.field(
+            workspace,
+            ("parts", self.part, field),
+            fields[field],
+            effective[field],
+            help=get_field_help(self.part, field),
+            condition=condition_help(self.part, field, effective),
+        )
 
     def draw_fields(self, workspace):
         from imgui_bundle import imgui as g
@@ -412,9 +518,12 @@ class EditorPages:
                 "alignItems",
                 "textAlign",
                 "fontSize",
+                "fontFamily",
+                "textColor",
                 "lineHeightMode",
                 "lineHeight",
                 "iconSize",
+                "iconColor",
                 "heightMode",
                 "height",
                 "minHeight",
@@ -428,30 +537,10 @@ class EditorPages:
                     list(fields).index(f),
                 ),
             )
-            groups = {name: [] for name in ("排版与间距", "尺寸与形状", "文字", "图标")}
+            groups = {name: [] for name in _parameter_groups(fields)}
             for field in ordered:
                 rule = fields[field]
-                group = (
-                    "文字"
-                    if field
-                    in (
-                        "fontSize",
-                        "lineHeightMode",
-                        "lineHeight",
-                        "textAlign",
-                        "detailSize",
-                        "valueSize",
-                        "unitSize",
-                    )
-                    else "图标"
-                    if "icon" in field.lower() or "thumb" in field.lower()
-                    else "排版与间距"
-                    if any(
-                        w in field.lower()
-                        for w in ("gap", "padding", "margin", "align", "layout", "columns", "label")
-                    )
-                    else "尺寸与形状"
-                )
+                group = _parameter_group(field, rule)
                 if self.field_group != "全部参数" and self.field_group != group:
                     continue
                 if self.field_matches(field, rule):
@@ -471,15 +560,31 @@ class EditorPages:
                 )
                 self.record_item("field-section/" + group)
                 if opened:
-                    for field in names:
-                        self.field(
-                            workspace,
-                            ("parts", self.part, field),
-                            fields[field],
-                            effective[field],
-                            help=get_field_help(self.part, field),
-                            condition=condition_help(self.part, field, effective),
+                    basic = [field for field in names if field not in _EDGE_FIELDS]
+                    edges = [field for field in names if field in _EDGE_FIELDS]
+                    for field in basic:
+                        self.draw_part_field(workspace, field, fields, effective)
+                    if edges:
+                        selected = self.selected_field
+                        if self.field_search or (
+                            selected
+                            and selected[:2] == ("parts", self.part)
+                            and selected[2] in edges
+                        ):
+                            g.set_next_item_open(True)
+                        count = sum(
+                            field in self.editor.spec.get("parts", {}).get(self.part, {})
+                            for field in edges
                         )
+                        caption = "四边独立设置" + (f" · {count} 项覆盖" if count else "")
+                        advanced = g.tree_node(caption + "##edge-overrides")
+                        self.record_item("field-advanced/" + group)
+                        if advanced:
+                            try:
+                                for field in edges:
+                                    self.draw_part_field(workspace, field, fields, effective)
+                            finally:
+                                g.tree_pop()
                 g.pop_id()
         elif self.mode in ("共享规范", "模块规范"):
             group = None

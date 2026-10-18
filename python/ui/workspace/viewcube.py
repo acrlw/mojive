@@ -54,7 +54,12 @@ class WorkspaceViewCube(ViewCube):
         return super().update(cam, rect, cursor, self.reference_scale, enabled=enabled)
 
     def draw(self, overlay, style_scale=1.0, **kwargs):
-        super().draw(overlay, self.reference_scale, **kwargs)
+        painter = (
+            self.design_ui.text_draw(overlay, "nav_widget")
+            if self.design_ui is not None
+            else overlay
+        )
+        super().draw(painter, self.reference_scale, **kwargs)
         if self._balls and self.design_ui is not None and self.design_ui.design is not None:
             from mojive.ui.viewcube import BACKDROP_RADIUS_PT
 

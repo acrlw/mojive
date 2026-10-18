@@ -5,7 +5,7 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.keyframe_editor.properties import draw_error, draw_selected
 from mojive.ui.workspace.design import CONTROL_RADIUS
 from mojive.ui.workspace.widgets import ACCENT, MUTED, TEXT
@@ -132,6 +132,7 @@ class NativeTimelineDetails:
             + padding[3]
         )
 
+    @part_scope("timeline_details")
     def draw(self, editor, ctx, editable):
         self.ctx = ctx
         p = imgui.get_cursor_screen_pos()
@@ -148,7 +149,7 @@ class NativeTimelineDetails:
         self._origin, self._width = (box.content.x, box.content.y), box.content.width
         font_size = self._style().get("fontSize", 14)
         imgui.set_cursor_screen_pos(self._origin)
-        imgui.push_font(ui.body, font_size * scale)
+        imgui.push_font(ui.resolve_font(self._style()), font_size * scale)
         imgui.push_style_var(
             imgui.StyleVar_.frame_padding,
             (8 * scale, max(0, (self._row_height() - font_size * scale) / 2)),
@@ -214,14 +215,16 @@ class NativeTimelineDetails:
         self._identity("diamond")
         _, name = ui.input_text("##keyframe-name", x + identity_width, y, name_width, name)
         self._record("timeline-detail-name")
-        if imgui.is_item_hovered():
-            ui.tooltip(f"{self.ctx.tr('name')}: {name}" if name else self.ctx.tr("name"))
+        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+            ui.tooltip(
+                f"{self.ctx.tr('name')}: {name}" if name else self.ctx.tr("name"), translate=False
+            )
         time_x = x + identity_width + name_width + gap if inline else x + identity_width
         time_y = y if inline else y + self._row_height() + self._row_gap()
         _, time = ui.input("##keyframe-time", time_x, time_y, time_width, time, format="%.9g s")
         self._record("timeline-detail-time")
-        if imgui.is_item_hovered():
-            ui.tooltip(self.ctx.tr("time"))
+        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+            ui.tooltip(self.ctx.tr("time"), translate=False)
         self._action_pos = (x, y + actions_y)
         return name, time
 
@@ -281,7 +284,7 @@ class NativeTimelineDetails:
             self._width, labels, fields=False
         )
         identity_width = self._identity_width(self._width)
-        self._identity("link" if deletable else "diamond")
+        self._identity("snapshot" if deletable else "diamond")
         ui.component_text(
             "timeline_details",
             Rect(x + identity_width, y, name_width, self._row_height()),
@@ -289,12 +292,16 @@ class NativeTimelineDetails:
             TEXT,
         )
         ui.hits["timeline-detail-name"] = (x + identity_width, y, name_width, self._row_height())
-        if ui.measure(
-            name, self._style().get("fontSize", 14)
-        ) > name_width and imgui.is_mouse_hovering_rect(
-            (x + identity_width, y), (x + identity_width + name_width, y + self._row_height())
-        ):
-            ui.tooltip(name)
+        if ui.measure(name, self._style().get("fontSize", 14)) > name_width:
+            imgui.internal.item_add(
+                imgui.internal.ImRect(
+                    (x + identity_width, y),
+                    (x + identity_width + name_width, y + self._row_height()),
+                ),
+                0,
+            )
+            if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+                ui.tooltip(name, translate=False)
         time_x = x + identity_width + name_width + self._gap(self._width)
         ui.component_text(
             "timeline_details",
@@ -369,9 +376,13 @@ class NativeTimelineDetails:
             icon="copy",
             tooltip=self.ctx.tr("Copy error"),
         )
-        if imgui.is_mouse_hovering_rect(
-            (x, y), (x + max(s, self._width - 34 * s), y + self._row_height())
-        ):
-            ui.tooltip(message)
+        imgui.internal.item_add(
+            imgui.internal.ImRect(
+                (x, y), (x + max(s, self._width - 34 * s), y + self._row_height())
+            ),
+            0,
+        )
+        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+            ui.tooltip(message, translate=False)
         self._advance(y + self._row_height())
         return copy

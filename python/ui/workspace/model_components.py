@@ -90,12 +90,13 @@ def component_actions(ui, part, key, label, labels, enabled):
         caption_height if above else box.content.height,
     )
     ui.component_text(part, text_rect, label, MUTED, translate=False)
-    if ui.measure(
-        label, font, translate=False, font_resolved=True
-    ) > text_rect.width and imgui.is_mouse_hovering_rect(
-        (text_rect.x, text_rect.y), (text_rect.right, text_rect.bottom)
-    ):
-        ui.tooltip(label, translate=False)
+    if ui.measure(label, font, translate=False, font_resolved=True) > text_rect.width:
+        imgui.internal.item_add(
+            imgui.internal.ImRect((text_rect.x, text_rect.y), (text_rect.right, text_rect.bottom)),
+            0,
+        )
+        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+            ui.tooltip(label, translate=False)
     x = box.content.x if above else box.content.right - total
     results = []
     for index, (text, (w, h), usable) in enumerate(zip(labels, sizes, enabled, strict=True)):

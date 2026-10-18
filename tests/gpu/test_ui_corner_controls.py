@@ -502,7 +502,8 @@ def test_focus_keeps_original_contour_and_child_scissor_when_partially_visible()
         assert hi.y > clip_bottom
         assert len(focus) > 8
         assert focus[:, 1].max() > hi.y
-        outside = pixels[int(np.ceil(clip_bottom)) : int(hi.y + 5), :350, :3]
+        top, bottom, right = window.points_to_pixels((clip_bottom, hi.y + 5, 350))
+        outside = pixels[int(np.ceil(top)) : int(bottom), : int(right), :3]
         pink = (outside[..., 0] > 200) & (outside[..., 1] < 100) & (outside[..., 2] > 100)
         assert not pink.any()
     finally:

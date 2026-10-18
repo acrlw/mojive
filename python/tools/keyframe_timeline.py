@@ -18,7 +18,8 @@ from mojive.scene.assets import resolve
 from .. import ViewerConfig, build
 from .. import commands as cmd
 from ..adapters.base import FrameNeeds
-from ..ui.panels.keyframes import timeline_channel_width, timeline_time_to_x
+from ..ui.keyframe_editor.track import TimelineLayout
+from ..ui.panels.keyframes import timeline_time_to_x
 from .ui_runtime import (
     _activate_panel,
     _click,
@@ -73,7 +74,6 @@ def timeline_point(viewer, time: float, row: str = "ruler") -> tuple[float, floa
     """Map time to a point in the actual ruler or recorded-take track."""
     lo, hi = _item_rect(viewer, "invisible_button", "##keyframe-dope-sheet")
     scale = viewer.window.style_scale
-    left = lo[0] + timeline_channel_width(hi[0] - lo[0], scale)
     panel = viewer.panels.get("Keyframes")
     workspace = getattr(viewer.app, "workspace", None)
     if workspace is not None:
@@ -86,18 +86,20 @@ def timeline_point(viewer, time: float, row: str = "ruler") -> tuple[float, floa
             else layout.lane_y({"model": 0, "take": 1, "snapshots": 2}[row])
         )
         return round(x), round(y)
+    # The hit rectangle excludes the measurement's trailing eight-point budget.
+    layout = TimelineLayout.measure(lo, (hi[0] - lo[0], hi[1] - lo[1] + 8 * scale), scale)
+    left, right = layout.time_bounds
     x = timeline_time_to_x(
         time,
         panel.editor.view_start,
         panel.editor.view_end,
         left,
-        hi[0],
+        right,
     )
-    row_height = (hi[1] - lo[1] - 32 * scale) / 3
     y = (
-        lo[1] + 12 * scale
+        layout.lo[1] + layout.ruler_height / 2
         if row == "ruler"
-        else lo[1] + 32 * scale + row_height * ({"model": 0.5, "take": 1.5, "snapshots": 2.5}[row])
+        else layout.lane_y({"model": 0, "take": 1, "snapshots": 2}[row])
     )
     # Native ImGui floors mouse coordinates; inject the nearest pixel to the target.
     return round(x), round(y)

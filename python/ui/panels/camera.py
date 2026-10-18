@@ -24,6 +24,7 @@ from mojive.types import CameraView
 from mojive.ui.camera import DEFAULT_PITCH, DEFAULT_YAW
 from mojive.ui.camera_tracking import can_track_node
 from mojive.ui.controls import begin_property_table, clearable_combo, property_row
+from mojive.ui.localization import camera_caption
 from mojive.ui.panels import (
     Panel,
     PanelContext,
@@ -107,7 +108,8 @@ class CameraPanel(Panel):
 
     def __init__(self) -> None:
         super().__init__()
-        self._bookmark_name = "view-1"
+        self.bookmark_directory = Path("output/snapshots/cameras")
+        self._bookmark_name = ""
         self._bookmark_index = 0
         self._bookmark_error = ""
         self._tracking_filter = ""
@@ -222,7 +224,7 @@ class CameraPanel(Panel):
                 int(ctx.tracking.axes == "xyz"),
                 theme=ctx.theme,
             )
-            imgui.set_item_tooltip(ctx.tr("X-Y keeps camera height. X-Y-Z also follows height."))
+            self._tooltip(ctx.tr("X-Y keeps camera height. X-Y-Z also follows height."))
             if axes != int(ctx.tracking.axes == "xyz"):
                 ctx.set_camera_tracking(replace(ctx.tracking, axes="xyz" if axes else "xy"))
             self._property_label(ctx.tr("Smoothing"), rail=True)
@@ -237,7 +239,7 @@ class CameraPanel(Panel):
                 show_reset=False,
                 unit="s",
             )
-            imgui.set_item_tooltip(
+            self._tooltip(
                 ctx.tr("Time to halve the position error. Higher is smoother; 0 follows directly.")
             )
             if edit.changed:
@@ -246,38 +248,74 @@ class CameraPanel(Panel):
         if self.presentation is None:
             imgui.separator()
 
+    def save_bookmark(self, ctx: PanelContext, camera: Any, *, replace_name=None) -> bool:
+        """Persist a new name or explicitly update the selected bookmark."""
+        try:
+            view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
+            name = replace_name or next_available_snapshot_name(
+                self._bookmark_name.strip() or "view-1", self.bookmark_directory
+            )
+            path = save_named_snapshot(
+                name, camera_bookmark(camera, view, ctx.model_camera_id), self.bookmark_directory
+            )
+            names = list_named_snapshots(self.bookmark_directory)
+            self._bookmark_index = names.index(path.stem)
+            if replace_name is None:
+                self._bookmark_name = ""
+            self._bookmark_error = ""
+            ctx.report(f"{ctx.tr('Saved camera bookmark to')} {path.resolve()}", level="success")
+            return True
+        except (OSError, TypeError, ValueError) as error:
+            self._report_storage_error(ctx, error)
+            return False
+
+    def load_bookmark(self, ctx: PanelContext, camera: Any, name: str) -> bool:
+        try:
+            apply_camera_bookmark(
+                load_named_snapshot(name, self.bookmark_directory), camera, ctx.select_model_camera
+            )
+            self._bookmark_index = list_named_snapshots(self.bookmark_directory).index(name)
+            self._bookmark_error = ""
+            ctx.report(f"{ctx.tr('Loaded camera bookmark')} '{name}'", level="success")
+            return True
+        except (OSError, KeyError, TypeError, ValueError) as error:
+            self._report_storage_error(ctx, error)
+            return False
+
+    def copy_bookmark(self, ctx: PanelContext, name: str) -> bool:
+        try:
+            imgui.set_clipboard_text(
+                json.dumps(load_named_snapshot(name, self.bookmark_directory), indent=2)
+            )
+            self._bookmark_error = ""
+            return True
+        except (OSError, TypeError, ValueError) as error:
+            self._report_storage_error(ctx, error)
+            return False
+
+    def delete_bookmark(self, ctx: PanelContext, name: str) -> bool:
+        try:
+            delete_named_snapshot(name, self.bookmark_directory)
+            self._bookmark_error = ""
+            ctx.report(f"{ctx.tr('Deleted camera bookmark')} '{name}'", level="success")
+            return True
+        except OSError as error:
+            self._report_storage_error(ctx, error)
+            return False
+
     def _stored_states(self, ctx: PanelContext, camera: Any) -> None:
         opened = self._section(f"{ctx.tr('camera bookmarks')}###camera_states")
-        camera_dir = Path("output/snapshots/cameras")
-        imgui.set_item_tooltip(f"{ctx.tr('Stored in')}: {camera_dir.resolve()}")
+        self._tooltip(f"{ctx.tr('Stored in')}: {self.bookmark_directory.resolve()}")
         if not opened:
             return
-        view = ctx.model_camera_view if ctx.model_camera_id >= 0 else camera.view()
-
         imgui.set_next_item_width(-1.0)
         input_text = (
             self.presentation.input_text if self.presentation is not None else imgui.input_text
         )
         _changed, self._bookmark_name = input_text("##bookmark_name", self._bookmark_name)
         if self._bookmark_button(ctx, "Save"):
-            try:
-                name = next_available_snapshot_name(self._bookmark_name, camera_dir)
-                path = save_named_snapshot(
-                    name,
-                    camera_bookmark(camera, view, ctx.model_camera_id),
-                    camera_dir,
-                )
-                bookmarks = list_named_snapshots(camera_dir)
-                self._bookmark_index = bookmarks.index(path.stem)
-                self._bookmark_name = next_available_snapshot_name(path.stem, camera_dir)
-                self._bookmark_error = ""
-                ctx.report(
-                    f"{ctx.tr('Saved camera bookmark to')} {path.resolve()}",
-                    level="success",
-                )
-            except (OSError, TypeError, ValueError) as error:
-                self._report_storage_error(ctx, error)
-        bookmarks = list_named_snapshots(camera_dir)
+            self.save_bookmark(ctx, camera)
+        bookmarks = list_named_snapshots(self.bookmark_directory)
         self._bookmark_index = min(self._bookmark_index, max(len(bookmarks) - 1, 0))
         if bookmarks:
             imgui.set_next_item_width(-1.0)
@@ -287,30 +325,13 @@ class CameraPanel(Panel):
             )
             name = bookmarks[self._bookmark_index]
             if changed:
-                try:
-                    apply_camera_bookmark(
-                        load_named_snapshot(name, camera_dir), camera, ctx.select_model_camera
-                    )
-                    self._bookmark_error = ""
-                    ctx.report(f"{ctx.tr('Loaded camera bookmark')} '{name}'", level="success")
-                except (OSError, KeyError, TypeError, ValueError) as error:
-                    self._report_storage_error(ctx, error)
+                self.load_bookmark(ctx, camera, name)
             if self._bookmark_button(ctx, "Copy"):
-                try:
-                    imgui.set_clipboard_text(
-                        json.dumps(load_named_snapshot(name, camera_dir), indent=2)
-                    )
-                except (OSError, TypeError, ValueError) as error:
-                    self._report_storage_error(ctx, error)
+                self.copy_bookmark(ctx, name)
             if self.presentation is None:
                 imgui.same_line()
             if self._bookmark_button(ctx, "Delete"):
-                try:
-                    delete_named_snapshot(name, camera_dir)
-                    ctx.report(f"{ctx.tr('Deleted camera bookmark')} '{name}'", level="success")
-                except OSError as error:
-                    self._report_storage_error(ctx, error)
-
+                self.delete_bookmark(ctx, name)
         if self._bookmark_error:
             imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._bookmark_error)
             if self._bookmark_button(ctx, "Copy error", small=True):
@@ -416,13 +437,20 @@ class CameraPanel(Panel):
                 current = _get(camera, attr)
                 if current is None:
                     continue
+                # Orbit transitions retain unwrapped yaw for the shortest animation path.
+                if attr == "yaw":
+                    current = (float(current) + 180.0) % 360.0 - 180.0
                 angular = attr in ("yaw", "pitch", "fov_y_deg")
                 factor = math.pi / 180.0 if angular else 1.0
                 initial = self._initial_distance if initial is None else initial
                 editor_distance = attr == "distance" and camera is ctx.camera
                 if editor_distance:
                     lo, hi = camera.navigation.min_distance, camera.navigation.max_distance
-                self._property_label(ctx.tr(attr), rail=True)
+                self._property_label(
+                    camera_caption(attr, ctx.language, ctx.tr),
+                    rail=True,
+                    tooltip=ctx.tr("Vertical field of view") if attr == "fov_y_deg" else "",
+                )
                 edit = self._rail(
                     ctx,
                     f"##camera-{attr}",
@@ -458,7 +486,7 @@ class CameraPanel(Panel):
             )
             imgui.end_disabled()
             if not supported:
-                imgui.set_item_tooltip(
+                self._tooltip(
                     f"{ctx.backend.caps.name}: {ctx.tr('orthographic projection unavailable')}"
                 )
             else:
@@ -516,8 +544,12 @@ class CameraPanel(Panel):
         )
         return begin_property_table(str_id, labels=labels)
 
-    def _property_label(self, label: str, *, rail=False, control_part="input_number") -> None:
+    def _property_label(
+        self, label: str, *, rail=False, control_part="input_number", tooltip=""
+    ) -> None:
         if self.presentation:
             self.presentation.row(label, rail=rail, control_part=control_part)
         else:
             property_row(label, wrap=True)
+        if tooltip:
+            self._tooltip(tooltip)

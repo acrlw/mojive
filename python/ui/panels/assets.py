@@ -228,6 +228,12 @@ class AssetsPanel(Panel):
                 | imgui.TableFlags_.row_bg
                 | imgui.TableFlags_.no_saved_settings
             )
+            style = imgui.get_style()
+            # The inventory needs column gutters even when surrounding forms use zero padding.
+            imgui.push_style_var(
+                imgui.StyleVar_.cell_padding,
+                (max(style.cell_padding.x, style.item_spacing.x / 2), style.cell_padding.y),
+            )
             if imgui.begin_table("asset-list-table", 3, flags):
                 imgui.table_setup_column(ctx.tr("Name"), imgui.TableColumnFlags_.width_stretch, 1.0)
                 imgui.table_setup_column(ctx.tr("Type"), imgui.TableColumnFlags_.width_fixed)
@@ -255,6 +261,7 @@ class AssetsPanel(Panel):
                         imgui.align_text_to_frame_padding()
                         imgui.text_disabled(str(len(item.references)))
                 self._end_properties()
+            imgui.pop_style_var()
         imgui.end_child()
         if not visible:
             imgui.text_disabled(ctx.tr("no matching assets"))
@@ -288,37 +295,44 @@ class AssetsPanel(Panel):
 
     def _import_controls(self, ctx: PanelContext) -> None:
         editable = ctx.session.paused and ctx.session.adapter.caps.model_assets
-        mesh_label = ctx.tr("Import Mesh...")
-        hfield_label = ctx.tr("Import Height Field...")
-        texture_label = ctx.tr("Import Texture...")
-        widths = (
-            button_width(mesh_label),
-            button_width(hfield_label),
-            button_width(texture_label),
+        actions = (
+            (ctx.tr("Import Mesh..."), editable and ctx.request_model_asset_import is not None),
+            (
+                ctx.tr("Import Height Field..."),
+                editable and ctx.request_model_asset_import is not None,
+            ),
+            (ctx.tr("Import Texture..."), editable and ctx.request_texture_import is not None),
         )
-        inline = button_row_layout(
-            widths,
-            imgui.get_content_region_avail().x,
-            imgui.get_style().item_spacing.x,
-        )
-        if not editable:
-            imgui.begin_disabled()
-        if imgui.button(mesh_label) and ctx.request_model_asset_import is not None:
+        imgui.set_next_item_width(-1)
+        selected = None
+        if self.presentation:
+            selected = self.presentation.action_menu("asset-import", ctx.tr("Import"), actions)
+        else:
+            imgui.begin_disabled(not any(enabled for _, enabled in actions))
+            opened = imgui.begin_combo("##asset-import", ctx.tr("Import"))
+            if opened:
+                for index, (label, enabled) in enumerate(actions):
+                    if imgui.menu_item(label, "", False, enabled)[0]:
+                        selected = index
+                imgui.end_combo()
+            imgui.end_disabled()
+        if selected == 0:
             ctx.request_model_asset_import(self._model_id, "mesh", ())
-        if inline[1]:
-            imgui.same_line()
-        if imgui.button(hfield_label) and ctx.request_model_asset_import is not None:
+        elif selected == 1:
             ctx.request_model_asset_import(
                 self._model_id,
                 "hfield",
                 (("size", _format_vector(self._hfield_import_size)),),
             )
-        if inline[2]:
-            imgui.same_line()
-        if imgui.button(texture_label) and ctx.request_texture_import is not None:
+        elif selected == 2:
             ctx.request_texture_import(self._model_id, -1, self._texture_import_type)
-        if not editable:
-            imgui.end_disabled()
+        if self._section(f"{ctx.tr('Import options')}##asset-import-options"):
+            self._import_options(ctx)
+        self._material_creation(ctx, editable)
+        if not ctx.session.paused:
+            imgui.text_disabled(ctx.tr("Pause the simulation to edit model assets"))
+
+    def _import_options(self, ctx):
         if self._begin_properties(ctx, "texture_import_type"):
             self._property(ctx.tr("texture type"), control_part="select")
             texture_types = ("2d", "cube", "skybox")
@@ -335,13 +349,15 @@ class AssetsPanel(Panel):
         hfield_open = self._section(
             f"{ctx.tr('Height-field import size')}##height-field-import-size"
         )
-        imgui.set_item_tooltip(ctx.tr("Set physical dimensions before importing the PNG."))
+        self._tooltip(ctx.tr("Set physical dimensions before importing the PNG."))
         if hfield_open:
             _changed, self._hfield_import_size = _hfield_size_editor(
                 ctx, "hfield-import-size", self._hfield_import_size, self.presentation
             )
+
+    def _material_creation(self, ctx, editable):
         material_open = self._section(f"{ctx.tr('New material')}##new-material")
-        imgui.set_item_tooltip(ctx.tr("Creates an unbound material asset for later assignment."))
+        self._tooltip(ctx.tr("Creates an unbound material asset for later assignment."))
         if material_open:
             if self._begin_properties(ctx, "new_material"):
                 self._property(ctx.tr("name"))
@@ -363,8 +379,6 @@ class AssetsPanel(Panel):
                     )
             if not material_name or not editable:
                 imgui.end_disabled()
-        if not ctx.session.paused:
-            imgui.text_disabled(ctx.tr("Pause the simulation to edit model assets"))
 
     def _details(self, ctx: PanelContext, item: ModelAssetInfo) -> None:
         key = (item.model_id, item.type, item.name)
@@ -453,9 +467,7 @@ class AssetsPanel(Panel):
             ctx.submit(cmd.RemoveModelAsset(item.model_id, item.type, item.name))
         if item.references:
             imgui.end_disabled()
-            imgui.set_item_tooltip(
-                ctx.tr("Remove or replace every reference before deleting this asset")
-            )
+            self._tooltip(ctx.tr("Remove or replace every reference before deleting this asset"))
 
         if item.type == "hfield":
             self._hfield_controls(ctx, item)
@@ -623,7 +635,7 @@ class AssetsPanel(Panel):
                 if item_changed:
                     value = default if enabled else -1.0
                     changed = True
-                imgui.set_item_tooltip(
+                self._tooltip(
                     ctx.tr("Toggle the MuJoCo PBR override; disabled uses classic material shading")
                 )
                 imgui.same_line()

@@ -56,6 +56,25 @@ def _english_ui():
         os.environ["MOJIVE_LANGUAGE"] = previous
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolated_design_specification(tmp_path_factory):
+    """Keep rendered tests and automated edits independent of the user's design draft."""
+    from mojive.design.specification import DEFAULT
+    from mojive.design.store import atomic_write
+
+    path = tmp_path_factory.mktemp("gpu-design") / "current-spec.json"
+    atomic_write(path, DEFAULT)
+    previous = os.environ.get("MOJIVE_DESIGN_SPEC")
+    os.environ["MOJIVE_DESIGN_SPEC"] = str(path)
+    try:
+        yield
+    finally:
+        if previous is None:
+            del os.environ["MOJIVE_DESIGN_SPEC"]
+        else:
+            os.environ["MOJIVE_DESIGN_SPEC"] = previous
+
+
 @pytest.fixture(scope="session")
 def backend_name():
 

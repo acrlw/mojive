@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 from itertools import pairwise
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -10,6 +11,8 @@ from fontTools.pens.basePen import BasePen
 from fontTools.svgLib.path import parse_path
 
 ROOT = Path(__file__).parent
+COMPILED_ICONS = ROOT.parents[2] / "python/ui/workspace/icons.json"
+SCENE_ICONS = ROOT.parents[2] / "python/interaction/resources/scene_icons.json"
 
 
 def library_masters():
@@ -21,7 +24,7 @@ def library_masters():
         root = ET.fromstring((directory / path).read_text())
         for element in root.iter():
             element.tag = element.tag.rsplit("}", 1)[-1]
-        root.set("stroke-width", "1.75")
+        root.set("stroke-width", str(manifest["style"]["stroke"]))
         sources[name] = ET.tostring(root, encoding="unicode")
     return sources
 
@@ -128,6 +131,15 @@ def compile_svg(svg):
             parse_path(a["d"], pen)
             pen._endPath()
             paths = pen.paths
+        elif e.tag == "line":
+            paths = [([(float(a["x1"]), float(a["y1"])), (float(a["x2"]), float(a["y2"]))], False)]
+        elif e.tag in ("polyline", "polygon"):
+            coordinates = [float(value) for value in re.split(r"[\s,]+", a["points"].strip())]
+            if len(coordinates) % 2:
+                raise ValueError("SVG points must contain complete coordinate pairs")
+            paths = [
+                (list(zip(coordinates[::2], coordinates[1::2], strict=True)), e.tag == "polygon")
+            ]
         elif e.tag in ("circle", "ellipse"):
             cx, cy = (float(a[k]) for k in ["cx", "cy"])
             rx = float(a.get("rx", a.get("r", 0)))
@@ -177,6 +189,15 @@ def compile_svg(svg):
             points = clean
             stroke = a.get("stroke", "none")
             width = float(a.get("stroke-width", 1)) if stroke != "none" else 0
+            cap = a.get("stroke-linecap", "butt")
+            join = a.get("stroke-linejoin", "miter")
+            miter_limit = float(a.get("stroke-miterlimit", 4))
+            if cap not in ("butt", "round", "square"):
+                raise ValueError(f"Unsupported SVG stroke cap: {cap}")
+            if join not in ("miter", "round", "bevel"):
+                raise ValueError(f"Unsupported SVG stroke join: {join}")
+            if not math.isfinite(miter_limit) or miter_limit < 1:
+                raise ValueError("SVG stroke miter limit must be finite and at least one")
             half = width / 2
             for px, py in points:
                 bounds = [
@@ -193,6 +214,9 @@ def compile_svg(svg):
                     "fill": a.get("fill", "black"),
                     "stroke": stroke,
                     "width": width * scale,
+                    "cap": cap,
+                    "join": join,
+                    "miter_limit": miter_limit,
                     "opacity": opacity,
                     "fill_opacity": float(a.get("fill-opacity", 1)),
                     "stroke_opacity": float(a.get("stroke-opacity", 1)),
@@ -222,6 +246,13 @@ def compile_svg(svg):
 def main():
     result = {}
     sources = json.loads((ROOT / "icons-source.json").read_text())
+    # One authored stroke applies to all outline masters, including local domain
+    # glyphs. Scale at submission; never impose a separate minimum pixel width.
+    manifest = json.loads((ROOT / "svg/sources.json").read_text())
+    for name, svg in sources.items():
+        root = ET.fromstring(svg)
+        root.set("stroke-width", str(manifest["style"]["stroke"]))
+        sources[name] = ET.tostring(root, encoding="unicode")
     sources.update(library_masters())
     for name, svg in sources.items():
         try:
@@ -230,8 +261,11 @@ def main():
             raise ValueError(f"{name}: {error}") from error
     (ROOT / "icons-source.json").write_text(json.dumps(sources, separators=(",", ":")))
     compiled = json.dumps(result, separators=(",", ":"))
-    (ROOT / "icons.json").write_text(compiled)
-    (ROOT.parents[2] / "python/ui/workspace/icons.json").write_text(compiled)
+    COMPILED_ICONS.write_text(compiled)
+    SCENE_ICONS.parent.mkdir(parents=True, exist_ok=True)
+    SCENE_ICONS.write_text(
+        json.dumps({name: result[name] for name in ("camera", "light")}, separators=(",", ":"))
+    )
     print("Compiled and checked", len(result), "shared SVG masters")
 
 

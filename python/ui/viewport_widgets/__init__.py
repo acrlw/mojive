@@ -121,13 +121,12 @@ from .model import ToolHint as ToolHint
 from .model import ViewportControl as ViewportControl
 from .model import ViewportLabels as ViewportLabels
 from .model import _HintGroup as _HintGroup
-from .model import _StatusPerformanceLayout as _StatusPerformanceLayout
 from .model import _transform_path as _transform_path
 from .model import tool_control_centers as tool_control_centers
 from .registry import ToolHintRegistry as ToolHintRegistry
 from .registry import ViewportChromeRegistry as ViewportChromeRegistry
-from .status import _status_performance_layout as _status_performance_layout
 from .status import draw_status as draw_status
 from .status import format_simulation_metric as format_simulation_metric
 from .status import format_simulation_steps as format_simulation_steps
 from .status import format_simulation_time as format_simulation_time
+from .status_metrics import _status_performance_layout as _status_performance_layout

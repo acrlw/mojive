@@ -1,0 +1,229 @@
+{
+  "Scene": {
+    "id": "scene",
+    "label": "场景",
+    "area": "场景",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "tree_row": "场景树",
+      "type_filters": "类型筛选",
+      "segment": "几何体显示"
+    }
+  },
+  "Pose": {
+    "id": "pose",
+    "label": "姿态",
+    "area": "姿态",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "joint": "关节组",
+      "control_metadata": "关节标题上下文"
+    }
+  },
+  "Control": {
+    "id": "control",
+    "label": "控制",
+    "area": "控制",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "button_row": "操作组",
+      "section_header": "分节标题",
+      "section_body": "分节内容"
+    }
+  },
+  "Assets": {
+    "id": "assets",
+    "label": "资产",
+    "area": "材质库",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "section_header": "分节标题",
+      "section_body": "分节内容",
+      "material": "材质卡片",
+      "material_list": "材质列表"
+    }
+  },
+  "Cameras": {
+    "id": "cameras",
+    "label": "相机",
+    "area": "相机",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "button_row": "操作组",
+      "section_header": "分节标题",
+      "section_body": "分节内容",
+      "segment": "相机选项"
+    }
+  },
+  "Sensors": {
+    "id": "sensors",
+    "label": "传感器",
+    "area": "传感器",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "sensor": "读数列表",
+      "button_row": "读数操作"
+    },
+    "controlKinds": {
+      "button_row": [
+        "icon_button"
+      ]
+    }
+  },
+  "Layers": {
+    "id": "layers",
+    "label": "图层",
+    "area": "图层",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区",
+      "section_header": "分节标题"
+    }
+  },
+  "Inspector": {
+    "id": "inspector",
+    "label": "检查器",
+    "area": "检查器",
+    "parts": {
+      "panel_body": "内容区",
+      "tabs": "标签导航",
+      "section_header": "分节标题",
+      "section_body": "分节内容",
+      "button_row": "操作组",
+      "component_list": "组件列表",
+      "component_path": "资源路径"
+    }
+  },
+  "Timeline": {
+    "id": "timeline",
+    "label": "时间轴",
+    "area": "时间轴",
+    "parts": {
+      "panel_body": "内容区",
+      "form_popup": "设置弹窗"
+    }
+  },
+  "Output": {
+    "id": "output",
+    "label": "输出",
+    "area": "输出",
+    "parts": {
+      "panel_body": "内容区"
+    }
+  },
+  "Statistics": {
+    "id": "statistics",
+    "label": "统计",
+    "area": "统计",
+    "parts": {
+      "panel_body": "内容区",
+      "data_list": "数据列表",
+      "table": "数据表"
+    }
+  },
+  "Plot": {
+    "id": "plot",
+    "label": "曲线",
+    "area": "曲线",
+    "parts": {
+      "panel_body": "内容区",
+      "segment": "来源导航"
+    }
+  },
+  "Settings": {
+    "id": "settings",
+    "label": "设置",
+    "area": "设置",
+    "parts": {
+      "panel_header": "标题栏",
+      "panel_body": "内容区"
+    }
+  },
+  "Settings/General": {
+    "id": "settings_general",
+    "label": "常规设置",
+    "area": "设置",
+    "parts": {
+      "settings_page": "内容页",
+      "section_header": "分节标题",
+      "section_body": "分节内容",
+      "segment": "更新模式"
+    }
+  },
+  "Settings/Camera": {
+    "id": "settings_camera",
+    "label": "相机设置",
+    "area": "设置",
+    "parts": {
+      "settings_page": "内容页",
+      "section_header": "分节标题",
+      "section_body": "分节内容"
+    }
+  },
+  "Settings/Interaction": {
+    "id": "settings_interaction",
+    "label": "交互设置",
+    "area": "设置",
+    "parts": {
+      "settings_page": "内容页",
+      "section_header": "分节标题",
+      "section_body": "分节内容",
+      "segment": "交互选项"
+    }
+  },
+  "Settings/Rendering": {
+    "id": "settings_rendering",
+    "label": "渲染设置",
+    "area": "设置",
+    "parts": {
+      "settings_page": "内容页",
+      "section_header": "分节标题",
+      "section_body": "分节内容",
+      "segment": "阴影质量"
+    }
+  },
+  "Settings/Recording": {
+    "id": "settings_recording",
+    "label": "录制设置",
+    "area": "设置",
+    "parts": {
+      "settings_page": "内容页",
+      "section_header": "分节标题",
+      "section_body": "分节内容"
+    }
+  },
+  "Settings/MuJoCo Visuals": {
+    "id": "settings_visuals",
+    "label": "内容可视化设置",
+    "area": "设置",
+    "parts": {
+      "settings_page": "内容页",
+      "section_header": "分节标题",
+      "section_body": "分节内容"
+    }
+  },
+  "Help": {
+    "id": "help",
+    "label": "帮助",
+    "area": "帮助",
+    "parts": {
+      "window_title": "窗口标题",
+      "panel_body": "内容区"
+    }
+  },
+  "Info": {
+    "id": "info",
+    "label": "信息",
+    "area": "信息",
+    "parts": {
+      "window_title": "窗口标题",
+      "panel_body": "内容区"
+    }
+  }
+}

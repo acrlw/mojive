@@ -21,6 +21,7 @@ from mojive.ui.panels import (
     pointer_hint,
     pointer_pressed,
 )
+from mojive.ui.panels.presentation import property_tooltip
 from mojive.ui.panels.value_cards import value_rail
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.theme import mix_color as _mix_color
@@ -28,6 +29,10 @@ from mojive.ui.theme import mix_color as _mix_color
 
 def _compact_transform(width: float, style_scale: float) -> bool:
     return float(width) < 210.0 * float(style_scale)
+
+
+def _property_tooltip(ctx, text, *, hovered=False):
+    property_tooltip(getattr(ctx, "inspector_presentation", None), text, hovered=hovered)
 
 
 def _begin_property_table(
@@ -127,9 +132,11 @@ def _property_end_combo(ctx):
         imgui.end_combo()
 
 
-def _property_input_text(ctx, key, value, flags=0):
+def _property_input_text(ctx, key, value, flags=0, *, mono=False):
     presentation = getattr(ctx, "inspector_presentation", None)
     if presentation is not None:
+        if mono:
+            return presentation.text(key, value, flags, mono=True)
         return presentation.text(key, value, flags)
     return imgui.input_text(key, value, flags)
 
@@ -272,7 +279,7 @@ def _property_solver_rows(
         ctx, f"##{name}_solver_reference", reference, 0.001, -1000000.0, 1000000.0, "%.5g"
     )
     if reference_tooltip:
-        imgui.set_item_tooltip(ctx.tr(reference_tooltip))
+        _property_tooltip(ctx, ctx.tr(reference_tooltip))
     _property_control_row(ctx, f"{label_prefix}impedance min / max / width", components=3)
     first_changed, first = _property_numbers(
         ctx, f"##{name}_impedance_first", impedance[:3], 0.001, 0.0, 1.0, "%.5g"
@@ -477,7 +484,9 @@ def _vector_row(
     if group_hovered and pointer_pressed(ctx, PointerAction.PROPERTY_COPY):
         imgui.set_clipboard_text(_format_vector(out))
     if group_hovered:
-        imgui.set_tooltip(pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy XYZ")))
+        _property_tooltip(
+            ctx, pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy XYZ")), hovered=True
+        )
 
     if compact:
         imgui.table_next_row()
@@ -583,8 +592,10 @@ def _axis_field(
     button_id = imgui.get_item_id()
     imgui.pop_style_color(5)
     if button_hovered:
-        imgui.set_tooltip(
-            f"{ctx.tr('Reset')}: {reset_value:g}" if editable else ctx.tr("Read only")
+        _property_tooltip(
+            ctx,
+            f"{ctx.tr('Reset')}: {reset_value:g}" if editable else ctx.tr("Read only"),
+            hovered=True,
         )
 
     group_gap = (2 - axis) * gap / 3.0
@@ -653,7 +664,7 @@ def _axis_field(
         hint = pointer_hint(ctx, PointerAction.PROPERTY_COPY, ctx.tr("Copy value"))
         if not editable:
             hint = f"{ctx.tr('Read only')} · {hint}"
-        imgui.set_tooltip(hint)
+        _property_tooltip(ctx, hint, hovered=True)
 
     return reset, edited, next_value
 

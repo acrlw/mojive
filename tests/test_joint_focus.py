@@ -101,6 +101,147 @@ def test_hinge_focus_targets_the_anchor_from_the_nearest_readable_oblique_view()
     assert app._pending_joint_focus_id is None
 
 
+def _marked_hinge_app(*, qpos=True, limited=True, bounds=None):
+    current = np.deg2rad(-26.624)
+    joint = JointInfo(
+        0,
+        "05_multi_revolute_z",
+        "hinge",
+        limited,
+        tuple(np.deg2rad((-100, 100))) if bounds is None else bounds,
+        1,
+        0,
+        1,
+        axis=(1.0, 0.0, 0.0),
+    )
+    center = np.array((1.5, 2, 3), np.float64)
+    frame = SceneFrame(
+        body_xpos=np.array(((0, 0, 0), (1, 2, 3)), np.float64),
+        body_xmat=np.repeat(np.eye(3, dtype=np.float64)[None], 2, axis=0),
+        qpos=np.array((123.5, current), np.float64) if qpos is True else qpos,
+        diagnostics=DiagnosticFrame(
+            joint_xpos=center[None].copy(),
+            joint_xaxis=np.array(((0, 0, 1),), np.float64),
+        ),
+    )
+    app = _focus_app(joint, frame)
+    app.camera = OrbitCamera(pivot=center.copy(), distance=3, yaw=np.rad2deg(current), pitch=45)
+    app.session.camera = app.camera.view()
+    return app, joint
+
+
+def _capture_hinge_markers(monkeypatch):
+    from mojive.ui.app import navigation
+
+    received, original = [], navigation.oblique_axis_view_directions
+
+    def capture(*args, **kwargs):
+        received.append(np.asarray(kwargs.get("marker_directions", ()), np.float64).copy())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(navigation, "oblique_axis_view_directions", capture)
+    return received
+
+
+def _finish_hinge_focus(app, joint):
+    app.session.camera = app.camera.view()
+    app._pending_joint_focus_id = joint.joint_id
+    app._apply_pending_joint_focus()
+    app.camera.advance(FOCUS_DURATION, app.camera_out)
+
+
+def test_pending_hinge_focus_uses_current_qpos_and_rendered_limits_without_mutation(monkeypatch):
+    from mojive.interaction.gizmo import RING_RADIUS, SIZE_PT, project, world_scale
+    from mojive.ui.gizmo.projection import _basis_from_z
+
+    app, joint = _marked_hinge_app()
+    frame = app.session.frame
+    buffers = (
+        frame.body_xpos,
+        frame.body_xmat,
+        frame.qpos,
+        frame.diagnostics.joint_xpos,
+        frame.diagnostics.joint_xaxis,
+    )
+    before = [value.copy() for value in buffers]
+    captured = _capture_hinge_markers(monkeypatch)
+    _finish_hinge_focus(app, joint)
+
+    axis = frame.diagnostics.joint_xaxis[0]
+    basis = _basis_from_z(axis)
+    angles = (frame.qpos[joint.qpos_adr], *joint.range)
+    markers = np.asarray(
+        [np.cos(value) * basis[:, 0] + np.sin(value) * basis[:, 1] for value in angles]
+    )
+    assert captured[0] == pytest.approx(markers)
+    assert app.camera.pivot == pytest.approx(frame.diagnostics.joint_xpos[0])
+    direction = app.camera.direction()
+    side = np.cross(axis, direction)
+    side /= np.linalg.norm(side)
+    assert np.min(np.abs(markers @ side)) >= 0.2 - 1e-6
+    assert app.camera.pitch >= 35 - 1e-6
+
+    view, rect = app.camera.view(), app._viewport_rect
+    center = frame.diagnostics.joint_xpos[0]
+    scale = world_scale(view, center, rect[3], SIZE_PT)
+    projected_axis = project(view, (center - axis * scale, center + axis * scale), rect)[:, :2]
+    side = np.array(
+        (projected_axis[0, 1] - projected_axis[1, 1], projected_axis[1, 0] - projected_axis[0, 0])
+    )
+    side /= np.linalg.norm(side)
+    ticks = project(view, center + markers * scale * RING_RADIUS, rect)[:, :2]
+    assert np.min(np.abs((ticks - projected_axis[0]) @ side)) > 10
+
+    _finish_hinge_focus(app, joint)
+    assert app.camera.direction() == pytest.approx(direction, abs=1e-7)
+    for value, original in zip(buffers, before, strict=True):
+        assert np.array_equal(value, original)
+
+
+@pytest.mark.parametrize("span", (2 * np.pi, 2 * np.pi - 0.5e-9, 4 * np.pi))
+def test_pending_full_turn_hinge_focus_skips_hidden_limit_markers(monkeypatch, span):
+    from mojive.ui.gizmo.projection import _basis_from_z
+
+    app, joint = _marked_hinge_app(bounds=(-np.pi, -np.pi + span))
+    captured = _capture_hinge_markers(monkeypatch)
+    _finish_hinge_focus(app, joint)
+    basis = _basis_from_z(app.session.frame.diagnostics.joint_xaxis[0])
+    angle = app.session.frame.qpos[joint.qpos_adr]
+    expected = np.cos(angle) * basis[:, 0] + np.sin(angle) * basis[:, 1]
+    assert captured[0].shape == (1, 3)
+    assert captured[0][0] == pytest.approx(expected)
+    side = np.cross(basis[:, 2], app.camera.direction())
+    side /= np.linalg.norm(side)
+    assert abs(expected @ side) >= 0.2 - 1e-6
+
+
+@pytest.mark.parametrize(
+    "case", ("missing", "out_of_bounds", "nonfinite", "unlimited", "reversed", "invalid_range")
+)
+def test_pending_hinge_focus_without_visible_valid_markers_retains_old_camera_behavior(
+    monkeypatch, case
+):
+    from mojive.ui.camera import camera_basis, oblique_axis_view_directions
+
+    qpos = {
+        "missing": None,
+        "out_of_bounds": np.array((0.0,)),
+        "nonfinite": np.array((0.0, np.nan)),
+    }.get(case, True)
+    bounds = {"reversed": (1.0, -1.0), "invalid_range": (np.nan, 1.0)}.get(case)
+    app, joint = _marked_hinge_app(qpos=qpos, limited=case != "unlimited", bounds=bounds)
+    initial = app.camera.view()
+    center = app.session.frame.diagnostics.joint_xpos[0]
+    axis = app.session.frame.diagnostics.joint_xaxis[0]
+    original = oblique_axis_view_directions(
+        axis, initial.eye - center, camera_basis(initial)[0], 35
+    )
+    captured = _capture_hinge_markers(monkeypatch)
+    _finish_hinge_focus(app, joint)
+    assert captured[0].size == 0
+    assert app.camera.direction() == pytest.approx(original[0], abs=1e-7)
+
+
 @pytest.mark.parametrize(("blocker_id", "target_id"), [(2, 1), (1, 42)])
 def test_joint_focus_can_avoid_an_occluder_with_a_small_nearby_turn(blocker_id, target_id) -> None:
     target = SceneNode(7, "elbow", NodeType.JOINT, body_index=1, joint_index=0)

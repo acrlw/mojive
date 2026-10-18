@@ -9,6 +9,7 @@ from pathlib import Path
 from imgui_bundle import imgui
 
 from mojive.capture import RecordingPhase
+from mojive.design.native.geometry import part_scope
 from mojive.ui.files import message_path, reveal_path
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.messages import OutputMessage
@@ -17,6 +18,7 @@ from mojive.ui.text_layout import fit_text
 from mojive.ui.viewport_widgets import (
     draw_status,
 )
+from mojive.ui.workspace.status_tooltip import status_tooltip
 
 from .support import APPLICATION_STATUS_HEIGHT_PT, _model_filters, _simulation_timestep
 
@@ -57,6 +59,7 @@ class _Status:
         ):
             self._paint_application_status_bar(loading=loading)
 
+    @part_scope("statusbar")
     def _paint_application_status_bar(self, *, loading: bool = False) -> None:
         """Draw persistent selection, simulation, backend, and frame-rate status."""
 
@@ -68,41 +71,25 @@ class _Status:
         workspace = getattr(self, "workspace", None)
         ui = workspace.ui if workspace is not None else None
         bar_style = ui.component_style("statusbar") if ui is not None else None
-        margins = bar_style.edges("margin", scale) if bar_style is not None else (0, 0, 0, 0)
-        badge, status_groups, bar_gap = None, None, 0
-        frame_height = APPLICATION_STATUS_HEIGHT_PT * scale
+        badge, status_groups = None, None
+        height = APPLICATION_STATUS_HEIGHT_PT * scale
+        bar_layout = None
         if ui is not None:
-            from mojive.ui.workspace.status_components import StatusBadge, StatusGroups
+            from mojive.ui.workspace.status_components import (
+                StatusBadge,
+                StatusGroups,
+                resolve_status_bar_layout,
+            )
 
-            badge = StatusBadge(ui)
+            badge = StatusBadge(ui, keycap=True)
             status_groups = StatusGroups(ui)
-            application_height = ui.metric(
-                "application", "statusHeight", APPLICATION_STATUS_HEIGHT_PT
+            bar_layout = resolve_status_bar_layout(
+                ui,
+                badge=badge,
+                groups=status_groups,
+                fallback_height=APPLICATION_STATUS_HEIGHT_PT,
             )
-            requested_height = (
-                bar_style.get("height", APPLICATION_STATUS_HEIGHT_PT)
-                if bar_style.explicit("height")
-                else application_height
-            )
-            padding = bar_style.edges("padding", scale, (10, 0, 10, 0))
-            font = bar_style.get("fontSize", 14)
-            line = bar_style.line_height(font * 1.4) * scale
-            frame_height = max(
-                requested_height * scale,
-                status_groups.minimum_height(
-                    max(
-                        font * scale,
-                        line,
-                        badge.size("Esc")[1],
-                        24 * scale,
-                        bar_style.get("iconSize", 7) * scale,
-                    )
-                )
-                + padding[1]
-                + padding[3],
-            )
-            bar_gap = ui.metric("application", "rowGap", 0) * scale
-        height = frame_height + margins[1] + margins[3] + bar_gap
+            height = bar_layout.height
         flags = (
             imgui.WindowFlags_.no_decoration.value
             | imgui.WindowFlags_.no_docking.value
@@ -159,19 +146,10 @@ class _Status:
             picking = workbench is not None and workbench.pick and imgui.get_io().key_alt
             box = None
             if ui is not None:
-                from mojive.design.native.geometry import Box, Rect
-
-                outer = Rect(origin.x, origin.y + bar_gap, size.x, size.y - bar_gap)
-                frame = Rect(
-                    outer.x + margins[0],
-                    outer.y + margins[1],
-                    max(0, outer.width - margins[0] - margins[2]),
-                    frame_height,
-                )
-                box = Box(outer, frame, frame.inset(*padding), padding, margins)
+                box = bar_layout.box(origin.x, origin.y, size.x)
             content = box.content if box is not None else None
             if ui is not None:
-                imgui.push_font(ui.body, bar_style.get("fontSize", 14) * scale)
+                imgui.push_font(ui.resolve_font(bar_style), bar_style.get("fontSize", 14) * scale)
             status_layout = draw_status(
                 self.window.painter(),
                 (content.x, content.y) if content is not None else (origin.x, origin.y),
@@ -227,6 +205,7 @@ class _Status:
                 if ui is not None
                 else None,
                 presentation=status_groups,
+                surface_rect=box.frame.tuple() if box is not None else None,
             )
             if ui is not None:
                 imgui.pop_font()
@@ -237,6 +216,8 @@ class _Status:
                         key="application-statusbar",
                         fields=status_groups.fields,
                         fieldRegions=dict.fromkeys(("gap", "columnGap"), status_groups.gaps),
+                        reservedHeight=bar_layout.height,
+                        minimumContentHeight=bar_layout.minimum_content_height,
                     )
                     ui.design.record(
                         "application-status",
@@ -259,12 +240,15 @@ class _Status:
                 x0, y0, x1, y1 = status_layout.passive_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
                 imgui.invisible_button("##status_passive", imgui.ImVec2(x1 - x0, y1 - y0))
-                imgui.set_item_tooltip(
-                    self.localizer.text(
-                        "Simulation is driven by the external application. Recording only captures images."
-                    )
+                hint = self.localizer.text(
+                    "Simulation is driven by the external application. Recording only captures images."
                 )
+                if ui is None:
+                    imgui.set_item_tooltip(hint)
+                elif imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
+                    ui.tooltip(hint, translate=False)
             if status_layout.metric_rect is not None and not loading:
+                metric_mode = self._status_metric_mode
                 x0, y0, x1, y1 = status_layout.metric_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
                 if (
@@ -276,17 +260,53 @@ class _Status:
                 ):
                     self._toggle_status_metric()
                 hovered = imgui.is_item_hovered()
-                if hovered and self.input_bindings.pointer_match(
-                    PointerAction.STATUS_COPY, self.input_bindings.pointer_frame(), press=True
+                if (
+                    hovered
+                    and not picking
+                    and self.input_bindings.pointer_match(
+                        PointerAction.STATUS_COPY, self.input_bindings.pointer_frame(), press=True
+                    )
                 ):
                     imgui.set_clipboard_text(status_layout.metric_exact)
-                if hovered:
+                if hovered and imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
                     switch = (
                         self._viewport_labels.show_steps
-                        if self._status_metric_mode == "time"
+                        if metric_mode == "time"
                         else self._viewport_labels.show_time
                     )
-                    imgui.set_tooltip(f"{switch} · {self._viewport_labels.copy_exact}")
+                    label = (
+                        self._viewport_labels.time
+                        if metric_mode == "time"
+                        else self._viewport_labels.steps
+                    )
+                    status_tooltip(
+                        ui,
+                        f"{label} {status_layout.metric_exact}",
+                        switch,
+                        self._viewport_labels.copy_exact,
+                        scale=scale,
+                    )
+            if not loading:
+                for metric in status_layout.metrics:
+                    x0, y0, x1, y1 = metric.rect
+                    imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
+                    imgui.invisible_button(
+                        f"##status_metric_{metric.key}", imgui.ImVec2(x1 - x0, y1 - y0)
+                    )
+                    if imgui.is_item_hovered():
+                        if not picking and self.input_bindings.pointer_match(
+                            PointerAction.STATUS_COPY,
+                            self.input_bindings.pointer_frame(),
+                            press=True,
+                        ):
+                            imgui.set_clipboard_text(metric.exact)
+                        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+                            status_tooltip(
+                                ui,
+                                f"{metric.label} {metric.exact}",
+                                self._viewport_labels.copy_exact,
+                                scale=scale,
+                            )
             if status_layout.recording_pause_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_pause_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
@@ -300,14 +320,16 @@ class _Status:
                         self.resume_recording()
                     else:
                         self.pause_recording()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        self.localizer.text(
-                            "Resume Recording"
-                            if recording.phase is RecordingPhase.PAUSED
-                            else "Pause Recording"
-                        )
+                if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+                    hint = self.localizer.text(
+                        "Resume Recording"
+                        if recording.phase is RecordingPhase.PAUSED
+                        else "Pause Recording"
                     )
+                    if ui is None:
+                        imgui.set_tooltip(hint)
+                    else:
+                        ui.tooltip(hint, translate=False)
             if status_layout.recording_stop_rect is not None and not loading:
                 x0, y0, x1, y1 = status_layout.recording_stop_rect
                 imgui.set_cursor_screen_pos(imgui.ImVec2(x0, y0))
@@ -318,14 +340,16 @@ class _Status:
                     and not picking
                 ):
                     self._request_recording_stop()
-                if imgui.is_item_hovered():
-                    imgui.set_tooltip(
-                        self.localizer.text(
-                            "Cancel Recording"
-                            if recording.phase is RecordingPhase.COUNTDOWN
-                            else "Stop Recording"
-                        )
+                if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+                    hint = self.localizer.text(
+                        "Cancel Recording"
+                        if recording.phase is RecordingPhase.COUNTDOWN
+                        else "Stop Recording"
                     )
+                    if ui is None:
+                        imgui.set_tooltip(hint)
+                    else:
+                        ui.tooltip(hint, translate=False)
         imgui.end()
         imgui.pop_style_var(2)
 
@@ -461,7 +485,12 @@ class _Status:
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             self._status_path_bounds = (lo.x, lo.y, hi.x, hi.y)
             if imgui.is_item_hovered():
-                imgui.set_tooltip(t("Ctrl+click to reveal file") + "\n" + str(path))
+                hint = t("Ctrl+click to reveal file") + "\n" + str(path)
+                ui = getattr(getattr(self, "workspace", None), "ui", None)
+                if ui is None:
+                    imgui.set_tooltip(hint)
+                else:
+                    ui.tooltip(hint, translate=False)
                 io = imgui.get_io()
                 if (io.key_ctrl or io.key_super) and imgui.is_mouse_clicked(0):
                     reveal_path(path)

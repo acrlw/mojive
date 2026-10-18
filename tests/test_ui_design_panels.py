@@ -6,7 +6,6 @@ import glfw
 import numpy as np
 import pytest
 from examples.ui_design.native.docking_study import LEFT_PANELS
-from examples.ui_design.native.settings_panel import CATEGORIES
 from imgui_bundle import imgui
 from PIL import Image
 
@@ -15,6 +14,7 @@ from mojive.adapters.base import NodeType
 from mojive.render.selection import render_backend_name
 from mojive.scene.queries import node_world_pose
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.workspace.settings_panel import CATEGORIES
 from tests.gpu.test_ui_design_gizmos import OUTPUT
 from tests.gpu.test_ui_design_gizmos import reference as reference
 
@@ -151,7 +151,10 @@ def test_control_heading_draws_distinct_hover_press_and_selection_feedback(refer
     baseline = study.frame(3)
     actuator = session.actuators[0]
     x, y, width, height = study.ui.hits[f"control-target-{actuator.ctrl_address}"]
-    probe_x, probe_y = round(x + width - 6 * study.s), round(y + height / 2)
+    display = imgui.get_io().display_size
+    pixel_scale = (baseline.shape[1] / display.x, baseline.shape[0] / display.y)
+    probe_x = round((x + width - 6 * study.s) * pixel_scale[0])
+    probe_y = round((y + height / 2) * pixel_scale[1])
     point = (x + width / 2, y + height / 2)
     hovered = study.event("add_mouse_pos_event", *point)
     pressed = study.event("add_mouse_button_event", 0, True)
@@ -161,7 +164,7 @@ def test_control_heading_draws_distinct_hover_press_and_selection_feedback(refer
     samples = [
         pixels[probe_y, probe_x].astype(int) for pixels in (baseline, hovered, pressed, selected)
     ]
-    assert all(np.max(np.abs(a - b)) >= 4 for a, b in pairwise(samples))
+    assert all(np.max(np.abs(a - b)) >= 4 for a, b in pairwise(samples)), samples
     panel = study.preview.panels.get("control")
     assert panel._selected_address == actuator.ctrl_address
     assert panel._selection_revision == session.selection_revision
@@ -194,7 +197,8 @@ def test_layer_labels_align_left_and_switches_share_their_row_center(
         shown = study.ui.translate(caption)
         assert painted[shown][0] == pytest.approx(label[0] + 10 * study.s, abs=1)
         assert label[1] + label[3] / 2 == pytest.approx(switch[1] + switch[3] / 2, abs=1)
-        assert switch[2:] == pytest.approx((36 * study.s, 28 * study.s), abs=1)
+        # The 44-point track retains four points of horizontal hit-area clearance.
+        assert switch[2:] == pytest.approx((48 * study.s, 28 * study.s), abs=1)
 
 
 @pytest.mark.parametrize("reference", (1.0, 2.0), indirect=True)

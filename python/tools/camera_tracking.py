@@ -66,11 +66,11 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     assert viewer.app.camera_tracker.config.axes == "xy"
     if output is not None:
         _save_window_crop(viewer, camera_name, output / "camera-tracking-xy.png", padding=0)
-    click(viewer, _item_center(viewer, "button", "X-Y-Z##tracking-axes-1"))
+    click(viewer, _item_center(viewer, "button", "tracking-axes-1"))
     assert viewer.app.camera_tracker.config.axes == "xyz"
     if output is not None:
         _save_window_crop(viewer, camera_name, output / "camera-tracking-xyz.png", padding=0)
-    click(viewer, _item_center(viewer, "button", "X-Y##tracking-axes-0"))
+    click(viewer, _item_center(viewer, "button", "tracking-axes-0"))
     assert viewer.app.camera_tracker.config.axes == "xy"
     lo, hi = _item_rect(viewer, "slider_float", "##tracking-smoothing")
     click(viewer, (lo[0] + (hi[0] - lo[0]) * 0.75, (lo[1] + hi[1]) * 0.5))

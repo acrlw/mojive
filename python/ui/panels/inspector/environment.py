@@ -31,6 +31,7 @@ from mojive.ui.panels.inspector.fields import (
     _property_section,
     _property_segmented,
     _property_toggle,
+    _property_tooltip,
     _property_value_rail,
     _property_vector_row,
     _vector_fields,
@@ -174,7 +175,7 @@ class _Environment:
             range_changed, light_range = _property_numeric(
                 ctx, "##light_range", light.range, 0.05, 0.0, 10000.0, "%.2f"
             )
-            imgui.set_item_tooltip(ctx.tr("0 means unlimited"))
+            _property_tooltip(ctx, ctx.tr("0 means unlimited"))
             attenuation_changed, attenuation = _property_vector_row(
                 ctx,
                 node,
@@ -215,7 +216,7 @@ class _Environment:
             )
             if lock_changed:
                 ctx.session.set_entity_gizmo_lock(node, locked)
-            imgui.set_item_tooltip(ctx.tr("Lock gizmo while simulation runs"))
+            _property_tooltip(ctx, ctx.tr("Lock gizmo while simulation runs"))
             _end_property_table(ctx)
         changed |= (
             range_changed
@@ -541,8 +542,8 @@ class _Environment:
             )
             imgui.end_disabled()
             if not supported:
-                imgui.set_item_tooltip(
-                    f"{ctx.backend.caps.name} {ctx.tr('has no orthographic projection')}"
+                _property_tooltip(
+                    ctx, f"{ctx.backend.caps.name} {ctx.tr('has no orthographic projection')}"
                 )
             elif selected_projection != projection:
                 orthographic = selected_projection == 1
@@ -571,8 +572,8 @@ class _Environment:
                 _property_control_row(ctx, "camera view", control_part="button")
                 if _property_button(ctx, ctx.tr(label), imgui.ImVec2(-1.0, 0.0)):
                     ctx.select_model_camera(-1 if active else info.camera_id)
-                imgui.set_item_tooltip(
-                    ctx.tr("Return to Editor Camera" if active else "View Through Camera")
+                _property_tooltip(
+                    ctx, ctx.tr("Return to Editor Camera" if active else "View Through Camera")
                 )
 
             if ctx.session.adapter.caps.simulation:
@@ -582,7 +583,7 @@ class _Environment:
                     "##camera-gizmo-lock",
                     ctx.session.entity_gizmo_lock_enabled(node),
                 )
-                imgui.set_item_tooltip(ctx.tr("Lock gizmo while simulation runs"))
+                _property_tooltip(ctx, ctx.tr("Lock gizmo while simulation runs"))
                 if changed:
                     ctx.session.set_entity_gizmo_lock(node, locked)
 
@@ -593,7 +594,7 @@ class _Environment:
                     "##camera_preview_enabled",
                     bool(ctx.camera_preview.enabled),
                 )
-                imgui.set_item_tooltip(ctx.tr("Show Camera Preview"))
+                _property_tooltip(ctx, ctx.tr("Show Camera Preview"))
                 if changed:
                     ctx.camera_preview.set_enabled(enabled)
             _end_property_table(ctx)
@@ -692,15 +693,3 @@ class _Environment:
                 ctx.report(str(error), level="error")
         if ctx.inspector_presentation is None:
             imgui.separator()
-
-    @staticmethod
-    def _entity_gizmo_lock(ctx: PanelContext, node: SceneNode) -> None:
-        if not ctx.session.adapter.caps.simulation:
-            return
-        changed, locked = _property_toggle(
-            ctx,
-            ctx.tr("Lock gizmo while simulation runs"),
-            ctx.session.entity_gizmo_lock_enabled(node),
-        )
-        if changed:
-            ctx.session.set_entity_gizmo_lock(node, locked)

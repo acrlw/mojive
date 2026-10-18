@@ -68,6 +68,7 @@ class ProductionScenes:
         self.popup_path = ()
         self.dialog_title = None
         self.choice_key = None
+        self.form_popup_key = None
         audit.input.before_editor = self.close_production_popup
         audit.input.after_editor = self.open_production_popup
         audit.ensure_visible = self.ensure_visible
@@ -88,6 +89,7 @@ class ProductionScenes:
         self.popup_path = ()
         self.dialog_title = None
         self.choice_key = None
+        self.form_popup_key = None
         if part == "empty" and not self.empty:
             result = session.submit(cmd.NewScene())
             if not result.ok:
@@ -233,6 +235,10 @@ class ProductionScenes:
             self.choice_key = "##ui_language"
             self.open_production_popup()
             audit.scene_state.update(state="expanded production language selector")
+        if part in ("form_popup", "timeline_form_popup"):
+            self.form_popup_key = "timeline-settings"
+            self.open_production_popup()
+            audit.scene_state.update(state="expanded production Timeline settings form")
 
     def prepare_field(self, part, field):
         """Open the native layout state required by the field's documented condition."""
@@ -374,7 +380,11 @@ class ProductionScenes:
         self.close_model_source()
         audit = self.audit
         menu = audit.viewer.app.workspace.menus
-        if self.choice_key is not None or self.dialog_title is not None:
+        if (
+            self.choice_key is not None
+            or self.form_popup_key is not None
+            or self.dialog_title is not None
+        ):
             audit.input.key(imgui.Key.escape)
             audit.input.frames(2)
         elif self.popup_path:
@@ -467,7 +477,28 @@ class ProductionScenes:
         self.open_model_source()
         audit = self.audit
         menu = audit.viewer.app.workspace.menus
-        if self.choice_key is not None:
+        if self.form_popup_key is not None:
+            record = next(
+                (
+                    item
+                    for item in audit.production_raw_records()
+                    if item["key"] == self.form_popup_key
+                ),
+                None,
+            )
+            if record is None:
+                raise RuntimeError("The actual Timeline settings toolbar button is not submitted")
+            x, y, width, height = record["hit"]
+            audit.input.event("add_mouse_pos_event", x + width / 2, y + height / 2)
+            audit.input.event("add_mouse_button_event", 0, True)
+            audit.input.event("add_mouse_button_event", 0, False)
+            audit.input.frames(3)
+            if not any(
+                item["key"] == "timeline-settings-popup" and item["kind"] == "form_popup"
+                for item in audit.production_raw_records()
+            ):
+                raise RuntimeError("The actual Timeline settings form popup did not open")
+        elif self.choice_key is not None:
             record = next(
                 item for item in audit.production_raw_records() if item["key"] == self.choice_key
             )

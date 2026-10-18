@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
+from mojive.geometry2d.curves import capsule_end_padding
 from mojive.ui.design_palette import rgba8
 
 _REFERENCE_PAINT = ContextVar("reference_item_paint", default=None)
@@ -75,39 +76,61 @@ class FieldLayer:
         self.splitter.merge(self.draw)
 
 
+def _mix_ink(first, second, amount):
+    return (
+        *(round(a + (b - a) * amount) for a, b in zip(first[:3], second[:3], strict=True)),
+        first[3],
+    )
+
+
 def draw_switch(ui, x, y, width, height, thumb, value, paint):
     """Paint one switch track and thumb for production and reference controls."""
     if width <= 0 or height <= 0:
         return
     thumb = min(thumb, width, height)
+    field, accent, text, secondary, disabled = (
+        ui.ink(rgba8(role)) for role in ("field", "primary", "text", "secondary", "disabled")
+    )
+    held = paint.active and not paint.disabled
+    hovered = paint.hovered and not paint.disabled
+    if paint.disabled:
+        track = _mix_ink(accent, field, 0.76) if value else _mix_ink(field, text, 0.03)
+        tint = disabled
+    elif value:
+        track = _mix_ink(accent, field, 0.42)
+        track = (
+            _mix_ink(track, field, 0.22)
+            if held
+            else _mix_ink(track, text, 0.12)
+            if hovered
+            else track
+        )
+        tint = _mix_ink(text, (255, 255, 255, 255), 0.6) if hovered and not held else text
+    else:
+        track = _mix_ink(field, text, 0.3 if held else 0.18 if hovered else 0.06)
+        tint = text if held or hovered else secondary
     ui.rect(
         x,
         y,
         width,
         height,
-        paint.color("primary_dim", "primary", "primary_bright")
-        if value
-        else paint.color("field_hovered", "field_active", "border"),
+        track,
         r=height / ui.s / 2,
+        color_resolved=True,
     )
     inset = max(0.0, (height - thumb) / 2)
     cx = x + width - inset - thumb / 2 if value else x + inset + thumb / 2
     if getattr(ui, "design", None) is not None:
         native = ui.design.runtime.spec["native"]
         if native["g3"] and native["g3_capsule_optical"]:
-            from mojive.ui.capsule_geometry import capsule_end_padding
-
             padding = capsule_end_padding(width, height, native["g3_capsule_smoothing"])
             cx = x + width - padding if value else x + padding
     cx = min(max(cx, x + thumb / 2), x + width - thumb / 2)
-    tint = (
-        paint.color("primary", "primary_bright", "text")
-        if value
-        else paint.color("secondary", "text", "primary_bright")
-    )
+    # Resolve palette roles before deriving feedback, and submit them once.
+    # A neutral thumb retains its edge against an accent-colored track.
     ui.draw.add_circle_filled(
         (cx, y + height / 2),
-        thumb / 2,
+        thumb * (0.46 if held else 0.5),
         imgui.get_color_u32(imgui.ImVec4(*(channel / 255 for channel in tint))),
         num_segments=32,
     )

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from imgui_bundle import imgui
@@ -20,13 +20,16 @@ from ..input_bindings import DEFAULT_INPUT_BINDINGS, InputBindings
 from ..pointer_bindings import PointerAction, PointerChord, PointerFrame
 from ..theme import with_alpha
 from ..timeline import (
+    clamp_timeline_range,
     fitted_timeline_range,
     follow_timeline_range,
     nearest_take_frame,
     nice_timeline_step,
+    pan_timeline_range,
     recorded_take_spans,
     take_frame_bounds,
     timeline_channel_width,
+    timeline_navigation_limits,
     timeline_time_to_x,
     timeline_x_to_time,
     zoom_timeline_range,
@@ -56,6 +59,7 @@ class TimelineLayout:
     channel_width: float
     marker_radius: float
     time_padding: float = 0.0
+    column_gap: float = field(default=0.0, kw_only=True)
 
     @classmethod
     def measure(
@@ -64,8 +68,15 @@ class TimelineLayout:
         ruler = (_COMMAND_HEIGHT_PT + 4) * scale
         width = max(1.0, float(available[0]))
         height = max(ruler + 60 * scale, min(ruler + 90 * scale, available[1] - 8 * scale))
+        channel = timeline_channel_width(width, scale)
         return cls(
-            tuple(origin), width, height, ruler, timeline_channel_width(width, scale), 7 * scale
+            tuple(origin),
+            width,
+            height,
+            ruler,
+            channel,
+            7 * scale,
+            column_gap=min(12 * scale, max(0, width - channel - scale)),
         )
 
     @property
@@ -73,8 +84,17 @@ class TimelineLayout:
         return self.lo[0] + self.width, self.lo[1] + self.height
 
     @property
+    def channel_right(self) -> float:
+        return min(self.hi[0], self.lo[0] + self.channel_width)
+
+    @property
+    def track_left(self) -> float:
+        return min(self.hi[0], self.channel_right + self.column_gap)
+
+    @property
     def time_bounds(self) -> tuple[float, float]:
-        return self.lo[0] + self.channel_width + self.time_padding, self.hi[0] - self.time_padding
+        left = min(self.hi[0], self.track_left + self.time_padding)
+        return left, max(left, self.hi[0] - self.time_padding)
 
     @property
     def ruler_bottom(self) -> float:
@@ -157,6 +177,7 @@ def _sample_timeline_input(
     hovered = imgui.is_item_hovered()
     mouse = imgui.get_mouse_pos()
     position = (float(mouse.x), float(mouse.y))
+    hovered = hovered and not layout.channel_right <= mouse.x < layout.track_left
     over_timeline = hovered and layout.time_bounds[0] <= mouse.x <= layout.time_bounds[1]
     if over_timeline:
         # Replace the child's retained wheel owner when entering the time area.
@@ -221,17 +242,29 @@ def _update_timeline_view(
     take_times: Sequence[float],
 ) -> None:
     time_lo, time_hi = layout.time_bounds
+    snapshots = ctx.session.scene_snapshots
+    if snapshots is not editor.snapshot_cache:
+        editor.snapshot_index = TimelineMarkerIndex(
+            tuple((item.snapshot_id, item.time) for item in snapshots)
+        )
+        editor.snapshot_cache = snapshots
+    # Chronological indices provide content bounds without scanning dense takes
+    # or rebuilding snapshot metadata during unchanged frames.
+    bounds = (editor.playhead, *editor.snapshot_index.time_bounds)
+    if keyframes:
+        bounds += (keyframes[0].time, keyframes[-1].time)
+    if take_times:
+        bounds += (take_times[0], take_times[-1])
     fitted = editor.view_needs_fit or editor.view_model_id != editor.model_id
     if fitted:
-        editor.view_start, editor.view_end = fitted_timeline_range(
-            tuple(key.time for key in keyframes)
-            + tuple(take_times)
-            + tuple(item.time for item in ctx.session.scene_snapshots)
-            + (editor.playhead,),
-            editor.playhead,
-        )
+        editor.manual_view_range = None
+        editor.view_start, editor.view_end = fitted_timeline_range(bounds, editor.playhead)
         editor.view_model_id = editor.model_id
         editor.view_needs_fit = False
+    limits = timeline_navigation_limits(bounds, editor.manual_view_range)
+    editor.view_start, editor.view_end = clamp_timeline_range(
+        editor.view_start, editor.view_end, limits
+    )
     if inputs.over_timeline and (inputs.pan or inputs.range) and not editor.pointer_mode:
         editor.drag_start_x = inputs.position[0]
         editor.pan_moved = False
@@ -258,7 +291,15 @@ def _update_timeline_view(
         if editor.follow_mode == "locked":
             anchor = editor.playhead
         editor.view_start, editor.view_end = zoom_timeline_range(
-            editor.view_start, editor.view_end, anchor, inputs.wheel
+            editor.view_start,
+            editor.view_end,
+            anchor,
+            inputs.wheel,
+            max_span=limits.max_span,
+            min_span=limits.min_span,
+        )
+        editor.view_start, editor.view_end = clamp_timeline_range(
+            editor.view_start, editor.view_end, limits
         )
     if (
         editor.pointer_mode == "pan"
@@ -268,8 +309,9 @@ def _update_timeline_view(
         editor.pan_moved = True
         editor.follow_mode = "off"
         shift = -inputs.delta_x * (editor.view_end - editor.view_start) / max(1, time_hi - time_lo)
-        editor.view_start += shift
-        editor.view_end += shift
+        editor.view_start, editor.view_end = pan_timeline_range(
+            editor.view_start, editor.view_end, shift, limits
+        )
     if (
         not editor.pointer_mode
         and not zooming
@@ -303,12 +345,6 @@ def _project_timeline(
         radius,
         moved=(editor.drag_id, editor.drag_preview_time) if editor.drag_moved else None,
     )
-    snapshots = ctx.session.scene_snapshots
-    if snapshots is not editor.snapshot_cache:
-        editor.snapshot_index = TimelineMarkerIndex(
-            tuple((item.snapshot_id, item.time) for item in snapshots)
-        )
-        editor.snapshot_cache = snapshots
     snapshot_projection = editor.snapshot_index.project(
         editor.view_start, editor.view_end, time_lo, time_hi, radius
     )
@@ -430,6 +466,7 @@ def draw_dope_sheet(
     icon_drawer: CommandIconDrawer = _draw_command_icon,
     layout: TimelineLayout | None = None,
     presentation: TimelinePresentation | None = None,
+    selection_menu: Callable[[TimelineEditor, PanelContext, bool], None] | None = None,
 ) -> None:
     layout = layout or TimelineLayout.measure(
         imgui.get_cursor_screen_pos(), imgui.get_content_region_avail(), ctx.style_scale
@@ -486,6 +523,7 @@ def draw_dope_sheet(
             take_times,
             hit.keyframe_id,
             projection,
+            layout,
         )
         _paint_snapshot_track(editor, ctx, layout, snapshots, hit, keyframe_by_id, icon_drawer)
     else:
@@ -493,7 +531,7 @@ def draw_dope_sheet(
             editor, ctx, layout, projection, snapshots, hit, keyframe_by_id, take_times
         )
     splitter.merge(draw_list)
-    draw_selection_menu(editor, ctx, editable)
+    (selection_menu or draw_selection_menu)(editor, ctx, editable)
 
 
 def handle_editor_keys(editor: TimelineEditor, ctx, keyframes, take_times, editable, timeline_id):
@@ -536,13 +574,27 @@ def handle_editor_keys(editor: TimelineEditor, ctx, keyframes, take_times, edita
         editor.delete_selection(ctx, editable)
 
 
-def draw_selection_menu(editor: TimelineEditor, ctx, editable):
+def draw_selection_menu(editor: TimelineEditor, ctx, editable, *, menus=None):
+    enabled = (
+        bool(editor.selection_count())
+        and not (ctx.session.state_take_recording or ctx.take_video_active)
+        and (editor.edit_lane == "take" or editable)
+    )
+    if menus is not None:
+        with menus.local_popup("timeline-selection-menu") as opened:
+            if (
+                opened
+                and menus.local_item(
+                    "Delete selection",
+                    "Delete",
+                    enabled=enabled,
+                    key="timeline-delete-selection",
+                    icon="delete",
+                )[0]
+            ):
+                editor.delete_selection(ctx, editable)
+        return
     if imgui.begin_popup("timeline-selection-menu"):
-        enabled = (
-            bool(editor.selection_count())
-            and not (ctx.session.state_take_recording or ctx.take_video_active)
-            and (editor.edit_lane == "take" or editable)
-        )
         if imgui.menu_item(ctx.tr("Delete selection"), "Delete", False, enabled)[0]:
             editor.delete_selection(ctx, editable)
         imgui.end_popup()
@@ -564,17 +616,23 @@ def paint_dope_sheet(
     take_times: Sequence[float],
     hit_id: int,
     projection: MarkerProjection,
+    layout: TimelineLayout | None = None,
 ) -> None:
     overlay = ImguiDraw2D()
     theme = ctx.theme
     ruler_bottom = lo[1] + ruler_height
-    overlay.rect_filled(lo, hi, theme.bg_child, rounding=3.0 * ctx.style_scale)
-    overlay.rect_filled(lo, (time_lo, hi[1]), theme.bg_header)
-    overlay.rect_filled((time_lo, lo[1]), (time_hi, ruler_bottom), theme.bg_frame)
-    overlay.line((time_lo, lo[1]), (time_lo, hi[1]), theme.border, 1.0)
-    overlay.line((lo[0], ruler_bottom), (hi[0], ruler_bottom), theme.border, 1.0)
+    channel_right = layout.channel_right if layout is not None else time_lo
+    track_left = layout.track_left if layout is not None else time_lo
+    overlay.rect_filled(lo, hi, theme.bg_window)
+    overlay.rect_filled((track_left, lo[1]), hi, theme.bg_child, rounding=3.0 * ctx.style_scale)
+    overlay.rect_filled(lo, (channel_right, hi[1]), theme.bg_header)
+    overlay.rect_filled((track_left, lo[1]), (time_hi, ruler_bottom), theme.bg_frame)
+    overlay.line((track_left, lo[1]), (track_left, hi[1]), theme.border, 1.0)
+    for left, right in ((lo[0], channel_right), (track_left, hi[0])):
+        overlay.line((left, ruler_bottom), (right, ruler_bottom), theme.border, 1.0)
     row_divider = (marker_y + take_y) * 0.5
-    overlay.line((lo[0], row_divider), (hi[0], row_divider), theme.border, 1.0)
+    for left, right in ((lo[0], channel_right), (track_left, hi[0])):
+        overlay.line((left, row_divider), (right, row_divider), theme.border, 1.0)
 
     loop = editor.range_preview or ctx.session.state_take_range
     if loop is not None:
@@ -593,10 +651,13 @@ def paint_dope_sheet(
     step = nice_timeline_step(
         editor.view_end - editor.view_start, time_hi - time_lo, 90 * ctx.style_scale
     )
-    first = math.ceil(editor.view_start / step) * step
-    tick = first
+    first = math.ceil(editor.view_start / step)
     iterations = 0
-    while tick <= editor.view_end + step * 1e-7 and iterations < 1000:
+    label_right = time_lo
+    while iterations < 1000:
+        tick = (first + iterations) * step
+        if tick > editor.view_end + step * 1e-7:
+            break
         x = timeline_time_to_x(tick, editor.view_start, editor.view_end, time_lo, time_hi)
         overlay.line((x, ruler_bottom), (x, hi[1]), with_alpha(theme.border, 0.65), 1.0)
         label = _format_tick(tick, step)
@@ -605,18 +666,19 @@ def paint_dope_sheet(
             time_hi - label_width - 3 * ctx.style_scale,
             max(time_lo + 3 * ctx.style_scale, x + 4 * ctx.style_scale),
         )
-        overlay.text(
-            (label_x, text_line_y(overlay, lo[1] + ruler_height * 0.5)),
-            theme.text_disabled,
-            label,
-        )
-        tick += step
+        if label_x >= label_right and label_width <= time_hi - time_lo - 6 * ctx.style_scale:
+            overlay.text(
+                (label_x, text_line_y(overlay, lo[1] + ruler_height * 0.5)),
+                theme.text_disabled,
+                label,
+            )
+            label_right = label_x + label_width + 8 * ctx.style_scale
         iterations += 1
 
     inset = 10.0 * ctx.style_scale
-    label_width = max(1.0, time_lo - lo[0] - 2.0 * inset)
+    label_width = max(1.0, channel_right - lo[0] - 2.0 * inset)
     draw_list = imgui.get_window_draw_list()
-    draw_list.push_clip_rect((lo[0], ruler_bottom), (time_lo, hi[1]), True)
+    draw_list.push_clip_rect((lo[0], ruler_bottom), (channel_right, hi[1]), True)
     rows = [
         (marker_y, "Keyframes", "model"),
         (take_y, "Take", "take"),
@@ -627,7 +689,7 @@ def paint_dope_sheet(
         if editor.edit_lane == lane:
             overlay.rect_filled(
                 (lo[0], center_y - row_height * 0.5),
-                (time_lo, center_y + row_height * 0.5),
+                (channel_right, center_y + row_height * 0.5),
                 with_alpha(theme.primary, 0.22),
             )
         text = ctx.tr(label)

@@ -121,6 +121,14 @@ def test_contact_settings_persist_and_override(
         height=round(1000 * scale),
         vsync=False,
     ) as viewer:
+        process_inputs = viewer.window._input.process_inputs
+
+        def timed_inputs():
+            process_inputs()
+            # Gesture deadlines must not depend on the cost of rendering a HiDPI frame.
+            imgui.get_io().delta_time = 1 / 60
+
+        monkeypatch.setattr(viewer.window._input, "process_inputs", timed_inputs)
         viewer.app.set_language(language)
         show_settings(viewer, "MuJoCo Visuals")
         # Keep the changed section visible in the production scrollable page.
@@ -150,6 +158,7 @@ def test_contact_settings_persist_and_override(
             _click(viewer, point)
             _click(viewer, point)
             io = imgui.get_io()
+            assert io.want_text_input
             modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
             io.add_key_event(modifier, True)
             io.add_key_event(imgui.Key.a, True)

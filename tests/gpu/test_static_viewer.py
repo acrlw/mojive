@@ -158,15 +158,21 @@ def test_inspector_name_tracks_external_rename_and_undo(canvas, monkeypatch):
         viewer.sync()
 
 
-def test_status_bar_uses_the_comfortable_application_height(canvas):
+def test_status_bar_honors_the_authored_application_height(canvas):
     from imgui_bundle import imgui
+
+    from mojive.design.specification import DEFAULT
 
     viewer, _scene = canvas
     status = imgui.internal.find_window_by_name("Status###application_status")
 
     assert status is not None and status.active
     assert status.size.y == pytest.approx(
-        (30 if hasattr(viewer.app, "workspace") else APPLICATION_STATUS_HEIGHT_PT)
+        (
+            DEFAULT["parts"]["statusbar"]["height"]
+            if hasattr(viewer.app, "workspace")
+            else APPLICATION_STATUS_HEIGHT_PT
+        )
         * viewer.window.style_scale,
         abs=1.0,
     )
@@ -907,17 +913,13 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         assert viewer.app.camera_preview._image.aspect == pytest.approx(16.0 / 9.0, rel=0.01)
         layer = viewer.backend.debug.layer(HELPER_LAYER)
         icon_layer = viewer.backend.debug.layer(HELPER_ICON_LAYER)
-        # Camera icons use joined overlay strokes; picking still uses the
+        # Camera icons use the canonical round silhouette; picking still uses the
         # projected anchor, while the selected frustum remains depth-aware.
         assert layer.count_of(PrimitiveType.POINT) == 0
         assert layer.count_of(PrimitiveType.LINE) == 12
-        from mojive.ui.icons import production_helper_strokes
+        from mojive.interaction.scene_icons import scene_icon_geometry
 
-        expected_segments = sum(
-            len(path.points) - int(not path.closed)
-            for path in production_helper_strokes("helper-camera")
-        )
-        assert icon_layer.count_of(PrimitiveType.STROKE) == expected_segments
+        assert icon_layer.count_of(PrimitiveType.TRIANGLE) == len(scene_icon_geometry("camera"))
         store = layer._stores[PrimitiveType.LINE]
         assert store.positions[: store.count] == pytest.approx(frustum_before_preview)
         # The preview intentionally owns pointer input over its rectangle.
