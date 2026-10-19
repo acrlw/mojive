@@ -917,11 +917,12 @@ def _calls_in_methods() -> dict[str, set[str]]:
     return out
 
 
-def test_startup_is_the_only_place_that_shows_the_window():
+def test_startup_is_the_only_place_that_requests_automatic_window_reveal():
 
     calls = _calls_in_methods()
-    showing = [name for name, names in calls.items() if "show" in names]
+    showing = [name for name, names in calls.items() if "request_show" in names]
     assert showing == ["_startup"]
+    assert not any("show" in names for names in calls.values())
 
     for entry in ("run", "sync"):
         assert "_startup" in calls[entry]

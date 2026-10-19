@@ -184,12 +184,18 @@ Resolve that column on the native cursor grid, including at fractional scales. M
 tables, checkbox grids and raw text use the same body bounds. Restore the parent bounds on
 scope exit and do not accumulate indentation between sibling sections. Icon-bearing joint
 rows align their body with the leading content icon; the name retains its intentional icon gap.
+Boolean rows decide automatic wrapping from the painted caption, actual switch/checkbox and
+their insets. A shared label column is a preference; numeric-field minima and stacked XYZ
+headings must not force a Boolean control onto another line. Grid planning uses the same budget.
 
 Keep startup and frame work separate. Native composition resolves font sources once and installs
 one final atlas; it constructs only the selected panel implementation. Fixed icon stroke unions
 are generated with the packaged resources, while runtime painting handles scale-dependent AA.
 An unobserved control must not assemble diagnostic geometry. Reuse validated design snapshots
 until their file identity changes, and bound caches keyed by entity or bookmark identities.
+Automatic window reveal waits for a successfully submitted frame and resolved native docking.
+Reuse normal frames for this preparation; do not add hidden physics ticks or a fixed warmup delay.
+Inactive dock tabs do not block reveal. An explicitly hidden viewer remains hidden until requested.
 
 Use `make startup-profile` for fresh-process first presentation and `make inspector-profile` for
 real tab/section interactions followed by recovery to the idle state. Collect timing separately

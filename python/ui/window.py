@@ -373,6 +373,7 @@ class Window:
             self._save_layout_settings()
 
     def _initialize_layout_state(self) -> None:
+        self._show_pending = False
         self.dockspace_id = 0
         self._layout_done = False
         self._layout_builder: Callable[[bool], None] | None = None
@@ -384,6 +385,7 @@ class Window:
     def hide(self) -> None:
         glfw.hide_window(self._window)
         self._shown = False
+        self._show_pending = False
 
     @property
     def layout_reset_pending(self) -> bool:
@@ -542,6 +544,41 @@ class Window:
     def show(self) -> None:
         glfw.show_window(self._window)
         self._shown = True
+        self._show_pending = False
+
+    def request_show(self) -> None:
+        """Reveal after a completed frame has resolved native window layout."""
+        self._show_pending = not self._shown
+
+    def _ready_to_show(self) -> bool:
+        if (
+            min(self.size_pixels) <= 0
+            or self._layout_reset_pending
+            or self._layout_rebuild_pending
+            or self._default_tabs_frame
+        ):
+            return False
+        context = self._imgui_context
+        excluded = (
+            imgui.WindowFlags_.child_window | imgui.WindowFlags_.popup | imgui.WindowFlags_.tooltip
+        )
+        visible = False
+        for window in context.windows:
+            if not window.active or window.flags & excluded or window.collapsed:
+                continue
+            node = window.dock_node
+            if node is not None and node.selected_tab_id not in (0, window.tab_id):
+                continue
+            # ImGui measures new windows and dock hosts in hidden frames. An
+            # inactive tab may stay hidden indefinitely; it is excluded above.
+            if window.hidden or window.hidden_frames_cannot_skip_items:
+                return False
+            visible = True
+        return visible
+
+    def _show_after_frame(self) -> None:
+        if self._show_pending and self._ready_to_show():
+            self.show()
 
     @property
     def shown(self) -> bool:
@@ -711,6 +748,7 @@ class Window:
         frame = self.read_frame() if readback else None
         glfw.swap_buffers(self._window)
         self._frame_index += 1
+        self._show_after_frame()
         return frame
 
     @property

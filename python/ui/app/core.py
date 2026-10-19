@@ -547,7 +547,7 @@ class ViewerApp(
             self._reset_source_camera()
         self.session.set_threaded_physics(self._threaded_physics)
         if self.window.config.show_on_start:
-            self.window.show()
+            self.window.request_show()
         self._started = True
         self._last_time = time.perf_counter()
 

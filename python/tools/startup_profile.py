@@ -1,4 +1,4 @@
-"""Measure editor startup in fresh processes, including the first presented frame."""
+"""Measure hidden startup, window reveal, and initial visible frames in fresh processes."""
 
 from __future__ import annotations
 
@@ -24,6 +24,61 @@ def _trace_completion(owner, method, event, label):
         return result
 
     setattr(owner, method, measured)
+
+
+def _trace_window_frames(window, event):
+    # The native override also presents its retained target after mapping on Wayland.
+    _trace_completion(window, "show", event, "window_shown")
+    original = window._show_after_frame
+
+    def completed():
+        event("visible_frame_completed" if window.shown else "hidden_frame_completed")
+        return original()
+
+    window._show_after_frame = completed
+
+
+def _trace_app_frames(app, frames, profiler=None):
+    original = app.frame
+
+    def frame():
+        start = time.perf_counter()
+        shown_at_start = app.window.shown
+        original()
+        frames.append(
+            {
+                "duration_s": time.perf_counter() - start,
+                "shown_at_start": shown_at_start,
+                "shown_at_end": app.window.shown,
+            }
+        )
+        if shown_at_start and profiler:
+            profiler.disable()
+
+    app.frame = frame
+
+
+def _startup_timings(data):
+    def first(name):
+        return next((item["elapsed_s"] for item in data["events"] if item["name"] == name), None)
+
+    shown = first("window_shown")
+    visible = first("visible_frame_completed")
+    if shown is None or visible is None or visible < shown:
+        raise RuntimeError("Startup did not complete a visible frame after revealing the window")
+    durations = [frame["duration_s"] for frame in data["frames"] if frame["shown_at_start"]]
+    if not durations:
+        raise RuntimeError("Startup did not measure a full frame after revealing the window")
+    return {
+        "launch_to_first_hidden_frame_s": first("hidden_frame_completed"),
+        "launch_to_reveal_s": shown,
+        "launch_to_first_visible_frame_s": visible,
+        "reveal_to_first_visible_frame_s": visible - shown,
+        "post_reveal_frame_max_s": max(durations),
+        # Preserve existing report fields, now referring to actual visible submissions.
+        "launch_s": visible,
+        "shown_s": visible - shown,
+    }
 
 
 def _measure(args) -> None:
@@ -64,25 +119,15 @@ def _measure(args) -> None:
 
     _trace_completion(Window, "_load_fonts", event, "font_sources_ready")
     _trace_completion(widgets, "install_fonts", event, "fonts_ready")
-    _trace_completion(Window, "show", event, "window_shown")
     _trace_completion(Session, "__init__", event, "session_ready")
     _trace_completion(ViewerApp, "__init__", event, "base_app_ready")
     _trace_completion(WorkspaceApp, "__init__", event, "app_ready")
-    original_frame = ViewerApp.frame
-
-    def frame(app):
-        start = time.perf_counter()
-        original_frame(app)
-        frames.append(time.perf_counter() - start)
-        if len(frames) == 1 and profiler:
-            profiler.disable()
-
-    ViewerApp.frame = frame
     original_run = composition.Viewer.run
 
     def run(viewer):
-        _trace_completion(viewer.window, "end_frame", event, "frame_presented")
-        original_run(viewer, max_frames=4)
+        _trace_window_frames(viewer.window, event)
+        _trace_app_frames(viewer.app, frames, profiler)
+        original_run(viewer, max_frames=8)
         # Readback and image encoding are outside every startup timing interval.
         from PIL import Image
 
@@ -101,7 +146,18 @@ def _measure(args) -> None:
                 pstats.Stats(profiler, stream=stream).strip_dirs().sort_stats(
                     "cumulative"
                 ).print_stats(60)
-        args.output.write_text(json.dumps({"events": events, "frames_s": frames}, indent=2) + "\n")
+        args.output.write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "events": events,
+                    "frames_s": [frame["duration_s"] for frame in frames],
+                    "frames": frames,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
 
 def _trial(args, backend: str, dynamic: bool, repeat: int) -> dict:
@@ -135,15 +191,11 @@ def _trial(args, backend: str, dynamic: bool, repeat: int) -> dict:
             timeout=120,
             check=True,
         )
-    events = json.loads(path.read_text())["events"]
-    present = next(e["elapsed_s"] for e in events if e["name"] == "frame_presented")
-    shown = next(e["elapsed_s"] for e in events if e["name"] == "window_shown")
     row = {
         "backend": backend,
         "mode": mode,
         "repeat": repeat,
-        "launch_s": present,
-        "shown_s": present - shown,
+        **_startup_timings(json.loads(path.read_text())),
     }
 
     return row
@@ -191,9 +243,24 @@ def main(argv: list[str] | None = None) -> int:
                 "mode": mode,
                 "launch_s": statistics.median(row["launch_s"] for row in selected),
                 "shown_s": statistics.median(row["shown_s"] for row in selected),
+                **{
+                    key: statistics.median(row[key] for row in selected)
+                    for key in (
+                        "launch_to_reveal_s",
+                        "launch_to_first_visible_frame_s",
+                        "reveal_to_first_visible_frame_s",
+                        "post_reveal_frame_max_s",
+                    )
+                },
             }
         )
-    report = {"asset": args.asset, "profiled": args.profile, "runs": rows, "medians": medians}
+    report = {
+        "schema_version": 2,
+        "asset": args.asset,
+        "profiled": args.profile,
+        "runs": rows,
+        "medians": medians,
+    }
     (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(medians, indent=2))
     return 0

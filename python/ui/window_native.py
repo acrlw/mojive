@@ -158,6 +158,13 @@ class NativeWindow(Window):
         # the initial xdg-shell configuration; hidden windows only render offscreen.
         if self._surface is None:
             self._create_surface()
+            if self._frame_target is not None:
+                # The first complete UI frame was prepared offscreen. Present
+                # it to the newly mapped surface without another scene/UI tick.
+                size = self.size_pixels
+                vertices, indices, commands = self._present_packet(size)
+                self.runtime.render_ui(*size, vertices, indices, commands, self._surface)
+                self.runtime.advance()
 
     def make_current(self) -> None:
         # NO_API window: there is no GL context to make current.
@@ -209,6 +216,8 @@ class NativeWindow(Window):
                 result = self.read_frame()
         self.device.drain_logs()
         self._frame_index += 1
+        if min(size) > 0:
+            self._show_after_frame()
         return result
 
     def _present_packet(self, size):

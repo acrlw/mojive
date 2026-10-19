@@ -520,11 +520,16 @@ make startup-profile ARGS="--backend opengl --profile --compare-icons"
 make readme-media
 ```
 
-Build each requested backend before profiling. Startup trials run in fresh processes and record
-imports, fonts, Session setup, first frame and window presentation separately. Profiling adds
-overhead; keep those samples separate from ordinary timing runs. `--compare-icons` compares
-production presets with dynamic icon fitting. Inspect JSON and images under
+Build each requested backend before profiling. Startup trials run eight normal frames in fresh
+processes. Reports separate imports, fonts, Session setup, `hidden_frame_completed`, `window_shown`
+and `visible_frame_completed`. `launch_to_reveal_s` measures startup through reveal, while
+`post_reveal_frame_max_s` measures the slowest subsequent full application frame, including the
+workspace scope. These are CPU submission boundaries, not display scanout measurements.
+Profiling adds overhead; keep those samples separate from ordinary timing runs. `--compare-icons`
+compares production presets with dynamic icon fitting. Inspect JSON and images under
 `output/startup-profile/`; do not equate a hidden black window with a presented usable frame.
+`tests/gpu/test_startup_presentation.py` checks the initial reveal, complete dock layout, render
+failure, explicit hidden mode and unchanged tick counts on both viewer frontends and renderers.
 
 README media uses isolated settings, the real jointed scene and fixed-size captures. Inspect
 all three files under `output/readme-media/` before delivery. The documentation gate checks
