@@ -198,6 +198,7 @@ class NativeInspectorPresentation:
                         label_style.get("fontSize", BODY_SIZE),
                         translate=False,
                         font_resolved=True,
+                        style=label_style,
                     )
                     for text in captions
                 )
@@ -242,7 +243,6 @@ class NativeInspectorPresentation:
                 width,
                 shown,
                 label_width=shared_label_width,
-                label_above=shared_above,
             )
         above = layout.label_above
         if toggle and not above and self.ui.design is not None:

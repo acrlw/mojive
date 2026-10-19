@@ -2,7 +2,7 @@
 
 import math
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
@@ -11,7 +11,7 @@ from mojive.ui.controls import clearable_combo
 from mojive.ui.workspace.choice_popup import ChoicePopup
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN, rail_style
 from mojive.ui.workspace.property_groups import PropertyGroups
-from mojive.ui.workspace.widgets import MUTED, SWITCH_WIDTH, TEXT
+from mojive.ui.workspace.widgets import MUTED, TEXT
 
 
 @contextmanager
@@ -124,8 +124,22 @@ def toggle_row_height(ui, label_style=None):
     return (height + margin[1] + margin[3]) * ui.s
 
 
-def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
-    """Reserve the full caption and the actual switch, independently of numeric grids."""
+@dataclass(frozen=True, slots=True)
+class _SwitchWidths:
+    caption: float
+    preferred_label: float
+    gap: float
+    field: float
+    field_inset: float
+    row_inset: float
+
+    @property
+    def minimum(self):
+        return self.caption + self.gap + self.field + self.field_inset + self.row_inset
+
+
+def _switch_widths(ui, width, label):
+    """Measure the painted caption and complete switch slot in native units."""
     scale = ui.s
     row, switch = ui.component_style("form_row"), ui.component_style("switch")
     label_style = ui.component_style(("switch", "form_label"))
@@ -137,10 +151,10 @@ def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
         label_style.get("fontSize", BODY_SIZE),
         translate=False,
         font_resolved=True,
+        style=label_style,
     )
     caption = text_width + label_margins[0] + label_margins[2]
     baseline = min(row.get("labelWidth", DESIGN.label_width) * scale, available * 0.28)
-    desired = max(caption, baseline if label_width is None else label_width)
     gap = (
         switch.get(
             "columnGap",
@@ -151,22 +165,34 @@ def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
     padding = switch.edges("padding", scale)
     minimum = (switch.get("switchWidth", DESIGN.switch_track_width) + 4) * scale
     minimum += padding[0] + padding[2]
-    above = (
-        desired + gap + minimum + switch_margins[0] + switch_margins[2] > available
-        if label_above is None
-        else label_above
+    return _SwitchWidths(
+        caption,
+        baseline,
+        gap,
+        minimum,
+        switch_margins[0] + switch_margins[2],
+        margins[0] + margins[2],
     )
+
+
+def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
+    """Fit the real caption and switch; shared label columns are preferences."""
+    measured = _switch_widths(ui, width, label)
+    desired = max(
+        measured.caption, measured.preferred_label if label_width is None else label_width
+    )
+    above = measured.minimum > width if label_above is None else label_above
     layout = ui.form_layout(
         width,
         label_width=desired,
-        label_gap=gap,
+        label_gap=measured.gap,
         label_above=above,
         field_part="switch",
-        field_minimum=minimum,
-        minimum=minimum + switch_margins[0] + switch_margins[2],
+        field_minimum=measured.field,
+        minimum=measured.field + measured.field_inset,
     )
     _, field_y, field_width, field_height = layout.fields[0]
-    field_width = min(field_width, minimum + switch_margins[0] + switch_margins[2])
+    field_width = min(field_width, measured.field + measured.field_inset)
     return replace(
         layout,
         fields=((width - layout.row_margin[2] - field_width, field_y, field_width, field_height),),
@@ -190,6 +216,7 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
             layout.label_width,
             above=True,
             row_height=layout.label_height / ui.s,
+            parent="switch",
         )
         imgui.set_cursor_screen_pos((pos.x + layout.label_x, pos.y + layout.label_y))
         clicked = imgui.invisible_button(
@@ -270,7 +297,16 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
         tooltip=tooltip
         or (shown if ui.measure(shown, translate=False) > layout.label_width else ""),
     )
-    property_label(ui, key + "-label-text", shown, pos.x, pos.y, layout.label_width, above=False)
+    property_label(
+        ui,
+        key + "-label-text",
+        shown,
+        pos.x,
+        pos.y,
+        layout.label_width,
+        above=False,
+        parent="switch",
+    )
     edited = ui.switch(key, control_x, pos.y, value)
     advance(ui, pos.x, pos.y + (DESIGN.control_height + DESIGN.row_gap) * ui.s)
     return not value if clicked else edited
@@ -360,12 +396,39 @@ class NativePropertyPresentation:
         minimum = (
             style.entry_width + style.minimum_track_width + DESIGN.row_gap if rail else minimum
         ) * scale
+        field_minimum = label_above = None
+        if control_part == "checkbox":
+            control = ui.component_style("checkbox")
+            control_margin = control.edges("margin", scale)
+            field_minimum = control.get("size", DESIGN.checkbox_size) * scale
+            minimum = field_minimum + control_margin[0] + control_margin[2]
+            row, caption_style = ui.component_style("form_row"), ui.component_style("form_label")
+            row_margin = row.edges("margin", scale)
+            available = max(0, width - row_margin[0] - row_margin[2])
+            caption_margin = caption_style.edges("margin", scale)
+            caption = (
+                ui.measure(
+                    label,
+                    caption_style.get("fontSize", BODY_SIZE),
+                    translate=False,
+                    font_resolved=True,
+                    style=caption_style,
+                )
+                + caption_margin[0]
+                + caption_margin[2]
+            )
+            preferred = min(row.get("labelWidth", DESIGN.label_width) * scale, available * 0.28)
+            label_width = max(caption, preferred if label_width is None else label_width)
+            gap = row.get("columnGap", row.get("labelGap", DESIGN.label_gap)) * scale
+            label_above = caption + gap + minimum > available
         layout = ui.form_layout(
             width,
             1,
             axis=False,
             label_width=label_width,
+            label_above=label_above,
             minimum=minimum,
+            field_minimum=field_minimum,
             minimum_height=ui.rail_height()
             if rail
             else ui.segment_height()
@@ -616,30 +679,14 @@ class NativePropertyPresentation:
         width, scale = imgui.get_content_region_avail().x, self.ui.s
         if not items:
             return ()
-        style = self.ui.component_style("switch")
-        label_style = (
-            self.ui.design.primitives.style(("switch", "form_label")) if self.ui.design else style
-        )
-        font_size = label_style.get("fontSize", DESIGN.body_size)
-        minimum = max(
-            self.ui.measure(label, font_size, translate=False, font_resolved=True)
-            for _, label, _ in items
-        )
-        shared_label_width = minimum
-        margin, label_margin = style.edges("margin", scale), label_style.edges("margin", scale)
-        label_gap = style.get("columnGap", DESIGN.label_gap) * scale
-        minimum += (
-            (style.get("switchWidth", SWITCH_WIDTH - 4) + 4) * scale
-            + 2 * label_gap
-            + margin[0]
-            + margin[2]
-            + label_margin[0]
-            + label_margin[2]
-        )
+        measurements = tuple(_switch_widths(self.ui, width, label) for _, label, _ in items)
+        shared_label_width = max(item.caption for item in measurements)
+        label_gap = measurements[0].gap
+        minimum = max(item.minimum for item in measurements) + label_gap
         columns = max(1, min(len(items), int(width / minimum)))
         column_width = width / columns
         row_height = max(
-            toggle_row_height(self.ui, label_style),
+            toggle_row_height(self.ui),
             *(
                 switch_form_layout(
                     self.ui, column_width - label_gap, label, label_width=shared_label_width

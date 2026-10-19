@@ -174,12 +174,13 @@ def _reveal(inputs, key, child):
 
 
 @contextmanager
-def _floating_inspector(inputs):
-    """Exercise actual 310-point reflow while retaining the original dock assignment."""
+def _floating_panel(inputs, panel):
+    """Resize a production review panel while retaining its original dock assignment."""
     workspace = inputs.viewer.app.workspace
     inputs.sync()
-    window = imgui.internal.find_window_by_name("Inspector")
+    window = imgui.internal.find_window_by_name(panel)
     assert window is not None
+    position, size = tuple(window.pos), tuple(window.size)
     dock_id, begin = window.dock_id, workspace.panel
     layout = imgui.save_ini_settings_to_memory()
     width = [560]
@@ -187,7 +188,7 @@ def _floating_inspector(inputs):
         imgui.internal.dock_context_process_undock_window(imgui.get_current_context(), window, True)
 
     def place(name, *args, **kwargs):
-        if (name if isinstance(name, str) else name.name) == "Inspector":
+        if (name if isinstance(name, str) else name.name) == panel:
             scale = workspace.s
             viewport = imgui.get_main_viewport()
             imgui.set_next_window_pos(
@@ -208,9 +209,16 @@ def _floating_inspector(inputs):
             # Removing the only window collapses its leaf and renames sibling
             # nodes. Restore the native layout, rather than reuse a deleted ID.
             imgui.load_ini_settings_from_memory(layout)
+        else:
+            imgui.set_window_pos(panel, position)
+            imgui.set_window_size(panel, size)
         inputs.sync()
         if dock_id:
-            assert imgui.internal.find_window_by_name("Inspector").dock_id == dock_id
+            assert imgui.internal.find_window_by_name(panel).dock_id == dock_id
+
+
+def _floating_inspector(inputs):
+    return _floating_panel(inputs, "Inspector")
 
 
 def capture_regressions(viewer, output):
@@ -374,17 +382,15 @@ def capture_regressions(viewer, output):
             "bar": bar,
         }
 
-    def body_switch_geometry(state, *, points):
+    def inline_boolean_geometry(state, row_key, control_key, caption):
         rows = {record["key"]: record for record in state["records"]}
-        prefix = "body_inertial_properties/row/"
-        row, gravity = rows[prefix + "mocap body"], rows[prefix + "gravity compensation"]
-        switch = rows["##body-mocap"]
-        label, control, track = row["labelRect"], switch["hit"], switch["switchRect"]
+        row, switch = rows[row_key], rows[control_key]
+        label, control = row["labelRect"], switch["hit"]
+        track = switch.get("switchRect", control)
         frame = row["frameRect"]
         epsilon = native_epsilon(*label, *control, *track, *frame)
-        assert row["windowId"] == switch["windowId"] == gravity["windowId"], (row, switch)
+        assert row["windowId"] == switch["windowId"], (row, switch)
         assert row["layout"] == "left", row
-        assert abs(label[0] - gravity["labelRect"][0]) <= epsilon, (row, gravity)
         assert abs(label[0] - frame[0]) <= epsilon, row
         assert abs(label[1] + label[3] / 2 - control[1] - control[3] / 2) <= epsilon, (
             row,
@@ -392,9 +398,7 @@ def capture_regressions(viewer, output):
         )
         assert track[0] >= label[0] + label[2] - epsilon, (row, switch)
         assert track[0] + track[2] <= frame[0] + frame[2] + epsilon, (row, switch)
-        # Boolean fit must not change the neighboring numeric grid's reflow.
-        assert gravity["layout"] == ("top" if points == 310 else "left"), gravity
-        shown = workspace._panel_context.tr("mocap body")
+        shown = workspace._panel_context.tr(caption)
         shown = shown[:1].upper() + shown[1:]
         assert any(
             item["text"] == shown
@@ -402,7 +406,20 @@ def capture_regressions(viewer, output):
             and row["hit"][1] <= item["position"][1] < row["hit"][1] + row["hit"][3]
             for item in state["emittedText"]
         ), (shown, row)
-        return {"panelWidthPoints": points, "row": row, "switch": switch, "gravity": gravity}
+        return {"row": row, "control": switch}
+
+    def body_switch_geometry(state, *, points):
+        prefix = "body_inertial_properties/row/"
+        geometry = inline_boolean_geometry(
+            state, prefix + "mocap body", "##body-mocap", "mocap body"
+        )
+        gravity = next(r for r in state["records"] if r["key"] == prefix + "gravity compensation")
+        label = geometry["row"]["labelRect"]
+        epsilon = native_epsilon(*label, *gravity["labelRect"])
+        assert abs(label[0] - gravity["labelRect"][0]) <= epsilon, (geometry, gravity)
+        # Boolean fit must not change the neighboring numeric grid's reflow.
+        assert gravity["layout"] == ("top" if points == 310 else "left"), gravity
+        return {"panelWidthPoints": points, **geometry, "gravity": gravity}
 
     try:
         runtime.observe_components = True
@@ -520,8 +537,75 @@ def capture_regressions(viewer, output):
                         report["checks"][key] = switch_geometry
                         flush()
                 inspector._body_property_edit = session.body_properties(body.node_id)
+                workspace.inspector_tab = "Properties"
+                # Floats retain the workspace's 230-point minimum. Smaller
+                # content-column cases are covered by the CPU property tests.
+                width[0] = 230
+                inputs.sync()
+                _reveal(inputs, "gizmos", "Inspector content")
+                state = save(inputs, "inspector-display-switch-fit", panels=("Inspector",))
+                rows = {r["key"]: r for r in state["records"]}
+                display_rows = [rows[key] for key in ("entity-visible", "gizmos")]
+                for row, caption in zip(
+                    display_rows, ("Visible", "Transform handles"), strict=True
+                ):
+                    label, track = row["labelRect"], row["switchRect"]
+                    epsilon = native_epsilon(*label, *track)
+                    assert row["textPresent"] and row["label"] == ui.translate(caption), row
+                    assert label[0] + label[2] <= track[0] - row["gap"] + epsilon, row
+                    assert abs(label[1] + label[3] / 2 - track[1] - track[3] / 2) <= epsilon, row
+                    assert any(
+                        item["text"] == ui.translate(caption)
+                        and item["windowId"] == row["windowId"]
+                        and row["hit"][1] <= item["position"][1] < row["hit"][1] + row["hit"][3]
+                        for item in state["emittedText"]
+                    ), row
+                epsilon = native_epsilon(*(v for row in display_rows for v in row["hit"]))
+                assert (
+                    abs(display_rows[0]["labelRect"][0] - display_rows[1]["labelRect"][0])
+                    <= epsilon
+                )
+                assert (
+                    abs(
+                        sum(display_rows[0]["switchRect"][::2])
+                        - sum(display_rows[1]["switchRect"][::2])
+                    )
+                    <= epsilon
+                )
+                report["checks"]["displaySwitchFit"] = {
+                    "panelWidthPoints": width[0],
+                    "visible": rows["entity-visible"],
+                    "handles": rows["gizmos"],
+                }
+                for kind, key, row_key, caption in (
+                    (
+                        NodeType.LIGHT,
+                        "##light_cast_shadow",
+                        "insp_light_properties/row/cast shadow",
+                        "cast shadow",
+                    ),
+                    (
+                        NodeType.CAMERA,
+                        "##camera-gizmo-lock",
+                        "insp_camera_behavior/row/gizmo lock",
+                        "gizmo lock",
+                    ),
+                ):
+                    node = next(node for node in session.nodes if node.type is kind)
+                    result = session.submit(cmd.SelectNode(node.node_id))
+                    assert result.ok, result.message
+                    width[0] = 210
+                    inputs.sync()
+                    _reveal(inputs, key, "Inspector content")
+                    state = save(
+                        inputs, "inspector-" + kind.value + "-switch-fit", panels=("Inspector",)
+                    )
+                    report["checks"][kind.value + "SwitchFit"] = inline_boolean_geometry(
+                        state, row_key, key, caption
+                    )
                 result = session.submit(cmd.SelectNode(geometry.node_id))
                 assert result.ok, result.message
+                workspace.inspector_tab = "Physics"
                 inputs.sync()
                 for points, name in ((560, "wide"), (310, "narrow")):
                     width[0] = points
@@ -570,6 +654,15 @@ def capture_regressions(viewer, output):
             workspace.activate("Settings")
             workspace.settings.show_category("Recording")
             inputs.sync()
+            with _floating_panel(inputs, "Settings") as width:
+                width[0] = 244
+                inputs.sync()
+                _reveal(inputs, "##capture_clipboard", "Reference settings content")
+                state = save(inputs, "settings-checkbox-fit", panels=("Settings",))
+                caption = workspace._panel_context.tr("Copy to clipboard")
+                report["checks"]["settingsCheckboxFit"] = inline_boolean_geometry(
+                    state, "settings_recording/row/" + caption, "##capture_clipboard", caption
+                )
             _reveal(inputs, "##recording_surface", "Reference settings content")
             inputs.click("##recording_surface")
             inputs.move((0, 0))

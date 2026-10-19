@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from mojive import commands as cmd
+from mojive.adapters.base import NodeType
 from mojive.design.native.presentation import DesignPresentation
 from mojive.design.runtime import DesignRuntime
 from mojive.design.store import SpecificationStore
@@ -102,3 +103,39 @@ def test_body_switch_reflows_after_resize_and_keeps_its_real_draft_edit(
             state.frame(body, "Physics", count=3, width=width)
             assert state.inspector._body_property_edit.mocap is expected
             assert ctx.session.body_properties(body.node_id).mocap is False
+
+
+@pytest.mark.parametrize("components", (1, 1.2, 1.25, 2.25), indirect=True)
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+@pytest.mark.parametrize("width", (185, 344))
+@pytest.mark.parametrize("kind", (NodeType.LIGHT, NodeType.CAMERA))
+def test_scalar_inspector_switches_do_not_inherit_numeric_minimums(
+    model_components, tmp_path, language, width, kind
+):
+    state, ctx = model_components, model_components.ctx
+    ui = state.study.ui
+    runtime = DesignRuntime(SpecificationStore(tmp_path / "scalar-switch-design.json"))
+    runtime.observe_components = True
+    ui.design = DesignPresentation(ui, runtime)
+    node = next(node for node in ctx.session.nodes if node.type is kind)
+    assert ctx.session.submit(cmd.SelectNode(node.node_id)).ok
+    state.frame(node, count=3, width=width)
+    rows = {record["key"]: record for record in runtime.observed}
+    keys = (
+        ("insp_light_properties/row/enabled", "insp_light_properties/row/cast shadow")
+        if kind is NodeType.LIGHT
+        else ("insp_camera_behavior/row/gizmo lock",)
+    )
+    for key in keys:
+        row = rows[key]
+        assert row["layout"] == "left", row
+        label = key.rsplit("/", 1)[-1]
+        shown = ctx.tr(label)
+        assert shown[:1].upper() + shown[1:] in state.rendered
+    scalar = rows[
+        "insp_light_properties/row/intensity"
+        if kind is NodeType.LIGHT
+        else "inspector_camera_projection/row/" + ctx.tr("vertical fov")
+    ]
+    assert scalar["layout"] == ("top" if width == 185 else "left"), scalar
+    assert all(row["labelRect"][0] == scalar["labelRect"][0] for row in (rows[key] for key in keys))
