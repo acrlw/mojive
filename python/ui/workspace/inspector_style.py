@@ -233,16 +233,9 @@ class NativeInspectorPresentation:
                 )
         if toggle and group_vector:
             anchor = self.ui.form_layout(width, 3, axis=True, minimum=0)
-            label_style = self.ui.component_style(("switch", "form_label"))
-            label_margin = label_style.edges("margin", s)
-            caption_width = self.ui.measure(
-                shown, label_style.get("fontSize", BODY_SIZE), translate=False, font_resolved=True
-            )
-            shared_label_width = anchor.label_width
-            shared_above = (
-                anchor.label_above
-                or caption_width + label_margin[0] + label_margin[2] > anchor.label_width
-            )
+            # A stacked XYZ heading spans the row, not a reusable label column.
+            # Switch wrapping depends on its own caption and control budget.
+            shared_label_width = None if anchor.label_above else anchor.label_width
         if toggle:
             layout = switch_form_layout(
                 self.ui,

@@ -5,6 +5,7 @@ from imgui_bundle import imgui
 from mojive.capture import CaptureSurface, RecordingPhase
 from mojive.ui.app.support import _model_filters
 
+from .constants import PANEL_ICONS
 from .menu_item import Item
 
 TOP_MENUS = ("File", "Edit", "Add", "View", "Simulate", "Window", "Help")
@@ -278,7 +279,13 @@ def items(menu, name):
             if n != "Settings"
         ] + [
             *(
-                Item(p.name, "extra-panel:" + p.id, checkable=True, checked=p.open)
+                Item(
+                    p.name,
+                    "extra-panel:" + p.id,
+                    PANEL_ICONS.get(p.id, "inspect"),
+                    checkable=True,
+                    checked=p.open,
+                )
                 for p in st.app.panels
                 if p.id
                 not in (

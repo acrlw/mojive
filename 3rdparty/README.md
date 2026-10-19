@@ -66,8 +66,8 @@ bgfx does not generate widget geometry. The tracked `imgui/` tree is currently c
 
 `make setup-imgui` runs `python/tools/build_imgui.py`, which downloads a pinned ImGui Bundle source
 archive and builds the Mojive wheel. The recipe contains checked patches for bulk geometry
-submission, slider/focus geometry and platform support. Its source/build cache lives under
-`build/imgui`; it is not an additional dependency to commit. Downloads enter the reusable cache
+submission, slider/focus geometry, resize decoration and platform support. Its source/build cache
+lives under `build/imgui`; it is not an additional dependency to commit. Downloads enter the reusable cache
 only after checksum verification; an incomplete cached archive is downloaded again automatically.
 Bundle's FreeType dependency remains `VER-2-13-3`; the recipe downloads its checksum-verified
 source archive instead of cloning the full Git history. The package version and Dear ImGui

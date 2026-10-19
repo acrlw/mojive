@@ -269,6 +269,8 @@ def main(argv=None):
         for menu in ("File", "Edit", "Add", "View", "Simulate", "Window", "Help"):
             workspace.menus.preview((menu,))
             states[menu] = capture(viewer, args.output / ("menu-" + menu.lower() + ".png"))
+        workspace.menus.preview(("Window", "Panels"))
+        states["Panels"] = capture(viewer, args.output / "menu-window-panels.png")
         geometry = next((n for n in viewer.session.nodes if n.name == "free_box"), None)
         if geometry is not None:
             viewer.session.submit(cmd.SelectNode(geometry.node_id))

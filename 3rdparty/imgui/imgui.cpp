@@ -7724,23 +7724,11 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
         if (window->ScrollbarY)
             Scrollbar(ImGuiAxis_Y);
 
-        // Render resize grips (after their input handling so we don't have a frame of latency)
-        if (handle_borders_and_resize_grips && !(flags & ImGuiWindowFlags_NoResize))
-        {
-            for (int resize_grip_n = 0; resize_grip_n < resize_grip_count; resize_grip_n++)
-            {
-                const ImU32 col = resize_grip_col[resize_grip_n];
-                if ((col & IM_COL32_A_MASK) == 0)
-                    continue;
-                const ImGuiResizeGripDef& grip = resize_grip_def[resize_grip_n];
-                const ImVec2 corner = ImLerp(window->Pos, window->Pos + window->Size, grip.CornerPosN);
-                const float border_inner = IM_ROUND(window_border_size * 0.5f);
-                window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(border_inner, resize_grip_draw_size) : ImVec2(resize_grip_draw_size, border_inner)));
-                window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(resize_grip_draw_size, border_inner) : ImVec2(border_inner, resize_grip_draw_size)));
-                window->DrawList->PathArcToFast(ImVec2(corner.x + grip.InnerDir.x * (window_rounding + border_inner), corner.y + grip.InnerDir.y * (window_rounding + border_inner)), window_rounding, grip.AngleMin12, grip.AngleMax12);
-                window->DrawList->PathFillConvex(col);
-            }
-        }
+        // Native corner hit targets and resize cursors remain active. A filled
+        // grip wedge cuts across the nested content inset and obscures its contour.
+        IM_UNUSED(resize_grip_count);
+        IM_UNUSED(resize_grip_col);
+        IM_UNUSED(resize_grip_draw_size);
 
         // Borders (for dock node host they will be rendered over after the tab bar)
         if (handle_borders_and_resize_grips && !window->DockNodeAsHost)

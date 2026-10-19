@@ -21,7 +21,7 @@ def capture_timeline_regressions(viewer, output):
     output.mkdir(parents=True, exist_ok=True)
     session, workspace = viewer.session, viewer.app.workspace
     runtime, ui = viewer.app.design, workspace.ui
-    observing = runtime.observe_components
+    observing, panel = runtime.observe_components, workspace.panel
     process, pointer = viewer.window._input.process_inputs, [0.0, 0.0]
     report = {"scale": viewer.window.style_scale, "captures": {}}
 
@@ -174,7 +174,21 @@ def capture_timeline_regressions(viewer, output):
         editor.view_needs_fit = True
         sync()
         save("timeline-sample-fit")
+        window = imgui.internal.find_window_by_name("Timeline")
+        for side, fraction, cursor in (
+            ("left", 0, imgui.MouseCursor_.resize_nesw),
+            ("right", 1, imgui.MouseCursor_.resize_nwse),
+        ):
+            inset = 4 * ui.s
+            pointer[:] = (
+                window.pos.x + (window.size.x - inset if fraction else inset),
+                window.pos.y + window.size.y - inset,
+            )
+            sync()
+            assert imgui.get_mouse_cursor() == cursor
+            save("timeline-corner-" + side + "-hover")
         return report
     finally:
         viewer.window._input.process_inputs = process
         runtime.observe_components = observing
+        workspace.panel = panel

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import replace
 from itertools import pairwise
 from math import ceil, floor
 from pathlib import Path
@@ -373,6 +374,36 @@ def capture_regressions(viewer, output):
             "bar": bar,
         }
 
+    def body_switch_geometry(state, *, points):
+        rows = {record["key"]: record for record in state["records"]}
+        prefix = "body_inertial_properties/row/"
+        row, gravity = rows[prefix + "mocap body"], rows[prefix + "gravity compensation"]
+        switch = rows["##body-mocap"]
+        label, control, track = row["labelRect"], switch["hit"], switch["switchRect"]
+        frame = row["frameRect"]
+        epsilon = native_epsilon(*label, *control, *track, *frame)
+        assert row["windowId"] == switch["windowId"] == gravity["windowId"], (row, switch)
+        assert row["layout"] == "left", row
+        assert abs(label[0] - gravity["labelRect"][0]) <= epsilon, (row, gravity)
+        assert abs(label[0] - frame[0]) <= epsilon, row
+        assert abs(label[1] + label[3] / 2 - control[1] - control[3] / 2) <= epsilon, (
+            row,
+            switch,
+        )
+        assert track[0] >= label[0] + label[2] - epsilon, (row, switch)
+        assert track[0] + track[2] <= frame[0] + frame[2] + epsilon, (row, switch)
+        # Boolean fit must not change the neighboring numeric grid's reflow.
+        assert gravity["layout"] == ("top" if points == 310 else "left"), gravity
+        shown = workspace._panel_context.tr("mocap body")
+        shown = shown[:1].upper() + shown[1:]
+        assert any(
+            item["text"] == shown
+            and item["windowId"] == row["windowId"]
+            and row["hit"][1] <= item["position"][1] < row["hit"][1] + row["hit"][3]
+            for item in state["emittedText"]
+        ), (shown, row)
+        return {"panelWidthPoints": points, "row": row, "switch": switch, "gravity": gravity}
+
     try:
         runtime.observe_components = True
         with _NativeInput(viewer) as inputs:
@@ -469,6 +500,29 @@ def capture_regressions(viewer, output):
             assert result.ok, result.message
             workspace.inspector_tab = "Physics"
             with _floating_inspector(inputs) as width:
+                body = next(node for node in session.nodes if node.name == "04_free")
+                result = session.submit(cmd.SelectNode(body.node_id))
+                assert result.ok, result.message
+                inputs.sync()
+                inspector = app.panels.get("inspector")
+                for inertia_mode in ("auto", "diagonal"):
+                    inspector._body_property_edit = replace(
+                        session.body_properties(body.node_id), inertia_mode=inertia_mode
+                    )
+                    for points, name in ((310, "narrow"), (704, "wide")):
+                        width[0] = points
+                        inputs.sync()
+                        _reveal(inputs, "##body-mocap", "Inspector content")
+                        key = f"inspector-body-switch-{inertia_mode}-{name}"
+                        state = save(inputs, key, panels=("Inspector",))
+                        switch_geometry = body_switch_geometry(state, points=points)
+                        state["bodySwitchGeometry"] = switch_geometry
+                        report["checks"][key] = switch_geometry
+                        flush()
+                inspector._body_property_edit = session.body_properties(body.node_id)
+                result = session.submit(cmd.SelectNode(geometry.node_id))
+                assert result.ok, result.message
+                inputs.sync()
                 for points, name in ((560, "wide"), (310, "narrow")):
                     width[0] = points
                     inputs.sync()
