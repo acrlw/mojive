@@ -35,14 +35,7 @@ def test_post_submit_samples_observe_header_fonts_and_menu_ink(backend_name, mon
                 viewer.sync()
 
         def samples():
-            scale = (
-                tuple(imgui.get_draw_data().framebuffer_scale)
-                if backend_name == "opengl"
-                else (1, 1)
-            )
-            sampler = NativeDrawSamples(
-                SimpleNamespace(_editor_window=lambda window: False), clip_scale=scale
-            )
+            sampler = NativeDrawSamples(SimpleNamespace(_editor_window=lambda window: False))
             records = list(ui.design_primitives.observed) + list(runtime.observed)
             return {
                 row["key"]: sampler.sample({**row, "visibleHit": row["hit"]})[0]

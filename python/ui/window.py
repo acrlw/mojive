@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,7 +34,6 @@ _live_windows = 0
 glfw: Any = None
 gl: Any = None
 imgui: Any = None
-GlfwRenderer: Any = None
 
 
 def _install_glfw_clipboard_callbacks(glfw_api: Any, imgui_api: Any, publisher: Any = None) -> None:
@@ -158,21 +158,20 @@ def _load_window_deps() -> None:
 
 
 def _load_gl_deps(context_api: str) -> None:
-    global gl, GlfwRenderer
+    global gl
     _load_window_deps()
     if gl is not None:
         return
-    # Select PyOpenGL's loader after GLFW selects the actual window system.
-    # ImGui Bundle's older backend otherwise forces GLX in a Wayland session.
+    # Select PyOpenGL's loader after GLFW selects the actual window system;
+    # its default GLX loader cannot serve a Wayland/EGL context.
     if sys.platform.startswith("linux"):
         platform = (
             "egl" if context_api == "egl" or glfw.get_platform() == glfw.PLATFORM_WAYLAND else "glx"
         )
         os.environ.setdefault("PYOPENGL_PLATFORM", platform)
-    from imgui_bundle.python_backends.glfw_backend import GlfwRenderer as _GlfwRenderer
     from OpenGL import GL as _gl
 
-    gl, GlfwRenderer = _gl, _GlfwRenderer
+    gl = _gl
 
 
 @dataclass
@@ -260,6 +259,9 @@ class WindowConfig:
 
 
 class Window:
+    # NativeWindow shares platform frame setup but owns a different renderer.
+    _renderer_new_frame: Callable[[], None] | None = None
+
     def painter(self, draw_list=None):
         """Draw ImGui-owned controls with their current draw list."""
         from .imgui_draw import ImguiDraw2D
@@ -269,6 +271,20 @@ class Window:
         return ImguiDraw2D(draw_list)
 
     def __init__(self, config: WindowConfig | None = None) -> None:
+        self._destroyed = False
+        self._window = None
+        self._imgui_context = None
+        self._impl = None
+        self._native_drop_token = 0
+        self._counted_window = False
+        try:
+            self._initialize(config)
+        except Exception:
+            with suppress(Exception):
+                self.close()
+            raise
+
+    def _initialize(self, config: WindowConfig | None) -> None:
         _load_window_deps()
         self.config = config or WindowConfig()
         configured_scale = os.environ.get("MOJIVE_UI_SCALE")
@@ -279,6 +295,7 @@ class Window:
             raise RuntimeError("GLFW initialization failed")
         global _live_windows
         _live_windows += 1
+        self._counted_window = True
 
         requested_api = os.environ.get("MOJIVE_GL", self.config.context_api)
         self._context_api = resolve_context_api(requested_api)
@@ -303,8 +320,6 @@ class Window:
                 self.config.width, self.config.height, self.config.title, None, None
             )
         if not handle:
-            _live_windows = max(0, _live_windows - 1)
-            glfw.terminate()
             raise RuntimeError(
                 f"Failed to create an OpenGL {self.config.gl_major}.{self.config.gl_minor} "
                 f"core context with GLFW {self._context_api}"
@@ -349,7 +364,10 @@ class Window:
         self._ini_existed = bool(ini) and Path(ini).exists()
         io.set_ini_filename(ini)
 
-        self._impl = GlfwRenderer(self._window, attach_callbacks=False)
+        from .opengl_imgui import OpenGLImGuiRenderer
+
+        self._impl = OpenGLImGuiRenderer(self.make_current)
+        self._renderer_new_frame = self._impl.new_frame
         self._input = GlfwInputAdapter(self._window)
         glfw.set_drop_callback(self._window, self._on_file_drop)
         self._native_drop_token = native_drop.install(glfw, self._window, self)
@@ -631,6 +649,8 @@ class Window:
             self._layout_rebuild_pending = True
         # NewFrame may dismiss a popup. Its closing event still belongs to UI.
         self.popup_owned_frame = bool(self._imgui_context.open_popup_stack)
+        if self._renderer_new_frame is not None:
+            self._renderer_new_frame()
         imgui.new_frame()
 
     def begin_dockspace(self) -> None:
@@ -731,6 +751,7 @@ class Window:
         self._layout_done = True
 
     def end_frame(self, *, readback: bool = False) -> np.ndarray | None:
+        self.make_current()
         imgui.set_current_context(self._imgui_context)
         self._finish_layout_frame()
         imgui.render()
@@ -779,22 +800,22 @@ class Window:
         if self._destroyed:
             return
         self._destroyed = True
-        native_drop.uninstall(self._native_drop_token)
         global _live_windows
-
-        imgui.set_current_context(self._imgui_context)
         try:
-            glfw.make_context_current(self._window)
-        except Exception as e:
-            log.debug("Failed to activate the GL context before shutdown: {}", e)
-        try:
-            self._impl.shutdown()
+            with ExitStack() as cleanup:
+                if self._window is not None:
+                    cleanup.callback(glfw.destroy_window, self._window)
+                if self._imgui_context is not None:
+                    cleanup.callback(imgui.destroy_context, self._imgui_context)
+                if self._impl is not None:
+                    cleanup.callback(self._impl.shutdown)
+                cleanup.callback(native_drop.uninstall, self._native_drop_token)
         finally:
-            imgui.destroy_context(self._imgui_context)
-            glfw.destroy_window(self._window)
-            _live_windows = max(0, _live_windows - 1)
-            if _live_windows == 0:
-                glfw.terminate()
+            if self._counted_window:
+                self._counted_window = False
+                _live_windows = max(0, _live_windows - 1)
+                if _live_windows == 0:
+                    glfw.terminate()
 
     def __enter__(self) -> Window:
         return self

@@ -62,11 +62,11 @@ def triangle_overlap(points, rect):
 class NativeDrawSamples:
     """Resolve logical owners after Render, when each buffer has its final address.
 
-    The caller supplies any scissor scale applied in place by its renderer.
-    Vertices and observation rectangles remain in logical ImGui coordinates.
+    Both renderers preserve clips, vertices, and observation rectangles in
+    logical ImGui coordinates; framebuffer scaling happens during submission.
     """
 
-    def __init__(self, workbench, *, clip_scale=(1.0, 1.0)):
+    def __init__(self, workbench):
         self.workbench = workbench
         self.windows = {}
         self.descendants = {}
@@ -123,12 +123,7 @@ class NativeDrawSamples:
                         positions,
                         positions.min(axis=1),
                         positions.max(axis=1),
-                        (
-                            clip.x / clip_scale[0],
-                            clip.y / clip_scale[1],
-                            clip.z / clip_scale[0],
-                            clip.w / clip_scale[1],
-                        ),
+                        (clip.x, clip.y, clip.z, clip.w),
                         font_textures.get(command.get_tex_id()),
                     )
                 )

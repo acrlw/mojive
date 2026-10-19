@@ -251,14 +251,7 @@ class ParameterAudit:
                     if record not in consumed
                 ]
                 records = consumed
-        # imgui-bundle's OpenGL renderer scales scissors in place during submit.
-        # Native bgfx stages its own packet and retains logical draw-data clips.
-        clip_scale = (
-            tuple(imgui.get_draw_data().framebuffer_scale)
-            if self.viewer.backend.caps.name == "opengl"
-            else (1.0, 1.0)
-        )
-        draw_samples = NativeDrawSamples(self.bench, clip_scale=clip_scale)
+        draw_samples = NativeDrawSamples(self.bench)
         instances = {}
         sources = {}
         for record in records:
