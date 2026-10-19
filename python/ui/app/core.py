@@ -971,21 +971,14 @@ class ViewerApp(
         return max(1, int(width)), max(1, int(height))
 
     def _sync_viewport_size(self, *, force: bool = False) -> None:
-        if self._fixed_render_size is not None:
-            self.backend.resize(*self._fixed_render_size)
-            self.camera.set_aspect(self._fixed_render_size[0] / self._fixed_render_size[1])
-        else:
-            settled = self.window.poll_render_size(self.viewport_surface.size)
-            if settled is None and force:
-                # The window's resize cache can still describe the same viewport
-                # while the backend was temporarily resized for fixed output.
-                settled = tuple(
-                    max(1, int(v)) for v in self.window.points_to_pixels(self.viewport_surface.size)
-                )
-            if settled is not None:
-                sw, sh = settled
-                self.backend.resize(sw, sh)
-                self.camera.set_aspect(max(sw, 1) / max(sh, 1))
+        size = self._fixed_render_size or tuple(
+            max(1, int(value)) for value in self.window.points_to_pixels(self.viewport_surface.size)
+        )
+        # The target owns its actual extent. Match this frame's panel bounds
+        # before projection and rendering, including during a held resize.
+        if force or size != self._current_viewport_render_size():
+            self.backend.resize(*size)
+        self.camera.set_aspect(size[0] / size[1])
         self._viewport_rect = self.viewport_surface.image_rect(self._current_viewport_render_size())
 
     def _sync_display_scale(self) -> None:

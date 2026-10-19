@@ -478,6 +478,11 @@ ui-optical-gallery:
 ui-runtime:
 	$(PY) -m mojive.tools.ui_runtime $(ARGS)
 
+.PHONY: viewport-resize
+## Verify current-frame viewport sizing during native and dock-splitter resizing.
+viewport-resize:
+	$(PY) -m mojive.tools.viewport_resize --backend $(BACKEND) $(ARGS)
+
 .PHONY: ui-default-layout
 ui-default-layout:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m "gpu or physics" tests/gpu/test_default_layout.py $(ARGS)

@@ -98,7 +98,6 @@ from mojive.ui.panels.settings import (
 )
 from mojive.ui.panels.stats import StatsPanel, _scale_ceiling
 from mojive.ui.viewport_widgets import ToolHint, capsule_points, playback_size, tool_column_size
-from mojive.ui.window import ResizeLatch
 
 EXPECTED_PANELS = {
     "Control",
@@ -1429,125 +1428,6 @@ def test_slider_gestures():
     assert slider_gesture(True, right_clicked=False, double_clicked=False, shift=False) is None
 
     assert slider_gesture(False, right_clicked=True, double_clicked=True, shift=True) is None
-
-
-WARMUP_FRAMES = 30
-
-SETTLE_SECONDS = 0.6
-
-HUMAN_PAUSE = 0.35
-
-FRAME_DT = 1.0 / 60.0
-
-
-def _warm_up(latch: ResizeLatch, size=(800, 600), now: float = 0.0) -> None:
-
-    for _ in range(WARMUP_FRAMES):
-        latch.update(size, now)
-
-
-def test_latch_constants_match_the_spec():
-
-    latch = ResizeLatch()
-    assert latch.settle_seconds == pytest.approx(SETTLE_SECONDS)
-    assert latch.warmup_frames == WARMUP_FRAMES
-
-
-def test_latch_rebuilds_immediately_during_startup():
-
-    latch = ResizeLatch()
-    for i in range(WARMUP_FRAMES):
-        size = (100 + i, 100)
-        assert latch.update(size, now=0.0) == size
-    assert latch.rebuilds == WARMUP_FRAMES
-
-    assert latch.update((900, 700), now=0.0) is None
-
-
-def test_latch_commits_an_explicit_resize_transition_immediately():
-
-    latch = ResizeLatch()
-    _warm_up(latch)
-    before = latch.rebuilds
-
-    assert latch.update((1200, 700), now=0.0, immediate=True) == (1200, 700)
-    assert latch.rebuilds == before + 1
-    assert latch.update((1200, 700), now=0.1) is None
-
-
-def test_latch_coalesces_changes_within_a_drag():
-
-    latch = ResizeLatch()
-    _warm_up(latch)
-    before = latch.rebuilds
-
-    t = 0.0
-    last = (800, 600)
-    while t < 0.3:
-        last = (900 + int(t / 0.05) * 10, 700)
-        latch.update(last, now=t)
-        t += FRAME_DT
-
-    committed = None
-    while t < 0.3 + SETTLE_SECONDS * 2:
-        out = latch.update(last, now=t)
-        if out is not None:
-            committed = out
-        t += FRAME_DT
-
-    assert latch.rebuilds - before == 1
-    assert committed == last
-
-
-def test_latch_survives_a_human_pause_between_drags():
-
-    latch = ResizeLatch()
-    _warm_up(latch)
-    before = latch.rebuilds
-
-    t = 0.0
-    size = (900, 700)
-    for i in range(4):
-        size = (900 + i * 10, 700)
-
-        stop = t + HUMAN_PAUSE
-        while t < stop:
-            latch.update(size, now=t)
-            t += FRAME_DT
-
-    assert latch.rebuilds - before == 0
-
-    committed = None
-    stop = t + SETTLE_SECONDS * 2
-    while t < stop:
-        out = latch.update(size, now=t)
-        if out is not None:
-            committed = out
-        t += FRAME_DT
-    assert committed == size
-    assert latch.rebuilds - before == 1
-
-
-def test_latch_ignores_a_size_that_comes_back():
-
-    latch = ResizeLatch()
-    _warm_up(latch, size=(800, 600))
-    before = latch.rebuilds
-
-    latch.update((1200, 600), now=0.0)
-    latch.update((800, 600), now=0.1)
-    t = 0.1
-    while t < 1.2:
-        t += 0.05
-        latch.update((800, 600), now=t)
-    assert latch.rebuilds == before
-
-
-def test_latch_needs_no_gl():
-
-    from mojive.ui import window as win
-
-    assert win.glfw is None and win.gl is None and win.imgui is None
 
 
 def test_inspector_collapsed_components_only_count_and_invalidate_on_model_edits():

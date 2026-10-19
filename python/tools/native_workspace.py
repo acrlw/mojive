@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -22,20 +21,14 @@ from mojive.ui.workspace.design import DEFAULT_DESIGN
 
 
 def capture(viewer, path: Path):
-    """Capture after the render target has caught up with the docked viewport."""
+    """Capture a prepared workspace with current viewport geometry."""
     for _ in range(6):
         viewer.sync()
-    deadline = time.perf_counter() + viewer.window.latch.settle_seconds + 2
-    while time.perf_counter() < deadline:
-        target = tuple(
-            max(1, int(v)) for v in viewer.window.points_to_pixels(viewer.app.viewport_surface.size)
-        )
-        if viewer.window.latch.committed == target:
-            break
-        time.sleep(0.01)
-        viewer.sync()
-    else:
-        raise RuntimeError("Viewport render target did not settle before capture")
+    target = tuple(
+        max(1, int(v)) for v in viewer.window.points_to_pixels(viewer.app.viewport_surface.size)
+    )
+    if viewer.app._current_viewport_render_size() != target:
+        raise RuntimeError("Viewport render target does not match the current content size")
     viewer.sync()
     Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(path)
     return viewer.app.workspace.snapshot()

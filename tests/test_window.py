@@ -771,7 +771,7 @@ def test_retained_debug_primitives_count_as_scene_content() -> None:
     assert app._has_scene_content()
 
 
-def test_viewport_image_is_aspect_fitted_while_render_target_resize_is_pending() -> None:
+def test_viewport_image_preserves_fixed_output_aspect_inside_the_panel() -> None:
     assert _fit_image_rect((10.0, 20.0), (800.0, 800.0), (1600, 900)) == pytest.approx(
         (10.0, 195.0, 800.0, 450.0)
     )

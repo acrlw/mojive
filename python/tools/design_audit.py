@@ -293,29 +293,23 @@ class ParameterAudit:
         }
 
     def settled_snapshot(self):
-        """Wait for native preparation and the actual delayed render resize to finish."""
+        """Wait for native preparation and measured UI geometry to stabilize."""
         before = self.snapshot()
         deadline = time.monotonic() + 3.0
         attempt = 0
-        settled_attempts = 0
         self.last_settle_trace = []
         while True:
             attempt += 1
             after = self.snapshot()
             difference = self.differences(before, after)
-            latch = getattr(self.viewer.window, "latch", None)
-            pending_resize = getattr(latch, "_pending", None) is not None
-            settled_attempts = 0 if pending_resize else settled_attempts + 1
-            self.last_settle_trace.append(
-                {"difference": difference, "pendingResize": pending_resize}
-            )
-            if not pending_resize and not any(
+            self.last_settle_trace.append({"difference": difference})
+            if not any(
                 difference[key]
                 for key in ("changedGeometryKeys", "removedKeys", "addedKeys", "drawChanged")
             ):
                 return after, True, attempt
             before = after
-            if time.monotonic() >= deadline or settled_attempts >= 8:
+            if time.monotonic() >= deadline or attempt >= 8:
                 return before, False, attempt
 
     def comparison_snapshot(self):

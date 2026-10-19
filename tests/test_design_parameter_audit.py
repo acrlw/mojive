@@ -133,24 +133,20 @@ def test_bounded_change_at_numeric_limit_uses_another_valid_value():
     assert changed_value(rule, 0) == 4
 
 
-def test_stable_draw_before_delayed_viewport_resize_is_not_a_stable_baseline():
+def test_baseline_waits_for_measured_geometry_to_stabilize():
     audit = object.__new__(ParameterAudit)
-    latch = SimpleNamespace(_pending=(800, 600))
-    audit.viewer = SimpleNamespace(window=SimpleNamespace(latch=latch))
     counter = 0
 
     def next_snapshot():
         nonlocal counter
         counter += 1
-        if counter >= 4:
-            latch._pending = None
-        y = 10 if counter < 4 else 40
+        y = min(counter, 3) * 10
         return snapshot({"key": "header", "hit": [0, y, 100, 28]})
 
     audit.snapshot = next_snapshot
     state, stable, _ = audit.settled_snapshot()
-    assert stable and counter == 5
-    assert state["records"][0]["hit"][1] == 40
+    assert stable and counter == 4
+    assert state["records"][0]["hit"][1] == 30
 
 
 def test_one_changed_instance_does_not_pass_an_unchanged_peer():

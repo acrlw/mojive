@@ -567,27 +567,13 @@ def _capture_canvas_2d(output: Path) -> None:
 def _settle(viewer, frames: int = 7) -> None:
     for _ in range(frames):
         viewer.sync()
-    # Resizing defers framebuffer rebuilds. A few fast frames can still capture
-    # letterboxing or start a gesture with the previous projection matrix.
-    deadline = time.perf_counter() + viewer.window.latch.settle_seconds + 1.0
-    resized = False
-    while viewer.app._fixed_render_size is None:
+    if viewer.app._fixed_render_size is None:
         target = tuple(
             max(1, int(value))
             for value in viewer.window.points_to_pixels(viewer.app.viewport_surface.size)
         )
-        if viewer.window.latch.committed == target:
-            break
-        if time.perf_counter() >= deadline:
-            raise RuntimeError("Viewport framebuffer did not settle to its content size")
-        time.sleep(0.01)
-        viewer.sync()
-        resized = True
-    if resized:
-        # The capture API reads GL_BACK after presentation. Refresh both buffers
-        # after the resize rather than capturing the last pre-resize image.
-        viewer.sync()
-        viewer.sync()
+        if viewer.app._current_viewport_render_size() != target:
+            raise RuntimeError("Viewport framebuffer does not match the current content size")
 
 
 def _capture_gesture_ownership(output: Path) -> None:

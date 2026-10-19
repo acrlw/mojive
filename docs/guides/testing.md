@@ -138,6 +138,16 @@ an unavailable check is not a passed check.
 
 ## Visual review and baselines
 
+`make viewport-resize BACKEND=opengl` (or `bgfx`) continuously changes the native window
+size, holds and reverses the production Timeline dock splitter, and verifies that every
+completed frame uses the current viewport dimensions and camera aspect. It also checks that
+fixed-resolution output retains intentional letterboxing and returns immediately to adaptive
+sizing. The JSON report and sparse captures are saved under `output/viewport-resize/acceptance/`;
+pass `ARGS='--visible --vsync --output output/viewport-resize/visible'` for visible presentation.
+Run it separately from other GPU tests. Submission timings exclude readback and do not measure
+desktop scanout or native modal-resize behavior; actual desktop border-drag inspection remains
+necessary when changing the operating-system event loop.
+
 The agent inspects relevant captures and golden comparisons before delivery. A golden image is a
 reviewed regression reference, not a visual quality score. Compare the intended change and areas
 that should remain stable; fix unexpected differences before updating a reference. User sign-off

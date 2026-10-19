@@ -70,6 +70,8 @@ class RenderTarget:
         height: int,
         samples: int = 4,
         id_layout: IdLayout | None = None,
+        *,
+        _clear_resources: tuple[moderngl.Program, moderngl.VertexArray] | None = None,
     ) -> None:
         self.ctx = ctx
         self.width = max(1, int(width))
@@ -78,60 +80,89 @@ class RenderTarget:
         self.samples = 0 if int(samples) <= 1 else int(samples)
         self._gl = G.native()
         self.id_layout = id_layout if id_layout is not None else probe_id_layout(ctx, self.samples)
+        self._owns_clear_resources = _clear_resources is None
 
         s = self.samples
+        with contextlib.ExitStack() as rollback:
 
-        self.color_ms = ctx.texture((self.width, self.height), 4, samples=s, dtype="f1")
-        self.depth_ms = ctx.depth_texture((self.width, self.height), samples=s)
+            def owned(resource):
+                rollback.callback(resource.release)
+                return resource
 
-        if self.id_layout is IdLayout.SHARED:
-            self.id_tex = ctx.texture((self.width, self.height), 1, samples=s, dtype="u4")
-            self.fbo = ctx.framebuffer([self.color_ms, self.id_tex], self.depth_ms)
-            self.id_fbo = self.fbo
-            self.id_draw_buffer = 1
-            self.id_samples = s
-            self.id_depth = None
-        else:
-            self.fbo = ctx.framebuffer([self.color_ms], self.depth_ms)
+            self.color_ms = owned(ctx.texture(self.size, 4, samples=s, dtype="f1"))
+            self.depth_ms = owned(ctx.depth_texture(self.size, samples=s))
 
-            self.id_tex = ctx.texture((self.width, self.height), 1, dtype="u4")
-            self.id_depth = ctx.depth_texture((self.width, self.height))
-            self.id_fbo = ctx.framebuffer([self.id_tex], self.id_depth)
-            self.id_draw_buffer = 0
-            self.id_samples = 0
+            if self.id_layout is IdLayout.SHARED:
+                self.id_tex = owned(ctx.texture(self.size, 1, samples=s, dtype="u4"))
+                self.fbo = owned(ctx.framebuffer([self.color_ms, self.id_tex], self.depth_ms))
+                self.id_fbo = self.fbo
+                self.id_draw_buffer = 1
+                self.id_samples = s
+                self.id_depth = None
+            else:
+                self.fbo = owned(ctx.framebuffer([self.color_ms], self.depth_ms))
+                self.id_tex = owned(ctx.texture(self.size, 1, dtype="u4"))
+                self.id_depth = owned(ctx.depth_texture(self.size))
+                self.id_fbo = owned(ctx.framebuffer([self.id_tex], self.id_depth))
+                self.id_draw_buffer = 0
+                self.id_samples = 0
 
-        self._blit_src = (
-            ctx.framebuffer([self.color_ms], self.depth_ms)
-            if self.id_layout is IdLayout.SHARED
-            else self.fbo
-        )
+            self._blit_src = (
+                owned(ctx.framebuffer([self.color_ms], self.depth_ms))
+                if self.id_layout is IdLayout.SHARED
+                else self.fbo
+            )
+            self.resolve_tex = owned(ctx.texture(self.size, 4, dtype="f1"))
+            self.resolve_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            self.resolve_fbo = owned(ctx.framebuffer([self.resolve_tex]))
+            self.depth_resolve = owned(ctx.depth_texture(self.size))
+            self.depth_resolve_fbo = owned(ctx.framebuffer(depth_attachment=self.depth_resolve))
+            self.metric_depth = owned(ctx.texture(self.size, 1, dtype="f4"))
+            self.segmentation = owned(ctx.texture(self.size, 2, dtype="i4"))
+            self.export_depth = owned(ctx.depth_texture(self.size))
+            self.export_fbo = owned(
+                ctx.framebuffer([self.metric_depth, self.segmentation], self.export_depth)
+            )
+            if self.id_layout is IdLayout.SHARED and self.samples > 1:
+                self.id_resolve = owned(ctx.texture(self.size, 1, dtype="u4"))
+                self.id_resolve_fbo = owned(ctx.framebuffer([self.id_resolve]))
+            else:
+                self.id_resolve = None
+                self.id_resolve_fbo = None
 
-        self.resolve_tex = ctx.texture((self.width, self.height), 4, dtype="f1")
-        self.resolve_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.resolve_fbo = ctx.framebuffer([self.resolve_tex])
+            if _clear_resources is None:
+                self._clear_prog = owned(
+                    ctx.program(
+                        vertex_shader=_CLEAR_VS_FAR,
+                        fragment_shader=_CLEAR_FS.replace(
+                            "location = 0", f"location = {self.id_draw_buffer}"
+                        ),
+                    )
+                )
+                self._clear_vao = owned(ctx.vertex_array(self._clear_prog, []))
+            else:
+                self._clear_prog, self._clear_vao = _clear_resources
+            rollback.pop_all()
 
-        self.depth_resolve = ctx.depth_texture((self.width, self.height))
-        self.depth_resolve_fbo = ctx.framebuffer(depth_attachment=self.depth_resolve)
-        self.metric_depth = ctx.texture((self.width, self.height), 1, dtype="f4")
-        self.segmentation = ctx.texture((self.width, self.height), 2, dtype="i4")
-        self.export_depth = ctx.depth_texture((self.width, self.height))
-        self.export_fbo = ctx.framebuffer(
-            [self.metric_depth, self.segmentation],
-            self.export_depth,
-        )
-        if self.id_layout is IdLayout.SHARED and self.samples > 1:
-            self.id_resolve = ctx.texture((self.width, self.height), 1, dtype="u4")
-            self.id_resolve_fbo = ctx.framebuffer([self.id_resolve])
-        else:
-            self.id_resolve = None
-            self.id_resolve_fbo = None
-
-        self._clear_prog = ctx.program(vertex_shader=_CLEAR_VS_FAR, fragment_shader=_CLEAR_FS)
-        self._clear_vao = ctx.vertex_array(self._clear_prog, [])
         self._pixel = bytearray(4)
-        self._rgb_stage = np.empty((self.height, self.width, 3), np.uint8)
-        self._metric_stage = np.empty((self.height, self.width), np.float32)
-        self._segmentation_stage = np.empty((self.height, self.width, 2), np.int32)
+        self._rgb_stage: np.ndarray | None = None
+        self._metric_stage: np.ndarray | None = None
+        self._segmentation_stage: np.ndarray | None = None
+
+    def create_resized(self, width: int, height: int) -> RenderTarget:
+        """Allocate new attachments, transferring stable resources only on success."""
+
+        replacement = RenderTarget(
+            self.ctx,
+            width,
+            height,
+            self.samples,
+            self.id_layout,
+            _clear_resources=(self._clear_prog, self._clear_vao),
+        )
+        replacement._owns_clear_resources = True
+        self._owns_clear_resources = False
+        return replacement
 
     @property
     def info(self) -> TargetInfo:
@@ -249,6 +280,8 @@ class RenderTarget:
                 f"got {out.dtype} {out.shape}"
             )
         if flip:
+            if self._rgb_stage is None:
+                self._rgb_stage = np.empty(shape, np.uint8)
             self.resolve_fbo.read_into(
                 self._rgb_stage,
                 components=3,
@@ -285,6 +318,8 @@ class RenderTarget:
                 f"got {out.dtype} {out.shape}"
             )
         if flip:
+            if self._metric_stage is None:
+                self._metric_stage = np.empty(shape, np.float32)
             self.export_fbo.read_into(
                 self._metric_stage,
                 components=1,
@@ -316,6 +351,8 @@ class RenderTarget:
                 f"got {out.dtype} {out.shape}"
             )
         if flip:
+            if self._segmentation_stage is None:
+                self._segmentation_stage = np.empty(shape, np.int32)
             self.export_fbo.read_into(
                 self._segmentation_stage,
                 components=2,
@@ -346,8 +383,8 @@ class RenderTarget:
         with contextlib.suppress(Exception):
             self.ctx.screen.use()
         for obj in (
-            self._clear_vao,
-            self._clear_prog,
+            self._clear_vao if self._owns_clear_resources else None,
+            self._clear_prog if self._owns_clear_resources else None,
             self.resolve_fbo,
             self.resolve_tex,
             self.depth_resolve_fbo,

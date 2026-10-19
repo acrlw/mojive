@@ -5,10 +5,9 @@ from __future__ import annotations
 import math
 import os
 import sys
-import time
 from collections.abc import Callable
 from contextlib import ExitStack, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -174,67 +173,6 @@ def _load_gl_deps(context_api: str) -> None:
     gl = _gl
 
 
-@dataclass
-class ResizeLatch:
-    settle_seconds: float = 0.6
-    warmup_frames: int = 30
-
-    _committed: tuple[int, int] | None = field(default=None, init=False)
-    _pending: tuple[int, int] | None = field(default=None, init=False)
-    _pending_since: float = field(default=0.0, init=False)
-    _frames: int = field(default=0, init=False)
-    _rebuilds: int = field(default=0, init=False)
-
-    @property
-    def committed(self) -> tuple[int, int] | None:
-        return self._committed
-
-    @property
-    def frames(self) -> int:
-        return self._frames
-
-    @property
-    def rebuilds(self) -> int:
-        return self._rebuilds
-
-    def update(
-        self,
-        size: tuple[int, int],
-        now: float,
-        *,
-        immediate: bool = False,
-    ) -> tuple[int, int] | None:
-        self._frames += 1
-        w, h = (max(1, int(size[0])), max(1, int(size[1])))
-        target = (w, h)
-
-        if target == self._committed:
-            self._pending = None
-            return None
-
-        if immediate or self._frames <= self.warmup_frames:
-            return self._commit(target)
-
-        if target != self._pending:
-            self._pending = target
-            self._pending_since = now
-            return None
-
-        if now - self._pending_since >= self.settle_seconds:
-            return self._commit(target)
-        return None
-
-    def reset(self) -> None:
-        self._committed = None
-        self._pending = None
-
-    def _commit(self, size: tuple[int, int]) -> tuple[int, int]:
-        self._committed = size
-        self._pending = None
-        self._rebuilds += 1
-        return size
-
-
 @dataclass(frozen=True)
 class WindowConfig:
     title: str = "Mojive"
@@ -326,7 +264,6 @@ class Window:
             )
         self._window = handle
         _restore_requested_size(handle, self.config.width, self.config.height)
-        self._maximized = bool(glfw.get_window_attrib(handle, glfw.MAXIMIZED))
         self._shown = False
         self._destroyed = False
         self._frame_index = 0
@@ -378,7 +315,6 @@ class Window:
         self._load_fonts(io)
 
         self._initialize_layout_state()
-        self.latch = ResizeLatch()
 
     def _finish_layout_frame(self) -> None:
         if (
@@ -545,19 +481,6 @@ class Window:
         style.scale_all_sizes(self._style_scale / self._applied_style_scale)
         style.font_scale_dpi = self._style_scale / self._font_atlas_scale
         self._applied_style_scale = self._style_scale
-
-    def poll_render_size(
-        self, viewport_points: tuple[float, float], now: float | None = None
-    ) -> tuple[int, int] | None:
-        px = self.points_to_pixels(viewport_points)
-        maximized = bool(glfw.get_window_attrib(self._window, glfw.MAXIMIZED))
-        maximize_changed = maximized != self._maximized
-        self._maximized = maximized
-        return self.latch.update(
-            (int(px[0]), int(px[1])),
-            time.perf_counter() if now is None else now,
-            immediate=maximize_changed,
-        )
 
     def show(self) -> None:
         glfw.show_window(self._window)

@@ -1,6 +1,5 @@
 """Native preview pixels and keyboard navigation through actual viewport inputs."""
 
-import time
 from dataclasses import replace
 
 import numpy as np
@@ -48,25 +47,16 @@ def _scene_point(study):
     raise AssertionError("The viewport has no free navigation point")
 
 
-def _wait_for_viewport_render(study, timeout=3):
-    """Wait for debounced render geometry before selecting a pointer target."""
-    deadline = time.monotonic() + timeout
-    while True:
-        study.frame()
-        target = tuple(
-            max(1, int(value))
-            for value in study.window.points_to_pixels(study.preview.viewport_surface.size)
-        )
-        image = study.preview._viewport_image
-        rendered = None if image is None else (image.width, image.height)
-        if study.window.latch.committed == target and rendered == target:
-            return
-        assert time.monotonic() < deadline, (
-            "Viewport render resize did not settle",
-            target,
-            study.window.latch.committed,
-            rendered,
-        )
+def _wait_for_viewport_render(study):
+    """Require current render geometry before selecting a pointer target."""
+    study.frame()
+    target = tuple(
+        max(1, int(value))
+        for value in study.window.points_to_pixels(study.preview.viewport_surface.size)
+    )
+    image = study.preview._viewport_image
+    rendered = None if image is None else (image.width, image.height)
+    assert rendered == target, ("Viewport render size does not match its content", target, rendered)
 
 
 def test_camera_preview_toggle_presents_peer_pixels_and_shared_pin_lock(runtime, monkeypatch):

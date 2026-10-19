@@ -13,7 +13,7 @@ import numpy as np
 from . import native_drop
 from . import theme as theme_mod
 from . import window as _window_module
-from .window import GlfwInputAdapter, ResizeLatch, Window, WindowConfig
+from .window import GlfwInputAdapter, Window, WindowConfig
 from .window_identity import window_identity
 
 glfw: Any = None
@@ -90,7 +90,6 @@ class NativeWindow(Window):
             raise RuntimeError("Failed to create a GLFW window (CLIENT_API=NO_API)")
         self._window = handle
         _window_module._restore_requested_size(handle, self.config.width, self.config.height)
-        self._maximized = bool(glfw.get_window_attrib(handle, glfw.MAXIMIZED))
         self._shown = False
         self._destroyed = False
         self._frame_index = 0
@@ -137,7 +136,6 @@ class NativeWindow(Window):
         self._load_fonts(io)
 
         self._initialize_layout_state()
-        self.latch = ResizeLatch()
 
         from .native_backend import NativeImguiBackend
 

@@ -343,11 +343,12 @@ class OpenGLBackend:
         self._background = tuple(float(channel) for channel in rgba)
 
     def resize(self, width: int, height: int) -> None:
+        width, height = max(1, int(width)), max(1, int(height))
         if (width, height) == self.target.size:
             return
-        self.target.release()
-        self.target = RenderTarget(self.ctx, width, height, self.target.samples)
-        self.caps = self._build_caps()
+        previous = self.target
+        self.target = previous.create_resized(width, height)
+        previous.release()
 
     def highlight(
         self,

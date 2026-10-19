@@ -27,6 +27,14 @@ def test_encoding_controls_switch_modes_and_persist_without_losing_values(
         show_window=False,
         config=ViewerConfig(recording=RecordingConfig()),
     ) as viewer:
+        process_inputs = viewer.window._input.process_inputs
+
+        def process_test_inputs():
+            process_inputs()
+            # Numeric text activation uses a double-click, independent of render latency.
+            imgui.get_io().delta_time = 1 / 60
+
+        monkeypatch.setattr(viewer.window._input, "process_inputs", process_test_inputs)
         viewer.app.set_language(language)
         show_settings(viewer)
         assert viewer.app.recording_config.copy_to_clipboard
@@ -48,6 +56,7 @@ def test_encoding_controls_switch_modes_and_persist_without_losing_values(
         _click(viewer, (lo[0] + 20 * scale, (lo[1] + hi[1]) * 0.5))
         _click(viewer, (lo[0] + 20 * scale, (lo[1] + hi[1]) * 0.5))
         io = imgui.get_io()
+        assert io.want_text_input
         modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
         io.add_key_event(modifier, True)
         io.add_key_event(imgui.Key.a, True)

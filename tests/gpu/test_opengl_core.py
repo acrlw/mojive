@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -200,6 +202,42 @@ def test_id_layout_is_probed_not_assumed(gl):
         finally:
             tgt.release()
     assert G.native().drain_errors() == 0
+
+
+@pytest.mark.parametrize("samples", (1, 4))
+def test_resized_target_retains_clear_program_and_renders_new_extent(gl, samples):
+    if samples > max(gl.info.get("GL_MAX_SAMPLES", 1), 1):
+        pytest.skip("Requested multisampling unavailable")
+    target = RenderTarget(gl, 32, 24, samples=samples)
+    program, vao, layout = target._clear_prog, target._clear_vao, target.id_layout
+    try:
+        for width, height in ((48, 33), (63, 47), (27, 19), (32, 24)):
+            previous = target
+            target = previous.create_resized(width, height)
+            previous.release()
+            assert target._clear_prog is program
+            assert target._clear_vao is vao
+            assert target.id_layout is layout
+            target.clear_main((0.2, 0.3, 0.4, 1.0))
+            native = target._gl
+            target._gl = SimpleNamespace(
+                clear_depth_only=native.clear_depth_only,
+                clear_color_uint=lambda *args: False,
+            )
+            try:
+                # Exercise the retained shader after releasing the old attachments.
+                target.clear_id(16_777_217)
+            finally:
+                target._gl = native
+            target.resolve()
+            colors = target.read_rgb()
+            assert colors.shape == (height, width, 3)
+            assert np.max(np.abs(colors.astype(int) - (51, 76, 102))) <= 2
+            assert target.read_id(width - 1, height - 1) == 16_777_217
+            assert target.read_ids().shape == (height, width)
+            assert G.native().drain_errors() == 0
+    finally:
+        target.release()
 
 
 def test_depth_mask_replay_is_defused(gl):

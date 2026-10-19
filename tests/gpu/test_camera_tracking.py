@@ -15,6 +15,21 @@ from mojive.types import CameraView
 pytestmark = pytest.mark.gpu
 
 
+def _use_fixed_focus_clock(viewer, monkeypatch):
+    from imgui_bundle import imgui
+
+    process_inputs = viewer.window._input.process_inputs
+
+    def process_test_inputs():
+        process_inputs()
+        imgui.get_io().delta_time = 1 / 60
+
+    # The two native clicks and explicit animation steps use a simulated clock;
+    # shader compilation or a busy desktop must not turn them into single clicks.
+    monkeypatch.setattr(viewer.window._input, "process_inputs", process_test_inputs)
+    monkeypatch.setattr(viewer.app, "_advance_camera", lambda _dt: None)
+
+
 @pytest.mark.physics
 @pytest.mark.parametrize("name", ("world_camera", "body_camera", "world_light", "body_light"))
 @pytest.mark.parametrize("entrypoint", ("hierarchy", "viewport"))
@@ -56,6 +71,7 @@ def test_double_click_focuses_camera_and_light_positions(
         mujoco.mj_forward(adapter.model, adapter.data)
         viewer.set_camera(CameraView(eye=(6, -9, 6), target=(0, 0, 1)))
         viewer.sync()
+        _use_fixed_focus_clock(viewer, monkeypatch)
         node = next(node for node in viewer.session.nodes if node.name == name)
         expected, _ = node_world_pose(viewer.session, node)
         if entrypoint == "hierarchy":
@@ -159,9 +175,7 @@ def test_double_click_focuses_from_the_current_side_and_above(
         # the focus animation must preserve this starting visibility.
         viewer.set_camera(CameraView(eye=initial_eye, target=initial_target, fov_y=np.deg2rad(65)))
         viewer.sync()
-        # Drive only the animation clock deterministically; picking, layout and
-        # presentation still run through the production native input/frame path.
-        monkeypatch.setattr(viewer.app, "_advance_camera", lambda _dt: None)
+        _use_fixed_focus_clock(viewer, monkeypatch)
         node = viewer.session.node_by_object_id(entity.object_id)
         if entrypoint == "hierarchy":
             viewer.panels.get("Hierarchy")._filter = node.name
