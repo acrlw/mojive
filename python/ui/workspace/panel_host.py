@@ -5,7 +5,6 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import replace
 
-import numpy as np
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
@@ -370,7 +369,13 @@ def panel_header(workspace, name, x, y, w):
             ("frame", "frame", "Frame all"),
             ("add", "plus", "Add"),
         ),
-        "Control": (("reset", "reset", "Reset controls"),),
+        "Control": (
+            ("search", "search", "Search actuators"),
+            ("sort", "sort", "Sort by name"),
+            ("copy-ctrl", "copy", "Copy ctrl"),
+            ("copy-act", "copy", "Copy act"),
+            ("reset", "reset", "Reset controls"),
+        ),
         "Pose": (
             ("search", "search", "Search joints"),
             ("sort", "sort", "Sort by name"),
@@ -426,12 +431,7 @@ def panel_header(workspace, name, x, y, w):
         width, height = sizes[key]
         button_y = y + max(0, box.content.height - height) * factor
         frame = control_frame_size(u, "header-" + name + "-" + key, width, height, icon=icon)
-        active = (
-            workspace.navigation.pose_action_active(key)
-            if name == "Pose"
-            else (key == "search" and workspace.search_visible)
-            or (key == "gizmos" and workspace.app.gizmos)
-        )
+        active = header_action_active(workspace, name, key)
         if u.button(
             "header-" + name + "-" + key,
             action_x,
@@ -442,6 +442,7 @@ def panel_header(workspace, name, x, y, w):
             active=active,
             icon_size=icon_size,
             width_limit=frame[0] * s,
+            enabled=header_action_enabled(workspace, name, key),
         ):
             workspace.header_action(name, key)
         action_x += width + gap
@@ -469,18 +470,14 @@ def panel_header(workspace, name, x, y, w):
                 checkable = key in ("search", "sort", "gizmos")
                 checked = None
                 if checkable:
-                    if name == "Pose":
-                        checked = workspace.navigation.pose_action_active(key)
-                    elif key == "search":
-                        checked = workspace.search_visible
-                    else:
-                        checked = workspace.app.gizmos
+                    checked = header_action_active(workspace, name, key)
                 clicked, _ = workspace.menus.local_item(
                     label,
                     checked=checked,
                     checkable=checkable,
                     key="header-menu-" + name + "-" + key,
                     icon=_icon,
+                    enabled=header_action_enabled(workspace, name, key),
                 )
                 if clicked:
                     workspace.header_action(name, key)
@@ -555,9 +552,33 @@ def panel_header(workspace, name, x, y, w):
     return box.outer.bottom + 8 * s
 
 
+def header_action_active(workspace, name, key):
+    if name == "Pose":
+        return workspace.navigation.pose_action_active(key)
+    if name == "Control":
+        from mojive.ui.workspace.scene_panels import control_action_active
+
+        return control_action_active(workspace, key)
+    return (key == "search" and workspace.search_visible) or (
+        key == "gizmos" and workspace.app.gizmos
+    )
+
+
+def header_action_enabled(workspace, name, key):
+    if name == "Control":
+        from mojive.ui.workspace.scene_panels import control_action_enabled
+
+        return control_action_enabled(workspace, key)
+    return True
+
+
 def header_action(workspace, name, key):
     if name == "Pose":
         workspace.navigation.pose_action(key)
+    elif name == "Control":
+        from mojive.ui.workspace.scene_panels import control_action
+
+        control_action(workspace, key)
     elif key == "search":
         workspace.search_visible = not workspace.search_visible
         if not workspace.search_visible:
@@ -566,9 +587,5 @@ def header_action(workspace, name, key):
         workspace.app._frame_scene(animate=True)
     elif key == "add":
         workspace.header_add_pending = True
-    elif name == "Control" and key == "reset":
-        session = workspace.app.session
-        if session.adapter.caps.write_ctrl and session.frame.ctrl is not None:
-            session.submit(cmd.SetCtrlVector(np.zeros_like(session.frame.ctrl)))
     elif key == "gizmos":
         workspace.app.gizmos = not workspace.app.gizmos

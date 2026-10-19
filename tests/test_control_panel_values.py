@@ -17,6 +17,8 @@ from mojive.design.store import SpecificationStore
 from mojive.render.backend import NullBackend
 from mojive.ui.panels import PanelContext
 from mojive.ui.panels.control import ControlPanel
+from mojive.ui.workspace import panel_host
+from mojive.ui.workspace.menus import Menus
 from mojive.ui.workspace.scene_panels import control_panel
 from mojive.ui.workspace.widgets import UI
 
@@ -44,7 +46,9 @@ def controls(request, monkeypatch, tmp_path):
         actuators=actuators,
         nodes=(target,),
         node=lambda identifier: target if identifier == 10 else None,
-        adapter=SimpleNamespace(caps=SimpleNamespace(write_ctrl=True, external_clock=False)),
+        adapter=SimpleNamespace(
+            caps=SimpleNamespace(write_ctrl=True, external_clock=False, state_snapshots=True)
+        ),
         frame=SimpleNamespace(ctrl=np.array([0.1, 0.2, 0.3])),
         selection_revision=0,
         structure_generation=0,
@@ -59,7 +63,12 @@ def controls(request, monkeypatch, tmp_path):
         _panel_context=ctx,
         app=SimpleNamespace(session=session, panels=SimpleNamespace(get=lambda _name: panel)),
         activate=lambda name: calls.append(name),
+        control_search_visible=False,
+        header_actions={"Control": {"reset"}},
+        open={"Control": True},
     )
+    workspace.menus = Menus(workspace, ())
+    workspace.header_action = lambda name, key: panel_host.header_action(workspace, name, key)
     state = SimpleNamespace(
         ui=ui,
         session=session,
@@ -69,6 +78,8 @@ def controls(request, monkeypatch, tmp_path):
         text=[],
         fonts={},
         force_edit=False,
+        header=False,
+        workspace=workspace,
     )
     original_rail, original_text = ui.rail, ui.component_text
     original_paint_text = ui.text
@@ -100,7 +111,10 @@ def controls(request, monkeypatch, tmp_path):
         state.fonts.clear()
         ui.hits.clear()
         with group_scope("Control"), part_scope("panel_body"):
-            control_panel(workspace, 20 * ui.s, 20 * ui.s, 280 * ui.s)
+            top = 20 * ui.s
+            if state.header:
+                top = panel_host.panel_header(workspace, "Control", 20 * ui.s, top, 280 * ui.s)
+            control_panel(workspace, 20 * ui.s, top, 280 * ui.s)
         imgui.end()
         imgui.render()
 
@@ -114,6 +128,7 @@ def controls(request, monkeypatch, tmp_path):
         paint()
 
     state.paint, state.click = paint, click
+    state.io = io
     try:
         for _ in range(3):
             paint()
@@ -211,3 +226,99 @@ def test_writable_rows_keep_the_existing_command_address_boundary(controls):
     state.click("reset-actuators")
     assert len(state.calls) == 1 and isinstance(state.calls[0], cmd.SetCtrlVector)
     assert np.array_equal(state.calls[0].values, np.zeros(3))
+
+
+def _control_menu(state, key):
+    state.click("header-Control-more")
+    state.paint()
+    state.click("header-menu-Control-" + key)
+    state.paint()
+
+
+def test_native_control_menu_restores_sorting_without_readdressing_controls(controls):
+    state = controls
+    state.header = True
+    state.session.actuators[0].name = "Zulu"
+    state.session.actuators[1].name = "Alpha"
+    state.session.structure_generation += 1
+    state.paint()
+    initial = [row[0] for row in state.rails]
+    assert initial == ["##ctrl-0", "##ctrl-1", "##ctrl-2"]
+    _control_menu(state, "sort")
+    assert [row[0] for row in state.rails] == ["##ctrl-2", "##ctrl-0", "##ctrl-1"]
+    assert panel_host.header_action_active(state.workspace, "Control", "sort")
+    state.force_edit = True
+    state.paint()
+    assert [command.index for command in state.calls] == [2, 0, 1]
+    assert all(isinstance(command, cmd.SetCtrl) for command in state.calls)
+    state.force_edit = False
+    _control_menu(state, "sort")
+    assert [row[0] for row in state.rails] == initial
+
+
+def test_native_control_search_filters_actual_rows_and_clears_when_hidden(controls):
+    state = controls
+    state.header = True
+    state.paint()
+    assert "##control-search" not in state.ui.hits
+    _control_menu(state, "search")
+    state.click("##control-search")
+    state.io.add_input_characters_utf8("MoToR")
+    state.paint()
+    assert state.panel._search == "MoToR"
+    assert [row[0] for row in state.rails] == ["##ctrl-0", "##ctrl-1"]
+    state.io.add_input_characters_utf8(" missing")
+    state.paint()
+    assert not state.rails
+    assert "No matching actuators" in state.fonts
+    _control_menu(state, "search")
+    assert not state.panel._search and "##control-search" not in state.ui.hits
+    assert [row[0] for row in state.rails] == ["##ctrl-0", "##ctrl-1", "##ctrl-2"]
+
+
+def test_native_control_copy_entries_use_current_vectors_and_snapshot_only_on_request(
+    controls, monkeypatch
+):
+    state, copied, captures = controls, [], []
+    monkeypatch.setattr(imgui, "set_clipboard_text", copied.append)
+
+    def capture():
+        captures.append(True)
+        return SimpleNamespace(act=np.array([0.75, -0.25]))
+
+    state.session.adapter.capture_state = capture
+    state.header = True
+    state.paint()
+    _control_menu(state, "copy-ctrl")
+    assert copied == ["[0.1, 0.2, 0.3]"] and not captures
+    state.session.frame.ctrl = np.array([1.0, 2.0, 3.0])
+    _control_menu(state, "copy-ctrl")
+    assert copied[-1] == "[1.0, 2.0, 3.0]" and not captures
+    _control_menu(state, "copy-act")
+    assert copied[-1] == "[0.75, -0.25]" and captures == [True]
+    for _ in range(4):
+        state.paint()
+    assert captures == [True]
+    state.session.adapter.caps.state_snapshots = False
+    _control_menu(state, "copy-act")
+    assert captures == [True] and len(copied) == 3
+    state.session.frame.ctrl = None
+    _control_menu(state, "copy-ctrl")
+    assert len(copied) == 3
+
+
+def test_actuator_rows_reuse_lookup_until_structure_or_filter_changes(controls):
+    state = controls
+    panel, ctx = state.panel, state.workspace._panel_context
+    rows, targets = panel.actuator_rows(ctx), panel._joint_nodes
+    state.paint()
+    assert panel.actuator_rows(ctx) is rows and panel._joint_nodes is targets
+    panel._search = "position"
+    assert [(a.ctrl_address, component) for a, component in panel.actuator_rows(ctx)] == [(2, 0)]
+    panel._search = ""
+    state.session.actuators = (state.session.actuators[1],)
+    state.session.nodes = ()
+    state.session.structure_generation += 1
+    state.paint()
+    assert [row[0] for row in state.rails] == ["##ctrl-2"]
+    assert not panel._joint_nodes

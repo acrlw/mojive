@@ -4,11 +4,18 @@ from imgui_bundle import imgui
 
 from mojive.capture import CaptureSurface, RecordingPhase
 from mojive.ui.app.support import _model_filters
+from mojive.ui.input_bindings import InputAction
 
-from .constants import PANEL_ICONS
+from .constants import PANEL_ICONS, PANELS, VIEWPORT_TOOLS
 from .menu_item import Item
+from .panel_manager import PANEL_NAMES
 
 TOP_MENUS = ("File", "Edit", "Add", "View", "Simulate", "Window", "Help")
+
+
+def _shortcut(app, action):
+    binding = app.input_bindings.binding(action)
+    return binding.label if binding.key is not None else ""
 
 
 def items(menu, name):
@@ -112,6 +119,11 @@ def items(menu, name):
                 enabled=n != "Capsule" or caps.topology_editing,
             )
             for n in ("Box", "Sphere", "Cylinder", "Capsule", "Cone", "Ellipsoid", "Plane")
+        ] + [
+            None,
+            Item("Point Light", "create:Point Light", "light", enabled=caps.scene_authoring),
+            Item("Camera", "create:Camera", "camera", enabled=caps.scene_authoring),
+            Item("Site", "create:Site", "target", enabled=caps.topology_editing),
         ]
     if name == "View":
         phase = st.app.recording.phase
@@ -132,7 +144,7 @@ def items(menu, name):
         else:
             recording = [Item("Record", submenu="Record", icon="video")]
         return [
-            Item("Frame all", "frame", "frame", "F"),
+            Item("Frame all", "frame", "frame", _shortcut(st.app, InputAction.FRAME_SCENE)),
             Item("Capture", submenu="Capture", icon="capture-image"),
             *recording,
             Item("Recording Settings...", "recording-settings", "video"),
@@ -167,14 +179,21 @@ def items(menu, name):
         if name == "Camera":
             rows += [
                 None,
-                Item("Frame all", "frame", "frame", "F"),
+                Item("Frame all", "frame", "frame", _shortcut(st.app, InputAction.FRAME_SCENE)),
                 Item("Cameras and saved views", "panel:Cameras", "camera"),
             ]
         return rows
     if name == "Transform tool":
         return [
-            Item(n.title(), "tool:" + n, n, key, checkable=True, checked=st.app.tool == n)
-            for n, key in [("select", "V"), ("move", "W"), ("rotate", "E"), ("scale", "R")]
+            Item(
+                n.title(),
+                "tool:" + n,
+                n,
+                "V" if action is None else _shortcut(st.app, action),
+                checkable=True,
+                checked=st.app.tool == n,
+            )
+            for n, action in VIEWPORT_TOOLS
         ]
     if name == "Gizmo orientation":
         return [
@@ -193,7 +212,7 @@ def items(menu, name):
                 "Pause simulation" if st.playing else "Play simulation",
                 "play",
                 "pause" if st.playing else "play",
-                "Space",
+                _shortcut(st.app, InputAction.TOGGLE_PAUSE),
             ),
             Item("Go to start", "start", "reset"),
             Item("Playback speed", icon="play", submenu="Playback speed"),
@@ -266,6 +285,11 @@ def items(menu, name):
             ),
         ]
     if name == "Panels":
+        unloaded = {
+            PANEL_NAMES.get(panel_id, title): panel_id
+            for panel_id, title in st.app.panels.unloaded_builtins()
+        }
+        available = {panel.name for panel in st.app.panels if panel.enabled} | unloaded.keys()
         return [
             Item(
                 n,
@@ -273,7 +297,7 @@ def items(menu, name):
                 icon,
                 checkable=True,
                 checked=st.open[n],
-                enabled=st.app.panels.get(n) is not None and st.app.panels.get(n).enabled,
+                enabled=n in available,
             )
             for n, icon in menu.panels
             if n != "Settings"
@@ -304,6 +328,11 @@ def items(menu, name):
                 )
                 and p.enabled
             ),
+            *(
+                Item(title, "extra-panel:" + panel_id, PANEL_ICONS.get(panel_id, "inspect"))
+                for title, panel_id in unloaded.items()
+                if title not in (*PANELS, "Inspector", "Timeline")
+            ),
             None,
             Item(
                 "Inspector",
@@ -311,8 +340,17 @@ def items(menu, name):
                 "inspect",
                 checkable=True,
                 checked=st.open["Inspector"],
+                enabled="Inspector" in available,
             ),
-            Item("Timeline", "timeline", "key", "T", checkable=True, checked=st.open["Timeline"]),
+            Item(
+                "Timeline",
+                "timeline",
+                "key",
+                "T",
+                checkable=True,
+                checked=st.open["Timeline"],
+                enabled="Timeline" in available,
+            ),
         ]
     if name == "Inspector position":
         return [
@@ -327,6 +365,7 @@ def items(menu, name):
         ]
     if name == "Help":
         return [
+            Item("Documentation", "documentation", "file"),
             Item("Interaction guide", "dialog:Interaction guide", "help"),
             Item("About Mojive", "extra-panel:info", "info"),
         ]

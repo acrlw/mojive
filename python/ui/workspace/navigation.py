@@ -160,6 +160,10 @@ class Navigation:
     def _scene_controls(self, ctx, x, y, w):
         u, s = self.workspace.ui, self.workspace.s
         top = y
+        if ctx.session.world_selection is not None:
+            imgui.set_cursor_screen_pos((x, y))
+            self.hierarchy._world_selection.draw(ctx)
+            y = imgui.get_cursor_screen_pos().y
         tools = u.component_style(("panel_tools", "scene_tools"))
         tools_gap = tools.get("rowGap", tools.get("gap", 8)) * s
         if self.workspace.search_visible:
@@ -498,6 +502,7 @@ class Navigation:
                 imgui.set_clipboard_text(node.name)
             if (node.type is NodeType.MODEL and node.model_id >= 0) or node.source_editable:
                 self.workspace.menus.local_separator()
+                self._batch_actions(ctx, node)
                 if node.type in (NodeType.MODEL, NodeType.ROBOT, NodeType.LINK):
                     self.hierarchy._model_create_menu(ctx, node, presentation=self.workspace.menus)
                 if node.type is NodeType.MODEL:
@@ -519,6 +524,31 @@ class Navigation:
             ):
                 self.workspace.menus.local_separator()
                 self._entity_actions(ctx, node, model=False)
+
+    def _batch_actions(self, ctx, node):
+        selected = self.hierarchy._batch_selected
+        if len(selected) < 2 or node.node_id not in selected:
+            return
+        roots = self.hierarchy._batch_removable_roots()
+        if not roots:
+            return
+        clicked, _ = self.workspace.menus.local_item(
+            f"{ctx.tr('Delete')} {len(roots)} {ctx.tr('model elements')}",
+            enabled=ctx.session.paused and ctx.session.adapter.caps.topology_editing,
+            key="scene-menu-delete-selected",
+            icon="delete",
+        )
+        if clicked:
+            result = ctx.submit(
+                cmd.ModelEditBatch(
+                    tuple(
+                        cmd.RemoveModelElementEdit(cmd.ModelElementRef(node_id=node_id))
+                        for node_id in roots
+                    )
+                )
+            )
+            if result.ok:
+                selected.clear()
 
     def _entity_actions(self, ctx, node, *, model):
         enabled = not ctx.session.adapter.caps.simulation or ctx.session.paused

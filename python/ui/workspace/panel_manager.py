@@ -54,7 +54,45 @@ class WorkspacePanels(PanelManager):
     def load(self, panel_id):
         name = str(panel_id)
         stable = next((key for key, title in PANEL_NAMES.items() if title == name), name)
-        return super().load(stable)
+        panel = self.get(stable)
+        if panel is None:
+            panel = super().load(stable)
+            if panel is not None and self.workspace is not None:
+                native = self._native_panel(panel)
+                self.panels[self.panels.index(panel)] = native
+                panel = native
+        return panel
+
+    def bind_workspace(self, workspace):
+        """Apply native presentation to both initial and subsequently loaded panels."""
+        self.workspace = workspace
+        self.panels[:] = [self._native_panel(panel) for panel in self.panels]
+
+    def _native_panel(self, panel):
+        workspace = self.workspace
+        if panel.id == "settings":
+            native = workspace.settings
+        elif panel.id == "output":
+            from .output_panel import WorkspaceOutput
+
+            native = WorkspaceOutput(workspace)
+        elif panel.id == "stats":
+            from .statistics import WorkspaceStatistics
+
+            native = WorkspaceStatistics(workspace)
+        elif panel.id == "sensors":
+            from .sensors_panel import WorkspaceSensors
+
+            native = WorkspaceSensors(workspace)
+        else:
+            native = panel
+            if panel.id in ("plot", "info", "help"):
+                from .property_style import NativePropertyPresentation
+
+                native.presentation = NativePropertyPresentation(workspace.ui, prefix=panel.id)
+        native.enabled, native.open = panel.enabled, panel.open
+        native.name = PANEL_NAMES.get(panel.id, panel.name)
+        return native
 
     def set_open(self, panel_id, open):
         changed = super().set_open(panel_id, open)
@@ -68,6 +106,7 @@ class WorkspacePanels(PanelManager):
 
     def register(self, panel):
         super().register(panel)
+        self._legacy_titles[panel.name] = panel.id
         if panel.id in PANEL_NAMES:
             panel.name = PANEL_NAMES[panel.id]
             if self.workspace is not None:

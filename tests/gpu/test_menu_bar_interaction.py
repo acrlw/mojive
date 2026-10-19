@@ -76,6 +76,16 @@ def test_main_menu_hover_switches_and_native_submenus_commit(
         menus = viewer.app.workspace.menus
         hover(menus.menu_rects["File"])
         assert not menus.observed
+
+        from mojive.adapters.base import NodeType
+
+        for label, kind in (("Point Light", NodeType.LIGHT), ("Camera", NodeType.CAMERA)):
+            click(menus.menu_rects["Add"])
+            row = next(row for row in menus.observed["Add"]["rows"] if row["label"] == label)
+            capture("restored-add")
+            click(row["rect"])
+            assert viewer.session.selected_node.type is kind
+            assert not menus.observed
         click(menus.menu_rects["File"])
         assert set(menus.observed) == {"File"}
         for name in ("Window", "Edit", "Help", "View", "File", "Window"):

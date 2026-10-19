@@ -19,9 +19,10 @@ def toggle_activity(workspace, name):
 
 
 def activate(workspace, name):
-    panel = workspace.app.panels.get(name)
+    panel = workspace.app.panels.load(name)
     if panel is None or not panel.enabled:
         return
+    name = panel.name
     if name not in workspace.open:
         panel.open = True
         return

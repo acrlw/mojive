@@ -11,7 +11,12 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.design.native.geometry import part_scope
 from mojive.ui.layers import LAYER_LABELS, LAYER_SECTIONS, debug_layer_group
-from mojive.ui.panels import activate_edit_gizmo, pointer_pressed, publish_focus_item_hint
+from mojive.ui.panels import (
+    activate_edit_gizmo,
+    copy_state_vector,
+    pointer_pressed,
+    publish_focus_item_hint,
+)
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.workspace.component_layout import component_flow, control_frame_size, control_size
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN
@@ -121,6 +126,54 @@ def _control_range(actuator):
     )
 
 
+def control_action_enabled(workspace, key):
+    session = workspace.app.session
+    if key == "copy-ctrl":
+        return session.frame.ctrl is not None
+    if key == "copy-act":
+        return session.adapter.caps.state_snapshots
+    return True
+
+
+def control_action_active(workspace, key):
+    panel = workspace.app.panels.get("control")
+    return (key == "search" and workspace.control_search_visible) or (
+        key == "sort" and panel._sort_by_name
+    )
+
+
+def control_action(workspace, key):
+    session = workspace.app.session
+    panel = workspace.app.panels.get("control")
+    if not control_action_enabled(workspace, key):
+        return
+    if key == "search":
+        workspace.control_search_visible = not workspace.control_search_visible
+        if not workspace.control_search_visible:
+            panel._search = ""
+    elif key == "sort":
+        panel._sort_by_name = not panel._sort_by_name
+    elif key == "copy-ctrl":
+        copy_state_vector(session.frame.ctrl)
+    elif key == "copy-act":
+        state = session.adapter.capture_state()
+        copy_state_vector(None if state is None else state.act)
+    elif key == "reset" and session.adapter.caps.write_ctrl and session.frame.ctrl is not None:
+        session.submit(cmd.SetCtrlVector(np.zeros_like(session.frame.ctrl)))
+
+
+@part_scope("panel_tools")
+def _control_search(workspace, panel, x, y, width):
+    if not workspace.control_search_visible:
+        return y
+    ui = workspace.ui
+    _, panel._search = ui.search(
+        "##control-search", x, y, width, panel._search, hint=ui.translate("Search actuators")
+    )
+    tools = ui.component_style("panel_tools")
+    return imgui.get_item_rect_max().y + tools.get("rowGap", tools.get("gap", 10)) * ui.s
+
+
 def control_panel(workspace, x, y, w):
     u, s = workspace.ui, workspace.s
     session = workspace.app.session
@@ -132,7 +185,9 @@ def control_panel(workspace, x, y, w):
     if panel._selection_revision != session.selection_revision:
         panel._selected_address = -1
         panel._selection_revision = session.selection_revision
-    joint_nodes = {node.joint_index: node for node in session.nodes if node.joint_index >= 0}
+    y = _control_search(workspace, panel, x, y, w)
+    rows = panel.actuator_rows(ctx)
+    joint_nodes = panel._joint_nodes
     values = session.frame.ctrl
     enabled = session.adapter.caps.write_ctrl
     complete = values is not None and all(
@@ -154,124 +209,121 @@ def control_panel(workspace, x, y, w):
             else "Read only · control writes unavailable"
         )
         yy = _control_detail(u, "control-read-only", x, yy, w, ctx.tr(reason)) + DESIGN.row_gap * s
-    for actuator in session.actuators if expanded else ():
+    for actuator, component in rows if expanded else ():
         bounds = _control_range(actuator)
-        for component in range(actuator.ctrl_count):
-            address = actuator.ctrl_address + component
-            suffix = f"[{component}]" if actuator.ctrl_count > 1 else ""
-            target = session.node(actuator.target_node_id) or joint_nodes.get(actuator.joint)
-            label = (actuator.name or f"act{actuator.actuator_id}") + suffix
-            key = "control-target-" + str(address)
-            _, heading_height = control_size(u, key, w / s, DESIGN.control_height, label=label)
-            button_width, button_height = control_frame_size(u, key, w, heading_height, label=label)
-            pressed = u.button(
-                key,
-                x,
-                yy,
-                button_width,
-                button_height,
-                width_limit=button_width * s,
-                label=label,
-                text_color=ACCENT if panel._selected_address == address else TEXT,
-                active=panel._selected_address == address,
-                translate=False,
-                align="left",
-            )
-            hovered = imgui.is_item_hovered()
-            focused = hovered and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
-            if hovered and target is not None:
-                publish_focus_item_hint(ctx)
-            if target is not None and (pressed or focused):
-                ctx.submit(cmd.SelectNode(target.node_id))
-                if focused:
-                    joint = next(
-                        (item for item in session.joints if item.joint_id == target.joint_index),
-                        None,
-                    )
-                    activate_edit_gizmo(ctx, target, joint)
-                    if joint is not None and ctx.focus_joint is not None:
-                        ctx.focus_joint(joint.joint_id)
-                    elif ctx.focus_node is not None:
-                        ctx.focus_node(target.node_id)
-            if pressed or focused:
-                panel._selection_revision = session.selection_revision
-                panel._selected_address = address
-            target_name = target.name if target is not None else ctx.tr("Target not specified")
-            if bounds is not None:
-                shown = (
-                    tuple(degrees(v) for v in bounds)
-                    if actuator.unit == "rad" and panel._angular_degrees
-                    else bounds
+        address = actuator.ctrl_address + component
+        suffix = f"[{component}]" if actuator.ctrl_count > 1 else ""
+        target = session.node(actuator.target_node_id) or joint_nodes.get(actuator.joint)
+        label = (actuator.name or f"act{actuator.actuator_id}") + suffix
+        key = "control-target-" + str(address)
+        _, heading_height = control_size(u, key, w / s, DESIGN.control_height, label=label)
+        button_width, button_height = control_frame_size(u, key, w, heading_height, label=label)
+        pressed = u.button(
+            key,
+            x,
+            yy,
+            button_width,
+            button_height,
+            width_limit=button_width * s,
+            label=label,
+            text_color=ACCENT if panel._selected_address == address else TEXT,
+            active=panel._selected_address == address,
+            translate=False,
+            align="left",
+        )
+        hovered = imgui.is_item_hovered()
+        focused = hovered and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
+        if hovered and target is not None:
+            publish_focus_item_hint(ctx)
+        if target is not None and (pressed or focused):
+            ctx.submit(cmd.SelectNode(target.node_id))
+            if focused:
+                joint = next(
+                    (item for item in session.joints if item.joint_id == target.joint_index),
+                    None,
                 )
-                unit = "°" if actuator.unit == "rad" and panel._angular_degrees else actuator.unit
-                limits = f"{shown[0]:.4g} … {shown[1]:.4g}" + (f" {unit}" if unit else "")
-            else:
-                limits = ctx.tr("Invalid control range" if actuator.ctrl_limited else "Unbounded")
-            detail = target_name + " · " + limits
-            value_y = (
+                activate_edit_gizmo(ctx, target, joint)
+                if joint is not None and ctx.focus_joint is not None:
+                    ctx.focus_joint(joint.joint_id)
+                elif ctx.focus_node is not None:
+                    ctx.focus_node(target.node_id)
+        if pressed or focused:
+            panel._selection_revision = session.selection_revision
+            panel._selected_address = address
+        target_name = target.name if target is not None else ctx.tr("Target not specified")
+        if bounds is not None:
+            shown = (
+                tuple(degrees(v) for v in bounds)
+                if actuator.unit == "rad" and panel._angular_degrees
+                else bounds
+            )
+            unit = "°" if actuator.unit == "rad" and panel._angular_degrees else actuator.unit
+            limits = f"{shown[0]:.4g} … {shown[1]:.4g}" + (f" {unit}" if unit else "")
+        else:
+            limits = ctx.tr("Invalid control range" if actuator.ctrl_limited else "Unbounded")
+        detail = target_name + " · " + limits
+        value_y = (
+            _control_detail(
+                u,
+                "control-meta-" + str(address),
+                x,
+                yy + heading_height,
+                w,
+                detail,
+            )
+            + DESIGN.numeric_gap * s
+        )
+        available = (
+            values is not None and 0 <= address < len(values) and isfinite(float(values[address]))
+        )
+        row += 1
+        if not available:
+            yy = (
                 _control_detail(
                     u,
-                    "control-meta-" + str(address),
+                    "##ctrl-" + str(address),
                     x,
-                    yy + heading_height,
+                    value_y,
                     w,
-                    detail,
+                    ctx.tr("Control value unavailable"),
+                    unavailable=True,
                 )
-                + DESIGN.numeric_gap * s
-            )
-            available = (
-                values is not None
-                and 0 <= address < len(values)
-                and isfinite(float(values[address]))
-            )
-            row += 1
-            if not available:
-                yy = (
-                    _control_detail(
-                        u,
-                        "##ctrl-" + str(address),
-                        x,
-                        value_y,
-                        w,
-                        ctx.tr("Control value unavailable"),
-                        unavailable=True,
-                    )
-                    + DESIGN.row_gap * s
-                )
-                continue
-            current = float(values[address])
-            editable = enabled and (not actuator.ctrl_limited or bounds is not None)
-            imgui.begin_disabled(not editable)
-            edit = u.rail(
-                "##ctrl-" + str(address),
-                x,
-                value_y,
-                w,
-                current,
-                bounds,
-                initial=float(panel._initial_ctrl[address])
-                if 0 <= address < len(panel._initial_ctrl)
-                and isfinite(float(panel._initial_ctrl[address]))
-                else current,
-                fmt="%.3f",
-                show_reset=False,
-                unit=actuator.unit,
-                angular_degrees=panel._angular_degrees,
-                toggle_unit=panel._toggle_angle_unit,
-            )
-            imgui.end_disabled()
-            if edit.changed and editable:
-                session.submit(cmd.SetCtrl(address, edit.value))
-            yy = (
-                u.hits["##ctrl-" + str(address)][1]
-                + u.hits["##ctrl-" + str(address)][3]
                 + DESIGN.row_gap * s
             )
-    if not session.actuators:
+            continue
+        current = float(values[address])
+        editable = enabled and (not actuator.ctrl_limited or bounds is not None)
+        imgui.begin_disabled(not editable)
+        edit = u.rail(
+            "##ctrl-" + str(address),
+            x,
+            value_y,
+            w,
+            current,
+            bounds,
+            initial=float(panel._initial_ctrl[address])
+            if 0 <= address < len(panel._initial_ctrl)
+            and isfinite(float(panel._initial_ctrl[address]))
+            else current,
+            fmt="%.3f",
+            show_reset=False,
+            unit=actuator.unit,
+            angular_degrees=panel._angular_degrees,
+            toggle_unit=panel._toggle_angle_unit,
+        )
+        imgui.end_disabled()
+        if edit.changed and editable:
+            session.submit(cmd.SetCtrl(address, edit.value))
+        yy = (
+            u.hits["##ctrl-" + str(address)][1]
+            + u.hits["##ctrl-" + str(address)][3]
+            + DESIGN.row_gap * s
+        )
+    if not session.actuators or (expanded and not rows):
         u.text(
             x,
             yy + DESIGN.control_padding_y(BODY_SIZE) * s,
-            "No actuators in this scene",
+            "No matching actuators" if session.actuators else "No actuators in this scene",
             MUTED,
             BODY_SIZE,
         )

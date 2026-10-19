@@ -16,11 +16,7 @@ from mojive.ui.workspace.camera_panel import camera_panel
 from mojive.ui.workspace.constants import BOTTOM_PANELS, ICONS, LEFT_PANELS, PANELS
 from mojive.ui.workspace.localization import workspace_text
 from mojive.ui.workspace.menus import Menus
-from mojive.ui.workspace.output_panel import WorkspaceOutput
-from mojive.ui.workspace.property_style import NativePropertyPresentation
-from mojive.ui.workspace.sensors_panel import WorkspaceSensors
 from mojive.ui.workspace.settings_panel import WorkspaceSettings
-from mojive.ui.workspace.statistics import WorkspaceStatistics
 from mojive.ui.workspace.visibility import PanelVisibility
 from mojive.ui.workspace.widgets import ACCENT, DIM, INPUT, LINE, PANEL, TEXT, UI
 
@@ -57,6 +53,7 @@ class WorkspaceShell:
             Layers={"gizmos"},
         )
         self.search_visible = False
+        self.control_search_visible = False
         self.header_add_pending = False
         self._numeric_edit = None
         self.pending = None
@@ -75,22 +72,7 @@ class WorkspaceShell:
         self.tool_panels = []
         self.menus = Menus(self, tuple(zip(PANELS, ICONS, strict=True)))
         self.settings = WorkspaceSettings(self)
-        app.panels.workspace = self
-        for panel_id in ("plot", "info", "help"):
-            panel = app.panels.get(panel_id)
-            if panel is not None:
-                panel.presentation = NativePropertyPresentation(self.ui, prefix=panel_id)
-        for replacement in (
-            self.settings,
-            WorkspaceOutput(self),
-            WorkspaceStatistics(self),
-            WorkspaceSensors(self),
-        ):
-            previous = app.panels.get(replacement.id)
-            if previous is not None:
-                replacement.enabled = previous.enabled
-                replacement.open = previous.open
-                app.panels.panels[app.panels.panels.index(previous)] = replacement
+        app.panels.bind_workspace(self)
         app.theme = replace(
             app.theme,
             **{

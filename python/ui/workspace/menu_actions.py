@@ -20,7 +20,10 @@ def dispatch(menu, action):
         else:
             st.activate(value)
     elif prefix == "extra-panel":
-        app.panels.toggle(value)
+        if app.panels.get(value) is None:
+            app.panels.open(value)
+        else:
+            app.panels.toggle(value)
     elif prefix == "remove-model":
         app.remove_model(int(value))
     elif prefix == "remove-resource":
@@ -63,12 +66,25 @@ def dispatch(menu, action):
         if value == "Capsule":
             if session.adapter.caps.topology_editing:
                 app._add_model_primitive("capsule", "capsule")
+        elif value == "Site":
+            if session.adapter.caps.topology_editing:
+                app._add_model_site()
+        elif value == "Point Light":
+            if session.adapter.caps.scene_authoring:
+                app._add_scene_light()
+        elif value == "Camera":
+            if session.adapter.caps.scene_authoring:
+                app._add_scene_camera()
         elif value == "Ellipsoid":
             app._add_scene_object(MeshShape.SPHERE, "ellipsoid", size=(0.65, 0.45, 0.35))
         else:
             app._add_scene_object(MeshShape(value.lower()), value.lower())
     elif prefix == "dialog":
         menu.dialog_pending = value
+    elif action == "documentation":
+        import webbrowser
+
+        webbrowser.open("https://github.com/acrlw/mojive#readme")
     elif action == "play":
         app._toggle_playback()
     elif action == "record":

@@ -156,7 +156,9 @@ def test_actual_scene_and_pose_filters_keep_independent_type_icons_and_spacing(
     navigation.pose_search_visible = True
     navigation._pose_copy_pending = False
     navigation.scene_filters = lambda _ctx: (("all", 0),)
-    ctx = SimpleNamespace(tr=str, theme=THEME, backend=None)
+    ctx = SimpleNamespace(
+        tr=str, theme=THEME, backend=None, session=SimpleNamespace(world_selection=None)
+    )
     monkeypatch.setattr(
         geometry_module, "geometry_view", lambda _backend: geometry_module.GeometryView.VISUAL
     )
@@ -1060,7 +1062,9 @@ def test_scene_filter_counts_remain_visible_after_switching_to_mono(appearance, 
         filter="All",
     )
     navigation.scene_filters = lambda _ctx: (("all", 52), ("link", 11), ("geom", 20), ("camera", 1))
-    ctx = SimpleNamespace(tr=str, backend=None, theme=THEME)
+    ctx = SimpleNamespace(
+        tr=str, backend=None, theme=THEME, session=SimpleNamespace(world_selection=None)
+    )
     monkeypatch.setattr(
         geometry_module, "geometry_view", lambda _backend: geometry_module.GeometryView.VISUAL
     )

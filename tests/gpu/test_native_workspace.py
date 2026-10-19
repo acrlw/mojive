@@ -570,6 +570,20 @@ def test_empty_editor_and_minimal_panel_configuration(backend_name, monkeypatch,
         viewer.panels.open("hierarchy")
         viewer.sync()
         assert viewer.app.workspace.open["Scene"]
+        from mojive.ui.workspace.output_panel import WorkspaceOutput
+
+        shell = viewer.app.workspace
+        for name in ("Output", "Statistics", "Sensors", "Control", "Plot", "Inspector", "Timeline"):
+            row = next(row for row in shell.menus.items("Panels") if row and row.label == name)
+            assert row.enabled
+            shell.menus.dispatch(row.action)
+            viewer.sync()
+            assert shell.open[name]
+        assert isinstance(viewer.panels.get("output"), WorkspaceOutput)
+        shell.menus.dispatch("extra-panel:info")
+        viewer.sync()
+        assert viewer.panels.get("info").open
+        assert viewer.panels.get("info").presentation is not None
     finally:
         viewer.release()
 

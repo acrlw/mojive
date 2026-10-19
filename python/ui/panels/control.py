@@ -78,6 +78,23 @@ class ControlPanel(Panel):
             draw=ctx.painter(),
         )
         self._state_copy_buttons(ctx)
+        rows = self.actuator_rows(ctx)
+        if not rows:
+            imgui.text_disabled(ctx.tr("No matching actuators"))
+            return
+        if any(a.target_node_id >= 0 or a.joint in self._joint_nodes for a, _ in rows):
+            publish_focus_item_hint(ctx)
+        clipper = imgui.ListClipper()
+        clipper.begin(len(rows))
+        while clipper.step():
+            for index in range(clipper.display_start, clipper.display_end):
+                actuator, component = rows[index]
+                self._actuator_row(ctx, actuator, component)
+        clipper.end()
+
+    def actuator_rows(self, ctx: PanelContext) -> tuple[tuple[ActuatorInfo, int], ...]:
+        """Share filtered control addresses and target lookup between presentations."""
+        session = ctx.session
         cache_key = (session.structure_generation, self._search, self._sort_by_name)
         if cache_key != self._row_cache_key:
             actuators = sort_actuators(
@@ -93,19 +110,7 @@ class ControlPanel(Panel):
             self._joint_nodes = {
                 n.joint_index: n for n in session.nodes if n.type is NodeType.JOINT
             }
-        rows = self._row_cache
-        if not rows:
-            imgui.text_disabled(ctx.tr("No matching actuators"))
-            return
-        if any(a.target_node_id >= 0 or a.joint in self._joint_nodes for a, _ in rows):
-            publish_focus_item_hint(ctx)
-        clipper = imgui.ListClipper()
-        clipper.begin(len(rows))
-        while clipper.step():
-            for index in range(clipper.display_start, clipper.display_end):
-                actuator, component = rows[index]
-                self._actuator_row(ctx, actuator, component)
-        clipper.end()
+        return self._row_cache
 
     @staticmethod
     def _state_copy_buttons(ctx: PanelContext) -> None:

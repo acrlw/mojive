@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 from imgui_bundle import imgui
 
+from mojive.adapters.base import AdapterCaps
 from mojive.types import MeshShape
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.workspace.menu_actions import dispatch
 from mojive.ui.workspace.menu_catalog import items
 from mojive.ui.workspace.widget_icons import GLYPHS, ICON_STROKE
@@ -86,24 +88,34 @@ def test_direction_and_primitive_symbols_remain_distinct_at_production_sizes(nam
 
 
 @pytest.mark.parametrize("topology", (False, True))
-def test_add_menu_uses_shape_symbols_and_capability_for_capsule(topology):
+@pytest.mark.parametrize("authoring", (False, True))
+def test_add_menu_keeps_creation_symbols_and_capabilities(topology, authoring):
     context = imgui.create_context()
     workspace = SimpleNamespace(
         app=SimpleNamespace(
             entity=None,
             session=SimpleNamespace(
-                adapter=SimpleNamespace(caps=SimpleNamespace(topology_editing=topology))
+                adapter=SimpleNamespace(
+                    caps=AdapterCaps(topology_editing=topology, scene_authoring=authoring)
+                )
             ),
         )
     )
     try:
         rows = items(SimpleNamespace(workspace=workspace), "Add")
-        assert tuple(row.label for row in rows) == PRIMITIVES
-        assert tuple(row.icon for row in rows) == tuple(
+        shapes = rows[: len(PRIMITIVES)]
+        assert tuple(row.label for row in shapes) == PRIMITIVES
+        assert tuple(row.icon for row in shapes) == tuple(
             "shape-" + name.lower() for name in PRIMITIVES
         )
-        assert all(row.icon in GLYPHS for row in rows)
-        assert all(row.enabled == (row.label != "Capsule" or topology) for row in rows)
+        assert all(row.icon in GLYPHS for row in rows if row)
+        assert all(row.enabled == (row.label != "Capsule" or topology) for row in shapes)
+        assert rows[len(PRIMITIVES)] is None
+        assert [(row.label, row.icon, row.enabled) for row in rows[len(PRIMITIVES) + 1 :]] == [
+            ("Point Light", "light", authoring),
+            ("Camera", "camera", authoring),
+            ("Site", "target", topology),
+        ]
     finally:
         imgui.destroy_context(context)
 
@@ -127,13 +139,10 @@ def test_add_menu_routes_each_shape_to_its_existing_creation_operation(primitive
         assert calls == [("scene", (MeshShape(primitive.lower()), primitive.lower()), {})]
 
 
-def test_capsule_creation_does_not_write_to_an_adapter_without_topology_editing():
-    app = SimpleNamespace(
-        session=SimpleNamespace(
-            adapter=SimpleNamespace(caps=SimpleNamespace(topology_editing=False))
-        )
-    )
-    dispatch(SimpleNamespace(workspace=SimpleNamespace(app=app)), "create:Capsule")
+@pytest.mark.parametrize("label", ("Capsule", "Site", "Point Light", "Camera"))
+def test_creation_does_not_write_to_an_adapter_without_required_capability(label):
+    app = SimpleNamespace(session=SimpleNamespace(adapter=SimpleNamespace(caps=AdapterCaps())))
+    dispatch(SimpleNamespace(workspace=SimpleNamespace(app=app)), "create:" + label)
 
 
 @pytest.mark.parametrize("orthographic", (False, True))
@@ -149,6 +158,7 @@ def test_view_menu_uses_projection_state_and_a_separate_image_capture_symbol(
         recording=SimpleNamespace(phase=RecordingPhase.IDLE, active=False),
         tool="select",
         gizmos=True,
+        input_bindings=DEFAULT_INPUT_BINDINGS,
     )
     menu = SimpleNamespace(workspace=SimpleNamespace(app=app))
     view = {row.label: row for row in items(menu, "View") if row}

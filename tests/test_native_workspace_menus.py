@@ -10,8 +10,9 @@ from mojive.adapters.static import StaticSceneAdapter
 from mojive.render.backend import NullBackend
 from mojive.session import Session
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.input_bindings import DEFAULT_INPUT_BINDINGS
 from mojive.ui.localization import Language, Localizer
-from mojive.ui.panels import PanelContext
+from mojive.ui.panels import PanelContext, PanelManager
 from mojive.ui.workspace.menus import Menus
 from mojive.ui.workspace.navigation import Navigation
 from mojive.ui.workspace.widgets import UI
@@ -40,7 +41,12 @@ def test_localized_product_menus_keep_command_identity_and_fit_labels(name, surf
     workspace = SimpleNamespace(
         ui=ui,
         s=1,
-        app=SimpleNamespace(session=session, entity=None, panels=[]),
+        app=SimpleNamespace(
+            session=session,
+            entity=None,
+            panels=PanelManager([]),
+            input_bindings=DEFAULT_INPUT_BINDINGS,
+        ),
         playing=False,
         saved=False,
         speed=1,

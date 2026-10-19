@@ -5,11 +5,16 @@ from types import SimpleNamespace
 import pytest
 from imgui_bundle import imgui
 
+from mojive import Scene
+from mojive.adapters.static import StaticSceneAdapter
 from mojive.design.groups import group_scope
 from mojive.design.native.presentation import DesignPresentation
 from mojive.design.runtime import DesignRuntime
 from mojive.design.store import SpecificationStore
+from mojive.render.backend import NullBackend
+from mojive.session import Session
 from mojive.ui.localization import Language, Localizer
+from mojive.ui.panels import PanelContext, PanelManager
 from mojive.ui.workspace.constants import LEFT_PANELS
 from mojive.ui.workspace.menu_item import Item
 from mojive.ui.workspace.menus import Menus
@@ -32,21 +37,25 @@ def action_surface(request, tmp_path, monkeypatch):
     )
     ui.design = DesignPresentation(ui, DesignRuntime(SpecificationStore(tmp_path / "ui.json")))
     actions = []
+    session = Session(StaticSceneAdapter(Scene()))
     workspace = SimpleNamespace(
         ui=ui,
         s=ui.s,
-        app=SimpleNamespace(gizmos=True),
+        app=SimpleNamespace(
+            gizmos=True, session=session, panels=PanelManager(builtin_ids=("control",))
+        ),
         open=dict.fromkeys(LEFT_PANELS, True),
         header_actions={name: set() for name in LEFT_PANELS},
         header_action=lambda *args: actions.append(args),
         header_add_pending=False,
         search_visible=False,
+        control_search_visible=False,
         filter="All",
         navigation=SimpleNamespace(
             pose_action_active=lambda _key: False,
             scene_filters=lambda _ctx: (("all", 5), ("camera", 2)),
         ),
-        _panel_context=None,
+        _panel_context=PanelContext(session, NullBackend(), style_scale=ui.s),
     )
     workspace.menus = menus = Menus(workspace, ())
     state = SimpleNamespace(
