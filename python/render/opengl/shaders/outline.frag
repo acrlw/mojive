@@ -5,10 +5,14 @@
 
 uniform sampler2D u_mask;
 uniform ivec2 u_size;
-uniform vec4 u_color;
 uniform float u_xray_alpha;
 
+#ifdef OUTLINE_ALPHA
+layout(location = 0) out float o_alpha;
+#else
+uniform vec4 u_color;
 layout(location = 0) out vec4 o_color;
+#endif
 
 const int AA_RADIUS = OUTLINE_RADIUS + 1;
 const float CORE_R2 = float(OUTLINE_RADIUS * OUTLINE_RADIUS);
@@ -57,7 +61,10 @@ void main() {
     float center = coverage_at(p);
     float alpha = max(outline_alpha(p), center * u_xray_alpha);
     if (center > 0.0 && clipped_by_border(p)) alpha = max(alpha, center);
+#ifdef OUTLINE_ALPHA
+    o_alpha = alpha;
+#else
     if (alpha <= 0.0) discard;
-
     o_color = vec4(u_color.rgb, u_color.a * alpha);
+#endif
 }

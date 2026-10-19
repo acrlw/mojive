@@ -454,6 +454,8 @@ class OpenGLBackend:
         reflect = self._passes.get("reflect")
         self.stats.notes["shadow cache"] = getattr(shadow, "cache_status", "off")
         self.stats.notes["reflection cache"] = getattr(reflect, "cache_status", "off")
+        outline = self._passes.get("outline")
+        self.stats.notes["outline cache"] = getattr(outline, "cache_status", "off")
         if not plan.returns_color:
             return None
         present = self._passes.get("present")
