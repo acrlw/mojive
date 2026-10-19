@@ -215,10 +215,12 @@ class ComponentStyles:
         """Observe a measured box inside the clip scope used for its actual painting."""
         if self.design is None:
             return
+        style = self.component_style(part)
+        if not self.design.runtime.observes(style.part_ids):
+            return
         if key is None:
             name = part if isinstance(part, str) else "/".join(part)
             key = f"component/{name}/{imgui.get_id(name)}"
-        style = self.component_style(part)
         self.design.record(
             key,
             style.part_ids,

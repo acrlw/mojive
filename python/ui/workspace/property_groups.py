@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
+from mojive.design.groups import scoped_parts
 from mojive.design.native.geometry import Rect, budget_margins
 from mojive.ui.workspace.design import DESIGN
 
@@ -70,19 +71,27 @@ class PropertyGroups:
         body = ui.component_style("section_body")
         margin, padding = body.edges("margin", scale), body.edges("padding", scale)
         bottom = position.y + section[3] + margin[3] + padding[3]
-        if ui.design is not None:
+        observe_section = ui.design is not None and ui.design.runtime.observes(
+            scoped_parts("section")
+        )
+        observe_body = ui.design is not None and ui.design.runtime.observes(
+            scoped_parts("section_body")
+        )
+        if observe_section or observe_body:
             outer = Rect(*owner.origin, owner.width, max(scale, bottom - owner.origin[1]))
             section_frame = outer.inset(*section)
+            if observe_section:
+                ui.design.record(
+                    "section/" + owner.key,
+                    ("section",),
+                    section_frame.tuple(),
+                    "section",
+                    outer=outer.tuple(),
+                    margin=list(section),
+                )
+        if observe_body:
             margin = budget_margins(margin, section_frame.width, section_frame.height)
             body_frame = section_frame.inset(*margin)
-            ui.design.record(
-                "section/" + owner.key,
-                ("section",),
-                section_frame.tuple(),
-                "section",
-                outer=outer.tuple(),
-                margin=list(section),
-            )
             ui.design.record(
                 "section-body/" + owner.key,
                 ("section_body",),

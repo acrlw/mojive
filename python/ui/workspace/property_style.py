@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
+from mojive.design.groups import scoped_parts
 from mojive.design.native.geometry import Rect
 from mojive.ui.controls import clearable_combo
 from mojive.ui.workspace.choice_popup import ChoicePopup
@@ -452,7 +453,7 @@ class NativePropertyPresentation:
                 field_part=control_part,
             )
         key = self.prefix + "-label-" + label
-        if ui.design is not None:
+        if ui.design is not None and ui.design.runtime.observes(scoped_parts("form_row")):
             owner = self.groups.tables[-1].key if self.groups.tables else self.prefix
             ui.design.record(
                 owner + "/row/" + label,
@@ -817,7 +818,8 @@ class NativePropertyPresentation:
         line_height = style.line_height() * scale
         text_height = line_height * len(self._readonly_lines)
         top = content.y + max(0, (content.height - text_height) / 2)
-        lines = []
+        observe = ui.design is not None and ui.design.runtime.observes(scoped_parts("form_label"))
+        lines = [] if observe else None
         ui.draw.push_clip_rect((content.x, content.y), (content.right, content.bottom), True)
         try:
             for index, text in enumerate(self._readonly_lines):
@@ -831,17 +833,18 @@ class NativePropertyPresentation:
                     translate=False,
                     font_resolved=True,
                 )
-                lines.append(
-                    (
-                        content.x,
-                        y,
-                        ui.measure(text, font_size, translate=False, font_resolved=True),
-                        line_height,
+                if observe:
+                    lines.append(
+                        (
+                            content.x,
+                            y,
+                            ui.measure(text, font_size, translate=False, font_resolved=True),
+                            line_height,
+                        )
                     )
-                )
         finally:
             ui.draw.pop_clip_rect()
-        if ui.design is not None:
+        if observe:
             ui.design.record(
                 self.prefix + "-value-" + label,
                 ("form_label",),

@@ -59,10 +59,9 @@ class WorkspaceApp(ViewerApp):
         self.scrollbar_visibility = NativeScrollbarVisibility(
             idle_seconds=self.preferences.get("scrollbar_hide_delay", DEFAULT_HIDE_DELAY)
         )
-        if self.design is not None:
-            from mojive.design.native.presentation import DesignPresentation
+        from mojive.design.native.presentation import DesignPresentation
 
-            self.workspace.ui.design = DesignPresentation(self.workspace.ui, self.design)
+        self.workspace.ui.design = DesignPresentation(self.workspace.ui, self.design)
         self._numeric_cancel_frame = -1
         self._selection_status_revision = -1
         self._selection_notice_sequence = None
@@ -174,20 +173,15 @@ class WorkspaceApp(ViewerApp):
         imgui.set_current_context(self.window._imgui_context)
         # DockSpace settings must be restored before ImGui starts the next frame.
         if self.workspace.restore_next:
-            imgui.set_current_context(self.window._imgui_context)
             imgui.load_ini_settings_from_memory(self.workspace.saved)
             self.workspace.restore_next = False
-        if self.design is None:
+        with self.design.scope(self.workspace):
+            self.workspace.ui.design.begin_frame()
             with floating_dock_hosts(self.workspace), self.scrollbar_visibility.scope():
                 super().frame()
-        else:
-            with self.design.scope(self.workspace):
-                self.workspace.ui.design.begin_frame()
-                with floating_dock_hosts(self.workspace), self.scrollbar_visibility.scope():
-                    super().frame()
 
     def _present_frame(self, elapsed):
-        if self.design is not None and self.design.workbench is not None:
+        if self.design.workbench is not None:
             self.design.workbench.draw_overlay(self.workspace)
         super()._present_frame(elapsed)
 

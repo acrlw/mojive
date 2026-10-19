@@ -561,7 +561,13 @@ Profiling uses isolated preferences and disables layout persistence in both mode
 and joint entities, clicks the production Inspector tabs, and toggles every available section
 twice per visit. It measures the initial, expanded, post-interaction, collapsed and deselected
 states, recording font/style counts and captures to distinguish persistent growth from the
-cost of an expanded panel. Add `--visible --vsync` to match presented window cadence.
+cost of an expanded panel. The reference first visits the same entity paths so automatic scene
+ancestor expansion is already present on both sides. Expanded and deselected recovery each
+record three consecutive `--frames` windows, with no input, capture or profiling between them.
+`recovery` emits CPU ratios only when selection, hierarchy, scroll, section and field geometry
+match; it also reports draw-count equality, font/style/window growth and bounded cache counts.
+Ratios describe this run, not a portable FPS threshold. Add `--visible --vsync` to match
+presented window cadence.
 Run each comparison in a fresh process at the same `MOJIVE_UI_SCALE`; never time it beside
 another viewer or test suite.
 

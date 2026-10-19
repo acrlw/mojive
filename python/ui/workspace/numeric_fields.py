@@ -474,7 +474,7 @@ class _NumericFields:
     def record_numeric_group(self, key, x, y, width, layout, *, parts="vector_group"):
         """Expose the same complete group bounds used by rows and color popups."""
         self.hits[key] = (x, y, width, layout.height)
-        if self.design is not None:
+        if self.design is not None and self.design.runtime.observes(scoped_parts(parts)):
             self.design.record(
                 key,
                 (parts,),
@@ -506,7 +506,9 @@ class _NumericFields:
             height=height,
         )
         self.record_numeric_group(key + "/controls", x + left, y + top, width, relative)
-        if self.design is not None:
+        if self.design is not None and self.design.runtime.observes(
+            scoped_parts(("form_row", "vector_row"))
+        ):
             row_margin = layout.row_margin
             right = (
                 max(
