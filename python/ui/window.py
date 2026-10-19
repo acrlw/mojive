@@ -908,13 +908,14 @@ class GlfwInputAdapter:
         if 0 < char <= 0x10FFFF and not 0xD800 <= char <= 0xDFFF:
             self.io.add_input_character(char)
 
-    def mouse_callback(self, *args: Any, **kwargs: Any) -> None:
-        mouse_pos = glfw.get_cursor_pos(self.window)
-        self.io.add_mouse_pos_event(mouse_pos[0], mouse_pos[1])
+    def mouse_callback(self, window: Any, x: float, y: float) -> None:
+        # Preserve queued motion/button order; querying the live cursor here
+        # can replace an earlier event with a position reached after its click.
+        self.io.add_mouse_pos_event(x, y)
 
     def cursor_enter_callback(self, window: Any, entered: bool) -> None:
         if entered:
-            self.mouse_callback()
+            self.mouse_callback(window, *glfw.get_cursor_pos(self.window))
         else:
             self.io.add_mouse_pos_event(-3.4028235e38, -3.4028235e38)
 

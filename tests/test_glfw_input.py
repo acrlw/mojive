@@ -84,3 +84,45 @@ def test_focus_loss_clears_held_input_in_the_owner(adapter):
     input.focus_callback(None, False)
     frame()
     assert not getattr(input.io, control) and not input.io.mouse_down[0]
+
+
+def test_queued_pointer_click_uses_event_position_in_the_owning_context(adapter, monkeypatch):
+    input, owner = adapter
+    # The current OS cursor may already have moved beyond the queued press.
+    monkeypatch.setattr(wm.glfw, "get_cursor_pos", lambda _window: (373, -64))
+    foreign = imgui.create_context()
+    try:
+        input.mouse_callback(None, 176, 420)
+        input.mouse_button_callback(None, 0, wm.glfw.PRESS, 0)
+        input.mouse_callback(None, 220, 460)
+        input.mouse_button_callback(None, 0, wm.glfw.RELEASE, 0)
+        assert not foreign.input_events_queue
+        imgui.set_current_context(owner)
+        frame()
+        assert input.io.mouse_clicked[0]
+        assert tuple(input.io.mouse_pos) == (176, 420)
+        for _ in range(3):
+            frame()
+        assert tuple(input.io.mouse_pos) == (220, 460)
+        assert not input.io.mouse_down[0]
+    finally:
+        imgui.destroy_context(foreign)
+        imgui.set_current_context(owner)
+
+
+def test_cursor_reentry_queries_position_when_no_motion_event_is_available(adapter, monkeypatch):
+    input, _owner = adapter
+    queries = []
+
+    def position(window):
+        queries.append(window)
+        return (96, 118)
+
+    monkeypatch.setattr(wm.glfw, "get_cursor_pos", position)
+    input.cursor_enter_callback(None, True)
+    frame()
+    assert tuple(input.io.mouse_pos) == (96, 118)
+    input.cursor_enter_callback(None, False)
+    frame()
+    assert input.io.mouse_pos.x < -1e30 and input.io.mouse_pos.y < -1e30
+    assert queries == [input.window]
