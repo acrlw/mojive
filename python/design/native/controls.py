@@ -1000,12 +1000,35 @@ class NativePrimitives:
                 prepare_menu_popup,
             )
 
+            identifier = key if key.startswith("##") else "##" + key
+            item_id = g.get_id(identifier)
+            context = g.get_current_context()
+            # Match BeginCombo's popup identity. Measure before Begin while its
+            # draw list can still accept font changes, and only for an open or
+            # immediately reachable mouse/keyboard target.
+            popup_id = g.internal.im_hash_str("##ComboPopup", 0, item_id)
+            needs_width = not disabled and (
+                g.internal.is_popup_open(popup_id, 0)
+                or context.nav_activate_id == item_id
+                or (
+                    (g.is_mouse_clicked(0) or g.is_mouse_released(0))
+                    and g.is_mouse_hovering_rect(
+                        (box.frame.x, box.frame.y), (box.frame.right, box.frame.bottom)
+                    )
+                )
+            )
+            measured_width = (
+                (
+                    (popup_width() if callable(popup_width) else popup_width)
+                    or menu_choice_width(ui, (preview,), 0)
+                )
+                if needs_width
+                else 0
+            )
             prepare_menu_popup(
                 ui,
                 minimum_width=box.frame.width,
-                auto_minimum_width=max(
-                    box.frame.width, popup_width or menu_choice_width(ui, (preview,), 0)
-                ),
+                auto_minimum_width=max(box.frame.width, measured_width),
                 part="select_popup",
             )
             with menu_popup_style(ui, part="select_popup"), self.native_field(style, box):
@@ -1017,9 +1040,7 @@ class NativePrimitives:
                 # The popup's authored content box owns that inset independently.
                 g.push_style_var(g.StyleVar_.frame_padding, (0, g.get_style().frame_padding.y))
                 try:
-                    opened = g.begin_combo(
-                        key if key.startswith("##") else "##" + key, str(preview), flags
-                    )
+                    opened = g.begin_combo(identifier, str(preview), flags)
                 finally:
                     g.pop_style_var()
                 paint = ItemPaint.capture(g, opened=opened)
@@ -1039,9 +1060,13 @@ class NativePrimitives:
 
         choices = tuple(choices)
         selected = choices.index(value) if value in choices else -1
-        popup_width = menu_choice_width(self.ui, choices, selected)
         opened, box = self.begin_combo(
-            key, rect, value, enabled=enabled, parts=parts, popup_width=popup_width
+            key,
+            rect,
+            value,
+            enabled=enabled,
+            parts=parts,
+            popup_width=lambda: menu_choice_width(self.ui, choices, selected),
         )
         g, changed, out = self.imgui, False, value
         if opened:
@@ -1444,8 +1469,16 @@ class NativePrimitives:
             unit_size = style.get("unitSize", font_size)
             number_format = kwargs.get("format", "%.3f")
             suffix = self.ui.translate(unit)
-            gap = style.get("columnGap", 0 if unit in ("°", "rad") else 4) * s if unit else 0.0
             g.push_font(self.ui.resolve_font(numeric, mono=True), unit_size * s)
+            gap = (
+                (
+                    style.get("columnGap", 0) * s
+                    if style.explicit("columnGap") or style.explicit("gap")
+                    else g.calc_text_size(" ").x
+                )
+                if unit
+                else 0.0
+            )
             suffix_width = g.calc_text_size(suffix).x if unit else 0.0
             g.pop_font()
             value_width = max(0, content.width - gap - suffix_width)

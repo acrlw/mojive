@@ -21,9 +21,13 @@ def draw(panel, ctx: PanelContext) -> None:
     panel._group_heading(t("Shortcuts"))
     if not panel._begin_properties("settings_interaction_shortcuts"):
         return
-    for action in InputAction:
-        if action is InputAction.PERTURB and not ctx.session.adapter.caps.perturb:
-            continue
+    actions = tuple(
+        action
+        for action in InputAction
+        if action is not InputAction.PERTURB or ctx.session.adapter.caps.perturb
+    )
+    for row in panel._property_rows(tuple(t(input_action_name(action)) for action in actions)):
+        action = actions[row]
         panel._property(t(input_action_name(action)), control_part="select")
         current = ctx.input_bindings.key_id(action)
         index = identifiers.index(current)
@@ -73,9 +77,13 @@ def mouse_shortcuts(panel, ctx: PanelContext) -> None:
                 panel._pointer_error = str(error)
         panel._end_properties()
     if panel._begin_properties("settings_mouse_gestures"):
-        for action in PointerAction:
-            if action.value.startswith("perturb.") and not ctx.session.adapter.caps.perturb:
-                continue
+        actions = tuple(
+            action
+            for action in PointerAction
+            if not action.value.startswith("perturb.") or ctx.session.adapter.caps.perturb
+        )
+        for row in panel._property_rows(tuple(t(POINTER_ACTION_NAMES[a]) for a in actions)):
+            action = actions[row]
             panel._property(t(POINTER_ACTION_NAMES[action]), control_part="input_text")
             submitted, value = panel._input_text(
                 f"##mouse_{action.value}",

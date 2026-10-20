@@ -1316,3 +1316,12 @@ ui-design:
 
 ui-design-check: ui-design-native-check
 	node examples/ui_design/web/model.test.mjs
+
+.PHONY: ui-floating ui-inspector-tabs
+## Capture Inspector tabs and verify distinct geometry, physics and material controls.
+ui-inspector-tabs:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py -k inspector_tabs_keep
+
+## Capture floating forms and verify selection, focus, closing, dragging and edits.
+ui-floating:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_floating_surfaces.py $(ARGS)

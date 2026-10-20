@@ -64,6 +64,7 @@ def _run(args):
         "platform": platform.platform(),
         "asset": args.asset,
         "workspace": args.workspace,
+        "settings_category": args.settings,
         "frames": args.frames,
         "scope": (
             "Uninstrumented wall/CPU samples, inclusive stage timers and cProfile run separately. "
@@ -83,6 +84,9 @@ def _run(args):
         height=args.height,
         config=ViewerConfig(layout=LayoutConfig(persistence=False)),
     ) as viewer:
+        if args.settings:
+            viewer.panels.get("Settings").show_category(args.settings)
+            viewer.panels.open_panel("Settings")
         if args.joint:
             joint = next(
                 (
@@ -219,6 +223,11 @@ def main(argv: list[str] | None = None) -> int:
         "--workspace", action="store_true", help="Use the production editor workspace"
     )
     parser.add_argument(
+        "--settings",
+        choices=("General", "Camera", "Interaction", "Rendering", "Recording", "MuJoCo Visuals"),
+        help="Open a settings category in the production workspace",
+    )
+    parser.add_argument(
         "--cases",
         nargs="+",
         choices=("idle", "orbit", "visibility", "color"),
@@ -232,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("-o", "--output", type=Path, default=Path("output/editor-profile"))
     args = parser.parse_args(argv)
+    if args.settings:
+        args.workspace = True
     if args.frames < 12 or min(args.width, args.height) < 320:
         parser.error("frames must be at least 12 and window dimensions at least 320")
     args.output.mkdir(parents=True, exist_ok=True)

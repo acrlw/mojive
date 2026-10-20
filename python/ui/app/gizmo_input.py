@@ -10,20 +10,30 @@ from imgui_bundle import imgui
 from mojive.adapters.base import NodeType
 from mojive.interaction.gizmo import axis_active_color, axis_hover_color
 from mojive.ui import gestures as gs
-from mojive.ui.compound_fields import borderless_numeric_input, draw_joined_field_frame
+from mojive.ui.compound_fields import borderless_numeric_input
 from mojive.ui.gizmo import JointLimitHit, PreciseGizmoInput
 from mojive.ui.gizmo.input import GizmoInput, update_gizmo_input
 from mojive.ui.panels import (
     padded_selectable,
-    segmented_control,
 )
 from mojive.ui.pointer_bindings import PointerAction
+from mojive.ui.workspace.component_layout import control_size
+from mojive.ui.workspace.floating import (
+    floating_button,
+    floating_heading_height,
+    floating_number,
+    floating_segment,
+    floating_style,
+    floating_window,
+)
+from mojive.ui.workspace.menu_item import Item
+from mojive.ui.workspace.menu_rows import advance_menu_row, menu_row_size, paint_menu_row
+from mojive.ui.workspace.property_style import advance
 
 from .support import (
     PRECISE_GIZMO_WIDTH_PT,
     Keys,
     _clipped_foreground_overlay_draw,
-    _middle_elide_text,
     _toggle_angle_input,
 )
 
@@ -84,6 +94,20 @@ class _GizmoInput:
             mouse = imgui.get_io().mouse_pos
             window_width = PRECISE_GIZMO_WIDTH_PT * scale
             estimated_height = 118.0 * scale
+            if self._floating_ui is not None:
+                with floating_style(self._floating_ui):
+                    style = imgui.get_style()
+                    estimated_height = 2 * style.window_padding.y + floating_heading_height(
+                        self._floating_ui
+                    )
+                    if edit.absolute_value is not None:
+                        estimated_height += (
+                            imgui.get_text_line_height()
+                            + 3 * style.item_spacing.y
+                            + self._floating_ui.segment_height()
+                        )
+                    with floating_number(self._floating_ui):
+                        estimated_height += imgui.get_frame_height()
             min_x = x + 8.0 * scale
             min_y = y + 8.0 * scale
             max_x = max(min_x, x + width - window_width - 8.0 * scale)
@@ -105,193 +129,149 @@ class _GizmoInput:
                 float(np.finfo(np.float32).max),
             ),
         )
-        visible = imgui.begin_popup(
-            popup_name,
-            imgui.WindowFlags_.always_auto_resize.value
-            | imgui.WindowFlags_.no_decoration.value
-            | imgui.WindowFlags_.no_docking.value
-            | imgui.WindowFlags_.no_move.value
-            | imgui.WindowFlags_.no_scrollbar.value
-            | imgui.WindowFlags_.no_scroll_with_mouse.value
-            | imgui.WindowFlags_.no_saved_settings.value,
-        )
-        if not visible:
-            if not just_opened:
-                self._consume_scene_pointer_until_release = bool(
-                    self._consume_scene_pointer_until_release
-                    or imgui.is_mouse_down(imgui.MouseButton_.left)
-                    or imgui.is_mouse_down(imgui.MouseButton_.right)
-                    or imgui.is_mouse_down(imgui.MouseButton_.middle)
-                    or imgui.is_mouse_clicked(imgui.MouseButton_.left)
-                    or imgui.is_mouse_clicked(imgui.MouseButton_.right)
-                    or imgui.is_mouse_clicked(imgui.MouseButton_.middle)
-                )
-                self.router.abort()
-                self.gizmo.cancel()
-                self._precise_gizmo_edit = None
-                self._precise_gizmo_error = ""
-            return
-        imgui.set_scroll_x(0.0)
-        appearing = imgui.is_window_appearing()
-
-        angular = edit.unit == "°"
-        unit_shortcut = angular and imgui.is_key_pressed(imgui.Key.u, False)
-        if unit_shortcut:
-            self._toggle_precise_gizmo_angle_unit()
-            # Rebuild InputScalar's private edit buffer from the converted
-            # value. Its active text state otherwise keeps the pre-conversion
-            # string even though the numeric model has changed.
-            imgui.internal.clear_active_id()
-        unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
         title = f"{self.localizer.text(edit.action)} {self.localizer.text(edit.label)}"
-        # Some popup placements preserve a negative horizontal cursor offset
-        # from the activating item. Clamp the first line to the popup's own
-        # content padding so the beginning of "Rotate" cannot be clipped.
-        imgui.set_cursor_pos_x(
-            max(
-                float(imgui.get_cursor_pos_x()),
-                float(imgui.get_style().window_padding.x),
-            )
-        )
-        title_width = max(1.0, float(imgui.get_content_region_avail().x))
-        shown_title = _middle_elide_text(
-            title,
-            title_width,
-            lambda value: float(imgui.calc_text_size(value).x),
-        )
-        imgui.text(shown_title)
-        if shown_title != title:
-            ui = getattr(getattr(self, "workspace", None), "ui", None)
-            if ui is None:
-                imgui.set_item_tooltip(title)
-            elif imgui.is_item_hovered(imgui.HoveredFlags_.for_tooltip):
-                ui.tooltip(title, translate=False)
-        imgui.separator()
-        modes = (
-            (
-                self.localizer.text("Relative"),
-                self.localizer.text("Absolute"),
-            )
-            if edit.absolute_value is not None
-            else (self.localizer.text("Relative"),)
-        )
-        mode_index = 1 if self._precise_gizmo_absolute and len(modes) > 1 else 0
-        if len(modes) > 1:
-            imgui.text_disabled(self.localizer.text("Mode"))
-            next_mode = segmented_control(
-                "precise-gizmo-mode",
-                modes,
-                mode_index,
-                theme=self.theme,
-            )
-        else:
-            next_mode = 0
-        if next_mode != mode_index:
-            mode_index = next_mode
-            self._set_precise_gizmo_absolute(edit, bool(mode_index))
-        imgui.spacing()
-        unit_width = 82.0 * scale if angular else float(imgui.calc_text_size(unit).x)
-        if not angular:
-            unit_width += 2.0 * float(imgui.get_style().frame_padding.x)
-        input_width = max(
-            72.0 * scale,
-            float(imgui.get_content_region_avail().x)
-            - (float(imgui.get_style().item_spacing.x) if angular else 0.0)
-            - unit_width,
-        )
-        if appearing or unit_shortcut:
-            imgui.set_keyboard_focus_here()
-        draw_list = imgui.get_window_draw_list()
-        splitter = imgui.ImDrawListSplitter()
-        if not angular:
-            splitter.split(draw_list, 2)
-            splitter.set_current_channel(draw_list, 1)
-            for slot in (
-                imgui.Col_.frame_bg,
-                imgui.Col_.frame_bg_hovered,
-                imgui.Col_.frame_bg_active,
-            ):
-                imgui.push_style_color(slot, (0, 0, 0, 0))
-        imgui.set_next_item_width(input_width)
-        with borderless_numeric_input():
-            submitted, self._precise_gizmo_value = imgui.input_double(
-                "##precise_gizmo_value",
-                self._precise_gizmo_value,
-                0.0,
-                0.0,
-                "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f",
-                imgui.InputTextFlags_.enter_returns_true.value
-                | imgui.InputTextFlags_.auto_select_all.value
-                | imgui.InputTextFlags_.chars_scientific.value,
-            )
-        field_lo, field_hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        if not angular:
-            imgui.pop_style_color(3)
-        imgui.same_line(0, imgui.get_style().item_spacing.x if angular else 0)
-        if angular:
-            next_unit = segmented_control(
-                "precise-gizmo-angle-unit",
-                ("deg", "rad"),
-                1 if self._precise_gizmo_angle_unit == "radians" else 0,
-                width=unit_width,
-                theme=self.theme,
-            )
-            if next_unit != (1 if self._precise_gizmo_angle_unit == "radians" else 0):
+        with floating_window(
+            self._floating_ui,
+            popup_name,
+            popup=True,
+            heading=title,
+            flags=imgui.WindowFlags_.always_auto_resize
+            | imgui.WindowFlags_.no_decoration
+            | imgui.WindowFlags_.no_docking
+            | imgui.WindowFlags_.no_move
+            | imgui.WindowFlags_.no_scrollbar
+            | imgui.WindowFlags_.no_scroll_with_mouse
+            | imgui.WindowFlags_.no_saved_settings,
+        ) as visible:
+            if not visible:
+                if not just_opened:
+                    self._consume_scene_pointer_until_release = bool(
+                        self._consume_scene_pointer_until_release
+                        or imgui.is_mouse_down(imgui.MouseButton_.left)
+                        or imgui.is_mouse_down(imgui.MouseButton_.right)
+                        or imgui.is_mouse_down(imgui.MouseButton_.middle)
+                        or imgui.is_mouse_clicked(imgui.MouseButton_.left)
+                        or imgui.is_mouse_clicked(imgui.MouseButton_.right)
+                        or imgui.is_mouse_clicked(imgui.MouseButton_.middle)
+                    )
+                    self.router.abort()
+                    self.gizmo.cancel()
+                    self._precise_gizmo_edit = None
+                    self._precise_gizmo_error = ""
+                return
+            imgui.set_scroll_x(0.0)
+            appearing = imgui.is_window_appearing()
+
+            angular = edit.unit == "°"
+            unit_shortcut = angular and imgui.is_key_pressed(imgui.Key.u, False)
+            if unit_shortcut:
                 self._toggle_precise_gizmo_angle_unit()
-        else:
-            badge_lo = imgui.get_cursor_screen_pos()
-            imgui.dummy((unit_width, imgui.get_frame_height()))
-            badge_hi = imgui.get_item_rect_max()
-            size = imgui.calc_text_size(unit)
-            draw_list.add_text(
+                # Rebuild InputScalar's private edit buffer from the converted
+                # value. Its active text state otherwise keeps the pre-conversion
+                # string even though the numeric model has changed.
+                imgui.internal.clear_active_id()
+            unit = "rad" if angular and self._precise_gizmo_angle_unit == "radians" else edit.unit
+            modes = (
                 (
-                    badge_lo.x + (unit_width - size.x) * 0.5,
-                    badge_lo.y + (imgui.get_frame_height() - size.y) * 0.5,
-                ),
-                imgui.color_convert_float4_to_u32(imgui.ImVec4(*self.theme.text_disabled)),
-                unit,
+                    self.localizer.text("Relative"),
+                    self.localizer.text("Absolute"),
+                )
+                if edit.absolute_value is not None
+                else (self.localizer.text("Relative"),)
             )
-            splitter.set_current_channel(draw_list, 0)
-            draw_joined_field_frame(
-                draw_list,
-                badge_lo,
-                badge_hi,
-                field_lo,
-                field_hi,
-                badge_color=self.theme.bg_child,
-                field_color=self.theme.bg_frame,
-                rounding=imgui.get_style().frame_rounding,
-            )
-            splitter.merge(draw_list)
-        if self._precise_gizmo_error:
-            imgui.spacing()
-            imgui.text_wrapped(self._precise_gizmo_error)
-            if imgui.small_button(f"{self.localizer.text('Copy error')}##precise-gizmo"):
-                imgui.set_clipboard_text(self._precise_gizmo_error)
-        submit_requested = submitted or imgui.is_key_pressed(imgui.Key.enter, False)
-        cancel = imgui.is_key_pressed(imgui.Key.escape, False)
-        if submit_requested:
-            value = self._precise_gizmo_value
-            if angular and self._precise_gizmo_angle_unit == "radians":
-                value = float(np.degrees(value))
-            result = self.gizmo.apply_precise_value(
-                self.session,
-                self._camera_view(),
-                edit,
-                value,
-                absolute=self._precise_gizmo_absolute,
-            )
-            if result.ok:
+            mode_index = 1 if self._precise_gizmo_absolute and len(modes) > 1 else 0
+            if len(modes) > 1:
+                imgui.text_disabled(self.localizer.text("Mode"))
+                next_mode = floating_segment(
+                    self._floating_ui,
+                    "precise-gizmo-mode",
+                    modes,
+                    mode_index,
+                    theme=self.theme,
+                )
+            else:
+                next_mode = 0
+            if next_mode != mode_index:
+                mode_index = next_mode
+                self._set_precise_gizmo_absolute(edit, bool(mode_index))
+            if len(modes) > 1:
+                imgui.spacing()
+            unit_width = 82.0 * scale if angular else 0.0
+            input_width = float(imgui.get_content_region_avail().x)
+            if angular:
+                input_width -= float(imgui.get_style().item_spacing.x) + unit_width
+            if appearing or unit_shortcut:
+                imgui.set_keyboard_focus_here()
+            imgui.set_next_item_width(max(72.0 * scale, input_width))
+            number_format = "%.6f" if edit.unit == "m" or unit == "rad" else "%.3f"
+            if unit and not angular:
+                number_format += " " + unit
+            with floating_number(self._floating_ui), borderless_numeric_input():
+                submitted, self._precise_gizmo_value = imgui.input_double(
+                    "##precise_gizmo_value",
+                    self._precise_gizmo_value,
+                    0.0,
+                    0.0,
+                    number_format,
+                    imgui.InputTextFlags_.enter_returns_true.value
+                    | imgui.InputTextFlags_.auto_select_all.value
+                    | imgui.InputTextFlags_.chars_scientific.value,
+                )
+            if self._floating_ui is not None:
+                lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+                self._floating_ui.hits["precise-gizmo-value"] = (
+                    lo.x,
+                    lo.y,
+                    hi.x - lo.x,
+                    hi.y - lo.y,
+                )
+            if angular:
+                imgui.same_line()
+                next_unit = floating_segment(
+                    self._floating_ui,
+                    "precise-gizmo-angle-unit",
+                    ("deg", "rad"),
+                    1 if self._precise_gizmo_angle_unit == "radians" else 0,
+                    width=unit_width,
+                    theme=self.theme,
+                )
+                if next_unit != (1 if self._precise_gizmo_angle_unit == "radians" else 0):
+                    self._toggle_precise_gizmo_angle_unit()
+                    imgui.internal.clear_active_id()
+            if self._precise_gizmo_error:
+                imgui.spacing()
+                imgui.text_wrapped(self._precise_gizmo_error)
+                label = f"{self.localizer.text('Copy error')}##precise-gizmo"
+                copy_error = (
+                    floating_button(self._floating_ui, label)
+                    if self._floating_ui is not None
+                    else imgui.small_button(label)
+                )
+                if copy_error:
+                    imgui.set_clipboard_text(self._precise_gizmo_error)
+            submit_requested = submitted or imgui.is_key_pressed(imgui.Key.enter, False)
+            cancel = imgui.is_key_pressed(imgui.Key.escape, False)
+            if submit_requested:
+                value = self._precise_gizmo_value
+                if angular and self._precise_gizmo_angle_unit == "radians":
+                    value = float(np.degrees(value))
+                result = self.gizmo.apply_precise_value(
+                    self.session,
+                    self._camera_view(),
+                    edit,
+                    value,
+                    absolute=self._precise_gizmo_absolute,
+                )
+                if result.ok:
+                    imgui.close_current_popup()
+                    self._precise_gizmo_edit = None
+                    self._precise_gizmo_error = ""
+                else:
+                    self._precise_gizmo_error = result.message
+            elif cancel:
                 imgui.close_current_popup()
                 self._precise_gizmo_edit = None
                 self._precise_gizmo_error = ""
-            else:
-                self._precise_gizmo_error = result.message
-        elif cancel:
-            imgui.close_current_popup()
-            self._precise_gizmo_edit = None
-            self._precise_gizmo_error = ""
-        imgui.end_popup()
 
     def _finish_consumed_scene_pointer(self) -> None:
         """Release a consumed pointer gesture after one clean release frame."""
@@ -400,28 +380,61 @@ class _GizmoInput:
     def _draw_joint_gizmo_picker(self) -> None:
         """Draw a movable chooser near the click that selected a multi-joint link."""
 
+        node = self.session.selected_node
+        selection = (self.session.structure_generation, node.node_id if node else -1)
+        if selection != self._joint_picker_selection:
+            self._joint_picker_selection = selection
+            self._joint_picker_dismissed = False
+        if self._joint_picker_dismissed:
+            return
         if not self.session.paused:
             return
         if not self.gizmo.enabled:
             return
         joints = self.gizmo.joint_choices(self.session)
-        node = self.session.selected_node
         if not joints or node is None:
             self._joint_picker_node_id = -1
             return
         x, y, width, height = self._viewport_rect
         scale = self.window.style_scale
-        style = imgui.get_style()
-        labels = [f"{joint.name or f'joint {joint.joint_id}'}  ({joint.type})" for joint in joints]
-        content_width = max(imgui.calc_text_size(label).x for label in labels)
-        picker_width = (
-            max(
-                imgui.calc_text_size(node.name).x,
-                content_width + 2.0 * style.frame_padding.x,
+        ui = self._floating_ui
+        with floating_style(ui):
+            style = imgui.get_style()
+            labels = [
+                f"{joint.name or f'joint {joint.joint_id}'}  ({joint.type})" for joint in joints
+            ]
+            content_width = max(imgui.calc_text_size(label).x for label in labels)
+            picker_width = (
+                max(
+                    imgui.calc_text_size(node.name).x
+                    + (imgui.get_frame_height() if ui is None else 0),
+                    content_width + 2.0 * style.frame_padding.x,
+                )
+                + 2.0 * style.window_padding.x
             )
-            + 2.0 * style.window_padding.x
-        )
-        picker_height = imgui.get_frame_height() * (len(joints) + 1) + 2.0 * style.window_padding.y
+            picker_height = (
+                imgui.get_frame_height() * (len(joints) + 1) + 2.0 * style.window_padding.y
+            )
+            if ui is not None:
+                row_sizes = [
+                    menu_row_size(ui, Item(label), part="select_option") for label in labels
+                ]
+                picker_width = max(
+                    picker_width,
+                    max(size[0] for size in row_sizes) + 2 * style.window_padding.x,
+                    imgui.calc_text_size(node.name).x
+                    + control_size(ui, "floating-close", 24, 24, icon="close")[0]
+                    + 6 * scale
+                    + 2 * style.window_padding.x,
+                )
+                picker_height = (
+                    sum(size[1] for size in row_sizes)
+                    + (len(joints) - 1) * round(ui.metric("select_popup", "rowGap", 6) * scale)
+                    + floating_heading_height(ui, closable=True)
+                    + 2 * style.window_padding.y
+                )
+        picker_width = min(picker_width, max(1, width - 16 * scale))
+        picker_height = min(picker_height, max(1, height - 16 * scale))
         if node.node_id != self._joint_picker_node_id:
             mouse = imgui.get_io().mouse_pos
             inside = x <= mouse.x <= x + width and y <= mouse.y <= y + height
@@ -440,47 +453,69 @@ class _GizmoInput:
             )
             self._joint_picker_node_id = node.node_id
         imgui.set_next_window_size(imgui.ImVec2(picker_width, 0.0))
-        imgui.set_next_window_bg_alpha(0.92)
         flags = (
             imgui.WindowFlags_.always_auto_resize.value
             | imgui.WindowFlags_.no_collapse.value
             | imgui.WindowFlags_.no_docking.value
             | imgui.WindowFlags_.no_saved_settings.value
         )
-        visible, _ = imgui.begin(
-            f"{node.name}###viewport_joint_gizmo",
-            None,
-            flags,
+        imgui.set_next_window_size_constraints(
+            (picker_width, 0), (picker_width, max(1, height - 16 * scale))
         )
-        if visible:
-            selected = self.gizmo.selected_joint_id(node.body_index)
-            for joint, label in zip(joints, labels, strict=True):
-                supported = joint.type in ("hinge", "slide", "ball")
-                imgui.begin_disabled(not supported)
-                clicked, _selected = padded_selectable(
-                    f"{label}##viewport-joint-{joint.joint_id}",
-                    selected == joint.joint_id,
-                )
-                if clicked:
-                    self.gizmo.select_joint(node.body_index, joint.joint_id)
-                if (
-                    supported
-                    and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
-                    and self.input_bindings.pointer_match(
-                        PointerAction.PANEL_FOCUS, self.input_bindings.pointer_frame(), press=True
-                    )
-                ):
-                    self.gizmo.select_joint(node.body_index, joint.joint_id)
-                    self._request_node_joint_focus(
-                        next(
-                            (
-                                candidate
-                                for candidate in self.session.nodes
-                                if candidate.type is NodeType.JOINT
-                                and candidate.joint_index == joint.joint_id
-                            ),
-                            node,
+        with floating_window(
+            ui,
+            f"{node.name}###viewport_joint_gizmo",
+            flags=flags,
+            on_close=self._dismiss_joint_picker,
+        ) as visible:
+            if visible:
+                selected = self.gizmo.selected_joint_id(node.body_index)
+                for joint, label in zip(joints, labels, strict=True):
+                    supported = joint.type in ("hinge", "slide", "ball")
+                    imgui.begin_disabled(not supported)
+                    if ui is None:
+                        clicked, _selected = padded_selectable(
+                            f"{label}##viewport-joint-{joint.joint_id}",
+                            selected == joint.joint_id,
                         )
-                    )
-                imgui.end_disabled()
-        imgui.end()
+                    else:
+                        row = paint_menu_row(
+                            ui,
+                            Item(label, checked=selected == joint.joint_id, enabled=supported),
+                            f"viewport-joint-{joint.joint_id}",
+                            part="select_option",
+                        )
+                        clicked = row.activated
+                    if clicked:
+                        self.gizmo.select_joint(node.body_index, joint.joint_id)
+                    if (
+                        supported
+                        and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled.value)
+                        and self.input_bindings.pointer_match(
+                            PointerAction.PANEL_FOCUS,
+                            self.input_bindings.pointer_frame(),
+                            press=True,
+                        )
+                    ):
+                        self.gizmo.select_joint(node.body_index, joint.joint_id)
+                        self._request_node_joint_focus(
+                            next(
+                                (
+                                    candidate
+                                    for candidate in self.session.nodes
+                                    if candidate.type is NodeType.JOINT
+                                    and candidate.joint_index == joint.joint_id
+                                ),
+                                node,
+                            )
+                        )
+                        self._dismiss_joint_picker()
+                    if ui is not None:
+                        advance_menu_row(ui, row, part="select_popup")
+                    imgui.end_disabled()
+                if ui is not None:
+                    advance(ui, row.box.outer.x, row.box.outer.bottom)
+
+    def _dismiss_joint_picker(self) -> None:
+        """Keep the selected joint active while removing the chooser from the viewport."""
+        self._joint_picker_dismissed = True

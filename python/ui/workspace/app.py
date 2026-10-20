@@ -23,6 +23,10 @@ from mojive.ui.workspace.viewcube import WorkspaceViewCube
 
 
 class WorkspaceApp(ViewerApp):
+    @property
+    def _floating_ui(self):
+        return self.workspace.ui
+
     def release(self):
         try:
             workbench = getattr(self.design, "workbench", None)

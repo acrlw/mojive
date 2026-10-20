@@ -182,6 +182,7 @@ def viewport(workspace, preview_name=""):
             overlay,
             bottom_limit=tools_y if horizontal and not collapsed_controls else None,
         )
+    app._playback_widget_rect = None
     if not app.viewport_layers.viewport_ui:
         workspace.rects["overlays"] = overlay
         workspace.input_overlays = list(overlay)
@@ -522,6 +523,12 @@ def transport(workspace, x, y, w, shell):
         padding=pad,
     )
     box = inset_action_box(box, corners)
+    workspace.app._playback_widget_rect = (
+        box.frame.x,
+        box.frame.y,
+        box.frame.right,
+        box.frame.bottom,
+    )
     shell(
         box.frame.x,
         box.frame.y,

@@ -23,7 +23,7 @@ from mojive.ui.viewport_widgets import (
 )
 
 CLICK_SLOP_PT = 4.0
-PRECISE_GIZMO_WIDTH_PT = 204.0
+PRECISE_GIZMO_WIDTH_PT = 240.0
 JOINT_LIMIT_LABEL_DELAY_SECONDS = 0.5
 JOINT_LIMIT_HOVER_GRACE_SECONDS = 0.12
 PRECISE_GIZMO_HINT_DELAY_SECONDS = 0.5
@@ -223,6 +223,7 @@ def _equal_modal_buttons(
     theme: Theme,
     *,
     primary: int = -1,
+    ui=None,
 ) -> tuple[bool, ...]:
     """Draw a full-width modal action row with equal, predictable targets."""
 
@@ -233,11 +234,16 @@ def _equal_modal_buttons(
     for index, label in enumerate(labels):
         if index:
             imgui.same_line()
-        clicked.append(
-            _primary_button(label, width, theme)
-            if index == primary
-            else bool(imgui.button(label, imgui.ImVec2(width, 0.0)))
-        )
+        if ui is not None:
+            from mojive.ui.workspace.floating import floating_button
+
+            clicked.append(floating_button(ui, label, width=width, primary=index == primary))
+        else:
+            clicked.append(
+                _primary_button(label, width, theme)
+                if index == primary
+                else bool(imgui.button(label, imgui.ImVec2(width, 0.0)))
+            )
     return tuple(clicked)
 
 

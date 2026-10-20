@@ -14,6 +14,7 @@ from mojive.scene.workspace import (
     relocate_workspace_resource,
     repair_workspace_resources,
 )
+from mojive.ui.workspace.floating import floating_button, floating_window
 
 if TYPE_CHECKING:
     from mojive.commands import CommandResult
@@ -404,42 +405,49 @@ class _ResourceDialogs:
             self._open_resource_repair_popup = False
         if imgui.is_popup_open(popup_title):
             _prepare_modal(480.0, self.window.style_scale)
-        visible, _ = imgui.begin_popup_modal(
-            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
-        )
-        if not visible:
-            return
-        imgui.text_wrapped(
-            t(
-                "This Mojive scene references model files that are no longer available. Locate "
-                "files individually or search one directory to repair every unambiguous path."
+        with floating_window(
+            self._floating_ui,
+            popup_title,
+            modal=True,
+            flags=imgui.WindowFlags_.always_auto_resize,
+        ) as visible:
+            if not visible:
+                return
+            imgui.text_wrapped(
+                t(
+                    "This Mojive scene references model files that are no longer available. Locate "
+                    "files individually or search one directory to repair every unambiguous path."
+                )
             )
-        )
-        imgui.spacing()
-        locate = -1
-        for missing in self._missing_resources:
-            imgui.text(f"{missing.model_name}: {missing.reference}")
-            imgui.same_line()
-            if imgui.small_button(f"{t('Locate...')}##missing-resource-{missing.model_index}"):
-                locate = missing.model_index
-        if self._resource_repair_status:
             imgui.spacing()
-            imgui.text_wrapped(self._resource_repair_status)
-            if imgui.small_button(f"{t('Copy details')}##resource-repair"):
-                imgui.set_clipboard_text(self._resource_repair_status)
-        imgui.spacing()
-        search = imgui.button(t("Search Directory..."), imgui.ImVec2(160.0, 0.0))
-        imgui.same_line()
-        cancel = imgui.button(t("Cancel"), imgui.ImVec2(100.0, 0.0))
-        if locate >= 0:
-            self._open_resource_repair_dialog("locate", locate)
-            imgui.close_current_popup()
-        elif search:
-            self._open_resource_repair_dialog("search")
-            imgui.close_current_popup()
-        elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
-            self._resource_repair_path = None
-            self._missing_resources = ()
-            self._resource_repair_status = ""
-            imgui.close_current_popup()
-        imgui.end_popup()
+            locate = -1
+            for missing in self._missing_resources:
+                imgui.text_wrapped(f"{missing.model_name}: {missing.reference}")
+                if floating_button(
+                    self._floating_ui, f"{t('Locate...')}##missing-resource-{missing.model_index}"
+                ):
+                    locate = missing.model_index
+            if self._resource_repair_status:
+                imgui.spacing()
+                imgui.text_wrapped(self._resource_repair_status)
+                if floating_button(self._floating_ui, f"{t('Copy details')}##resource-repair"):
+                    imgui.set_clipboard_text(self._resource_repair_status)
+            imgui.spacing()
+            search = floating_button(
+                self._floating_ui, t("Search Directory..."), width=160.0 * self.window.style_scale
+            )
+            imgui.same_line()
+            cancel = floating_button(
+                self._floating_ui, t("Cancel"), width=100.0 * self.window.style_scale
+            )
+            if locate >= 0:
+                self._open_resource_repair_dialog("locate", locate)
+                imgui.close_current_popup()
+            elif search:
+                self._open_resource_repair_dialog("search")
+                imgui.close_current_popup()
+            elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
+                self._resource_repair_path = None
+                self._missing_resources = ()
+                self._resource_repair_status = ""
+                imgui.close_current_popup()

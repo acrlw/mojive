@@ -507,3 +507,66 @@ def test_integer_quality_entry_accumulates_small_drags_and_cancels(
     settings.frame()
     assert ctx.recording_config.crf == original
     assert app.preferences.get("recording") == saved
+
+
+@pytest.mark.parametrize("section_padding", (0, 12))
+def test_binding_row_clipping_preserves_scroll_geometry_and_active_text(
+    settings, monkeypatch, tmp_path, section_padding
+):
+    from mojive.design.native.presentation import DesignPresentation
+    from mojive.design.runtime import DesignRuntime
+    from mojive.design.store import SpecificationStore
+
+    runtime = DesignRuntime(SpecificationStore(tmp_path / "design.json"))
+    spec = deepcopy(runtime.spec)
+    spec["parts"]["section_body"] = {"paddingTop": section_padding, "paddingBottom": 8}
+    runtime.update_spec(spec)
+    settings.ui.design = DesignPresentation(settings.ui, runtime)
+    panel = settings.settings
+    clipped_rows = panel._property_rows
+    monkeypatch.setattr(panel, "_property_rows", lambda labels: range(len(labels)))
+    panel.show_category("Interaction")
+    settings.frame(4)
+    page = next(
+        w
+        for w in imgui.get_current_context().windows
+        if w.active and "Reference settings content" in w.name
+    )
+    baseline_extent = page.scroll_max.y
+    baseline = {key: rect for key, rect in settings.ui.hits.items() if key.startswith("##mouse_")}
+    assert len(baseline) > 20
+    key = tuple(baseline)[len(baseline) // 2]
+    monkeypatch.setattr(panel, "_property_rows", clipped_rows)
+    settings.frame(3)
+    assert page.scroll_max.y == pytest.approx(baseline_extent, abs=1)
+    assert len([key for key in settings.ui.hits if key.startswith("##mouse_")]) <= 3
+    _, y, _, _ = baseline[key]
+    imgui.internal.set_scroll_y(page, y - page.inner_clip_rect.min.y - 40 * settings.s)
+    monkeypatch.setattr(panel, "_property_rows", lambda labels: range(len(labels)))
+    settings.frame(3)
+    scrolled = {name: rect for name, rect in settings.ui.hits.items() if name in baseline}
+    monkeypatch.setattr(panel, "_property_rows", clipped_rows)
+    settings.frame(3)
+    assert key in settings.ui.hits
+    for name, rect in settings.ui.hits.items():
+        if name in scrolled:
+            assert rect == pytest.approx(scrolled[name], abs=1)
+    settings.click(key)
+    io = imgui.get_io()
+    io.add_input_characters_utf8("extra")
+    settings.frame()
+    action = next(a for a in panel._pointer_text if key == "##mouse_" + a.value)
+    draft = panel._pointer_text[action]
+    assert "extra" in draft
+    active_id = imgui.get_current_context().active_id
+    assert active_id
+    imgui.internal.set_scroll_y(page, 0)
+    settings.frame(3)
+    assert imgui.get_current_context().active_id == active_id
+    assert panel._pointer_text[action] == draft
+    assert key in settings.ui.hits
+    io.add_key_event(imgui.Key.escape, True)
+    settings.frame()
+    io.add_key_event(imgui.Key.escape, False)
+    settings.frame(2)
+    assert "extra" not in panel._pointer_text[action]

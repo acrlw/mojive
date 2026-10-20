@@ -295,7 +295,7 @@ def _value_entry(
     style = imgui.get_style()
     origin = imgui.get_cursor_screen_pos()
     height = imgui.get_frame_height()
-    suffix = ("" if unit in ("°", "rad") else " ") + unit if unit else ""
+    suffix = " " + unit if unit else ""
     display_format = fmt + suffix
     caption = display_format % value
     caption_width = imgui.calc_text_size(caption).x

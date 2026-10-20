@@ -1866,6 +1866,14 @@ def icon_gallery(window, path, *, portable_fonts=False):
         ("icon-geometry.png", "Icon geometry · domain symbols", focus),
         ("icon-rounding.png", "Icon geometry · round boundaries and follow modes", rounding),
         (
+            "icon-playback.png",
+            "Icon geometry · playback controls",
+            tuple(
+                "playback-" + name
+                for name in ("previous", "play", "pause", "next", "reset", "record", "more")
+            ),
+        ),
+        (
             "icon-views.png",
             "Icon geometry · camera directions",
             tuple(

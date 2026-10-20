@@ -38,7 +38,9 @@ def end_radii(path, center, samples=181):
     denominator = np.where(np.abs(denominator) < 1e-12, np.nan, denominator)
     distance = cross(offsets[None], edges[None]) / denominator
     along = cross(offsets[None], rays[:, None]) / denominator
-    return np.where((distance > 0) & (along >= 0) & (along <= 1), distance, np.inf).min(axis=1)
+    # A shared vertex can round just outside both incident segments.
+    hits = (distance > 0) & (along >= -1e-12) & (along <= 1 + 1e-12)
+    return np.where(hits, distance, np.inf).min(axis=1)
 
 
 def optical_end_padding(radius, smoothing):

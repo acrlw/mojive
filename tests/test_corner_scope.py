@@ -78,7 +78,7 @@ def test_popup_roots_measure_their_own_control_corners_independently(appearance)
             form = measure_form_popup(ui, ("Field",), field_width=100 * ui.s, row_height=28 * ui.s)
             color = color_popup_geometry(ui)
             choice = popup_radius(ui, "select_popup", (native_unit(8 * ui.s),) * 4)
-        assert form.inner_radius == pytest.approx(6 * ui.s)
+        assert form.inner_radius == pytest.approx(4 * ui.s)
         assert color.inner_radius == pytest.approx(6 * ui.s)
         assert choice == pytest.approx(6 * ui.s + native_unit(8 * ui.s))
 

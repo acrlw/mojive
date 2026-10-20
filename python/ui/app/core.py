@@ -72,6 +72,7 @@ from mojive.ui.viewport_widgets import (
     localized_viewport_labels,
 )
 from mojive.ui.window import Window, WindowConfig
+from mojive.ui.workspace.floating import floating_window
 
 if TYPE_CHECKING:
     from mojive.session import Session
@@ -112,6 +113,10 @@ class ViewerApp(
     _Status,
 ):
     viewport_layers = ViewportLayers()
+
+    @property
+    def _floating_ui(self):
+        return None
 
     def __init__(
         self,
@@ -255,6 +260,8 @@ class ViewerApp(
         self._consume_scene_pointer_until_release = False
         self._last_viewport_click: tuple[float, tuple[float, float], int] | None = None
         self._joint_picker_node_id = -1
+        self._joint_picker_selection = None
+        self._joint_picker_dismissed = False
         self._pending_node_focus_id: int | None = None
         self._pending_joint_focus_id: int | None = None
         self._joint_limit_hover = _JointLimitHoverState()
@@ -827,7 +834,10 @@ class ViewerApp(
         if job is None:
             return
         x, y, viewport_width, viewport_height = self._viewport_rect
-        width = min(460.0, max(1.0, viewport_width - 32.0))
+        width = min(
+            460.0 * self.window.style_scale,
+            max(1.0, viewport_width - 32.0 * self.window.style_scale),
+        )
         imgui.set_next_window_pos(
             imgui.ImVec2(x + viewport_width * 0.5, y + viewport_height * 0.5),
             imgui.Cond_.always.value,
@@ -846,19 +856,20 @@ class ViewerApp(
             | imgui.WindowFlags_.no_saved_settings.value
         )
         t = self.localizer.text
-        visible, _ = imgui.begin(f"{t('Loading')}###model_loading", None, flags)
-        if visible:
-            elapsed = max(0.0, time.monotonic() - self._model_load_started)
-            dots = "." * (int(elapsed * 2.0) % 3 + 1)
-            imgui.text(f"{t(self._model_load_verb(job.action))}{dots}")
-            imgui.separator()
-            imgui.text_disabled(t("File"))
-            imgui.text_wrapped(str(job.path))
-            imgui.spacing()
-            imgui.text(f"{t('Elapsed')}: {elapsed:.1f} s")
-            if self._model_load_queue:
-                imgui.text(f"{t('Queued')}: {len(self._model_load_queue)}")
-        imgui.end()
+        with floating_window(
+            self._floating_ui, f"{t('Loading')}###model_loading", flags=flags
+        ) as visible:
+            if visible:
+                elapsed = max(0.0, time.monotonic() - self._model_load_started)
+                dots = "." * (int(elapsed * 2.0) % 3 + 1)
+                imgui.text(f"{t(self._model_load_verb(job.action))}{dots}")
+                imgui.separator()
+                imgui.text_disabled(t("File"))
+                imgui.text_wrapped(str(job.path))
+                imgui.spacing()
+                imgui.text(f"{t('Elapsed')}: {elapsed:.1f} s")
+                if self._model_load_queue:
+                    imgui.text(f"{t('Queued')}: {len(self._model_load_queue)}")
 
     def _publish_gizmo(self) -> None:
         self.gizmo.publish(

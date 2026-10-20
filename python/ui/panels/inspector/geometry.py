@@ -329,7 +329,11 @@ class _Geometry:
     """Private geometry methods of InspectorPanel; state belongs to its owner."""
 
     def _material(self, ctx: PanelContext, node: SceneNode) -> None:
-        if not _property_section(ctx, "material", 0):
+        self._geometry_components(ctx, node)
+
+    def _geometry_components(self, ctx: PanelContext, node: SceneNode, *, fields="all") -> None:
+        heading = "Geometry components" if fields == "geometry" else "material"
+        if not _property_section(ctx, heading, 0):
             return
         src = ctx.session.source
         if src is None or node.body_index < 0 or len(src.geom_body) == 0:
@@ -349,14 +353,16 @@ class _Geometry:
             groups.setdefault(node_id, []).append(int(instance))
         imgui.text_disabled(f"{len(groups)} {ctx.tr('geometry components')}")
         for node_id, group in list(groups.items())[:8]:
-            self._geometry_material(ctx, node_id, group)
+            self._geometry_material(ctx, node_id, group, fields=fields)
 
-    def _geometry_material(self, ctx: PanelContext, node_id: int, instances: list[int]) -> None:
+    def _geometry_material(
+        self, ctx: PanelContext, node_id: int, instances: list[int], *, fields="all"
+    ) -> None:
         src = ctx.session.source
         assert src is not None
         first = instances[0]
         material_index = src.geom_material[first] if first < len(src.geom_material) else -1
-        if not 0 <= material_index < len(src.materials):
+        if fields != "geometry" and not 0 <= material_index < len(src.materials):
             imgui.text_disabled(ctx.tr("material data is unavailable"))
             return
         scene_node = ctx.session.node(node_id)
@@ -369,11 +375,14 @@ class _Geometry:
                 imgui.TreeNodeFlags_.default_open if len(instances) == 1 else 0,
             ):
                 return
-            self._geometry_shape_properties(ctx, node_id)
-            self._geometry_dimensions(ctx, src, scene_node, node_id, first)
-            self._geometry_contact_properties(ctx, node_id)
-            self._geometry_advanced_properties(ctx, node_id)
-            self._geometry_appearance(ctx, src, scene_node, node_id, first, material_index)
+            if fields != "appearance":
+                self._geometry_shape_properties(ctx, node_id)
+                self._geometry_dimensions(ctx, src, scene_node, node_id, first)
+            if fields == "all":
+                self._geometry_contact_properties(ctx, node_id)
+                self._geometry_advanced_properties(ctx, node_id)
+            if fields != "geometry":
+                self._geometry_appearance(ctx, src, scene_node, node_id, first, material_index)
         finally:
             imgui.pop_id()
 

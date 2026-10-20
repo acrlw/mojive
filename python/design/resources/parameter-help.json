@@ -8809,10 +8809,10 @@
         },
         "radius": {
           "summary": "框体四角的圆角半径。",
-          "reference": "从矩形直边进入圆角处计算，半径受框体短边限制。适用：观察可见背景、轮廓或悬停高亮的四角；纯文字没有圆角图形。半径超过短边一半时角形状达到尺寸上限。",
+          "reference": "The outer corner equals the control corner plus the actual uniform inset: 4 + 12 = 16 logical points at scale 1. Resolve the native inset before deriving the inner radius. A smaller authored outer radius reduces both the inset and the control corner; a large radius may increase the inset to keep controls within their height limit.",
           "unit": "像素",
           "shortLabel": "圆角",
-          "defaultHelp": "未单独设值时跟随共享规范「弹出层圆角」；对应模块覆盖共享值，部件显式值优先于模块值。恢复此项重新跟随。"
+          "defaultHelp": "The default uses a 12-point inset and a 4-point control corner. An explicit outer radius constrains both; resetting it restores the derived radius."
         },
         "fontSize": {
           "summary": "弹窗未被标题或正文覆盖的通用文字的字号。",
@@ -11441,10 +11441,10 @@
         },
         "radius": {
           "summary": "The popup outer corner radius.",
-          "reference": "The outer corner is the contained control corner plus the actual uniform inset: 6 + 8 = 14 logical points at scale 1. Native insets are resolved before deriving the outer radius. An explicit outer radius constrains contained corners.",
+          "reference": "The outer corner equals the control corner plus the actual uniform inset: 4 + 8 = 12 logical points at scale 1. Resolve the native inset before deriving the inner radius. A smaller authored outer radius reduces both the inset and the control corner; a large radius may increase the inset to keep controls within their height limit.",
           "unit": "logical pt",
           "shortLabel": "Outer corner radius",
-          "defaultHelp": "Derived from the enclosing or contained corner and the resolved inset; restoring this field restores the shared geometry."
+          "defaultHelp": "The default uses an 8-point inset and a 4-point control corner. An explicit outer radius constrains both; resetting it restores the derived radius."
         },
         "rowGap": {
           "summary": "Vertical space between adjacent rows in one form group.",

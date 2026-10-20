@@ -228,6 +228,9 @@ class SettingsPanel(Panel):
     def _interaction(self, ctx: PanelContext) -> None:
         return interaction.draw(self, ctx)
 
+    def _property_rows(self, labels):
+        return range(len(labels))
+
     def _number_setting(
         self,
         ctx: PanelContext,

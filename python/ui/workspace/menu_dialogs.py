@@ -6,6 +6,7 @@ from mojive.design.native.geometry import Rect
 from mojive.ui.input_bindings import InputAction
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import BODY_SIZE
+from mojive.ui.workspace.form_popup import form_corners
 from mojive.ui.workspace.widgets import DIM, MUTED, TEXT
 
 
@@ -14,7 +15,14 @@ def dialogs(menu):
         menu.dialog = menu.dialog_pending
         menu.dialog_pending = None
         imgui.open_popup("##workspace-dialog")
-    with menu.style(controls=True), menu.ui.component_scope("dialog"):
+    corners = form_corners(
+        menu.ui, "dialog", control_part="button", inner_limit=max(0, 26 * menu.s / 2 - 1)
+    )
+    with (
+        menu.style(controls=True),
+        menu.ui.component_scope("dialog"),
+        menu.ui.corner_scope(corners.inner_radius, ("button", "icon_button")),
+    ):
         vp = imgui.get_main_viewport()
         u, scale = menu.ui, menu.s
         style = u.component_style("dialog")
@@ -35,7 +43,7 @@ def dialogs(menu):
             (0.5, 0.5),
         )
         imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-        imgui.push_style_var(imgui.StyleVar_.window_rounding, style.get("radius", 8) * scale)
+        imgui.push_style_var(imgui.StyleVar_.window_rounding, corners.radius)
         opened, _ = imgui.begin_popup_modal(
             "##workspace-dialog",
             None,
@@ -54,7 +62,7 @@ def dialogs(menu):
         body_style = u.component_style("dialog_body")
         footer_style = u.component_style("dialog_footer")
         row_gap = style.get("rowGap", 0) * s
-        header_pad = header_style.edges("padding", s, (16, 14, 16, 8))
+        header_pad = header_style.edges("padding", s, tuple(p / s for p in corners.padding))
         header_margin = header_style.edges("margin", s)
         generic_edited = u.design is not None and any(
             u.design.runtime.edited(part, "fontSize") for part in ("dialog", "dialog_header")
@@ -151,7 +159,7 @@ def dialogs(menu):
             font_field=subtitle_field,
             translate=False,
         )
-        footer_pad = footer_style.edges("padding", s, (16, 8, 16, 14))
+        footer_pad = footer_style.edges("padding", s, tuple(p / s for p in corners.padding))
         footer_margin = footer_style.edges("margin", s)
         with u.component_scope("dialog_footer"):
             done_style = u.component_style("button")
@@ -183,7 +191,7 @@ def dialogs(menu):
             frame.content.width,
             max(s, footer.outer.y - row_gap - header.outer.bottom),
             key="guide-dialog-body",
-            padding=(16 * s, 0, 16 * s, 0),
+            padding=(corners.padding[0], 0, corners.padding[2], 0),
             observe=False,
         )
         p = imgui.ImVec2(body.content.x, body.content.y)

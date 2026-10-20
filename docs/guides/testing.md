@@ -32,6 +32,13 @@ matrix; other agent guidance links here.
 
 ## Change mapping
 
+`make ui-floating BACKEND=opengl` (or `bgfx`) exercises joint choice, double-click focus,
+closing and reopening the chooser, and precise edits after dismissal. Inspect the captures
+under `output/ui-floating/`, including `joint-focused.png` with the unobstructed gizmo.
+`make ui-inspector-tabs BACKEND=opengl` (or `bgfx`) verifies that geometry shape and dimensions
+remain in Properties, contact and mass controls in Physics, and appearance controls in Material.
+Inspect the expanded tabs under `output/ui-inspector-tabs/` at both tested UI scales.
+
 MuJoCo viewer compatibility is covered by `tests/test_mujoco_viewer.py` (real MuJoCo state with
 isolated window ownership) and `tests/gpu/test_mujoco_viewer.py` (user geometry on both renderers).
 `tests/test_mujoco_model_updates.py` covers every `mjOption` field and enable/disable flag,
@@ -566,6 +573,9 @@ close other viewer instances before collecting performance evidence.
 Add `--visible --vsync` for the presented window's display-paced cadence; keep these settings
 equal in the paired runs and separate those numbers from uncapped application throughput.
 Profiling uses isolated preferences and disables layout persistence in both modes.
+Add `--settings Interaction --cases idle` to measure the Interaction settings page,
+including its shortcut and mouse-gesture editors. Compare with `--settings General`
+under the same window size and UI scale; the window capture records the visible page.
 
 `make inspector-profile ARGS="--cycles 6 --frames 120 --profile"` selects geometry, body,
 and joint entities, clicks the production Inspector tabs, and toggles every available section

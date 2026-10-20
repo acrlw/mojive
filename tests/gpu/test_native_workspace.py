@@ -1248,3 +1248,56 @@ def test_native_settings_escape_restores_preview_without_saving(
     viewer.frame()
     assert current() == original
     assert viewer.app.preferences.get(config_name) == saved
+
+
+def test_inspector_tabs_keep_geometry_physics_and_material_controls_separate(
+    workspace, backend_name, monkeypatch
+):
+    from pathlib import Path
+
+    from PIL import Image
+
+    from mojive.adapters.base import NodeType
+    from mojive.ui.workspace.inspector_style import NativeInspectorPresentation
+
+    viewer, shell = workspace, workspace.app.workspace
+    node = next(n for n in viewer.session.nodes if n.type is NodeType.GEOM and n.name != "floor")
+    assert viewer.session.submit(cmd.SelectNode(node.node_id)).ok
+    visited = set()
+    section = NativeInspectorPresentation.section
+
+    def expanded(self, label, flags):
+        visited.add(label)
+        imgui.set_next_item_open(True, imgui.Cond_.always)
+        return section(self, label, flags)
+
+    monkeypatch.setattr(NativeInspectorPresentation, "section", expanded)
+    directory = Path("output/ui-inspector-tabs") / backend_name / f"{shell.s:g}x"
+    directory.mkdir(parents=True, exist_ok=True)
+    expected = {
+        "Properties": {"geometry dimensions", "geometry shape and resource"},
+        "Physics": {"contact properties", "mass, group, and fluid"},
+        "Material": {"appearance"},
+    }
+    for tab, controls in expected.items():
+        shell.inspector_tab = tab
+        viewer.frame()
+        visited.clear()
+        viewer.frame()
+        assert controls <= visited
+        assert not (set.union(*(v for k, v in expected.items() if k != tab)) & visited)
+        Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(directory / f"{tab}.png")
+
+    from mojive.ui.workspace.menu_actions import dispatch
+
+    body = next(n for n in viewer.session.nodes if n.name == "free_body")
+    assert viewer.session.submit(cmd.Pause()).ok
+    assert viewer.session.submit(cmd.SelectNode(body.node_id)).ok
+    dispatch(shell.menus, "create:Site")
+    assert viewer.session.selected_node.type is NodeType.SITE
+    shell.inspector_tab = "Properties"
+    visited.clear()
+    viewer.frame()
+    assert {"site shape and endpoints", "geometry dimensions"} <= visited
+    assert "appearance" not in visited
+    Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(directory / "Site.png")

@@ -24,6 +24,7 @@ from mojive.ui.panels import (
     button_width,
 )
 from mojive.ui.theme import THEME
+from mojive.ui.workspace.floating import floating_action_gap, floating_button, floating_window
 
 if TYPE_CHECKING:
     from mojive.adapters.base import SceneNode
@@ -705,23 +706,27 @@ class _Menus:
             self._show_model_load_error = False
         if imgui.is_popup_open(popup_title):
             _prepare_modal(360.0, self.window.style_scale)
-        visible, _ = imgui.begin_popup_modal(
-            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
-        )
-        if not visible:
-            return
-        imgui.text_wrapped(self._model_load_error)
-        imgui.spacing()
-        copy_error = t("Copy error")
-        if imgui.button(copy_error, imgui.ImVec2(button_width(copy_error, 110.0), 0.0)):
-            imgui.set_clipboard_text(self._model_load_error)
-        imgui.same_line()
-        ok = t("OK")
-        if imgui.button(ok, imgui.ImVec2(button_width(ok, 88.0), 0.0)) or imgui.is_key_pressed(
-            imgui.Key.escape, False
-        ):
-            imgui.close_current_popup()
-        imgui.end_popup()
+        with floating_window(
+            self._floating_ui,
+            popup_title,
+            modal=True,
+            flags=imgui.WindowFlags_.always_auto_resize,
+        ) as visible:
+            if not visible:
+                return
+            imgui.text_wrapped(self._model_load_error)
+            floating_action_gap(self._floating_ui)
+            copy_error = t("Copy error")
+            if floating_button(
+                self._floating_ui, copy_error, width=button_width(copy_error, 110.0)
+            ):
+                imgui.set_clipboard_text(self._model_load_error)
+            imgui.same_line()
+            ok = t("OK")
+            if floating_button(
+                self._floating_ui, ok, width=button_width(ok, 88.0), primary=True
+            ) or imgui.is_key_pressed(imgui.Key.escape, False):
+                imgui.close_current_popup()
 
     def _request_document_action(self, action: str, path: Path | None = None) -> None:
         if self.session.dirty:
@@ -751,38 +756,42 @@ class _Menus:
         popup_title = f"{t('Unsaved changes')}###Unsaved changes"
         imgui.open_popup(popup_title)
         _prepare_modal(360.0, self.window.style_scale)
-        visible, _ = imgui.begin_popup_modal(
-            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
-        )
-        if not visible:
-            return
-        name = (
-            self.session.asset_path.name if self.session.asset_path is not None else t("Untitled")
-        )
-        imgui.text(t("Save changes to this file?"))
-        imgui.text_wrapped(name)
-        imgui.spacing()
-        cancel, discard, save = _equal_modal_buttons(
-            (t("Cancel"), t("Discard"), t("Save")), self.theme, primary=2
-        )
-        if save:
-            if self.session.asset_path is None:
-                self._after_save_action = pending
+        with floating_window(
+            self._floating_ui,
+            popup_title,
+            modal=True,
+            flags=imgui.WindowFlags_.always_auto_resize,
+        ) as visible:
+            if not visible:
+                return
+            name = (
+                self.session.asset_path.name
+                if self.session.asset_path is not None
+                else t("Untitled")
+            )
+            imgui.text(t("Save changes to this file?"))
+            imgui.text_wrapped(name)
+            floating_action_gap(self._floating_ui)
+            cancel, discard, save = _equal_modal_buttons(
+                (t("Cancel"), t("Discard"), t("Save")), self.theme, primary=2, ui=self._floating_ui
+            )
+            if save:
+                if self.session.asset_path is None:
+                    self._after_save_action = pending
+                    self._pending_document_action = None
+                    self._open_scene_dialog("save")
+                else:
+                    self._pending_document_action = None
+                    self._request_scene_save(self.session.asset_path, pending)
+                imgui.close_current_popup()
+            elif discard:
+                self.model_edits.clear()
                 self._pending_document_action = None
-                self._open_scene_dialog("save")
-            else:
+                self._execute_document_action(*pending)
+                imgui.close_current_popup()
+            elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
                 self._pending_document_action = None
-                self._request_scene_save(self.session.asset_path, pending)
-            imgui.close_current_popup()
-        elif discard:
-            self.model_edits.clear()
-            self._pending_document_action = None
-            self._execute_document_action(*pending)
-            imgui.close_current_popup()
-        elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
-            self._pending_document_action = None
-            imgui.close_current_popup()
-        imgui.end_popup()
+                imgui.close_current_popup()
 
     def _draw_pose_save_prompt(self) -> None:
         pending = self._pending_pose_save
@@ -793,68 +802,88 @@ class _Menus:
         popup_title = f"{t('Save current pose')}###Save current pose"
         imgui.open_popup(popup_title)
         _prepare_modal(360.0, self.window.style_scale)
-        visible, _ = imgui.begin_popup_modal(
-            popup_title, None, imgui.WindowFlags_.always_auto_resize.value
-        )
-        if not visible:
-            return
-        imgui.text_wrapped(
-            t(
-                "The current pose differs from the model default. Add the current qpos as "
-                "keyframe key0 in the exported MJCF?"
+        with floating_window(
+            self._floating_ui,
+            popup_title,
+            modal=True,
+            flags=imgui.WindowFlags_.always_auto_resize,
+        ) as visible:
+            if not visible:
+                return
+            imgui.text_wrapped(
+                t(
+                    "The current pose differs from the model default. Add the current qpos as "
+                    "keyframe key0 in the exported MJCF?"
+                )
             )
-        )
-        imgui.spacing()
-        target, after = pending
-        cancel, without_key, save_key = _equal_modal_buttons(labels, self.theme, primary=2)
-        if save_key:
-            self._pending_pose_save = None
-            if self.save_scene(target, current_pose_keyframe="key0").ok and after is not None:
-                self._execute_document_action(*after)
-            imgui.close_current_popup()
-        elif without_key:
-            self._pending_pose_save = None
-            if self.save_scene(target).ok and after is not None:
-                self._execute_document_action(*after)
-            imgui.close_current_popup()
-        elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
-            self._pending_pose_save = None
-            imgui.close_current_popup()
-        imgui.end_popup()
+            floating_action_gap(self._floating_ui)
+            target, after = pending
+            cancel, without_key, save_key = _equal_modal_buttons(
+                labels, self.theme, primary=2, ui=self._floating_ui
+            )
+            if save_key:
+                self._pending_pose_save = None
+                if self.save_scene(target, current_pose_keyframe="key0").ok and after is not None:
+                    self._execute_document_action(*after)
+                imgui.close_current_popup()
+            elif without_key:
+                self._pending_pose_save = None
+                if self.save_scene(target).ok and after is not None:
+                    self._execute_document_action(*after)
+                imgui.close_current_popup()
+            elif cancel or imgui.is_key_pressed(imgui.Key.escape, False):
+                self._pending_pose_save = None
+                imgui.close_current_popup()
 
     def _draw_rename_popup(self) -> None:
         popup_title = f"{self.localizer.text('Rename Entity')}###Rename Entity"
         if self._open_rename_popup:
             imgui.open_popup(popup_title)
             self._open_rename_popup = False
-        width = min(220.0, max(1.0, float(imgui.get_main_viewport().work_size.x) - 32.0))
+        width = min(
+            220.0 * self.window.style_scale,
+            max(1.0, float(imgui.get_main_viewport().work_size.x) - 32.0 * self.window.style_scale),
+        )
         imgui.set_next_window_size_constraints(
             imgui.ImVec2(width, 0.0),
             imgui.ImVec2(width, float(np.finfo(np.float32).max)),
         )
-        visible = imgui.begin_popup(popup_title, imgui.WindowFlags_.always_auto_resize.value)
-        if not visible:
-            return
-        imgui.text_disabled(self.localizer.text("Rename"))
-        imgui.separator()
-        imgui.set_next_item_width(-1.0)
-        submitted, self._rename_value = imgui.input_text(
-            "##entity_name",
-            self._rename_value,
-            imgui.InputTextFlags_.enter_returns_true.value
-            | imgui.InputTextFlags_.auto_select_all.value,
-        )
-        if imgui.is_window_appearing():
-            imgui.set_keyboard_focus_here(-1)
-        if submitted and self._rename_value.strip():
-            value = self._rename_value.strip()
-            command = (
-                cmd.RenameModelElement(self._rename_model_node_id, value)
-                if self._rename_model_node_id >= 0
-                else cmd.RenameSceneEntity(self._rename_object_id, value)
-            )
-            self.session.submit(command)
-            imgui.close_current_popup()
-        elif imgui.is_key_pressed(imgui.Key.escape, False):
-            imgui.close_current_popup()
-        imgui.end_popup()
+        with floating_window(
+            self._floating_ui,
+            popup_title,
+            popup=True,
+            heading=self.localizer.text("Rename"),
+            flags=imgui.WindowFlags_.always_auto_resize,
+        ) as visible:
+            if not visible:
+                return
+            imgui.set_next_item_width(-1.0)
+            flags = imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.auto_select_all
+            ui = self._floating_ui
+            if ui is None:
+                submitted, self._rename_value = imgui.input_text(
+                    "##entity_name", self._rename_value, flags
+                )
+            else:
+                pos = imgui.get_cursor_screen_pos()
+                submitted, self._rename_value = ui.input_text(
+                    "##entity_name",
+                    pos.x,
+                    pos.y,
+                    imgui.get_content_region_avail().x,
+                    self._rename_value,
+                    flags=flags,
+                )
+            if imgui.is_window_appearing():
+                imgui.set_keyboard_focus_here(-1)
+            if submitted and self._rename_value.strip():
+                value = self._rename_value.strip()
+                command = (
+                    cmd.RenameModelElement(self._rename_model_node_id, value)
+                    if self._rename_model_node_id >= 0
+                    else cmd.RenameSceneEntity(self._rename_object_id, value)
+                )
+                self.session.submit(command)
+                imgui.close_current_popup()
+            elif imgui.is_key_pressed(imgui.Key.escape, False):
+                imgui.close_current_popup()

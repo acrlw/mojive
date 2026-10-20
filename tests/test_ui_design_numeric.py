@@ -353,6 +353,7 @@ def test_long_numeric_display_uses_padded_compact_caption_and_full_hover(
                 (
                     value,
                     position,
+                    imgui.calc_text_size(value).x,
                     (clip_lo.x, clip_lo.y, clip_hi.x, clip_hi.y),
                     tuple(
                         (draw_list.vtx_buffer[index].pos.x, draw_list.vtx_buffer[index].pos.y)
@@ -368,15 +369,19 @@ def test_long_numeric_display_uses_padded_compact_caption_and_full_hover(
     monkeypatch.setattr(ImguiDraw2D, "text", text)
     monkeypatch.setattr(numeric.ui, "tooltip", tooltip)
     numeric.frame(3)
-    shown, position, clip, vertices = painted[-1]
+    shown, position, text_width, clip, vertices = painted[-1]
     x, y, width, height = numeric.ui.hits["##number"]
     s = numeric.ui.s
-    assert shown.endswith("…") and shown != numeric.format % numeric.value
+    assert shown != numeric.format % numeric.value
+    if shown != "…":
+        suffix = " 毫米" if language == "zh_CN" else " mm"
+        assert shown.endswith(suffix)
+        number = shown.removesuffix(suffix)
+        assert "e" in number
+        assert float(number) == pytest.approx(numeric.value, rel=0.2)
     assert clip[0] >= x + 8 * s - 0.5
     assert clip[2] <= x + width - 8 * s + 0.5
-    assert position[0] + imgui.calc_text_size(shown).x / 2 == pytest.approx(
-        (clip[0] + clip[2]) / 2, abs=0.5
-    )
+    assert position[0] + text_width / 2 == pytest.approx((clip[0] + clip[2]) / 2, abs=0.5)
     assert vertices
     for vx, vy in vertices:
         assert clip[0] - 0.5 <= vx <= clip[2] + 0.5

@@ -174,6 +174,31 @@ def test_import_menu_disables_missing_requests_and_running_model_edits(surface):
     assert len(calls) == 1
 
 
+def test_height_field_options_skip_scrolled_rows_and_reappear_without_losing_values(surface):
+    from mojive.ui.panels.assets import _hfield_size_editor
+
+    view = surface
+    presenter = NativePropertyPresentation(view.ui, prefix="assets")
+    values = np.array((2, 3, 4, 0.5), np.float32)
+    original = values.copy()
+
+    def draw(ctx):
+        imgui.dummy((0, 900 * view.ui.s))
+        changed, edited = _hfield_size_editor(ctx, "import-size", values, presenter)
+        assert not changed
+        np.testing.assert_array_equal(edited, original)
+
+    view.group, view.width, view.draw = "Assets", 220, draw
+    for _ in range(3):
+        view.frame()
+    assert sum(f"##import-size-{index}" in view.ui.hits for index in range(4)) < 4
+    window = imgui.internal.find_window_by_name("Assets")
+    imgui.internal.set_scroll_y(window, window.scroll_max.y)
+    for _ in range(3):
+        view.frame()
+    assert "##import-size-3" in view.ui.hits
+
+
 @pytest.mark.parametrize("width", (180, 700))
 def test_output_empty_and_filtered_states_have_real_clear_copy_and_reset_actions(surface, width):
     view = surface

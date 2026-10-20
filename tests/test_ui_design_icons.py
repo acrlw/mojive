@@ -63,6 +63,17 @@ def test_all_masters_compile_inside_their_canvas():
     assert 17 <= bottom - top <= 22
 
 
+@pytest.mark.parametrize("direction", (-math.inf, math.inf))
+def test_icon_compilation_is_stable_under_trigonometric_roundoff(monkeypatch, direction):
+    sources = json.loads((ROOT / "icons-source.json").read_text())
+    expected = {name: compile_svg(svg) for name, svg in sources.items()}
+    cosine, sine = math.cos, math.sin
+    monkeypatch.setattr(math, "cos", lambda value: math.nextafter(cosine(value), direction))
+    monkeypatch.setattr(math, "sin", lambda value: math.nextafter(sine(value), direction))
+    for name, svg in sources.items():
+        assert compile_svg(svg) == expected[name], name
+
+
 def test_joint_projection_and_sort_masters_share_the_grid_and_have_distinct_silhouettes():
     sources = json.loads((ROOT / "icons-source.json").read_text())
     names = (

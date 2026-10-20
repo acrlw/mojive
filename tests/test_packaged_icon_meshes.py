@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,61 @@ import pytest
 
 from mojive.geometry2d import icon_mesh as compiler
 from mojive.ui.workspace import icon_mesh, widget_icons
+from tests.curve_assertions import assert_paths_close
+
+
+def _assert_stroke_matches(mesh, reference):
+    # Native tessellation normalizes to float32. Equivalent triangulations and
+    # boundary start vertices can differ between compiler/platform combinations.
+    tolerance = 24 * np.finfo(np.float32).eps * 16
+
+    def area(value):
+        vertices, indices = np.asarray(value["vertices"]), np.asarray(value["indices"])
+        assert np.isfinite(vertices).all()
+        assert indices.min() >= 0 and indices.max() < len(vertices)
+        triangle_indices = indices.reshape(-1, 3)
+        edges = Counter(
+            tuple(sorted((int(a), int(b))))
+            for triangle in triangle_indices
+            for a, b in zip(triangle, np.roll(triangle, -1), strict=True)
+        )
+        assert max(edges.values()) <= 2
+        boundary_length = sum(
+            np.linalg.norm(vertices[a] - vertices[b])
+            for (a, b), count in edges.items()
+            if count == 1
+        )
+        outline_length = sum(
+            np.linalg.norm(np.asarray(points) - np.roll(points, 1, axis=0), axis=1).sum()
+            for points, _inside in value["boundaries"]
+        )
+        assert boundary_length == pytest.approx(outline_length, abs=len(vertices) * tolerance)
+        triangles = vertices[triangle_indices]
+        a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+        areas = (a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]) / 2
+        assert areas.min() >= -(tolerance**2)
+        return areas.sum()
+
+    vertices, expected = np.asarray(mesh["vertices"]), np.asarray(reference["vertices"])
+    np.testing.assert_allclose(vertices.min(axis=0), expected.min(axis=0), atol=tolerance, rtol=0)
+    np.testing.assert_allclose(vertices.max(axis=0), expected.max(axis=0), atol=tolerance, rtol=0)
+    remaining = list(reference["boundaries"])
+    perimeter = 0.0
+    for points, hole in mesh["boundaries"]:
+        points = np.asarray(points)
+        # Match by geometric bounds, independently of contour order and start.
+        match = next(
+            i
+            for i, (outline, inside) in enumerate(remaining)
+            if hole == inside
+            and np.allclose(np.min(outline, axis=0), points.min(axis=0), atol=tolerance, rtol=0)
+            and np.allclose(np.max(outline, axis=0), points.max(axis=0), atol=tolerance, rtol=0)
+        )
+        outline, _inside = remaining.pop(match)
+        assert_paths_close(points, outline, tolerance)
+        perimeter += np.linalg.norm(points - np.roll(points, 1, axis=0), axis=1).sum()
+    assert not remaining
+    assert area(mesh) == pytest.approx(area(reference), abs=perimeter * tolerance)
 
 
 def test_packaged_meshes_match_every_canonical_master():
@@ -23,13 +79,27 @@ def test_packaged_meshes_match_every_canonical_master():
                 np.testing.assert_allclose(actual["fill"], compiled["fill"], atol=1e-6, rtol=0)
                 continue
             mesh, reference = actual["stroke"], compiled["stroke"]
-            assert mesh["indices"] == list(reference["indices"])
-            np.testing.assert_allclose(mesh["vertices"], reference["vertices"], atol=1e-6, rtol=0)
-            for (points, hole), (outline, inside) in zip(
-                mesh["boundaries"], reference["boundaries"], strict=True
-            ):
-                assert hole == inside
-                np.testing.assert_allclose(points, outline, atol=1e-6, rtol=0)
+            _assert_stroke_matches(mesh, reference)
+
+
+def test_mesh_comparison_accepts_equivalent_diagonals_and_rejects_missing_fill():
+    points = ((0, 0), (2, 0), (2, 2), (0, 2))
+    reference = {
+        "vertices": points,
+        "indices": (0, 1, 2, 0, 2, 3),
+        "boundaries": ((points, False),),
+    }
+    reordered = (*points[2:], *points[:2])
+    mesh = {
+        "vertices": reordered,
+        "indices": (0, 1, 3, 1, 2, 3),
+        "boundaries": ((reordered, False),),
+    }
+    _assert_stroke_matches(mesh, reference)
+    for indices in ((0, 1, 3), (0, 1, 3, 0, 1, 3)):
+        mesh["indices"] = indices
+        with pytest.raises(AssertionError):
+            _assert_stroke_matches(mesh, reference)
 
 
 def test_first_paint_and_scale_changes_do_not_compile_strokes(monkeypatch):

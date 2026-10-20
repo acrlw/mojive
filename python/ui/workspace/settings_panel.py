@@ -60,6 +60,9 @@ class WorkspaceSettings(SettingsPanel):
     def _end_properties(self):
         self.fields.end_table()
 
+    def _property_rows(self, labels):
+        return self.fields.clipped_rows(labels)
+
     def _combo(self, key, index, labels):
         return self.fields.combo(key, index, labels)
 
@@ -72,7 +75,9 @@ class WorkspaceSettings(SettingsPanel):
         ui = self.workspace.ui
         preview = labels[index] if preview is None and index >= 0 else preview or ""
         selected = index
-        if self.fields.begin_combo(key, preview, popup_width=menu_choice_width(ui, labels, index)):
+        if self.fields.begin_combo(
+            key, preview, popup_width=lambda: menu_choice_width(ui, labels, index)
+        ):
             self.choices.begin(key)
             try:
                 for option, label in enumerate(labels):

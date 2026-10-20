@@ -2882,7 +2882,7 @@ def test_double_clicking_a_scalar_gizmo_opens_and_applies_precise_input(
     v.sync()
     popup_left, popup_width = popup_bounds[-1]
     content_right = popup_left + popup_width - imgui.get_style().window_padding.x
-    assert popup_width == pytest.approx(204.0 * v.window.style_scale, abs=2.0)
+    assert popup_width == pytest.approx(240.0 * v.window.style_scale, abs=2.0)
     assert input_bounds[-1][1] <= content_right + 1.0
     assert input_flags[-1] & imgui.InputTextFlags_.auto_select_all.value
     assert input_flags[-1] & imgui.InputTextFlags_.chars_scientific.value

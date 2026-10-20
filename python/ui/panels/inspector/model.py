@@ -14,15 +14,18 @@ from mojive.adapters.base import (
 )
 from mojive.ui.panels import (
     PanelContext,
-    begin_kv_table,
     button_width,
     copyable_name_item,
 )
 from mojive.ui.panels.inspector.fields import (
+    _begin_property_table,
     _end_property_table,
     _property_begin_combo,
     _property_button,
     _property_choice,
+    _property_control_row,
+    _property_dialog,
+    _property_dialog_actions,
     _property_end_combo,
     _property_input_text,
     _property_section,
@@ -302,181 +305,176 @@ class _Model:
             imgui.open_popup(popup_title)
             self._open_component_popup = False
         imgui.set_next_window_size(
-            imgui.ImVec2(560.0 * ctx.style_scale, 520.0 * ctx.style_scale),
+            imgui.ImVec2(
+                min(
+                    560.0 * ctx.style_scale,
+                    imgui.get_main_viewport().work_size.x - 32 * ctx.style_scale,
+                ),
+                min(
+                    520.0 * ctx.style_scale,
+                    imgui.get_main_viewport().work_size.y - 32 * ctx.style_scale,
+                ),
+            ),
             imgui.Cond_.appearing.value,
         )
-        visible, _ = imgui.begin_popup_modal(popup_title)
-        if not visible:
-            return
-        if component is None:
-            imgui.close_current_popup()
-            imgui.end_popup()
-            return
-        imgui.text_disabled(f"{component.category} / {component.subtype}")
-        choices = {field.name: field.choices for field in component.fields}
-        if begin_kv_table("component_fields"):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.text_disabled(ctx.tr("name"))
-            imgui.table_next_column()
-            imgui.set_next_item_width(-1.0)
-            _changed, self._component_name = _property_input_text(
-                ctx, "##component-name", self._component_name
-            )
-            for index, field in enumerate(self._component_fields):
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.text_disabled(field[0])
-                imgui.table_next_column()
-                imgui.set_next_item_width(-1.0)
-                field[1] = _component_value_editor(
-                    ctx,
-                    f"##component-field-{index}",
-                    field[1],
-                    choices.get(field[0], ()),
-                    multiline=field[0] in _MULTILINE_COMPONENT_FIELDS or len(field[1]) > 72,
+        with _property_dialog(ctx, popup_title) as visible:
+            if not visible:
+                return
+            if component is None:
+                imgui.close_current_popup()
+                return
+            imgui.text_disabled(f"{component.category} / {component.subtype}")
+            choices = {field.name: field.choices for field in component.fields}
+            if _begin_property_table("component_fields", ctx):
+                _property_control_row(ctx, "name", control_part="input_text")
+                _changed, self._component_name = _property_input_text(
+                    ctx, "##component-name", self._component_name
                 )
-            _end_property_table(ctx)
-        if self._component_path:
-            imgui.separator()
-            imgui.text_disabled(ctx.tr("Path"))
-        for path_index, (element_type, fields) in enumerate(tuple(self._component_path)):
-            imgui.push_id(f"path-{path_index}")
-            object_type = next((value for name, value in fields if name == "objtype"), "")
-            suffix = f" · {object_type}" if object_type else ""
-            presentation = getattr(ctx, "inspector_presentation", None)
-            if presentation is not None:
-                move_up, move_down, remove = presentation.component_actions(
-                    "component_path",
-                    f"component-path-{path_index}",
-                    f"{path_index + 1}. {element_type}{suffix}",
-                    (ctx.tr("Up"), ctx.tr("Down"), ctx.tr("Remove")),
-                    (path_index > 0, path_index + 1 < len(self._component_path), True),
-                )
-            else:
-                imgui.text_disabled(f"{path_index + 1}. {element_type}{suffix}")
-                imgui.same_line()
-                if path_index == 0:
-                    imgui.begin_disabled()
-                move_up = _property_button(ctx, ctx.tr("Up"))
-                if path_index == 0:
-                    imgui.end_disabled()
-                imgui.same_line()
-                if path_index + 1 == len(self._component_path):
-                    imgui.begin_disabled()
-                move_down = _property_button(ctx, ctx.tr("Down"))
-                if path_index + 1 == len(self._component_path):
-                    imgui.end_disabled()
-                imgui.same_line()
-                remove = _property_button(ctx, ctx.tr("Remove"))
-            if begin_kv_table(f"component_path_fields_{path_index}"):
-                imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed)
-                imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch)
-                for field_index, field in enumerate(fields):
-                    preset = _matching_path_preset(
-                        self._component_path_presets, element_type, fields
-                    )
-                    preset_fields = (
-                        {item.name: item for item in preset.fields} if preset is not None else {}
-                    )
-                    choices = self._component_path_choices[path_index].get(field[0], ())
-                    if field[0] in preset_fields:
-                        choices = preset_fields[field[0]].choices
-                    imgui.table_next_row()
-                    imgui.table_next_column()
-                    imgui.text_disabled(field[0])
-                    imgui.table_next_column()
-                    imgui.set_next_item_width(-1.0)
-                    previous = field[1]
+                for index, field in enumerate(self._component_fields):
+                    _property_control_row(ctx, field[0], control_part="input_text")
                     field[1] = _component_value_editor(
                         ctx,
-                        f"##path-field-{field_index}",
+                        f"##component-field-{index}",
                         field[1],
-                        choices,
+                        choices.get(field[0], ()),
                         multiline=field[0] in _MULTILINE_COMPONENT_FIELDS or len(field[1]) > 72,
                     )
-                    if field[0] == "objtype" and field[1] != previous:
-                        next_preset = _matching_path_preset(
+                _end_property_table(ctx)
+            if self._component_path:
+                imgui.separator()
+                imgui.text_disabled(ctx.tr("Path"))
+            for path_index, (element_type, fields) in enumerate(tuple(self._component_path)):
+                imgui.push_id(f"path-{path_index}")
+                object_type = next((value for name, value in fields if name == "objtype"), "")
+                suffix = f" · {object_type}" if object_type else ""
+                presentation = getattr(ctx, "inspector_presentation", None)
+                if presentation is not None:
+                    move_up, move_down, remove = presentation.component_actions(
+                        "component_path",
+                        f"component-path-{path_index}",
+                        f"{path_index + 1}. {element_type}{suffix}",
+                        (ctx.tr("Up"), ctx.tr("Down"), ctx.tr("Remove")),
+                        (path_index > 0, path_index + 1 < len(self._component_path), True),
+                    )
+                else:
+                    imgui.text_disabled(f"{path_index + 1}. {element_type}{suffix}")
+                    imgui.same_line()
+                    if path_index == 0:
+                        imgui.begin_disabled()
+                    move_up = _property_button(ctx, ctx.tr("Up"))
+                    if path_index == 0:
+                        imgui.end_disabled()
+                    imgui.same_line()
+                    if path_index + 1 == len(self._component_path):
+                        imgui.begin_disabled()
+                    move_down = _property_button(ctx, ctx.tr("Down"))
+                    if path_index + 1 == len(self._component_path):
+                        imgui.end_disabled()
+                    imgui.same_line()
+                    remove = _property_button(ctx, ctx.tr("Remove"))
+                if _begin_property_table(f"component_path_fields_{path_index}", ctx):
+                    for field_index, field in enumerate(fields):
+                        preset = _matching_path_preset(
                             self._component_path_presets, element_type, fields
                         )
-                        if next_preset is not None:
-                            default_name = next(
-                                (
-                                    item.value
-                                    for item in next_preset.fields
-                                    if item.name == "objname"
-                                ),
-                                "",
-                            )
-                            for candidate in fields:
-                                if candidate[0] == "objname":
-                                    candidate[1] = default_name
-                                    break
-                _end_property_table(ctx)
-            imgui.pop_id()
-            if move_up:
-                self._component_path[path_index - 1 : path_index + 1] = reversed(
-                    self._component_path[path_index - 1 : path_index + 1]
-                )
-                self._component_path_choices[path_index - 1 : path_index + 1] = reversed(
-                    self._component_path_choices[path_index - 1 : path_index + 1]
-                )
-                break
-            if move_down:
-                self._component_path[path_index : path_index + 2] = reversed(
-                    self._component_path[path_index : path_index + 2]
-                )
-                self._component_path_choices[path_index : path_index + 2] = reversed(
-                    self._component_path_choices[path_index : path_index + 2]
-                )
-                break
-            if remove:
-                self._component_path.pop(path_index)
-                self._component_path_choices.pop(path_index)
-                break
-        if self._component_path_presets and _property_begin_combo(
-            ctx, ctx.tr("Add path item"), ctx.tr("select type")
-        ):
-            for preset in self._component_path_presets:
-                selected, _ = _property_choice(ctx, _path_preset_label(preset), False)
-                if selected:
-                    self._component_path.append(
-                        (
-                            preset.type,
-                            [[field.name, field.value] for field in preset.fields],
+                        preset_fields = (
+                            {item.name: item for item in preset.fields}
+                            if preset is not None
+                            else {}
                         )
+                        choices = self._component_path_choices[path_index].get(field[0], ())
+                        if field[0] in preset_fields:
+                            choices = preset_fields[field[0]].choices
+                        _property_control_row(ctx, field[0], control_part="input_text")
+                        previous = field[1]
+                        field[1] = _component_value_editor(
+                            ctx,
+                            f"##path-field-{field_index}",
+                            field[1],
+                            choices,
+                            multiline=field[0] in _MULTILINE_COMPONENT_FIELDS or len(field[1]) > 72,
+                        )
+                        if field[0] == "objtype" and field[1] != previous:
+                            next_preset = _matching_path_preset(
+                                self._component_path_presets, element_type, fields
+                            )
+                            if next_preset is not None:
+                                default_name = next(
+                                    (
+                                        item.value
+                                        for item in next_preset.fields
+                                        if item.name == "objname"
+                                    ),
+                                    "",
+                                )
+                                for candidate in fields:
+                                    if candidate[0] == "objname":
+                                        candidate[1] = default_name
+                                        break
+                    _end_property_table(ctx)
+                imgui.pop_id()
+                if move_up:
+                    self._component_path[path_index - 1 : path_index + 1] = reversed(
+                        self._component_path[path_index - 1 : path_index + 1]
                     )
-                    self._component_path_choices.append(
-                        {field.name: field.choices for field in preset.fields}
+                    self._component_path_choices[path_index - 1 : path_index + 1] = reversed(
+                        self._component_path_choices[path_index - 1 : path_index + 1]
                     )
-            _property_end_combo(ctx)
-        if self._component_error:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
-            if _property_button(ctx, f"{ctx.tr('Copy error')}##component"):
-                imgui.set_clipboard_text(self._component_error)
-        if _property_button(ctx, ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
-            ctx.submit_model_edit(
-                cmd.UpdateModelComponent(
-                    component.model_id,
-                    component.category,
-                    component.component_id,
-                    self._component_name,
-                    tuple((name, value) for name, value in self._component_fields),
-                    tuple(
-                        (element_type, tuple((name, value) for name, value in fields))
-                        for element_type, fields in self._component_path
-                    ),
-                ),
-                self._component_edit_completed,
+                    break
+                if move_down:
+                    self._component_path[path_index : path_index + 2] = reversed(
+                        self._component_path[path_index : path_index + 2]
+                    )
+                    self._component_path_choices[path_index : path_index + 2] = reversed(
+                        self._component_path_choices[path_index : path_index + 2]
+                    )
+                    break
+                if remove:
+                    self._component_path.pop(path_index)
+                    self._component_path_choices.pop(path_index)
+                    break
+            if self._component_path_presets and _property_begin_combo(
+                ctx, ctx.tr("Add path item"), ctx.tr("select type")
+            ):
+                for preset in self._component_path_presets:
+                    selected, _ = _property_choice(ctx, _path_preset_label(preset), False)
+                    if selected:
+                        self._component_path.append(
+                            (
+                                preset.type,
+                                [[field.name, field.value] for field in preset.fields],
+                            )
+                        )
+                        self._component_path_choices.append(
+                            {field.name: field.choices for field in preset.fields}
+                        )
+                _property_end_combo(ctx)
+            if self._component_error:
+                imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
+                if _property_button(ctx, f"{ctx.tr('Copy error')}##component"):
+                    imgui.set_clipboard_text(self._component_error)
+            canceled, applied = _property_dialog_actions(
+                ctx, (ctx.tr("Cancel"), ctx.tr("Apply")), primary=1
             )
-            imgui.close_current_popup()
-        imgui.same_line()
-        if _property_button(ctx, ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
-            self._component_edit = None
-            imgui.close_current_popup()
-        imgui.end_popup()
+            if applied:
+                ctx.submit_model_edit(
+                    cmd.UpdateModelComponent(
+                        component.model_id,
+                        component.category,
+                        component.component_id,
+                        self._component_name,
+                        tuple((name, value) for name, value in self._component_fields),
+                        tuple(
+                            (element_type, tuple((name, value) for name, value in fields))
+                            for element_type, fields in self._component_path
+                        ),
+                    ),
+                    self._component_edit_completed,
+                )
+                imgui.close_current_popup()
+            if canceled:
+                self._component_edit = None
+                imgui.close_current_popup()
 
     def _component_edit_completed(self, result) -> None:
         if result.ok:
@@ -496,36 +494,46 @@ class _Model:
             imgui.open_popup(popup_title)
             self._open_source_popup = False
         imgui.set_next_window_size(
-            imgui.ImVec2(820.0 * ctx.style_scale, 620.0 * ctx.style_scale),
+            imgui.ImVec2(
+                min(
+                    820.0 * ctx.style_scale,
+                    imgui.get_main_viewport().work_size.x - 32 * ctx.style_scale,
+                ),
+                min(
+                    620.0 * ctx.style_scale,
+                    imgui.get_main_viewport().work_size.y - 32 * ctx.style_scale,
+                ),
+            ),
             imgui.Cond_.appearing.value,
         )
-        visible, _ = imgui.begin_popup_modal(popup_title)
-        if not visible:
-            return
-        _changed, self._source_text = _property_input_text_multiline(
-            ctx,
-            "##mjcf_source",
-            self._source_text,
-            imgui.ImVec2(-1.0, -70.0 * ctx.style_scale),
-            imgui.InputTextFlags_.allow_tab_input.value,
-        )
-        _property_tooltip(
-            ctx, ctx.tr("MjSpec validates and recompiles the model when changes are applied.")
-        )
-        if self._source_error:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
-            if _property_button(ctx, f"{ctx.tr('Copy error')}##source"):
-                imgui.set_clipboard_text(self._source_error)
-        if _property_button(ctx, ctx.tr("Apply"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
-            ctx.submit_model_edit(
-                cmd.SetModelSource(self._source_model_id, self._source_text),
-                self._source_edit_completed,
+        with _property_dialog(ctx, popup_title) as visible:
+            if not visible:
+                return
+            _changed, self._source_text = _property_input_text_multiline(
+                ctx,
+                "##mjcf_source",
+                self._source_text,
+                imgui.ImVec2(-1.0, -70.0 * ctx.style_scale),
+                imgui.InputTextFlags_.allow_tab_input.value,
             )
-            imgui.close_current_popup()
-        imgui.same_line()
-        if _property_button(ctx, ctx.tr("Cancel"), imgui.ImVec2(100.0 * ctx.style_scale, 0.0)):
-            imgui.close_current_popup()
-        imgui.end_popup()
+            _property_tooltip(
+                ctx, ctx.tr("MjSpec validates and recompiles the model when changes are applied.")
+            )
+            if self._source_error:
+                imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
+                if _property_button(ctx, f"{ctx.tr('Copy error')}##source"):
+                    imgui.set_clipboard_text(self._source_error)
+            canceled, applied = _property_dialog_actions(
+                ctx, (ctx.tr("Cancel"), ctx.tr("Apply")), primary=1
+            )
+            if applied:
+                ctx.submit_model_edit(
+                    cmd.SetModelSource(self._source_model_id, self._source_text),
+                    self._source_edit_completed,
+                )
+                imgui.close_current_popup()
+            if canceled:
+                imgui.close_current_popup()
 
     def _identity(self, ctx: PanelContext, node: SceneNode) -> None:
         text = f"{ctx.tr('node id')} {node.node_id} · {ctx.tr('object id')} {node.object_id}"

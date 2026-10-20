@@ -159,6 +159,9 @@ def _draw_body(workspace, e, bx, yy, bw):
             u.text(bx, yy + 30 * s, "Type", MUTED, BODY_SIZE)
             u.text(bx + 100 * s, yy + 30 * s, e["type"], TEXT, BODY_SIZE)
             yy += 64 * s
+        imgui.set_cursor_screen_pos((bx, yy))
+        draw_component(workspace, workspace._panel_context, e, "Properties", details="geometry")
+        yy = imgui.get_cursor_screen_pos().y
     elif workspace.inspector_tab == "Material":
         u.section("SURFACE", bx, yy, bw)
         imgui.begin_disabled(not e["colorable"])
@@ -199,9 +202,8 @@ def _draw_body(workspace, e, bx, yy, bw):
         imgui.end_disabled()
         yy += 136 * s + layout.height
         imgui.set_cursor_screen_pos((bx, yy))
-        # Shared material ownership includes shape resources, textures, PBR,
-        # assignments, and model asset actions beyond the native color shortcut.
-        draw_component(workspace, workspace._panel_context, e, "Material", material_details=True)
+        # Material controls share the registered panel's transactions and asset actions.
+        draw_component(workspace, workspace._panel_context, e, "Material", details="appearance")
         yy = imgui.get_cursor_screen_pos().y
     imgui.set_cursor_screen_pos((bx, yy))
     imgui.dummy((1, 1))

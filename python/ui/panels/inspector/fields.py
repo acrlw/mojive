@@ -102,6 +102,28 @@ def _property_button(ctx, label, size=None):
     return imgui.button(label) if size is None else imgui.button(label, size)
 
 
+def _property_dialog(ctx, title):
+    from mojive.ui.workspace.floating import floating_window
+
+    presentation = ctx.inspector_presentation
+    return (
+        presentation.dialog(title)
+        if presentation is not None
+        else floating_window(None, title, modal=True)
+    )
+
+
+def _property_dialog_actions(ctx, labels, *, primary=0):
+    from mojive.ui.workspace.floating import floating_actions
+
+    presentation = ctx.inspector_presentation
+    return (
+        presentation.dialog_actions(labels, primary=primary)
+        if presentation is not None
+        else floating_actions(None, labels, primary=primary)
+    )
+
+
 def _property_combo(ctx, key, index, labels, flags=0):
     presentation = getattr(ctx, "inspector_presentation", None)
     if presentation is not None:

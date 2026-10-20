@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
-from mojive.design.groups import scoped_parts
+from mojive.design.groups import CURRENT_GROUPS, scoped_parts
 from mojive.design.native.geometry import (
     CURRENT_NATIVE_PARTS,
     NativePartStyle,
@@ -559,6 +559,43 @@ class _NumericFields:
     ):
         """Reserve one label column and a measured child grid inside row margins."""
         s = self.s
+        field_minimum = self.numeric_minimum(axis=axis) if field_minimum is None else field_minimum
+        runtime = self.design.runtime if self.design else None
+        revision = runtime.revision if runtime else 0
+        state = getattr(self, "_form_layouts", None)
+        if state is None or state[:2] != (runtime, revision):
+            state = self._form_layouts = (runtime, revision, {})
+        cache = state[2]
+        field = self._layout_style(
+            field_part or (("input_number", "axis_input") if axis else "input_number")
+        )
+        field_height = (
+            self.design.primitives.field_height(field.part_ids, DESIGN.control_height)
+            if field
+            else DESIGN.control_height
+        )
+        geometry = (
+            width,
+            count,
+            s,
+            axis,
+            minimum,
+            label_above,
+            label_width,
+            label_minimum,
+            label_gap,
+            field_minimum,
+            vector,
+            minimum_height,
+            field_part,
+            field_height,
+            CURRENT_GROUPS.get(),
+            CURRENT_NATIVE_PARTS.get(),
+        )
+        # Audits must observe every field read even when the geometry is unchanged.
+        cacheable = runtime is None or not runtime.track_field_reads
+        if cacheable and geometry in cache:
+            return cache[geometry]
         row = self._layout_style(("form_row", "vector_row") if vector else "form_row")
         margins = budget_margins(row.edges("margin", s), width, math.inf) if row else (0, 0, 0, 0)
         available = max(0, width - margins[0] - margins[2])
@@ -580,7 +617,6 @@ class _NumericFields:
                 if row
                 else DESIGN.label_gap
             ) * s
-        field_minimum = self.numeric_minimum(axis=axis) if field_minimum is None else field_minimum
         # A left label shares the row with at least one field. The numeric grid
         # owns XYZ reflow; reserving every axis before that pass erases the label.
         required_count = 1 if force_left else count
@@ -633,7 +669,7 @@ class _NumericFields:
         align_y = max(0, cross - layout.height) * (
             0.5 if valign == "center" else 1 if valign == "end" else 0
         )
-        return replace(
+        result = replace(
             layout,
             fields=tuple(
                 (x + field_x + margins[0], y + field_y + margins[1] + align_y, w, h)
@@ -650,6 +686,11 @@ class _NumericFields:
             width=width,
             row_margin=margins,
         )
+        if cacheable:
+            if len(cache) >= 128:
+                cache.clear()
+            cache[geometry] = result
+        return result
 
     @part_scope("vector_row")
     def vector_caption_width(self, text, unit=""):

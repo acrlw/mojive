@@ -18,6 +18,12 @@ from mojive.config import (
     RecordingConfig,
 )
 from mojive.ui.take_video import TakeVideo
+from mojive.ui.workspace.floating import (
+    floating_button,
+    floating_button_width,
+    floating_style,
+    floating_window,
+)
 
 from .support import log
 
@@ -235,16 +241,37 @@ class _Capture:
         recording = self.recording
         x, y, width, _height = self._viewport_rect
         scale = self.window.style_scale
+        ui = self._floating_ui
+        remaining = math.ceil(recording.countdown_remaining)
+        title = self.localizer.text("Recording starts in")
+        timing = (
+            f"{remaining} {self.localizer.text('s')}"
+            if remaining
+            else self.localizer.text("Close menus to begin")
+        )
+        cancel = self.localizer.text("Cancel")
+        with floating_style(ui):
+            style = imgui.get_style()
+            time_font = imgui.get_font_size() * (1.6 if remaining else 1)
+            imgui.push_font(None, time_font)
+            time_width = imgui.calc_text_size(timing).x
+            imgui.pop_font()
+            content_width = max(
+                imgui.calc_text_size(title).x,
+                time_width + style.item_spacing.x + floating_button_width(ui, cancel),
+            )
+            popup_width = min(
+                width - 16 * scale, math.ceil(content_width + 2 * style.window_padding.x)
+            )
         capsule = self._playback_widget_rect
         center_x = (capsule[0] + capsule[2]) * 0.5 if capsule else x + width * 0.5
         top = capsule[3] + 8 * scale if capsule else y + 12 * scale
-        imgui.push_style_var(imgui.StyleVar_.window_padding, (10 * scale, 8 * scale))
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, (10 * scale, 6 * scale))
         imgui.set_next_window_pos(
-            (min(x + width - 85 * scale, max(x + 85 * scale, center_x)), top),
+            (min(x + width - popup_width / 2, max(x + popup_width / 2, center_x)), top),
             imgui.Cond_.always,
             (0.5, 0),
         )
+        imgui.set_next_window_size((popup_width, 0))
         flags = (
             imgui.WindowFlags_.always_auto_resize
             | imgui.WindowFlags_.no_title_bar
@@ -253,20 +280,16 @@ class _Capture:
             | imgui.WindowFlags_.no_docking
             | imgui.WindowFlags_.no_focus_on_appearing
         )
-        imgui.begin("##recording_countdown", None, flags)
-        remaining = math.ceil(recording.countdown_remaining)
-        imgui.text(self.localizer.text("Recording starts in"))
-        if remaining:
-            imgui.push_font(None, imgui.get_style().font_size_base * 1.6)
-            imgui.text(f"{remaining} {self.localizer.text('s')}")
+        with floating_window(ui, "##recording_countdown", flags=flags) as visible:
+            if not visible:
+                return
+            imgui.text(title)
+            imgui.push_font(None, time_font)
+            imgui.text(timing)
             imgui.pop_font()
-        else:
-            imgui.text(self.localizer.text("Close menus to begin"))
-        imgui.same_line()
-        if imgui.button(self.localizer.text("Cancel")):
-            self.stop_recording()
-        imgui.end()
-        imgui.pop_style_var(2)
+            imgui.same_line()
+            if floating_button(ui, cancel):
+                self.stop_recording()
 
     def pause_recording(self) -> bool:
         """Pause an active interactive recording without finalizing its video."""

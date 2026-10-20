@@ -570,7 +570,9 @@ def _capsule_padding_ratio(smoothing: float) -> float:
         offsets = points - (middle, 1.0)
         distance = cross(offsets[None], edges[None]) / denominator
         along = cross(offsets[None], rays[:, None]) / denominator
-        radii = np.where((distance > 0) & (along >= 0) & (along <= 1), distance, np.inf)
+        # Include shared vertices despite roundoff in the segment parameter.
+        hits = (distance > 0) & (along >= -1e-12) & (along <= 1 + 1e-12)
+        radii = np.where(hits, distance, np.inf)
         if radii.min(axis=1).mean() < 1.0:
             lo = middle
         else:

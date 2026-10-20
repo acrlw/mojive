@@ -235,11 +235,13 @@ def compile_svg(svg):
         raise ValueError(f"Stroked icon bounds {bounds} exceed its viewBox {view_box}")
     return {
         "viewBox": view_box,
+        # Bounds use the same canonical precision as contour coordinates so
+        # platform trigonometric roundoff cannot invalidate packaged resources.
         "bounds": [
-            bounds[0] * scale + dx,
-            bounds[1] * scale + dy,
-            bounds[2] * scale + dx,
-            bounds[3] * scale + dy,
+            round(bounds[0] * scale + dx, 6),
+            round(bounds[1] * scale + dy, 6),
+            round(bounds[2] * scale + dx, 6),
+            round(bounds[3] * scale + dy, 6),
         ],
         "contours": contours,
     }

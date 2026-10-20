@@ -325,6 +325,7 @@ class NativePropertyPresentation:
         self._table_labels = {}
         self._label_width = None
         self._labels = []
+        self._active_rows = {}
         self.choices = ChoicePopup(ui)
 
     def _field_width(self):
@@ -369,6 +370,40 @@ class NativePropertyPresentation:
             self._table_labels[self.groups.tables[-1].key] = tuple(self._labels)
         self.groups.end()
         self._control_width = None
+
+    def clipped_rows(self, labels):
+        """Clip uniform property rows while retaining label width and active edits."""
+        labels = tuple(labels)
+        if not labels:
+            return
+        ui = self.ui
+        owner = self.groups.tables[-1].key
+        if self.fit_labels and not ui.component_style("form_row").explicit("labelWidth"):
+            size = ui.metric("form_label", "fontSize", BODY_SIZE)
+            self._label_width = max(ui.measure(label, size, translate=False) for label in labels)
+        active = self._active_rows.pop(owner, None)
+
+        def remember(index):
+            item_id = imgui.get_item_id()
+            if item_id and item_id == imgui.get_current_context().active_id:
+                self._active_rows[owner] = (index, item_id)
+
+        # Section top padding belongs only to the first row. Measure the uniform
+        # remainder separately so an authored section inset never changes its stride.
+        yield 0
+        remember(0)
+        clipper = imgui.ListClipper()
+        clipper.begin(len(labels) - 1)
+        if active and active[0] > 0 and active[1] == imgui.get_current_context().active_id:
+            clipper.include_item_by_index(active[0] - 1)
+        try:
+            while clipper.step():
+                for index in range(clipper.display_start + 1, clipper.display_end + 1):
+                    yield index
+                    remember(index)
+        finally:
+            clipper.end()
+            self._labels[:] = labels
 
     def row(
         self,

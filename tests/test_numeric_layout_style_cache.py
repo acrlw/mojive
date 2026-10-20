@@ -71,6 +71,7 @@ def test_cached_layout_matches_fresh_raw_styles_under_family_group_parent_and_ty
     assert frame(draw) == actual
     with monkeypatch.context() as fresh:
         fresh.setattr(ui, "_layout_style", lambda parts: _fresh_style(ui, parts))
+        ui._form_layouts[2].clear()
         expected = frame(draw)
     assert actual == expected
     raw = ui._layout_style("form_label")
@@ -151,3 +152,19 @@ def test_raw_layout_cache_stays_bounded(appearance):
         ui._layout_style(("unused-layout-" + str(index),))
     assert len(ui._numeric_layout_styles[2]) <= 64
     assert ui._layout_style("form_row") is ui._layout_style("form_row")
+
+
+def test_form_geometry_reuses_warm_rows_and_invalidates_resizes_and_design_edits(appearance):
+    ui, _runtime, update, frame = appearance
+    initial = frame(lambda: _form(ui, 640))
+    assert frame(lambda: _form(ui, 640)) is initial
+    narrow = frame(lambda: _form(ui, 170))
+    assert narrow != initial
+    assert frame(lambda: _form(ui, 640)) is initial
+    update({"vector_group": {"columnGap": 17}, "form_label": {"fontSize": 30}})
+    edited = frame(lambda: _form(ui, 640))
+    assert edited != initial
+    assert frame(lambda: _form(ui, 640)) is edited
+    for width in range(200, 340):
+        frame(lambda width=width: _form(ui, width))
+    assert len(ui._form_layouts[2]) <= 128

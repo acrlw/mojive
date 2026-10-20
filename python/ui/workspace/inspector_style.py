@@ -9,7 +9,7 @@ import numpy as np
 from imgui_bundle import imgui
 
 from mojive.design.groups import scoped_parts
-from mojive.design.native.geometry import Rect, part_scope
+from mojive.design.native.geometry import CURRENT_NATIVE_PARTS, Rect, part_scope
 from mojive.ui.panels import pointer_pressed
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.workspace.button_rows import draw_button_row, measure_button_row
@@ -495,9 +495,20 @@ class NativeInspectorPresentation:
             width / ui.s,
             height,
             label=caption,
+            filled="dialog" in CURRENT_NATIVE_PARTS.get(),
             translate=False,
             width_limit=limit,
         )
+
+    def dialog(self, title):
+        from mojive.ui.workspace.floating import floating_window
+
+        return floating_window(self.ui, title, modal=True)
+
+    def dialog_actions(self, labels, *, primary=0):
+        from mojive.ui.workspace.floating import floating_actions
+
+        return floating_actions(self.ui, labels, primary=primary)
 
     def button_row(self, key, labels, enabled=None):
         return draw_button_row(self.ui, key, labels, enabled, available=self._field_width())

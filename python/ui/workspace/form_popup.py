@@ -2,13 +2,13 @@
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from math import ceil
+from math import ceil, floor
 
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import Rect, independent_corner_scope, part_scope
 from mojive.ui.workspace.corner_geometry import nested_corners
-from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.design import BODY_SIZE
 from mojive.ui.workspace.menu_geometry import native_edges, native_unit
 from mojive.ui.workspace.panel_geometry import corner_inset
 from mojive.ui.workspace.window_chrome import surface_ink
@@ -42,12 +42,34 @@ class FormPopupLayout:
         return Rect(start, row.y, max(0, row.right - start), row.height)
 
 
+@independent_corner_scope()
+def form_corners(ui, part="form_popup", *, control_part="input_number", inner_limit=None):
+    """Balance the shell, native inset and contained control corners."""
+    with part_scope(part, inherit=False):
+        scale, style = ui.s, ui.component_style(part)
+        padding_style = style if part == "dialog" else ui.component_style("form_popup")
+        default_padding = 12 if part == "dialog" else 8
+        padding = max(native_edges(padding_style, "padding", scale, (default_padding,) * 4))
+        control = ui.component_style(control_part)
+        inner = max(0, control.get("radius", 4) if control.explicit("radius") else 4) * scale
+        if inner_limit is not None:
+            inner = min(inner, inner_limit)
+        corners = nested_corners(style, scale, (padding,) * 4, inner)
+        if corners.authored_radius:
+            # Smaller shells reduce both the inset and the child corner. Round
+            # the inset first so their sum remains exact at fractional UI scales.
+            inset_ratio = default_padding / (default_padding + 4)
+            padding = min(padding, native_unit(corners.radius * inset_ratio), floor(corners.radius))
+            if inner_limit is not None:
+                padding = corner_inset(corners.radius, padding, inner_limit)
+        return nested_corners(style, scale, (padding,) * 4, inner)
+
+
 @part_scope("form_popup", inherit=False)
 @independent_corner_scope()
 def measure_form_popup(ui, labels, *, field_width, row_height, group_starts=()):
     """Resolve all layout extents on the same grid as ImGui's native windows."""
     scale, style = ui.s, ui.component_style("form_popup")
-    padding = (max(native_edges(style, "padding", scale, (8, 8, 8, 8))),) * 4
     gap = native_unit(style.get("columnGap", 12) * scale)
     row_gap = native_unit(style.get("rowGap", 6) * scale)
     group_gap = native_unit(style.get("groupGap", 12) * scale)
@@ -63,12 +85,9 @@ def measure_form_popup(ui, labels, *, field_width, row_height, group_starts=()):
         )
     )
     row_height = ceil(max(row_height, label_style.line_height(label_font * 1.4) * scale))
-    number = ui.component_style("input_number")
     limit = max(0, min(field_width, row_height) / 2 - 1)
-    inner = min(number.get("radius", DESIGN.control_radius) * scale, limit)
-    corners = nested_corners(style, scale, padding, inner)
-    padding = (corner_inset(corners.radius, padding[0], limit),) * 4
-    corners = nested_corners(style, scale, padding, inner)
+    corners = form_corners(ui, inner_limit=limit)
+    padding = corners.padding
     width = ceil(label_width + gap + field_width + padding[0] + padding[2])
     width = min(width, native_unit(imgui.get_main_viewport().work_size.x - 16 * scale))
     label_width = min(label_width, max(0, width - padding[0] - padding[2] - gap - field_width))

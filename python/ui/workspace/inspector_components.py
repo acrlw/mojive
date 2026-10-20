@@ -48,7 +48,7 @@ def _physics(panel, ctx, node):
     _empty(ctx)
 
 
-def draw_component(workspace, ctx, entity, tab, *, material_details=False):
+def draw_component(workspace, ctx, entity, tab, *, details=None):
     """Apply native presentation to the registered Inspector's real controls."""
     presentation = getattr(workspace, "inspector_presentation", None)
     if presentation is None:
@@ -64,8 +64,8 @@ def draw_component(workspace, ctx, entity, tab, *, material_details=False):
     with property_controls(workspace.ui):
         try:
             panel = workspace.app.panels.get("inspector")
-            if material_details:
-                panel._material(ctx, ctx.session.node(entity["node_id"]))
+            if details is not None:
+                panel._geometry_components(ctx, ctx.session.node(entity["node_id"]), fields=details)
                 handled = True
             else:
                 handled = _draw_component(workspace, ctx, entity, tab)
@@ -135,6 +135,7 @@ def _draw_component(workspace, ctx, entity, tab):
             if ctx.session.site_properties(node.node_id) is not None:
                 imgui.set_next_item_open(True, imgui.Cond_.once)
                 panel._site_properties(ctx, node)
+            panel._geometry_components(ctx, node, fields="geometry")
         elif node.type is NodeType.WORLD:
             _empty(ctx)
         else:

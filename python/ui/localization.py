@@ -1077,6 +1077,7 @@ _ZH_CN = {
     "frame cpu": "帧 CPU",
     "frames": "帧",
     "geometry components": "个几何体组件",
+    "Geometry components": "几何体组件",
     "gpu ms": "GPU 毫秒",
     "haze": "薄雾",
     "headlight": "头灯",

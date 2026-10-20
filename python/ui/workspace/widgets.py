@@ -674,7 +674,9 @@ class UI(ComponentStyles, _NumericFields):
         if self.design is not None:
             from mojive.ui.workspace.popup_style import menu_choice_width
 
-            popup_width = menu_choice_width(self, labels, index)
+            def popup_width():
+                return menu_choice_width(self, labels, index)
+
         opened = self.begin_combo(
             key,
             x,

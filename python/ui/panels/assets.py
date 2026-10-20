@@ -95,10 +95,19 @@ def _hfield_size_editor(
     changed = False
     if presentation:
         if presentation.begin_table(str_id):
-            for index, label in enumerate(
-                ("X half-size", "Y half-size", "elevation scale", "base depth")
-            ):
-                presentation.row(ctx.tr(label))
+            labels = tuple(
+                ctx.tr(label)
+                for label in ("X half-size", "Y half-size", "elevation scale", "base depth")
+            )
+            # Four visible fields cost less than starting a native clipper. Use
+            # clipping when the group scrolls out of view, retaining active edits.
+            rows = (
+                range(len(labels))
+                if imgui.is_rect_visible((1, imgui.get_frame_height()))
+                else presentation.clipped_rows(labels)
+            )
+            for index in rows:
+                presentation.row(labels[index])
                 item_changed, edited[index] = presentation.numeric(
                     f"##{str_id}-{index}", float(edited[index]), 0.01, 0.001, 1000000, "%.3f"
                 )
