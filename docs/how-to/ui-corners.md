@@ -1,5 +1,11 @@
 # G3 UI corners
 
+The adopted workspace uses scoped component radii and **circular corners by default**.
+Read the [project corner rules](../guides/ui-design.md#spacing-alignment-and-corners) for
+current nested surfaces and the native-window boundary. This page describes the shared
+optional G3 geometry, retained feasibility specimens, and base ImGui behavior. Its older
+capsule dimensions and base frame radius are not universal workspace defaults.
+
 Mojive's custom UI uses curvature ramps for rounded rectangles, playback and tool capsules,
 rounded arrowheads, small rounded Scale handles, Snap, mouse hints, and stroke caps.
 `python/geometry2d/curves.py` computes paths for ImGui drawing and PNG export.
@@ -24,8 +30,10 @@ It pins nanobind 2.9.2 because that source release uses its four-argument ndarra
 The source, wheel, and reusable CMake build are under `build/imgui/`.
 Subsequent unchanged builds reuse the wheel for the same Python ABI and host architecture.
 
-Production ImGui controls use ordinary circular corners with a 4.8 px frame radius.
-Menus, selectable rows, docking targets, and window decorations retain native drawing.
+Base ImGui controls use ordinary circular corners with a 4.8 px frame radius before
+workspace component scopes apply their own radii.
+Base menus, selectable rows, docking targets, and window decorations retain native drawing;
+workspace menus use the shared workspace popup presentation.
 Custom `Draw2D` shapes select their own G3 profiles independently of ImGui style.
 There is no global G3 style field or replacement for native rectangle tessellation.
 Use the drawing API below to style custom geometry.
@@ -43,7 +51,8 @@ math lives only in the shared Python geometry modules. The build restores previo
 files from the checked archive before applying a changed recipe, so removed code cannot survive
 in a cached source tree. `make setup-g3` remains an alias for existing workflows.
 
-Panel padding is fixed at 10 logical pixels and does not depend on the corner radius.
+Base ImGui panel padding is 10 logical pixels and does not depend on the corner radius.
+Workspace content uses its resolved design specification and semantic group insets.
 Viewport uses zero content padding in both floating and docked windows. Its scene image
 fills the docked content area. Floating windows retain their native one-pixel resize border
 outside the image clip; custom overlay margins are owned by the overlays.
@@ -62,12 +71,14 @@ the local wheel. Run `make setup-imgui` again after synchronization, and launch 
 `uv run --no-sync mojive`. The patch is a source-build recipe,
 not a published binary distribution. The wheel is specific to the build host's platform and ABI.
 
-The production defaults use smoothing **0.382** for capsules, playback glyphs and tool-column
-icons, and **0.618** for the other custom corner geometry. Capsule outlines use Soft white (the theme's text color at 25% opacity). Playback and tool capsules share their thickness; their lengths follow
-the number of controls. Native ImGui frame rounding remains **4.8 logical pixels**.
+The retained custom G3 defaults use smoothing **0.382** for capsules, playback glyphs and
+tool-column icon candidates, and **0.618** for the other custom corner geometry. These capsule
+outlines use Soft white (the theme's text color at 25% opacity). Playback and tool capsules
+share their thickness; their lengths follow the number of controls. The base ImGui frame
+rounding remains **4.8 logical pixels**.
 
-Viewport capsules use icon/state/shell radii of **8 / 14 / 20** logical pixels, a **34**-pixel
-center step, a **10**-pixel group gap, and a **20**-pixel tool divider. Optical end spacing puts
+The retained viewport capsule specimens use icon/state/shell radii of **8 / 14 / 20** logical
+pixels, a **34**-pixel center step, a **10**-pixel group gap, and a **20**-pixel tool divider. Optical end spacing puts
 the first and last control centers **20.3532** pixels from the capsule ends, matching their mean
 clearance to the straight sides. `OverlayGeometry.end_padding_ratio` stores the measured ratio
 to the shell radius, so production layout scales without fitting the curve during startup.
@@ -184,6 +195,11 @@ dependency build. Whole-frame timing also includes scene rendering and schedulin
 subtracting two frame medians cannot establish that corner drawing costs zero.
 
 ## Live corner controls
+
+This section describes the retained feasibility controls and their shared base painters.
+References to production glyphs here mean the `ui/icons/` family used by those specimens.
+For the adopted workspace SVG family and live component scopes, use `make ui-design-guide`
+and `make ui-native-design` as described in the [UI rules](../guides/ui-design.md).
 
 For a small side-by-side study using current production controls, run:
 

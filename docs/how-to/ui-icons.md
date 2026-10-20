@@ -1,5 +1,10 @@
 # Design and verify UI icons
 
+For project-wide visual and interaction rules, start with the
+[UI design guide](../guides/ui-design.md). The
+[review checklist](../reference/ui-design-checklist.md#icon-geometry-and-meaning) covers
+scaling, centering, contour, and semantic failure patterns.
+
 Mojive draws compact UI icons from filled vector contours. Treat an icon family as a small type
 system: its members share a canvas, proportions, weight, cap style, alignment, and scaling rules.
 Changing one contour in isolation usually produces a visible mismatch at Output-row sizes.

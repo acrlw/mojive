@@ -68,15 +68,32 @@ Use these names consistently:
   and reviewed golden fixtures use their existing tracked locations when their update is in scope.
 - Reuse or extend a Make target for visual acceptance of visible behavior; add a target when no
   existing one demonstrates the change.
-- Follow the [UI icon design guide](docs/how-to/ui-icons.md) for custom glyphs. Author each family
-  on one canonical grid, scale every visible dimension together, and verify production geometry at
-  every target size; do not add an isolated pixel floor to one stroke, dot, gap, or inset.
 - Follow [implementation and collaboration standards](docs/guides/development.md#implementation-principles)
   for ownership, command transactions, capability boundaries, reusable controls, and handoffs.
 - Basic editor interactions must work without physics capabilities. Gate backend writes at their
   command boundary; do not reset local UI state merely because an adapter has no models or takes.
 - Fix the violated invariant before adding a fallback. Preserve failure evidence and atomicity;
   do not hide failed writes, guess entity identities, or accept stale state without proving compatibility.
+
+## UI design
+
+- For UI design, implementation, or review, use the repository
+  [UI design skill](skills/mojive-ui-design/SKILL.md), the
+  [project UI rules](docs/guides/ui-design.md), and relevant
+  [review criteria](docs/reference/ui-design-checklist.md). This includes the design guide,
+  workbench, viewport overlays, and capture workflows.
+- Use the adopted specification and production components as the baseline. Distinguish retained
+  experiments from current defaults; a current user request can intentionally revise a decision.
+- Preserve independent semantic groups, explicit insets, derived nested corners, stable numeric
+  layout, and native input ownership. Fix shared consumers, not only the reported screenshot.
+- Follow the [UI icon design guide](docs/how-to/ui-icons.md) for custom glyphs. Author each family
+  on one canonical grid, scale every visible dimension together, and verify production geometry at
+  every target size; do not add an isolated pixel floor to one stroke, dot, gap, or inset.
+- Performance work preserves approved appearance and hit geometry. Inspect real production
+  captures and interactions under matching specifications, fonts, scales, and scene state.
+- Record reusable corrections in the owning design guide and checklist in the same change.
+  Keep instructions portable and public-safe: use generic failure patterns and repository
+  evidence, without private conversations, personal identifiers, or workstation incident details.
 
 ## Verification
 

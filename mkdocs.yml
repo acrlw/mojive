@@ -37,6 +37,8 @@ nav:
       - Testing: guides/testing.md
       - Python and C++ development: guides/development.md
       - Python module map (中文): guides/python-layout.zh.md
+      - UI design rules: guides/ui-design.md
+      - UI design review checklist: reference/ui-design-checklist.md
       - G3 UI corners: how-to/ui-corners.md
       - Extend UI drawing: how-to/ui-drawing.md
       - Canvas2D: how-to/canvas2d.md

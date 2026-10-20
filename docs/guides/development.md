@@ -349,6 +349,11 @@ remain in Python.
 
 ## Shared UI controls
 
+Read the [project UI design rules](ui-design.md) before changing controls or their consumers.
+The [review checklist](../reference/ui-design-checklist.md) maps common failure patterns to
+design constraints and focused verification. For the agent workflow, use the repository
+`skills/mojive-ui-design/SKILL.md`.
+
 UI performance changes preserve measured rectangles, nested corner budgets, typography and
 native input/transaction state. Cache style preparation with explicit revision, scope and
 typography invalidation; keep raw layout styles separate from inherited painter styles.

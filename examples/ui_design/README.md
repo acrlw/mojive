@@ -1,5 +1,9 @@
 # UI design study
 
+The [project UI rules](../../docs/guides/ui-design.md) define the shared design contract.
+The [review checklist](../../docs/reference/ui-design-checklist.md) maps common failure patterns
+to focused checks. This page documents the runnable tools and their component controls.
+
 The native design is now the default production Mojive workspace. `mojive view`,
 `mojive editor`, and public viewer builders use `python/ui/workspace/`, with
 Session commands and the existing ViewerApp frame pipeline retaining scene and
@@ -424,10 +428,11 @@ The active thumb uses a neutral light ink against the accent track.
 Body, camera, light, physics and joint vectors use the same grid.
 XYZ groups use three equal columns when common numeric precision fits, and one
 column at compact widths. Color channels use one complete RGB/RGBA row or one channel
-per row; partial rows are avoided. Units appear in field labels. Numeric values keep
-their authored decimal precision, including trailing zeros. Plain inputs reserve eight
-points of horizontal padding; axis fields use their independently adjustable three-point
-insets. The grid measures a static numeric domain before choosing its column count.
+per row; partial rows are avoided. Units use the shared numeric-field presentation.
+Numeric values keep their authored decimal precision, including trailing zeros. Plain inputs
+reserve eight points of horizontal padding; shared axis fields default to four-point insets,
+with a three-point override in the compact color editor. These insets remain independently
+adjustable. The grid measures a static numeric domain before choosing its column count.
 Values exceeding that budget use complete scientific notation, then an ellipsis when
 even the exponent cannot fit, with the full value on hover. Text editing retains the
 native caret, horizontal scrolling and original precision.
@@ -469,8 +474,8 @@ a tilted rounded object with a short rotation arrow for Pose, a mechanical pivot
 joints and rotation arcs for ball joints. Runtime statistics use a performance gauge.
 Sensors use a sensing point between reception arcs; Curves retains the distinct waveform.
 Snap uses a filled horseshoe with separated poles. Bodies use a framed center mark;
-state snapshots use a card with a diamond. Content visualization uses a body, reference plane and normal
-arrow, independently of the layer-stack symbol. Projection frames have rounded inner and outer
+state snapshots use a bookmark outline for a saved instant. Content visualization uses a body,
+reference plane and normal arrow, independently of the layer-stack symbol. Projection frames have rounded inner and outer
 corners.
 Default uses a preset flag, Visual a palette, Collision two contacting body outlines,
 and Both overlapping circles. Chinese

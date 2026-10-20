@@ -1,7 +1,8 @@
 # Agent workflows
 
-This guide describes scene operation and Skill maintenance. Operating a scene does not require
-running the repository test suites. Use the interface for the process that contains the scene:
+This guide describes scene operation, UI development entry points, and Skill maintenance.
+Operating a scene does not require running the repository test suites. Use the interface for
+the process that contains the scene:
 
 | Task | Entry point | State owner |
 |---|---|---|
@@ -12,8 +13,11 @@ running the repository test suites. Use the interface for the process that conta
 | Display a caller-owned MuJoCo rollout | `launch_passive(model, data)` and `sync()` | The caller's physics loop |
 | Display a remote publisher | Snapshot transport | The publisher owns simulation state |
 
-For UI implementation changes, see the [drawing extension guide](ui-drawing.md) for shape
-functions, drawing adapters, retained diagnostics, coordinate units, caching, and tests.
+For UI design, implementation, or review, use `skills/mojive-ui-design/SKILL.md` and the
+[project UI rules](../guides/ui-design.md). The
+[review checklist](../reference/ui-design-checklist.md) connects failure patterns to focused
+checks. Use the [drawing extension guide](ui-drawing.md) for shape functions, drawing adapters,
+retained diagnostics, coordinate units, caching, and tests.
 
 Starting a standalone service creates a separate Session. To inspect the scene already visible
 to a user, connect to its attached RPC endpoint. See [local RPC control](rpc-control.md) for
@@ -144,10 +148,16 @@ viewport and window images. Both modes shut down their service on completion.
 
 ## Skill discovery
 
-The source skill is `skills/mojive/SKILL.md`. The repository's `.agents/skills/mojive` symlink
-points to that directory for repository discovery. Edit the source once; do not maintain a second
-copy. Resolve Skill references from the source directory. The skill can be invoked as `$mojive`
-once discovered, or selected automatically for matching scene tasks.
+| Task | Source | Invocation |
+|---|---|---|
+| Inspect, author, control, or capture scene content through public APIs | `skills/mojive/SKILL.md` | `$mojive` |
+| Design, implement, or review editor UI and design tools | `skills/mojive-ui-design/SKILL.md` | `$mojive-ui-design` |
+
+Each directory is linked from `.agents/skills/` under the same name for repository discovery.
+Edit the source once; do not maintain a second copy. Resolve Skill references from the source
+directory. Skills can be invoked by name once discovered or selected for matching tasks.
+The UI skill depends on this repository's design documents and production components; it is
+not a general-purpose design system for unrelated projects.
 
 For optional use outside this repository, link the source into a user skill directory supported
 by your Codex host. The shared user location is `~/.agents/skills`:
@@ -166,9 +176,13 @@ there need not be replaced. Repository operation requires no personal installati
 
 Maintain instructions or examples when that work is part of the requested task. Ordinary scene
 operation can report a demonstrated workflow gap without changing repository instructions.
-Keep the Skill focused on task decisions; the operation catalog in `python/control/operations.py` owns
-parameter definitions and `control/schema.py` owns shared schemas. Component responsibilities are
-documented in [architecture](../concepts/architecture.md#ownership).
+Keep each Skill focused on task decisions. For scene operations, the catalog in
+`python/control/operations.py` owns parameter definitions and `control/schema.py` owns shared
+schemas. Component responsibilities are
+documented in [architecture](../concepts/architecture.md#ownership). For UI work, the shared
+design specification owns defaults, the [UI guide](../guides/ui-design.md) owns cross-component
+rules, and specialist guides own detailed geometry and drawing contracts. Keep reusable
+instructions public-safe and independent of personal conversations or workstation details.
 
 For Skill edits, validate frontmatter, naming, UI metadata, the discovery symlink, and referenced
 paths. Use the installed skill-creator's `quick_validate.py` with the source Skill directory as its
@@ -178,7 +192,9 @@ validation method. The helper's absence does not block equivalent validation.
 Check realistic task decisions as well: existing-viewer edits keep the correct Session, direct
 scene creation works without RPC, unknown mutation outcomes are inspected before retry, and an
 explicit request for review before edits still produces only a proposal. Format validation alone
-does not establish these behaviors. Run the applicable [verification gates](../guides/testing.md#change-mapping)
+does not establish these behaviors. For the UI skill, check that a focused change locates its
+shared production owner, selects relevant checks, preserves scope, and does not silently adopt
+experimental defaults. Run the applicable [verification gates](../guides/testing.md#change-mapping)
 for changed decisions or executable behavior. Pure wording changes do not require scene rendering.
 Extend the Skill only for demonstrated gaps, keeping parameter and protocol details in code and
 the relevant reference guide.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mojive UI Design"
+  short_description: "Design and verify consistent Mojive editor UI"
+  default_prompt: "Use $mojive-ui-design to review or implement this Mojive UI change against the project design rules and verify the affected production behavior."

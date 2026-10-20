@@ -32,4 +32,6 @@ and recordings. Rendering uses OpenGL or bgfx, independently of the physics adap
 - [Architecture](concepts/architecture.md)
 - [Rendering](concepts/rendering.md)
 - [Build and development instructions](guides/development.md)
+- [UI design rules](guides/ui-design.md)
+- [UI design review checklist](reference/ui-design-checklist.md)
 - [Testing](guides/testing.md)

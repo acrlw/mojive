@@ -1,5 +1,10 @@
 # Extend UI drawing
 
+Start with the [project UI design rules](../guides/ui-design.md) for component ownership,
+current workspace defaults, and verification. The adopted workspace uses shared presenters
+under `ui/workspace/` and controls under `design/native/`. The feasibility Icon Library below
+is a retained candidate set; its fitting rules do not replace the adopted SVG master pipeline.
+
 UI widgets draw through the `Draw2D` protocol, which is implemented with ImGui draw lists.
 This protocol does not define a separate renderer. Retained diagnostics use a DebugDraw `Layer`
 or Canvas2D. Both use CPU geometry functions; neither imports the other's drawing code.
@@ -10,6 +15,11 @@ For canonical grids, optical sizing, family consistency, and multi-size acceptan
 For retained viewport geometry, see [Canvas2D](canvas2d.md).
 
 ## Review on the production backend
+
+For the adopted workspace, use `make ui-native-capture`, `make ui-design-guide`, and
+`make ui-design-reference ARGS='--icons --portable-fonts'`. See
+[focused verification](../guides/ui-design.md#verification-and-maintaining-the-rules) for
+their roles. The following workflow exercises retained custom geometry on the same backend.
 
 UI Feasibility and the viewer share window creation in
 `app/ui/window.py`. The probe creates no 3D renderer just to display its panels. Its Icon Library,
@@ -185,7 +195,7 @@ mutation as a stable extension API.
 
 ## Reuse geometry and retain clear ownership
 
-Production icons compile their reviewed local contours into a bounded cache of Draw2D calls,
+Retained custom icons compile their reviewed local contours into a bounded cache of Draw2D calls,
 keyed by glyph and logical size. Calls retain geometry and color slots, never a draw list,
 ImGui context, theme, or actual interaction color. Placement, hover, press, selection and disabled
 opacity are resolved when replaying the calls. ImGui translates the submitted vertices, including
@@ -209,12 +219,17 @@ Keep this path shared between production UI, scripted visual acceptance and prog
 An empty MuJoCo edit batch does not compile; writes that defer constants explicitly request the
 single final rebuild.
 
-Use `panels.padded_selectable` for standard list rows and native `imgui.menu_item` for menus.
+Workspace menus use the shared `ui/workspace/menus.py` and popup presentation; new workspace
+consumers must retain their measured columns, inherited styles, and input behavior.
+For base ImGui consumers, use `panels.padded_selectable` for standard list rows and native
+`imgui.menu_item` for menus.
 The list helper retains native selection, keyboard navigation, IDs, and highlighting while giving
 text explicit insets and equal first/middle/last row bounds. Custom G3 geometry belongs to `Draw2D`;
 it does not change global ImGui corners, item bounds, or clipping behavior.
 
-The default ImGui radius is 4.8 logical pixels. Spacing is independent of corner radius:
+The following values describe base ImGui styling, before workspace component scopes.
+Current workspace defaults are in `python/design/resources/design-spec.json`.
+The base ImGui radius is 4.8 logical pixels. Spacing is independent of corner radius:
 
 | Surface | Horizontal inset | Vertical inset |
 | --- | --- | --- |
@@ -224,7 +239,7 @@ The default ImGui radius is 4.8 logical pixels. Spacing is independent of corner
 | Menu rows | 10 | 4 |
 | Viewport content | 0 | 0 |
 
-The default gap between controls is 10 horizontally and 8 vertically. Keep the 4.8 px radius
+The base gap between controls is 10 horizontally and 8 vertically. Keep the 4.8 px radius
 independent of these spacing values.
 Top-level menu labels use a separate compact horizontal gap; popup row padding must not
 expand the menu bar. Mutually exclusive segments measure each label and icon, then stack
@@ -235,8 +250,8 @@ controls apply the same alpha to their text, fill, border, and checkmark.
 Use `ROW_PADDING_X` and `ROW_PADDING_Y` from `theme` for custom list rows. Rows keep their
 full-width hover background while text and disclosure icons sit inside it. Custom text in
 one row uses `ui.text_layout.text_line_y`, which centers a shared cap-height reference: descenders
-must not move individual words off the baseline. Status keys and telemetry use the same
-keycap drawing and `keycap_rounding` proportions.
+must not move individual words off the baseline. Status keys and telemetry share baseline
+geometry. Workspace keyboard hints use keycaps; telemetry readouts have no keycap background.
 
 Use `panels.search_input` for search fields. It reserves trailing icon slots outside the
 native text editor, so long text and the caret cannot collide with Search or Clear. Toolbar
