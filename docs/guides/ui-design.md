@@ -71,6 +71,10 @@ Related text shares a baseline; icon slots align to the font's measured cap-heig
 Do not independently center every word's ink box: changing a caption must not move its
 baseline. Missing CJK glyphs, fallback faces, and clipped descenders are acceptance failures.
 Apply application UI scale once; framebuffer density is a separate conversion.
+Native workspace presenters submit font sizes in resolved layout coordinates, so live scale
+changes must not also apply an atlas-relative `FontScaleDpi` multiplier. Classic UI fonts use
+that multiplier for their fixed atlas sizes. Verify actual painted text after scale changes,
+including fractional scales below 1 on high-density displays.
 
 The following table illustrates the adopted factory tokens. The specification and component
 resolver remain the source for actual values; local group overrides can differ. Update these
@@ -225,6 +229,11 @@ The first revealed window contains a completed frame and resolved docking. Resiz
 and camera projection follow the current viewport extent; do not wait for a settling timer.
 Fixed-resolution capture can retain intentional letterboxing. Scene captures include enabled
 scene diagnostics; choosing scene, viewport, or window capture controls the UI layer.
+For documentation captures, choose a physical UI scale that remains readable at the page's
+display width, then resize dock splits to contain the showcased content. Check all Timeline
+tracks after scaling; increasing the UI scale also changes toolbar wrapping and required height.
+Inspect viewport tool orientation too: expanding Timeline can reduce viewport height enough to
+trigger its compact horizontal layout.
 
 ## Independent groups and design editing
 

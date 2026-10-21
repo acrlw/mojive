@@ -252,7 +252,7 @@ class _Capture:
         cancel = self.localizer.text("Cancel")
         with floating_style(ui):
             style = imgui.get_style()
-            time_font = imgui.get_font_size() * (1.6 if remaining else 1)
+            time_font = style.font_size_base * (1.6 if remaining else 1)
             imgui.push_font(None, time_font)
             time_width = imgui.calc_text_size(timing).x
             imgui.pop_font()

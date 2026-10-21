@@ -27,7 +27,7 @@ from .ui_runtime import _park_cursor, _save, _settle
 
 
 def _capture_editor(
-    output: Path, width: int, height: int, *, interactive=False, ui_scale=1.0
+    output: Path, width: int, height: int, *, interactive=False, ui_scale=1.2
 ) -> dict:
     config = ViewerConfig(
         layout=LayoutConfig(persistence=False),
@@ -102,6 +102,7 @@ def _capture_editor(
         _settle(viewer)
         viewer.app.output.active_status(float("inf"))
         _settle(viewer)
+        _fit_timeline(viewer)
         if interactive:
             viewer.window.show()
             _wait_for_capture(viewer, "hero.png")
@@ -129,8 +130,26 @@ def _capture_editor(
             "keyframes": ["Start", "Reach", "Hold", "Return"],
             "logical_ui_scale": viewer.window.style_scale,
             "physical_ui_scale": viewer.window.ui_scale,
+            "framebuffer_scale": list(imgui.get_io().display_framebuffer_scale),
+            "font_scale_dpi": imgui.get_style().font_scale_dpi,
             "layout": layout,
         }
+
+
+def _fit_timeline(viewer) -> None:
+    """Resize the capture's dock split to include all three production tracks."""
+    workspace = viewer.app.workspace
+    timeline = imgui.internal.find_window_by_name("Timeline")
+    viewport = imgui.internal.find_window_by_name("Viewport")
+    track = workspace.timeline_panel.last_layout
+    extra = track.hi[1] + 12 * workspace.s - timeline.inner_rect.max.y
+    if extra > 0:
+        for window, delta in ((timeline, extra), (viewport, -extra)):
+            node = window.dock_node
+            imgui.internal.dock_builder_set_node_size(
+                node.id_, imgui.ImVec2(node.size.x, node.size.y + delta)
+            )
+        _settle(viewer)
 
 
 def _layout_report(viewer, *, sidebar="Scene") -> dict:
@@ -147,6 +166,9 @@ def _layout_report(viewer, *, sidebar="Scene") -> dict:
     for left, top, w, h in workspace.rects["overlays"]:
         if left < x - 1 or top < y - 1 or left + w > x + width + 1 or top + h > y + height + 1:
             raise RuntimeError("A production viewport overlay is clipped")
+    timeline = imgui.internal.find_window_by_name("Timeline")
+    if workspace.timeline_panel.last_layout.hi[1] > timeline.inner_rect.max.y + 1:
+        raise RuntimeError("The production Timeline tracks are clipped")
     return bounds
 
 
@@ -186,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1200)
-    parser.add_argument("--ui-scale", type=float, default=1.0)
+    parser.add_argument("--ui-scale", type=float, default=1.2)
     parser.add_argument("--spec", type=Path, help="Use a saved UI design specification")
     parser.add_argument(
         "--interactive",

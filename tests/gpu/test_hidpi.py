@@ -18,6 +18,49 @@ from mojive.ui.viewport_widgets import ToolHint  # noqa: E402
 
 
 @pytest.mark.parametrize("initial_scale", [1.0, 2.0])
+def test_workspace_text_matches_controls_after_live_scale_changes(
+    initial_scale, tmp_path, monkeypatch
+):
+    from imgui_bundle import imgui
+
+    from mojive.app.composition import build_workspace
+    from mojive.config import LayoutConfig
+    from mojive.tools.ui_runtime import _settle
+    from mojive.ui.imgui_draw import ImguiDraw2D
+
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(initial_scale))
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_DESIGN_SPEC", str(tmp_path / "design-spec.json"))
+    measured = {}
+    paint = ImguiDraw2D.text
+
+    def observe(painter, pos, color, text, **options):
+        if text == "Scene":
+            measured["heading"] = imgui.get_font_size()
+        return paint(painter, pos, color, text, **options)
+
+    monkeypatch.setattr(ImguiDraw2D, "text", observe)
+    with build_workspace(
+        resolve("joint_types"),
+        config=ViewerConfig(layout=LayoutConfig(persistence=False)),
+        vsync=False,
+        width=1600,
+        height=1000,
+        show_window=False,
+    ) as viewer:
+        assert hasattr(viewer.app, "workspace")
+        viewer.app.set_language("en")
+        _settle(viewer)
+        for scale in (0.5, 0.625, 0.75, 1.0, 1.6, 2.25, 1.0):
+            measured.clear()
+            viewer.window._scale_override = scale
+            _settle(viewer, 3)
+            assert "heading" in measured, scale
+            assert measured["heading"] == pytest.approx(16 * scale, abs=0.5)
+            assert imgui.get_style().font_scale_dpi == 1.0
+
+
+@pytest.mark.parametrize("initial_scale", [1.0, 2.0])
 def test_relative_fonts_follow_live_scale_changes_once(initial_scale, tmp_path, monkeypatch):
     from imgui_bundle import imgui
 

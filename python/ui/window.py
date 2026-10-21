@@ -192,7 +192,8 @@ class WindowConfig:
     font_size_pt: float = 14.0
     ui_scale: float | None = None
     context_api: str = "auto"
-    # Frontends with their own atlas still need the shared renderer font sources.
+    # Native frontends own their atlas and submit layout-scaled font sizes.
+    # They still need the shared renderer font sources.
     load_default_fonts: bool = True
 
 
@@ -478,8 +479,15 @@ class Window:
         if math.isclose(self._applied_style_scale, self._style_scale, abs_tol=1e-3):
             return
         style = imgui.get_style()
-        style.scale_all_sizes(self._style_scale / self._applied_style_scale)
-        style.font_scale_dpi = self._style_scale / self._font_atlas_scale
+        ratio = self._style_scale / self._applied_style_scale
+        style.scale_all_sizes(ratio)
+        if self.config.load_default_fonts:
+            style.font_scale_dpi = self._style_scale / self._font_atlas_scale
+        else:
+            # Native presenters submit sizes already resolved in layout coordinates.
+            # A second DPI multiplier would scale text twice after a live scale change.
+            style.font_scale_dpi = 1.0
+            style.font_size_base *= ratio
         self._applied_style_scale = self._style_scale
 
     def show(self) -> None:

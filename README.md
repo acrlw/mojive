@@ -208,8 +208,9 @@ make help              # Examples, backend checks and performance targets
 
 Use `make readme-media ARGS='--interactive'` to adjust the workspace and camera before each
 editor capture. Press `F8` to capture the main workspace, then again for the joint controls;
-the rendering image is generated automatically. The command uses the saved UI design specification
-and updates `docs/images/readme/`. See [README media](docs/guides/development.md#readme-media)
+the rendering image is generated automatically. The command uses the saved UI design specification,
+captures at 1920 × 1200 with 120% UI scale, and updates `docs/images/readme/`.
+See [README media](docs/guides/development.md#readme-media)
 for image dimensions and specification options.
 
 Generated captures, recordings, reports, and the documentation site are written to `output/`.

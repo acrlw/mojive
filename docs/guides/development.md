@@ -470,7 +470,8 @@ API pages are generated from current Python definitions through `python/tools/do
 
 ### README media
 
-`make readme-media` captures the production workspace and renderer at 1920 × 1200. It reads
+`make readme-media` captures the production workspace and renderer at 1920 × 1200, with the
+editor UI at 120% scale for readable README text. It reads
 the saved UI design specification, uses isolated desktop settings, and records a short take in
 the bundled `joint_types` scene. The images show Scene, Inspector and Timeline; Pose with the
 rotation gizmo; and the rendered showcase. Images come directly from OpenGL captures.
@@ -492,10 +493,11 @@ Save parameter changes in `make ui-native-design` before capture. The capture us
 specification, image size or physical UI scale can be selected explicitly:
 
 ```bash
-make readme-media ARGS='--interactive --spec /absolute/path/design-spec.json --width 1920 --height 1200 --ui-scale 1'
+make readme-media ARGS='--interactive --spec /absolute/path/design-spec.json --width 1920 --height 1200 --ui-scale 1.2'
 ```
 
 Omit `--interactive` for unattended captures with the prepared layouts. The default physical UI
-scale is 1; the logical scale is adjusted for display density. Inspect all three images and
+scale is 1.2; the logical scale is adjusted for display density. The prepared layout grows the
+Timeline dock to fit the keyframe, take and snapshot tracks. Inspect all three images and
 `manifest.json` under `output/readme-media/` before committing: labels, panel alignment,
 viewport overlays and timeline content must remain readable and contained.
