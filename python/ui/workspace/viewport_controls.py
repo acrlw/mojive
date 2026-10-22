@@ -18,6 +18,8 @@ from mojive.ui.workspace.tooltips import ShortcutHint
 from mojive.ui.workspace.widgets import DIM, color
 
 BACKGROUND = (22, 25, 28, 230)
+PROJECTION_ARROW_SIZE = 12
+PROJECTION_ARROW_INSET = 8
 
 
 def toolbar_group_gap(style, scale, gap):
@@ -151,7 +153,18 @@ def camera_controls(workspace, rect, overlay):
         width_limit=frame[0] * scale,
     )
     if not compact:
-        ui.role_icon("down", p.right - 19 * scale, p.y, 12 * scale, p.height, role="inline", c=DIM)
+        from mojive.design.native.geometry import Rect
+
+        button = Rect(*ui.hits["projection-button"])
+        ui.role_icon(
+            "down",
+            button.right - (PROJECTION_ARROW_SIZE + PROJECTION_ARROW_INSET) * scale,
+            button.y,
+            PROJECTION_ARROW_SIZE * scale,
+            button.height,
+            role="inline",
+            c=DIM,
+        )
     workspace.menus.popup("Camera", ui.hits["projection-button"], camera_clicked)
     p = layout.rectangles[1]
     frame = control_frame_size(ui, "shading", p.width, p.height, icon="shading")

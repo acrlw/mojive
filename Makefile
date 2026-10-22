@@ -1270,6 +1270,10 @@ ui-native-capture:
 ui-notice-review:
 	$(PY) -m mojive.tools.native_notice_review --backend $(BACKEND) --output output/ui_design/notices/$(BACKEND) $(ARGS)
 
+.PHONY: ui-pending-review
+ui-pending-review:
+	$(PY) -m mojive.tools.native_pending_review --backend $(BACKEND) $(ARGS)
+
 .PHONY: ui-design-guide
 ## Browse typography, palettes, spacing and independent panel-group prototypes.
 ui-design-guide:

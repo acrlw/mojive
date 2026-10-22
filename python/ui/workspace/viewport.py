@@ -416,7 +416,7 @@ def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
         (box.frame.x, box.frame.y), (box.frame.right, box.frame.bottom)
     ):
         ui.tooltip(app.model_edits.error)
-    bx = box.content.x if stacked else box.content.right - actions_width
+    bx = box.content.right - actions_width
     by = (
         box.content.y + row_height + gap
         if stacked
@@ -474,7 +474,7 @@ def transport(workspace, x, y, w, shell):
     session, replay = workspace.app.session, workspace.app.session.replay_info
     compact = w < 340 * scale
     style = u.component_style("transport")
-    gap = style.get("columnGap", style.get("gap", 3)) * scale
+    gap = style.get("columnGap", style.get("gap", 4)) * scale
     time_gap = u.metric("time_field", "columnGap", u.metric("time_field", "gap", 4)) * scale
     caption = f"{workspace.time:.3f}"
     time_font = style.get("fontSize", MONO_SIZE)

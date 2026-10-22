@@ -315,7 +315,8 @@ def test_compact_and_stacked_action_consumers_use_their_actual_adjacent_corner_g
         assert y + height - child[1] - child[3] == pytest.approx(inset, abs=epsilon)
         assert plate["radius"] - inset == pytest.approx(plate["childRadius"])
     if layout == "pending-stacked":
-        assert ui.hits[first][0] - x == pytest.approx(inset, abs=epsilon)
+        assert x + width - ui.hits[last][0] - ui.hits[last][2] == pytest.approx(inset, abs=epsilon)
+        assert ui.hits[first][0] >= x + inset - epsilon
     else:
         child = ui.hits[last]
         assert x + width - child[0] - child[2] == pytest.approx(inset, abs=epsilon)
