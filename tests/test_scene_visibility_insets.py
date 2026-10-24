@@ -117,7 +117,7 @@ def test_visibility_plate_has_trailing_and_vertical_clearance_without_reindentin
     assert (rx + rw - x - w, y - ry, ry + rh - y - h) == pytest.approx(
         (4 * ui.s, 3 * ui.s, 3 * ui.s)
     )
-    radius = 3 if authored_radius is None else authored_radius
+    radius = 1 if authored_radius is None else authored_radius
     assert state.row["visibilityRadius"] == pytest.approx(radius * ui.s)
     assert any(
         paint[:4] == pytest.approx((x, y, w, h)) and paint[4] == pytest.approx(radius)

@@ -79,6 +79,17 @@ def test_filters_and_modal_keep_native_focus_and_localized_copy(
             asset = next(r for r in _records(viewer) if r["key"] == "##asset-filter")
             assert asset["iconSize"] == scene["iconSize"]
             assert asset["hit"][3] == scene["hit"][3]
+            inputs.click("##asset-type")
+            inputs.sync()
+            choices = [r for r in _records(viewer) if r["key"].startswith("##asset-type/choice/")]
+            assert len(choices) > 1
+            assert all(not r["clippedLabel"] for r in choices)
+            capture(viewer, target / "asset-type-popup.png")
+            inputs.click(choices[-1]["key"])
+            assert viewer.app.panels.get("assets")._asset_type != "all"
+            inputs.click("##asset-type")
+            inputs.click("##asset-type/choice/0")
+            assert viewer.app.panels.get("assets")._asset_type == "all"
             workspace.activate("Output")
             output = viewer.app.panels.get("output")
             output.show_search, output._focus_search = True, True

@@ -39,6 +39,7 @@ def test_popup_class_insets_override_legacy_global_radius(tmp_path, scale, part,
         runtime = DesignRuntime(SpecificationStore(tmp_path / "design.json"))
         spec = deepcopy(runtime.spec)
         spec["tokens"]["radius_popup"] = 8
+        spec["parts"]["menu_item"]["radius"] = 6
         spec["parts"]["settings_nav"] = {"iconSize": 20}
         spec["parts"]["segment"] = {"fontSize": 12, "iconSize": 16}
         if live:
@@ -127,5 +128,5 @@ def test_select_popup_radius_is_independent_of_its_preserved_inset(appearance, r
 
     for _ in range(5):
         box, rounding = frame(draw)
-    assert box.padding == (native_unit(8 * ui.s),) * 4
-    assert rounding == pytest.approx(6 * ui.s + box.padding[0] if radius is None else radius * ui.s)
+    assert box.padding == (native_unit(4 * ui.s),) * 4
+    assert rounding == pytest.approx((8 if radius is None else radius) * ui.s)

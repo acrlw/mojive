@@ -131,7 +131,7 @@ def test_actual_group_action_plates_keep_one_uniform_native_corner_budget(
     if outer is not None:
         assert plate["radius"] == pytest.approx(outer * ui.s)
     else:
-        assert plate["radius"] == pytest.approx(6 * ui.s + gap)
+        assert plate["radius"] == pytest.approx(4 * ui.s + gap)
 
 
 @pytest.mark.parametrize("appearance", (1, 1.2, 1.25, 2.25), indirect=True)

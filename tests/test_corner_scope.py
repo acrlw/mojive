@@ -4,7 +4,7 @@ import pytest
 
 from mojive.ui.workspace.color_editor import color_popup_geometry
 from mojive.ui.workspace.form_popup import measure_form_popup
-from mojive.ui.workspace.menu_geometry import native_unit, popup_radius
+from mojive.ui.workspace.menu_geometry import popup_padding, popup_radius
 from tests.test_component_appearance import appearance as appearance
 
 pytestmark = pytest.mark.parametrize("appearance", (1, 1.2, 1.25, 2.25), indirect=True)
@@ -33,7 +33,7 @@ def test_parent_corner_scope_overrides_authored_children_and_restores_cached_sty
             assert ui.component_style("button").get("radius") * ui.s == pytest.approx(5.2)
         assert ui.component_style("input_number").get("radius") * ui.s == pytest.approx(5.2)
     assert ui.component_style("input_number") is baseline
-    assert baseline.get("radius") == (21 if authored else 6)
+    assert baseline.get("radius") == (21 if authored else 4)
     with pytest.raises(RuntimeError), ui.corner_scope(0, "input_number"):
         raise RuntimeError("Scope restoration")
     assert ui.component_style("input_number") is baseline
@@ -77,9 +77,9 @@ def test_popup_roots_measure_their_own_control_corners_independently(appearance)
         with ui.corner_scope(2 * ui.s, ("input_number", "button", "select_option")):
             form = measure_form_popup(ui, ("Field",), field_width=100 * ui.s, row_height=28 * ui.s)
             color = color_popup_geometry(ui)
-            choice = popup_radius(ui, "select_popup", (native_unit(8 * ui.s),) * 4)
+            choice = popup_radius(ui, "select_popup", popup_padding(ui, "select_popup"))
         assert form.inner_radius == pytest.approx(4 * ui.s)
-        assert color.inner_radius == pytest.approx(6 * ui.s)
-        assert choice == pytest.approx(6 * ui.s + native_unit(8 * ui.s))
+        assert color.inner_radius == pytest.approx(4 * ui.s)
+        assert choice == pytest.approx(8 * ui.s)
 
     frame(paint)

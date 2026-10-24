@@ -37,7 +37,7 @@ def assert_popup(rows, popup, scale):
     first, last = rows[0]["frame_rect"], rows[-1]["frame_rect"]
     x, y, w, h = popup["rect"]
     insets = (first[0] - x, first[1] - y, x + w - last[0] - last[2], y + h - last[1] - last[3])
-    assert insets == (native_unit(6 * scale),) * 4
+    assert insets == (native_unit(4 * scale),) * 4
     assert all(not row["clippedLabel"] and not row["clippedShortcut"] for row in rows)
     assert popup["radius"] * scale == pytest.approx(rows[-1]["backgroundRadius"] + insets[0])
 

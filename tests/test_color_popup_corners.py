@@ -177,7 +177,7 @@ def test_default_production_color_popup_has_exact_native_insets_and_compact_corn
     state.open_popup(entry)
     window, header, done, insets, epsilon = _actual_geometry(state)
     assert insets == pytest.approx((native_unit(8 * ui.s),) * 4, abs=epsilon)
-    assert window.window_rounding == pytest.approx(6 * ui.s + insets[0], abs=epsilon)
+    assert window.window_rounding == pytest.approx(4 * ui.s + insets[0], abs=epsilon)
     container = next(r for r in reversed(state.runtime.observed) if r["kind"] == "color_popup")
     assert container["radiusDerived"] is True and container["radiusAuthored"] is False
     assert imgui.get_style().popup_rounding == previous_rounding

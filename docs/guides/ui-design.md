@@ -84,6 +84,7 @@ examples when changing the corresponding factory defaults.
 |---|---|
 | Body / title / numeric size | `body_font_size=14`, `title_font_size=16`, `mono_font_size=14` |
 | Control height / panel insets | `control_height=28`; horizontal `12`, vertical `10` |
+| Ordinary control radius / menu and choice row height | `control_radius=4`; `28` |
 | Row gap / numeric gap | `row_gap=8`, `numeric_gap=4` |
 | Preferred label width / minimum / control gap | `120 / 48 / 12` |
 | Main / secondary / disabled text | `#E6E8EB / #A9AFB7 / #8E98A5` |
@@ -155,10 +156,13 @@ relationship. An explicitly authored parent radius constrains local children wit
 generic control defaults elsewhere. If the inset consumes the radius, retain the spacing and
 use a square inner corner.
 
-Current scale-1 examples are menu `12 / 6 / 6` and form/color popup `14 / 8 / 6`
-for outer radius / inset / inner radius. Floating Timeline and Settings use a
-`14 → 8 → 4` radius chain with `6 → 4` insets. These are component defaults, not a mandate
-to give every surface the same radius.
+Menus and choice lists use `8 / 4 / 4` at scale 1 for outer radius / inset / inner
+radius. Both use 28-point rows with 2-point within-group gaps; menu dividers retain
+their separate 10-point budget. Compact density changes row and shell budgets without
+shrinking typography or flattening the larger separation between semantic groups.
+Ordinary framed controls use a 4-point radius at their existing 28-point height.
+Floating surfaces continue to derive their child corners from actual insets; these
+component defaults do not give every surface the same radius.
 
 Where the navigation rail follows a rounded native window edge, its outer radius uses native
 window points, independently of application zoom. Derive its inner corner from the actual

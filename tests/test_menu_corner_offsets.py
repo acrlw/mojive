@@ -47,12 +47,16 @@ def _corner_point(bounds, right, bottom, offset):
 @pytest.mark.parametrize("path", ("named", "local"))
 @pytest.mark.parametrize("radius", (0, 3, 19, 24))
 @pytest.mark.parametrize("asymmetric", (False, True))
+@pytest.mark.parametrize("uniform_inset", (4, 6))
 def test_real_menu_owners_keep_uniform_insets_and_constrain_actual_row_paint(
-    appearance, monkeypatch, path, radius, asymmetric
+    appearance, monkeypatch, path, radius, asymmetric, uniform_inset
 ):
     ui, runtime, update, frame = appearance
     runtime.observe_components = True
     authored = dict(runtime.spec["parts"]["menu"], radius=radius)
+    authored.update(
+        dict.fromkeys(("paddingLeft", "paddingTop", "paddingRight", "paddingBottom"), uniform_inset)
+    )
     if asymmetric:
         authored.update(paddingLeft=3, paddingTop=7, paddingRight=11, paddingBottom=5)
     update({"menu": authored, "menu_item": {"radius": 17}})
@@ -86,7 +90,7 @@ def test_real_menu_owners_keep_uniform_insets_and_constrain_actual_row_paint(
 
     for _ in range(5):
         frame(draw)
-    inset = native_unit((11 if asymmetric else 6) * ui.s)
+    inset = native_unit((11 if asymmetric else uniform_inset) * ui.s)
     inner = max(0, radius * ui.s - inset)
     for hovered in (0, 2):
         row = menus.observed["Offset menu"]["rows"][hovered]
@@ -137,12 +141,16 @@ def test_real_menu_owners_keep_uniform_insets_and_constrain_actual_row_paint(
 
 @pytest.mark.parametrize("radius", (0, 24))
 @pytest.mark.parametrize("asymmetric", (False, True))
+@pytest.mark.parametrize("uniform_inset", (4, 6))
 def test_menu_reference_uses_the_same_resolved_inset_and_effective_row_curve(
-    appearance, radius, asymmetric
+    appearance, radius, asymmetric, uniform_inset
 ):
     ui, runtime, update, frame = appearance
     runtime.observe_components = True
     authored = dict(runtime.spec["parts"]["menu"], radius=radius)
+    authored.update(
+        dict.fromkeys(("paddingLeft", "paddingTop", "paddingRight", "paddingBottom"), uniform_inset)
+    )
     if asymmetric:
         authored.update(paddingLeft=3, paddingTop=7, paddingRight=11, paddingBottom=5)
     update({"menu": authored, "menu_item": {"radius": 17}})
@@ -158,7 +166,7 @@ def test_menu_reference_uses_the_same_resolved_inset_and_effective_row_curve(
         record = frame(draw)
     first, last = record["children"][0], record["children"][-1]
     x, y, width, height = record["frame"]
-    inset = native_unit((11 if asymmetric else 6) * ui.s)
+    inset = native_unit((11 if asymmetric else uniform_inset) * ui.s)
     assert (
         first[0] - x,
         first[1] - y,

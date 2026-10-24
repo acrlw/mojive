@@ -19,7 +19,7 @@
     "label_minimum": 48,
     "label_gap": 12,
     "icon_size": 20,
-    "control_radius": 6,
+    "control_radius": 4,
     "container_radius": 8,
     "radius_popup": 14,
     "radius_tab": 6,
@@ -115,8 +115,8 @@
     "menu_item": {
       "iconSize": 16,
       "gap": 6,
-      "radius": 6,
-      "height": 30,
+      "radius": 4,
+      "height": 28,
       "paddingX": 6
     },
     "camera_header": {
@@ -170,13 +170,13 @@
       "height": 320,
       "widthMode": "auto",
       "width": 210,
-      "paddingLeft": 6,
-      "paddingRight": 6,
-      "paddingTop": 6,
-      "paddingBottom": 6,
-      "radius": 12,
-      "paddingX": 6,
-      "paddingY": 6
+      "paddingLeft": 4,
+      "paddingRight": 4,
+      "paddingTop": 4,
+      "paddingBottom": 4,
+      "radius": 8,
+      "paddingX": 4,
+      "paddingY": 4
     },
     "separator": {
       "margin": 4
@@ -217,8 +217,8 @@
       "marginTop": 0,
       "marginRight": 0,
       "marginLeft": 0,
-      "radius": 6,
-      "height": 36,
+      "radius": 4,
+      "height": 28,
       "paddingX": 12
     },
     "switch": {
@@ -227,13 +227,15 @@
       "switchThumb": 18
     },
     "select_popup": {
-      "rowGap": 4,
-      "paddingLeft": 8,
-      "paddingX": 8,
+      "rowGap": 2,
+      "paddingLeft": 4,
+      "paddingX": 4,
       "marginBottom": 0,
-      "paddingBottom": 8,
-      "paddingTop": 8,
-      "paddingRight": 8
+      "paddingBottom": 4,
+      "paddingTop": 4,
+      "paddingRight": 4,
+      "radius": 8,
+      "paddingY": 4
     },
     "panel_header": {
       "paddingX": 0

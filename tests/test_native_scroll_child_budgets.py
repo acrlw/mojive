@@ -220,7 +220,7 @@ def test_navigation_corners_follow_actual_insets_without_losing_first_row_margin
     row_margin = tuple(value * ui.s for value in (4, 2)) if authored == "row-margin" else (0, 0)
     assert first[0] - container["hit"][0] == pytest.approx(inset + row_margin[0])
     assert first[1] - container["hit"][1] == pytest.approx(inset + row_margin[1])
-    outer_radius = 23 * ui.s if authored == "radius" else 6 * ui.s + inset
+    outer_radius = 23 * ui.s if authored == "radius" else 4 * ui.s + inset
     assert container["radius"] == pytest.approx(outer_radius)
     assert container["innerRadius"] == pytest.approx(max(0, outer_radius - inset))
     assert first[0] + first[2] <= container["nativePaintableRight"]
