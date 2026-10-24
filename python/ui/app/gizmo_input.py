@@ -129,7 +129,8 @@ class _GizmoInput:
                 float(np.finfo(np.float32).max),
             ),
         )
-        title = f"{self.localizer.text(edit.action)} {self.localizer.text(edit.label)}"
+        label = edit.label if edit.joint_id >= 0 else self.localizer.text(edit.label)
+        title = f"{self.localizer.text(edit.action)} {label}"
         with floating_window(
             self._floating_ui,
             popup_name,
@@ -240,7 +241,7 @@ class _GizmoInput:
                     imgui.internal.clear_active_id()
             if self._precise_gizmo_error:
                 imgui.spacing()
-                imgui.text_wrapped(self._precise_gizmo_error)
+                imgui.text_wrapped(self.localizer.text(self._precise_gizmo_error))
                 label = f"{self.localizer.text('Copy error')}##precise-gizmo"
                 copy_error = (
                     floating_button(self._floating_ui, label)
@@ -346,7 +347,12 @@ class _GizmoInput:
         if visible_hit is not None:
             self.gizmo.reveal_joint_precision(visible_hit, now=now)
             with _clipped_foreground_overlay_draw(self._viewport_rect) as draw:
-                self.gizmo.draw_joint_limit_label(draw, visible_hit, self.window.style_scale)
+                self.gizmo.draw_joint_limit_label(
+                    draw,
+                    visible_hit,
+                    self.window.style_scale,
+                    ui=self._floating_ui,
+                )
 
     @staticmethod
     def _joint_limit_key(hit: JointLimitHit) -> tuple[int, int, str]:

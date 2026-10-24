@@ -9,31 +9,47 @@ Mojive draws compact UI icons from filled vector contours. Treat an icon family 
 system: its members share a canvas, proportions, weight, cap style, alignment, and scaling rules.
 Changing one contour in isolation usually produces a visible mismatch at Output-row sizes.
 
-The adopted workspace family contains 120 SVG entries on a 24-unit grid, with a
-1.5-unit round stroke. Pinned Lucide sources cover general symbols;
-`examples/ui_design/native/svg/mojive/` owns the domain and transport designs.
-`examples/ui_design/native/svg/sources.json` records the source, license and stroke policy;
-`make ui-design-icons` regenerates the shared vector inventory and packaged canonical
-stroke meshes using the native geometry compiler. Runtime painting scales those meshes and
-constructs only size-dependent antialias fringes; fixed stroke unions must not run on
-first paint or after Inspector navigation. The mesh package records its source digest,
-and a stale package fails explicitly with the regeneration command.
+The adopted workspace family contains 124 identifiers for 107 semantic masters on a
+24-unit grid with a 1.5-unit round stroke. General and domain redraws live in
+`examples/ui_design/native/svg/mojive/`; retained Lucide geometry keeps its pinned source.
+`examples/ui_design/native/svg/sources.json` records source, license and stroke policy.
+`make ui-design-icons` regenerates the shared vector inventory and packaged canonical meshes.
+Both strokes and compound fills are triangulated during generation. Runtime painting scales
+those meshes and constructs only size-dependent antialias fringes; fixed unions and fill
+triangulation must not run on first paint or after Inspector navigation. A stale mesh package
+fails explicitly with the regeneration command.
 
-Workspace context IDs resolve through aliases to the same master. Viewport and timeline
-playback, transform controls, activity navigation, panel headers and scene rows therefore
-share one drawing pipeline. Scene hierarchy uses a tree silhouette; hinge joints use a
-mechanical pivot; snapshots have a distinct symbol from body or link identity.
-Pose adjustment uses a tilted rounded object outline and a short rotation arrow above it.
-The object and arrow retain separate visible contours, with no axes or internal box edges.
-The generic joint category retains its separate articulated-chain symbol.
-Runtime statistics use a performance gauge. Snap uses a filled horseshoe with two separated
-poles; small outlined cells are avoided in its arms. Joint symbols retain their established
-translation and rotation cues. Content visualization uses a body, reference plane and normal
-arrow; the layer stack is reserved for Layers. Projection frames use circular corner fillets,
-with rounded stroke caps and joins. Filled silhouettes and round outlines share the same optical scale.
-Sensors use a central sensing point between two rounded reception arcs. Curves and actions
-that open plotted data retain the separate waveform symbol.
-Mature mouse-button silhouettes and diagnostic symbols retain their reviewed painters.
+Workspace, viewport, timeline, diagnostics and mouse hints resolve to the same semantic masters.
+The family uses outlines for editing and navigation, solids for Play/Pause/Stop/Record, and
+selective fills for sensing and state marks. Previous/Next use open chevrons to distinguish
+stepping from playback. Directional arrows retain generous open heads and separated contours.
+Scene uses an object on a stage. Pose uses an asymmetric, outlined control chain with two open
+nodes and a square endpoint handle; Joint retains a branching articulation. Robot link uses a
+rigid member with two bearing bores, distinct from the Body frame and Joint pivot. Ball joint
+uses an outlined ball and a 120-degree socket arc, with a separate lower stem.
+Scale uses three hollow handles. Snap uses an outlined upright horseshoe with filled pole tips.
+Sensors use a connected sensing module; plotted data retains its separate waveform. Its rounded
+14-unit body and 20-unit pin span balance neighboring object and camera symbols; pin reach alone
+must not substitute for a legible central body when judging visual size.
+The four-well palette, selection pointer, camera, light, perspective, record, rotation/reset,
+visibility pair, Assets, Control, Copy/Duplicate and other retained symbols keep their approved
+silhouettes. Copy/Duplicate use separated rear contours to communicate occlusion.
+
+Preserve each compound SVG element's fill rule. An aperture is transparent geometry, not a
+panel-colored patch: connectors must join its surrounding material without crossing the opening.
+Bake transforms into masters before compilation. Inspect packaged meshes at 14/16/18/24 pixels
+and enlarged sizes; confirm that holes, curve endpoints and outline gaps survive the pipeline.
+Navigation uses a 28-point canvas, panel titles 22 and toolbar actions 20; secondary and inline
+roles retain their smaller canvases. Do not fit individual glyphs to a bounding box at runtime.
+
+Calibrate diagnostic frames as a family: a warning triangle needs a wider envelope and a higher
+authored placement than a rounded square or octagon to balance its bottom-heavy silhouette.
+Compare Info, Warning and Error side by side at Output sizes and enlarged sizes; equal bounding
+boxes do not imply equal apparent size or optical center. `icon-severity.png` in the production
+reference gallery keeps these three masters in one row for that review.
+
+The titlebar's left/right panel controls share a mirrored panel outline; their interior separator
+identifies the side. Scene navigation retains its object-on-stage symbol.
 The Settings entry uses a gear. Its General category uses a dedicated rounded preference
 panel with two rows; category navigation does not repeat the window's gear.
 Camera view controls have separate front, back, left, right, top, bottom and isometric
@@ -53,8 +69,8 @@ in the shell's existing round join. Offsetting these terminals inward exposes a 
 the opening. Box and cone internal edges stay within the continuous outer silhouette.
 Cube and box aliases share the creation master.
 Collision visibility uses two contacting body outlines, distinct from box creation and the
-intersecting circles used by the combined geometry view. The locally adapted trash master keeps
-its source and license in the manifest; its handle and lid share a continuous path, with the
+offset outlines used by the combined geometry view. The locally adapted trash master keeps
+its source and license in the manifest; its handle meets the lid, with the
 body and interior slots separated by grid-relative clearances.
 Default geometry visibility uses a preset flag, indicating the scene source's visible groups.
 The flag is distinct from the Visual, Collision and Overlay display symbols.
@@ -100,6 +116,11 @@ shell. Moving an endpoint inward can replace an outer protrusion with an inner l
 the path's tangent and attachment position before combining its coverage. Detached marks need
 a measured gap between their expanded outlines. Verify the actual production mesh at small
 sizes and inspect enlarged inner boundaries; an unchanged outer bounding box is insufficient.
+
+Production placement and coverage tests use the adopted master and submitted native ink.
+Choose probe regions from that master's current features; a retired glyph's spoke or shell may
+no longer exist. Keep exact centering, spacing, and coverage assertions instead of compensating
+for a different candidate's bounds with a wider tolerance.
 
 The earlier `ui/icons/` G3 icon exploration remains a separate candidate library in
 `make ui-feasibility`. Its fitted contours and editable optical-offset controls, documented

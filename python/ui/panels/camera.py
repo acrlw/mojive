@@ -333,7 +333,7 @@ class CameraPanel(Panel):
             if self._bookmark_button(ctx, "Delete"):
                 self.delete_bookmark(ctx, name)
         if self._bookmark_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._bookmark_error)
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr(self._bookmark_error))
             if self._bookmark_button(ctx, "Copy error", small=True):
                 imgui.set_clipboard_text(self._bookmark_error)
 

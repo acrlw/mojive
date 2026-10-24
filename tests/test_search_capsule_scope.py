@@ -6,6 +6,7 @@ from math import sqrt
 import pytest
 from imgui_bundle import imgui
 
+from mojive.design.native.geometry import Rect
 from mojive.geometry2d.curves import smooth_capsule_points
 from mojive.ui import compound_fields
 from mojive.ui.workspace.widgets import color
@@ -113,3 +114,47 @@ def test_actual_search_background_and_keyboard_focus_remain_capsules(
     ]
     assert corner_vertices
     assert min(corner_vertices) == pytest.approx(expected, abs=1)
+
+
+@pytest.mark.parametrize("parent_disabled", (False, True))
+def test_disabled_search_keeps_glyph_and_clear_hit_regions_inert(appearance, parent_disabled):
+    ui, _runtime, _update, frame = appearance
+    enabled = False
+    value = "Filter"
+
+    def paint():
+        nonlocal value
+        ui.design.begin_frame()
+        imgui.begin_disabled(parent_disabled and not enabled)
+        result = ui.design.primitives.input_text(
+            "disabled-search",
+            Rect(30 * ui.s, 40 * ui.s, 300 * ui.s, 28 * ui.s),
+            value,
+            enabled=enabled or parent_disabled,
+            parts=("input_text", "search"),
+            icon="search",
+        )
+        imgui.end_disabled()
+        value = result.value
+
+    def click(point):
+        io = imgui.get_io()
+        io.add_mouse_pos_event(*point)
+        frame(paint)
+        io.add_mouse_button_event(0, True)
+        frame(paint)
+        io.add_mouse_button_event(0, False)
+        frame(paint)
+        frame(paint)
+
+    for _ in range(3):
+        frame(paint)
+    x, y, width, height = ui.hits["disabled-search"]
+    for point in ((x + height / 2, y + height / 2), (x + width - height / 2, y + height / 2)):
+        click(point)
+        assert value == "Filter"
+        assert imgui.get_current_context().active_id == 0
+    enabled = True
+    frame(paint)
+    click((x + width - height / 2, y + height / 2))
+    assert value == ""

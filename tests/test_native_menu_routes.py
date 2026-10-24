@@ -104,7 +104,6 @@ def test_lazy_panels_are_discoverable_without_eager_construction(menu):
         "Timeline",
         "Plot",
         "Help",
-        "Info",
     }
     assert all(row.enabled for row in rows.values())
     assert [panel.id for panel in panels] == ["hierarchy"]
@@ -166,12 +165,12 @@ def test_lazy_panels_preserve_legacy_titles_through_close_and_reopen(menu, names
     assert list(panels) == [panel]
 
 
-def test_about_loads_info_and_settings_uses_shell_instance(menu):
+def test_about_opens_modal_and_settings_uses_shell_instance(menu):
     panels = menu.workspace.app.panels
     row = next(row for row in items(menu, "Help") if row.label == "About Mojive")
     dispatch(menu, row.action)
-    assert panels.get("info").open
-    assert isinstance(panels.get("info").presentation, NativePropertyPresentation)
+    assert menu.dialog_pending == "About Mojive"
+    assert panels.get("info") is None
     dispatch(menu, "panel:Settings")
     assert panels.get("settings") is menu.workspace.settings
     assert menu.workspace.open["Settings"]
@@ -206,3 +205,14 @@ def test_disabled_lazy_panels_stay_unavailable(menu):
     dispatch(menu, "toggle:Sensors")
     assert not workspace.open["Sensors"]
     assert not panels.get("sensors").enabled
+
+
+def test_left_side_toggle_restores_previously_active_panel(menu):
+    workspace = menu.workspace
+    dispatch(menu, "panel:Control")
+    dispatch(menu, "toggle-side:left")
+    assert not workspace.open["Control"]
+    assert workspace.left_active == "Control"
+    dispatch(menu, "toggle-side:left")
+    assert workspace.open["Control"]
+    assert not workspace.open["Scene"]

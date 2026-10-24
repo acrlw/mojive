@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from typing import Literal
 
@@ -86,6 +87,19 @@ def action_menu_popup(str_id, items, *, on_item=None):
     return action
 
 
+_SEARCH_PRESENTATION = ContextVar("search_presentation", default=None)
+
+
+@contextmanager
+def search_presentation(ui):
+    """Route embedded panel filters through the workspace's production painter."""
+    token = _SEARCH_PRESENTATION.set(ui if ui.design is not None else None)
+    try:
+        yield
+    finally:
+        _SEARCH_PRESENTATION.reset(token)
+
+
 def search_input(
     str_id: str,
     value: str,
@@ -98,6 +112,19 @@ def search_input(
 ) -> tuple[bool, str]:
     """Draw a live filter with a leading search glyph and a trailing clear button."""
 
+    ui = _SEARCH_PRESENTATION.get()
+    if ui is not None:
+        pos = imgui.get_cursor_screen_pos()
+        return ui.search(
+            str_id,
+            pos.x,
+            pos.y,
+            imgui.calc_item_width(),
+            value,
+            hint=hint,
+            search_tooltip=search_tooltip,
+            clear_tooltip=clear_tooltip,
+        )
     icon_drawer = icon_drawer or _production_control_icon
     style = imgui.get_style()
     width, height = float(imgui.calc_item_width()), float(imgui.get_frame_height())
@@ -145,9 +172,7 @@ def search_input(
         changed, value = imgui.input_text(str_id, value)
     imgui.pop_style_var()
     imgui.pop_style_color(4)
-    imgui.push_style_var(imgui.StyleVar_.frame_rounding, height * 0.5)
-    imgui.internal.render_nav_cursor(imgui.internal.ImRect(lo, hi), input_id)
-    imgui.pop_style_var()
+    draw_focus_frame(imgui.ImVec2(*lo), imgui.ImVec2(*hi), rounding=height * 0.5, item_id=input_id)
 
     draw = ImguiDraw2D() if draw is None else draw
     color = imgui.get_style_color_vec4(imgui.Col_.text_disabled)

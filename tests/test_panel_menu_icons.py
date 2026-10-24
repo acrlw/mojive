@@ -82,7 +82,7 @@ def test_window_panels_paints_icons_for_all_registered_rows_and_keeps_columns_al
             imgui.render()
         rows = [row for row in menus.items("Panels") if row]
         actual = menus.observed["Window/Panels"]["rows"]
-        assert len(rows) == len(actual) == len(_BUILTIN_PANELS) - 1
+        assert len(rows) == len(actual) == len(_BUILTIN_PANELS.keys() - {"settings", "info"})
         for item, record in zip(rows, actual, strict=True):
             panel_id = (
                 "keyframes"

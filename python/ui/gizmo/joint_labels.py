@@ -6,7 +6,7 @@ import numpy as np
 
 from mojive.interaction.gizmo import RING_HIT_PT, GizmoHandle, screen_path_distance
 from mojive.ui.paint_protocol import Draw2D
-from mojive.ui.theme import THEME
+from mojive.ui.workspace.gizmo_readout import draw_gizmo_readout
 
 from .state import (
     JOINT_LIMIT_HIT_PADDING_PT,
@@ -32,55 +32,19 @@ def _draw_joint_value_label(
     above: bool,
     align_right: bool,
     centered: bool = False,
+    ui=None,
 ) -> tuple[float, float, float, float]:
-    """Draw a translucent semantic-dot label without coloring the value text."""
-
-    measured = overlay.text_size(label)
-    if measured is None:  # permissive for recording/test Draw2D adapters
-        text_width, text_height = len(label) * 8.0 * style_scale, 14.0 * style_scale
-    else:
-        text_width, text_height = measured
-    padding_x = 8.0 * style_scale
-    padding_y = 5.0 * style_scale
-    dot_radius = 3.0 * style_scale
-    dot_gap = 6.0 * style_scale
-    width = padding_x * 2.0 + dot_radius * 2.0 + dot_gap + text_width
-    height = max(26.0 * style_scale, text_height + padding_y * 2.0)
-    margin = 8.0 * style_scale
-    if centered:
-        x = float(anchor[0]) - width * 0.5
-    else:
-        x = float(anchor[0]) - width - margin if align_right else float(anchor[0]) + margin
-    y = float(anchor[1]) - height - margin if above else float(anchor[1]) + margin
-    overlay.rect_filled(
-        (x, y),
-        (x + width, y + height),
-        (*THEME.bg_popup[:3], 0.92),
-        rounding=3.0 * style_scale,
-    )
-    overlay.rect(
-        (x, y),
-        (x + width, y + height),
-        THEME.border,
-        1.0 * style_scale,
-        rounding=3.0 * style_scale,
-    )
-    center_y = y + height * 0.5
-    overlay.circle_filled(
-        (x + padding_x + dot_radius, center_y),
-        dot_radius,
-        semantic_color,
-        segments=16,
-    )
-    overlay.text(
-        (
-            x + padding_x + dot_radius * 2.0 + dot_gap,
-            y + (height - text_height) * 0.5,
-        ),
-        THEME.text,
+    return draw_gizmo_readout(
+        overlay,
+        anchor,
         label,
+        style_scale,
+        ui=ui,
+        semantic_color=semantic_color,
+        above=above,
+        align_right=align_right,
+        centered=centered,
     )
-    return (x, y, x + width, y + height)
 
 
 def _point_in_rect(point, rect: tuple[float, float, float, float]) -> bool:

@@ -84,7 +84,7 @@ def test_semantic_icon_groups_override_generic_presets_and_stay_independent(
         ui.button("unscoped", 240 * ui.s, 40 * ui.s, 40, 40, icon="camera")
 
     frame(paint)
-    assert [size for size, _ in painted] == [30, 26, 14, 18]
+    assert [size for size, _ in painted] == [30, 26, 14, 20]
     assert [tint[:3] for _, tint in painted[:3]] == [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
 
 
@@ -830,25 +830,29 @@ def test_status_mouse_icons_scale_uniformly_and_measure_without_resizing_the_tex
 ):
     from mojive.ui.viewport_widgets import hints
     from mojive.ui.viewport_widgets.model import ToolHint
+    from mojive.ui.workspace import icon_mesh
 
     ui, _runtime, update, frame = appearance
     shapes, captions, bounds = [], [], []
-    original_shape, original_text = hints._paint_mouse_shape, ImguiDraw2D.text
+    original_shape, original_text = hints.draw_packaged_icon, ImguiDraw2D.text
+    original_native, submissions = icon_mesh.native_icon, []
 
-    def shape(
-        draw, x, y, width, height, button, stroke, pixel_size, geometry, smoothing, shell, fill
-    ):
-        shapes.append((width, height, stroke, shell, fill))
-        return original_shape(
-            draw, x, y, width, height, button, stroke, pixel_size, geometry, smoothing, shell, fill
-        )
+    def native(name, size, antialias):
+        submissions.append(name)
+        return original_native(name, size, antialias)
+
+    monkeypatch.setattr(icon_mesh, "native_icon", native)
+
+    def shape(draw, center, size, name, color, **options):
+        shapes.append((size, color, options["stroke_color"]))
+        return original_shape(draw, center, size, name, color, **options)
 
     def text(draw, position, color, value, **options):
         if value == "Push":
             captions.append((imgui.get_font().font_id, imgui.get_font_size(), color))
         return original_text(draw, position, color, value, **options)
 
-    monkeypatch.setattr(hints, "_paint_mouse_shape", shape)
+    monkeypatch.setattr(hints, "draw_packaged_icon", shape)
     monkeypatch.setattr(ImguiDraw2D, "text", text)
 
     def paint():
@@ -885,11 +889,15 @@ def test_status_mouse_icons_scale_uniformly_and_measure_without_resizing_the_tex
     update({"status_hints": {"iconSize": 36, "iconColor": "#ff00ff"}})
     with part_scope("statusbar"):
         frame(paint)
-    assert shapes[0][1] == hints.OVERLAY_GEOMETRY.hint_control_height * ui.s
-    assert shapes[1][:3] == pytest.approx(tuple(value * 2 for value in shapes[0][:3]))
-    assert shapes[1][3:] == ((1, 0, 1, 1), (1, 0, 1, 1))
+    assert submissions == ["status-mouse-left", "status-mouse-left"]
+    assert shapes[0][0] == hints.OVERLAY_GEOMETRY.hint_control_height * ui.s
+    assert shapes[1][0] == pytest.approx(shapes[0][0] * 2)
+    assert shapes[1][1] == (1, 0, 1, 1)
+    assert shapes[1][2] == (1, 0, 1, 0.55)
     assert captions[1] == captions[0]
-    assert bounds[1][2] - bounds[0][2] == pytest.approx(shapes[0][0] + 5 * ui.s)
+    assert bounds[1][2] - bounds[0][2] == pytest.approx(
+        hints.OVERLAY_GEOMETRY.hint_mouse_width * ui.s + 5 * ui.s
+    )
     assert bounds[1][3] >= 36 * ui.s
 
 
@@ -1244,7 +1252,7 @@ def test_viewport_camera_group_keeps_one_icon_canvas_with_and_without_caption(
                 workspace, (0, 20 * ui.s, width * ui.s, 400 * ui.s), []
             )
         )
-        assert painted["perspective"] == painted["shading"] == 18
+        assert painted["perspective"] == painted["shading"] == 20
         if width == 800:
             assert painted["layers"] == painted["perspective"]
     update({"viewport_toolbar": {"iconSize": 20}})
@@ -1314,3 +1322,28 @@ def test_scene_and_content_settings_share_four_icon_choices_and_backend_state(
     frame(paint)
     assert backend.view is GeometryView.DEFAULT
     assert calls[-2][2] == calls[-1][2] == 0
+
+
+@pytest.mark.parametrize("count", ("0", "12", "999"))
+def test_output_filter_measurement_preserves_count_beside_shared_icon(appearance, count):
+    from mojive.ui.workspace.component_layout import control_frame_size
+    from mojive.ui.workspace.output_toolbar import _measure
+
+    ui, runtime, update, frame = appearance
+    runtime.observe_components = True
+    update({"output_toolbar": {"iconSize": 20}})
+
+    def paint():
+        with part_scope("output_toolbar"):
+            key = "output-level-info"
+            width, height = _measure(ui, key, "info", count)
+            dimensions = control_frame_size(ui, key, width, height, icon="info", label=count)
+            ui.button(
+                key, 40 * ui.s, 40 * ui.s, *dimensions, icon="info", label=count, width_limit=width
+            )
+        return next(row for row in reversed(ui.design.primitives.observed) if row["key"] == key)
+
+    row = frame(paint)
+    assert row["label"] == count
+    assert not row["clippedLabel"]
+    assert row["textRect"][2] > 0

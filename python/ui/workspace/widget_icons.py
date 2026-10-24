@@ -8,15 +8,13 @@ from typing import Literal
 
 from imgui_bundle import imgui
 
-from mojive.ui.icons import draw_icon as draw_production_icon
-from mojive.ui.imgui_draw import ImguiDraw2D, _cached_color
-from mojive.ui.severity_icons import severity_icon
+from mojive.ui.imgui_draw import _cached_color
 from mojive.ui.workspace.design import BODY_SIZE
-from mojive.ui.workspace.icon_mesh import prepared_icon
+from mojive.ui.workspace.icon_mesh import _freeze_icon_arrays, native_icon
 from mojive.ui.workspace.widget_style import PANEL
 
 ROOT = Path(__file__).parent
-GLYPHS = json.loads((ROOT / "icons.json").read_text())
+GLYPHS = _freeze_icon_arrays(json.loads((ROOT / "icons.json").read_text()))
 
 ICON_GRID = 24
 # Compiled from the canonical family's stroke in svg/sources.json.
@@ -33,18 +31,16 @@ class IconRoleSpec:
 
 
 ICON_ROLES: dict[IconRole, IconRoleSpec] = {
-    "activity": IconRoleSpec(24, 36),
+    "activity": IconRoleSpec(28, 36),
     "title": IconRoleSpec(22, 30),
-    "toolbar": IconRoleSpec(18, 28),
+    "toolbar": IconRoleSpec(20, 28),
     "subtle": IconRoleSpec(16, 28),
     "inline": IconRoleSpec(BODY_SIZE, 28),
     "status": IconRoleSpec(12, 20),
 }
 
-# Mouse hints retain the authored shell and button cutouts used by the status bar.
-PRODUCTION_GLYPHS = {
-    name: name for name in ("status-mouse-left", "status-mouse-right", "status-mouse-wheel")
-}
+# All reviewed status glyphs are now compiled; retained for inventory consumers.
+PRODUCTION_GLYPHS = {}
 
 # Context identifiers select a semantic master, never a different fitting algorithm.
 COMPILED_ALIASES = {
@@ -128,39 +124,11 @@ def icon_geometry(name, size):
 def draw_icon(draw, name, x, y, size, tint, scale):
     """Paint one glyph in a screen-positioned canonical canvas."""
     name = COMPILED_ALIASES.get(name, name)
-    if name in PRODUCTION_GLYPHS:
-        draw_production_icon(
-            ImguiDraw2D(draw),
-            (x + size * scale / 2, y + size * scale / 2),
-            size * scale,
-            PRODUCTION_GLYPHS[name],
-            tuple(channel / 255 for channel in tint),
-        )
-        return
-    severity = {"info": "info", "warn": "warning", "err": "error"}.get(name)
-    if severity is not None:
-        severity_icon(
-            ImguiDraw2D(draw),
-            (x + size * scale / 2, y + size * scale / 2),
-            size * scale,
-            severity,
-            (*[channel / 255 for channel in tint[:3]], tint[3] / 255 * imgui.get_style().alpha),
-        )
-        return
-    first_vertex = len(draw.vtx_buffer)
     alpha = imgui.get_style().alpha
-    for background, opacity, operations in prepared_icon(name, size * scale):
+    antialias = bool(draw.flags & imgui.ImDrawListFlags_.anti_aliased_fill.value)
+    for background, opacity, mesh in native_icon(name, size * scale, antialias):
         color = PANEL if background else tint
         rgba = _cached_color(
             (color[0] / 255, color[1] / 255, color[2] / 255, color[3] / 255 * opacity * alpha)
         )
-        for fringe, vertices, indices in operations:
-            if fringe:
-                if draw.flags & imgui.ImDrawListFlags_.anti_aliased_fill.value:
-                    draw.add_poly_fringe(vertices, indices, rgba)
-            else:
-                draw.add_indexed_fill(vertices, indices, rgba)
-    # Local tessellation avoids precision loss at large screen coordinates.
-    imgui.internal.shade_verts_transform_pos(
-        draw, first_vertex, len(draw.vtx_buffer), (0, 0), 1.0, 0.0, (x, y)
-    )
+        mesh.draw(draw, (x, y), rgba)

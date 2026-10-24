@@ -363,7 +363,7 @@ class _Status:
         if not empty and not notice and not dragging:
             return
         empty_hint = (
-            "Drop a .mojive.json scene here\nFile > Open Scene...  ·  Entity > Create"
+            "Drop a .mojive.json scene here\nOpen a scene or add an object to begin."
             if caps.supports("scene_open")
             else (
                 "Drop a supported model here\nFile > Open Model..."
@@ -524,7 +524,7 @@ class _Status:
         *,
         border: bool = False,
     ) -> None:
-        lines = message.splitlines()
+        lines = self.localizer.text(message).splitlines()
         sizes = [overlay.text_size(line) for line in lines]
         scale = self.window.style_scale
         pad_x, pad_y = 18.0 * scale, 12.0 * scale

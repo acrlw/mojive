@@ -34,13 +34,11 @@ class ItemPaint:
         if reference is not None:
             return reference
         disabled = bool(
-            imgui.get_current_context().last_item_data.item_flags & imgui.ItemFlags_.disabled
+            imgui.get_current_context().last_item_data.item_flags & imgui.ItemFlags_.disabled.value
         )
-        return cls(
-            not disabled and imgui.is_item_hovered(),
-            not disabled and (opened or imgui.is_item_active()),
-            disabled,
-        )
+        hovered = not disabled and imgui.is_item_hovered()
+        active = not disabled and (opened or imgui.is_item_active())
+        return _ITEM_PAINTS[int(hovered) | (int(active) << 1) | (int(disabled) << 2)]
 
     def color(self, idle="field", hover="field_hovered", active="field_active"):
         return rgba8(active if self.active else hover if self.hovered else idle)
@@ -53,6 +51,11 @@ class ItemPaint:
         )
 
 
+# Interaction feedback has eight immutable combinations. Keep no window, ID,
+# draw list or gesture state in these shared values.
+_ITEM_PAINTS = tuple(ItemPaint(bool(i & 1), bool(i & 2), bool(i & 4)) for i in range(8))
+
+
 class FieldLayer:
     """Keep native text/caret above a background chosen after item submission.
 
@@ -60,9 +63,10 @@ class FieldLayer:
     Retain the parent draw list when BeginCombo enters its popup window.
     """
 
-    def __init__(self, imgui, draw):
+    def __init__(self, imgui, draw, scratch=None):
         self.draw = draw
-        self.splitter = imgui.ImDrawListSplitter()
+        self.scratch = scratch
+        self.splitter = scratch.pop() if scratch else imgui.ImDrawListSplitter()
 
     def __enter__(self):
         self.splitter.split(self.draw, 2)
@@ -73,7 +77,14 @@ class FieldLayer:
         self.splitter.set_current_channel(self.draw, 0)
 
     def __exit__(self, *exc):
-        self.splitter.merge(self.draw)
+        try:
+            self.splitter.merge(self.draw)
+            # Each active layer borrows its own splitter, including nested fields
+            # and combo popups. Keep native buffer capacity, never a frame's draw list.
+            if self.scratch is not None and len(self.scratch) < 8:
+                self.scratch.append(self.splitter)
+        finally:
+            self.draw = self.splitter = None
 
 
 def _mix_ink(first, second, amount):

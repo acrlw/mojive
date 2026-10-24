@@ -68,7 +68,7 @@ def test_direction_and_primitive_symbols_remain_distinct_at_production_sizes(nam
     glyphs = [GLYPHS[name] for name in names]
     assert len({repr(glyph["contours"]) for glyph in glyphs}) == len(names)
     for name, glyph in zip(names, glyphs, strict=True):
-        inset = 1.25 if name == "camera" else 2
+        inset = {"pose": 0.75, "camera": 1.25, "sensor": 1.25, "joint": 1.75}.get(name, 2)
         assert min(glyph["bounds"]) >= inset
         assert max(glyph["bounds"]) <= 24 - inset
         for contour in glyph["contours"]:
@@ -146,9 +146,7 @@ def test_creation_does_not_write_to_an_adapter_without_required_capability(label
 
 
 @pytest.mark.parametrize("orthographic", (False, True))
-def test_view_menu_uses_projection_state_and_a_separate_image_capture_symbol(
-    orthographic, icon_context
-):
+def test_view_menu_separates_action_icons_from_projection_configuration(orthographic, icon_context):
     from mojive.capture import RecordingPhase
 
     app = SimpleNamespace(
@@ -162,9 +160,12 @@ def test_view_menu_uses_projection_state_and_a_separate_image_capture_symbol(
     )
     menu = SimpleNamespace(workspace=SimpleNamespace(app=app))
     view = {row.label: row for row in items(menu, "View") if row}
-    assert view["Projection"].icon == ("orthographic" if orthographic else "perspective")
+    assert not view["Projection"].icon
     assert view["Capture"].icon == "capture-image"
-    assert {row.icon for row in items(menu, "Capture")} == {"capture-image"}
+    assert all(not row.icon for row in items(menu, "Capture"))
+    projection = {row.label: row for row in items(menu, "Projection") if row}
+    assert projection["Orthographic"].checked is orthographic
+    assert projection["Perspective"].checked is not orthographic
 
 
 @pytest.mark.parametrize("scale", (1, 2))

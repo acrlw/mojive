@@ -6,6 +6,8 @@ from __future__ import annotations
 import inspect
 import subprocess
 import sys
+import weakref
+from itertools import pairwise
 
 import numpy as np
 import pytest
@@ -30,8 +32,8 @@ RECT = (0.0, 0.0, 800.0, 600.0)
 @pytest.mark.parametrize("fraction", (0.0, 0.5, 1.0))
 @pytest.mark.parametrize("disabled", (False, True))
 def test_value_rail_keeps_a_separate_opaque_handle_when_disabled(scale, fraction, disabled):
-    from mojive.ui.panels.value_cards import draw_value_rail
     from mojive.ui.theme import THEME
+    from mojive.ui.value_rail import draw_value_rail
 
     draw = RecordingDraw2D()
     position, radius = 100 * scale * fraction, 5 * scale
@@ -65,11 +67,102 @@ def test_value_rail_keeps_a_separate_opaque_handle_when_disabled(scale, fraction
     assert all(name == "line" for name, _ in draw.calls[:-1])
 
 
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+@pytest.mark.parametrize("fraction", (0.0, 0.5, 1.0))
+def test_value_rail_limits_cover_caps_but_remain_below_the_thumb(scale, fraction):
+    from mojive.ui.theme import THEME
+    from mojive.ui.value_rail import draw_value_rail
+
+    draw = RecordingDraw2D()
+    left, right = (30 * scale, 20 * scale), (158 * scale, 20 * scale)
+    position = left[0] + (right[0] - left[0]) * fraction
+    limits = ((0.2, 0.4, 0.8, 1.0), (0.8, 0.3, 0.3, 1.0))
+    draw_value_rail(
+        draw,
+        left,
+        right,
+        position,
+        6 * scale,
+        THEME,
+        scale,
+        track_size=4,
+        limit_colors=limits,
+    )
+    tracks, ticks, thumb = draw.calls[:-3], draw.calls[-3:-1], draw.calls[-1]
+    for name, (start, end, _ink, width) in tracks:
+        assert name == "line"
+        assert start[0] - width * 0.5 >= left[0]
+        assert end[0] + width * 0.5 <= right[0]
+    for (name, (start, end, ink, width)), point, color in zip(
+        ticks, (left, right), limits, strict=True
+    ):
+        assert name == "line" and ink == color
+        assert (start[0], end[0]) == (point[0], point[0])
+        assert (start[1] + end[1]) * 0.5 == pytest.approx(point[1])
+        assert end[1] - start[1] == pytest.approx(16 * scale)
+        assert width == pytest.approx(3 * scale)
+    assert thumb[0] == "circle_filled"
+    assert thumb[1][0] == (position, left[1])
+
+
+@pytest.mark.parametrize("scale", (0.65, 1.0, 1.5, 2.5))
+@pytest.mark.parametrize("reference_fraction", (0.0, 0.4, 1.0))
+@pytest.mark.parametrize("fraction", (0.0, 0.2, 0.4, 0.8, 1.0))
+def test_value_rail_marks_the_gesture_delta_in_both_directions(scale, fraction, reference_fraction):
+    from mojive.ui.theme import THEME
+    from mojive.ui.value_rail import draw_value_rail
+
+    draw = RecordingDraw2D()
+    left, right = (30 * scale, 20 * scale), (158 * scale, 20 * scale)
+    reference = left[0] + (right[0] - left[0]) * reference_fraction
+    position = left[0] + (right[0] - left[0]) * fraction
+    radius = 6 * scale
+    draw_value_rail(
+        draw,
+        left,
+        right,
+        position,
+        radius,
+        THEME,
+        scale,
+        pressed=True,
+        track_size=4,
+        limit_colors=(THEME.text, THEME.text),
+        reference_position=reference,
+    )
+    meshes = [args for name, args in draw.calls if name == "indexed_fill"]
+    delta = [args for args in meshes if args[2] == THEME.primary_dim]
+    assert len(delta) == (fraction != reference_fraction)
+    if delta:
+        contour = np.asarray(delta[0][0])
+        assert contour[:, 0].min() == pytest.approx(min(reference, position))
+        assert contour[:, 0].max() == pytest.approx(max(reference, position))
+    # The rail is partitioned, never painted under another color. All segments
+    # use the same filled contour and outer AA, including flat internal joins.
+    bounds = [(vertices[:, 0].min(), vertices[:, 0].max()) for vertices, _, _ in meshes]
+    assert bounds[0][0] == pytest.approx(left[0])
+    assert bounds[-1][1] == pytest.approx(right[0])
+    for previous, following in pairwise(bounds):
+        assert previous[1] == pytest.approx(following[0])
+    for vertices, _indices, _ink in meshes:
+        assert vertices[:, 1].min() == pytest.approx(left[1] - 2 * scale)
+        assert vertices[:, 1].max() == pytest.approx(left[1] + 2 * scale)
+    origin = next(
+        args
+        for name, args in draw.calls
+        if name == "line" and args[0][0] == args[1][0] == reference
+    )
+    assert (origin[0][1] + origin[1][1]) * 0.5 == left[1]
+    assert origin[1][1] - origin[0][1] + origin[3] < 2 * radius
+    assert draw.calls[-1][0] == "circle_filled"
+
+
 class RecordingDraw2D:
     """Draw2D fake that records every call as a (name, args) tuple."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple]] = []
+        self.keywords: list[dict] = []
 
     def __getattr__(self, name: str):
         if name.startswith("__"):
@@ -77,6 +170,7 @@ class RecordingDraw2D:
 
         def record(*args, **kwargs):
             self.calls.append((name, args))
+            self.keywords.append(kwargs)
 
         return record
 
@@ -168,9 +262,9 @@ def native_draw():
 )
 def test_icon_motion_reuses_local_geometry_and_preserves_submitted_vertices(native_draw, name):
     from mojive.ui.icons import draw_icon
-    from mojive.ui.icons.drawing import _icon_draw_commands
+    from mojive.ui.workspace.icon_mesh import native_icon
 
-    _icon_draw_commands.cache_clear()
+    native_icon.cache_clear()
     draw_icon(native_draw, (0.0, 0.0), 24.0, name, (1.0, 0.5, 0.2, 0.5))
     reference = [(v.pos.x, v.pos.y, v.col) for v in native_draw._dl.vtx_buffer]
     indices = list(native_draw._dl.idx_buffer)
@@ -185,7 +279,7 @@ def test_icon_motion_reuses_local_geometry_and_preserves_submitted_vertices(nati
     assert [(v.pos.x, v.pos.y, v.col) for v in vertices[: len(reference)]] == reference
     assert [i - len(reference) for i in list(native_draw._dl.idx_buffer)[len(indices) :]] == indices
     assert max(v.col >> 24 for v in moved) == 64
-    assert _icon_draw_commands.cache_info().misses == 1
+    assert native_icon.cache_info().misses == 1
 
 
 @pytest.mark.parametrize("width", (0.75, 2.0, 20.0, 24.0))
@@ -707,3 +801,86 @@ def test_capped_stroke_cache_tracks_mutable_points_and_cap_style():
     assert circular != moved
     points[1, 0] = 20.0
     assert capped_polyline_points(points, 4.0, **options) is first
+
+
+def test_native_icon_releases_staging_buffers_and_reuses_the_mesh(native_draw, monkeypatch):
+    from mojive.ui.workspace import icon_mesh
+
+    class VertexBuffer(list):
+        pass
+
+    buffers, calls = [], []
+    original_vertices = icon_mesh._MeshRecorder.vertices
+    original_prepare = icon_mesh.prepared_icon
+
+    def vertices(recorder, points):
+        buffer = VertexBuffer(original_vertices(recorder, points))
+        buffers.append(weakref.ref(buffer))
+        return buffer
+
+    def prepare(name, size):
+        calls.append((name, size))
+        return original_prepare(name, size)
+
+    monkeypatch.setattr(icon_mesh._MeshRecorder, "vertices", vertices)
+    monkeypatch.setattr(icon_mesh, "prepared_icon", prepare)
+    icon_mesh.native_icon.cache_clear()
+    try:
+        groups = icon_mesh.native_icon("pose", 24)
+        assert groups is icon_mesh.native_icon("pose", 24)
+        assert calls == [("pose", 24)]
+        assert buffers and all(reference() is None for reference in buffers)
+        for _background, _opacity, mesh in groups:
+            mesh.draw(native_draw._dl, (10, 20), 0xFFFFFFFF)
+        assert len(native_draw._dl.vtx_buffer) > 0
+    finally:
+        icon_mesh.native_icon.cache_clear()
+
+
+@pytest.mark.parametrize("size", (14.0, 24.0, 31.5))
+@pytest.mark.parametrize("aa", (False, True))
+def test_retained_native_icons_preserve_all_vertices_indices_and_coverage(native_draw, size, aa):
+    from imgui_bundle import imgui
+
+    from mojive.ui.workspace.icon_mesh import native_icon, prepared_icon
+    from mojive.ui.workspace.widget_icons import GLYPHS
+
+    draw = native_draw._dl
+    color, origin = 0x7F80AA33, (181.25, 327.5)
+    for name in GLYPHS:
+        draw._reset_for_new_frame()
+        draw.flags = imgui.ImDrawListFlags_.anti_aliased_fill.value if aa else 0
+        draw.push_clip_rect((-1000.0, -1000.0), (1000.0, 1000.0))
+        for _background, _opacity, operations in prepared_icon(name, size):
+            for fringe, points, elements in operations:
+                if fringe:
+                    if aa:
+                        draw.add_poly_fringe(points, elements, color)
+                else:
+                    draw.add_indexed_fill(points, elements, color)
+        count, index_count = len(draw.vtx_buffer), len(draw.idx_buffer)
+        imgui.internal.shade_verts_transform_pos(draw, 0, count, (0, 0), 1.0, 0.0, origin)
+        expected = [(v.pos.x, v.pos.y, v.uv.x, v.uv.y, v.col) for v in draw.vtx_buffer]
+        indices = list(draw.idx_buffer)
+        for _background, _opacity, mesh in native_icon(name, size, aa):
+            mesh.draw(draw, origin, color)
+        assert [
+            (v.pos.x, v.pos.y, v.uv.x, v.uv.y, v.col) for v in list(draw.vtx_buffer)[count:]
+        ] == expected, name
+        assert [i - count for i in list(draw.idx_buffer)[index_count:]] == indices, name
+
+
+@pytest.mark.parametrize(
+    "points,indices,opaque",
+    (
+        ([(0, 0)], [0, 0], [True]),
+        ([(0, 0)], [0, 0, 1], [True]),
+        ([(0, 0)], [0, 0, 0], []),
+        ([(float("nan"), 0)], [], [True]),
+    ),
+)
+def test_retained_native_mesh_rejects_invalid_geometry(points, indices, opaque):
+    from imgui_bundle import imgui
+
+    with pytest.raises(ValueError):
+        imgui.DrawMesh(points, indices, opaque)

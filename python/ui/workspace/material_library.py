@@ -19,7 +19,9 @@ PALETTE = (
 def draw_material_library(workspace, x, y, width):
     u, s = workspace.ui, workspace.s
     imgui.set_cursor_screen_pos((x, y))
-    if not property_section(u, "MATERIAL LIBRARY", imgui.TreeNodeFlags_.default_open):
+    if not property_section(
+        u, "MATERIAL LIBRARY", imgui.TreeNodeFlags_.default_open, divider=False
+    ):
         return imgui.get_cursor_screen_pos().y
     y = imgui.get_cursor_screen_pos().y
     style, listing = u.component_style("material"), u.component_style("material_list")

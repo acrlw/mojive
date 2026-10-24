@@ -92,15 +92,30 @@ examples when changing the corresponding factory defaults.
 | Sage accent / amber warning | `#9CBF8D / #E8B04F` |
 
 Use semantic theme and component roles instead of copying these hex values into new callers.
+Compact geometry-mode selectors retain readable captions at the normal body size. Add icons
+only when the combined content leaves a full text inset on both sides of each segment;
+otherwise omit the redundant icons before shrinking text or hiding the mode names.
+Menu icons identify recognizable actions or object types, rather than decorating every row.
+Separate these action groups from plain-text configuration and information groups. Text-only
+groups omit the icon column; check, shortcut and submenu columns remain stable across the popup.
+
 Headings, primary values, labels, metadata, and hints need different emphasis. A source caption
 should not dominate its section heading. Avoid large blocks of equally bright text. Preserve
 axis and diagnostic meanings when applying hover, active, disabled, and selection colors.
 Disabled styling must not multiply alpha twice or make a control unintentionally transparent.
+Selection outlines belong below joint helpers, transform gizmos and viewport UI. Verify their
+actual overlap, including depth-tested helpers that must still disappear behind scene geometry.
 
 Use professional, concise English source copy and the shared localization path. The design
 guide supports Chinese and English. Translate explanatory labels while retaining source
 entity names, API identifiers, units, and engine algorithm choices such as `Euler`.
 Use the product's established terms; do not invent another name for an existing action.
+Translate complete message templates before interpolation, measurement, and painting. Include
+tooltips, disabled-action reasons, empty states, validation feedback, and drag readouts in the
+language review. Translate presentation captions without changing command keys, entity or
+resource names, source values, or copied diagnostics. Verify English/Chinese switching in the
+running workspace as well as the initial language; dictionary coverage alone misses callers
+that bypass translation.
 Frequent, recognizable actions can use icons with a short delayed tooltip. Unfamiliar actions
 still need an understandable label. Shortcut hints use the shared key badges.
 
@@ -112,11 +127,20 @@ quantities. Changing one side of a status divider must not move both neighbors. 
 gutter, selected navigation row, material card, or floating close button needs the same care
 as a main panel.
 
+Use proximity to express ownership: label-to-value spacing must be visibly smaller than the
+space between field groups, and neighboring entities need the largest separation. Review the
+whole repeated column; equal gaps can make a caption appear to belong to the preceding values.
+
 Section heading text and ordinary body labels share one leading content edge. The heading's
 hover background keeps its own padding. Manual rows, tables, checkbox grids, and raw text use
 that same column, including at fractional scales. Restore the enclosing bounds after a group.
 Joint rows with leading icons align the body to the content icon and retain the name's icon gap.
 Use separators to distinguish groups, without adding a leading rule to every section.
+A panel header already separates its first group; that group's heading must not add a second rule.
+Read-only identity rows use the shared property grid and baseline, just like editable rows.
+About is a modal in the shared dialog shell, with localized features and the running version/source
+revision. It must not open a legacy diagnostic dictionary panel. Left and right panel visibility
+controls name their side and restore the last active left panel.
 Settings has one rule below its window title; category headings use spacing.
 
 Adjacent nested rounded surfaces share one resolved corner budget:
@@ -155,7 +179,15 @@ workspace family uses a 24-unit canvas and 1.5-unit round stroke, with pinned Lu
 Mojive-owned SVG masters. Context aliases for the same action use the same master. Different
 meanings need distinguishable symbols: Settings and General, Layers and content visualization,
 camera objects and projection, state snapshots and image capture, isometric view and box creation.
-Mature mouse hints and Output severity symbols retain their reviewed painters.
+Mouse hints and Output severity symbols use those same packaged masters. Mouse button and
+wheel fills use neutral text ink, including the muted status-bar treatment; they do not compete
+with primary actions. The shell and dividers use 55% of that ink's alpha, keeping the indicated
+button or wheel visually dominant without changing the shared geometry. Diagnostic colors retain
+their severity meanings.
+
+Mouse-button fills end at the inner edges of the shell and divider, not their stroke centerlines.
+Keep the whole dark frame visible around the selected region; a brighter fill must not enlarge
+the apparent width of the mouse or consume the center divider.
 
 Keep optical placement in the authored grid. Do not refit or recenter each workspace glyph
 by its own bounds during drawing. Scale strokes, dots, openings, and gaps together. A fixed
@@ -173,6 +205,13 @@ production panels, and acceptance tools must share measurement, paint geometry, 
 focus contours, and native item state. Shared controls contain presentation and gestures;
 callers own domain commands.
 
+Icon-and-text buttons measure the same resolved icon canvas, font, gap and padding used for
+painting. An icon-size change must not silently remove filter counts. Pose uses independent
+spacing roles: 12 points from the joint heading to its content, 4 from an above-row summary
+caption to XYZ, 12 between Position and Rotation groups, and 20 between joint entries. Resolve
+these through `rowGap`, `summaryLabelGap`, `summaryGroupGap`, and `gap` respectively. Include each
+gap in both measurement and painting; inline summary captions have no vertical caption gap.
+
 ## Stable fields and component behavior
 
 | Surface | Required behavior |
@@ -182,11 +221,12 @@ callers own domain commands.
 | Numeric text | Value changes do not choose another layout. Reduce display precision or use complete scientific notation within the allocated field; viewing a value never rounds stored data. Editing retains full precision and native caret/scrolling. Units belong to the shared field presentation. |
 | Status metrics | Stable text boxes, digit cells, decimal anchors, and unit ends. Keep label/value/unit gaps and divider clearances independently adjustable. Compact large steps/time values, expose the exact value on hover, and copy the exact value on right-click. |
 | Switches | Right-align in property rows, with shared track/thumb/hit geometry. Hover and press are distinguishable; the light thumb stays readable against the accent track. |
-| Search | Leading search icon, trailing clear action, consistent text padding and keyboard behavior. Clearing a filter does not delete the underlying data. |
+| Search | One production painter resolves icon size, capsule geometry, text padding and the reserved trailing clear slot for every panel. Native text input excludes the icon hit regions. Paint one inset keyboard focus contour; suppress the native input outline when the compound field owns it. Clearing a filter does not delete the underlying data. |
 | Exclusive choices | Use shared segmented controls or choices; preserve the selected value and keyboard behavior during reflow. |
 | Menus, More, and choices | Measure each popup's own longest title, shortcut, and optional columns. Check, icon, title, shortcut, and submenu arrow have distinct aligned slots. Omit a check column only if the entire menu has no checkable entries; selection changes must not shift columns. |
 | Menu activation | Click activates a top-menu group; hover then switches menus. Escape, outside click, or completed action ends that mode. Ordinary inactive hover does not open menus. |
-| Tooltips and notices | Use shared surfaces and typography. Keep complete corners and centered content within the clip. File-action buttons align right when wrapped below text. Avoid duplicate status messages or competing tooltip implementations. |
+| Tooltips and notices | Use shared surfaces and typography. Keep complete corners and centered content within the clip. File-action buttons align right when wrapped below text. Text-only captions beside action buttons need their own text inset in addition to the shell-to-button clearance. Avoid duplicate status messages or competing tooltip implementations. |
+| Gizmo value feedback | Transform drags, joint precision rails, and range endpoints share `workspace/gizmo_readout.py`: the numeric field’s resolved font, height, padding and radius on the floating surface. Center text by cap height, retain semantic axis dots, and scale viewport-edge clearance with the UI. Precision rails paint the track first, full-height limit ticks centered across it second, and the round thumb last. Inset the painted track by its cap radius so it cannot protrude past the ticks; preserve full-range hit and value mapping. During a gesture, a shorter tick marks the starting value on the rail and a distinct darker segment spans the start and current values in either direction. The change segment has flat caps at the reference boundary so no rounded bulge protrudes beneath the origin tick. The thumb covers the origin tick when they coincide. |
 | Floating forms | Reuse `ui/workspace/floating.py` and the shared popup geometry. Closing a chooser preserves the selected joint; double-click focus can dismiss the chooser while retaining the gizmo. |
 | Inspector | Properties owns geometry shape/dimensions; Physics owns contact/mass; Material owns appearance. A presentation refactor must not hide or duplicate these capabilities. |
 | Output | Preserve selection, context-menu copying, search, severity filters, multiline messages, and clearing. Distinguish empty history from unmatched filters. Avoid a repeated copy button on every row. |
@@ -292,6 +332,13 @@ idle. Separate UI work, renderer work, initialization, and system pressure. Reus
 geometry and measurements with explicit invalidation and bounded caches; skip invisible ink
 without removing active native items. Do not flatten corners, change spacing, or shrink text
 as an unrequested optimization.
+At capacity, measurement caches evict cold entries rather than clearing hot layouts along with
+them. Repeated scene-row insertion and scrolling must preserve frequently used geometry and its
+field-read evidence. Bulk cache churn can promote short-lived layout objects into older GC
+generations even when entity and memory counts stay bounded.
+Share identical immutable field-read evidence within a frozen style instead of duplicating it
+for every row position. Interning stays bounded and must preserve argument-dependent reads;
+do not share mutable layouts or evidence across incompatible specifications.
 
 When a correction establishes or revises a reusable rule, update its owning guide and the
 relevant checklist entry in the same change. Describe the generic failure pattern, governing

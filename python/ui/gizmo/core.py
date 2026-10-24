@@ -28,6 +28,8 @@ from mojive.interaction.gizmo import (
 from mojive.types import CameraView
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mojive.adapters.base import SceneNode
     from mojive.session import Session
 
@@ -70,7 +72,14 @@ from .targets import _Targets
 
 
 class ObjectGizmo(_PreciseInput, _Overlay, _JointRanges, _Guides, _Dragging, _Targets):
-    def __init__(self, mode: str = "translate", *, enabled: bool = True) -> None:
+    def __init__(
+        self,
+        mode: str = "translate",
+        *,
+        enabled: bool = True,
+        translate: Callable[[str], str] = str,
+    ) -> None:
+        self._tr = translate
         self.enabled = bool(enabled)
         self._mode = GizmoMode(mode)
         self._style = GizmoStyle.FLAT

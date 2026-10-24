@@ -464,7 +464,7 @@ class _Physics:
             )
             self._body_property_error = ""
         if self._body_property_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._body_property_error)
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr(self._body_property_error))
             if _property_button(ctx, f"{ctx.tr('Copy error')}##body-properties"):
                 imgui.set_clipboard_text(self._body_property_error)
 
@@ -620,10 +620,11 @@ class _Physics:
         invalid_axis = joint.type in ("hinge", "slide") and np.linalg.norm(axis) <= 1e-6
         invalid_range = bool(limited) and value_range[1] <= value_range[0]
         if invalid_axis:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "Axis must be non-zero")
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr("Axis must be non-zero"))
         if invalid_range:
             imgui.text_colored(
-                imgui.ImVec4(*ctx.theme.warning), "Range upper bound must exceed lower bound"
+                imgui.ImVec4(*ctx.theme.warning),
+                ctx.tr("Range upper bound must exceed lower bound"),
             )
         if changed and editable and not invalid_axis and not invalid_range:
             self._submit_edit(
@@ -686,7 +687,7 @@ class _Physics:
         if invalid_force_range:
             imgui.text_colored(
                 imgui.ImVec4(*ctx.theme.warning),
-                "Actuator force upper bound must exceed its lower bound",
+                ctx.tr("Actuator force upper bound must exceed its lower bound"),
             )
         apply_clicked = False
         revert_clicked = False
@@ -729,7 +730,7 @@ class _Physics:
             self._joint_advanced_edit = current
             self._joint_advanced_error = ""
         if self._joint_advanced_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._joint_advanced_error)
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr(self._joint_advanced_error))
             if _property_button(ctx, f"{ctx.tr('Copy error')}##joint-advanced"):
                 imgui.set_clipboard_text(self._joint_advanced_error)
 
@@ -769,7 +770,7 @@ class _Physics:
                 ctx,
                 "##site-type",
                 site_type,
-                tuple(value.title() for value in site_types),
+                tuple(ctx.tr(value.title()) for value in site_types),
             )
             type_value = site_types[site_type]
             supports_endpoints = type_value in ("capsule", "cylinder")
@@ -832,7 +833,9 @@ class _Physics:
             <= 1e-9
         )
         if invalid_endpoints:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), "Site endpoints must be distinct")
+            imgui.text_colored(
+                imgui.ImVec4(*ctx.theme.warning), ctx.tr("Site endpoints must be distinct")
+            )
         dirty = edited != current
         if not editable or not dirty or invalid_endpoints:
             imgui.begin_disabled()
@@ -859,6 +862,6 @@ class _Physics:
             self._site_property_edit = current
             self._site_property_error = ""
         if self._site_property_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._site_property_error)
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr(self._site_property_error))
             if _property_button(ctx, f"{ctx.tr('Copy error')}##site-properties"):
                 imgui.set_clipboard_text(self._site_property_error)

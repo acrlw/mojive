@@ -27,6 +27,7 @@ from mojive.ui.viewport_widgets.model import (
     ToolHint,
     ViewportLabels,
 )
+from mojive.ui.workspace.icon_mesh import draw_packaged_icon
 
 _OVERFLOW_HINT = ToolHint("text", label="…", hint_id="scene.hints.overflow")
 
@@ -113,70 +114,8 @@ def _mouse_width(
 def mouse_hint_colors(theme: Theme, *, muted: bool = False) -> tuple[RGBA, RGBA, RGBA]:
     """Resolve the shared shell, control, and suffix colors for mouse hints."""
 
-    return (
-        theme.text_disabled if muted else theme.text,
-        theme.bg_frame_active if muted else theme.primary,
-        theme.text_disabled if muted else theme.primary_bright,
-    )
-
-
-def _paint_mouse_shape(
-    draw,
-    x,
-    y,
-    width,
-    height,
-    button,
-    outline_width,
-    pixel_size,
-    geometry,
-    smoothing,
-    shell_color,
-    fill_color,
-):
-    radius = min(width * 0.22, height * 0.18)
-    button_geometry = mouse_button_geometry(
-        x,
-        y,
-        width,
-        height,
-        button,
-        outline_width=outline_width,
-        geometry=geometry,
-        smoothing=smoothing,
-    )
-    if button_geometry is None:
-        draw.rect(
-            (x, y),
-            (x + width, y + height),
-            shell_color,
-            outline_width,
-            rounding=radius,
-            smoothing=smoothing,
-        )
-    else:
-        # Omit the shell beneath the button's transparent outer contour instead
-        # of repainting it with a guessed background color. This remains a
-        # genuine knockout over translucent chrome and arbitrary viewports.
-        draw.polyline(button_geometry.visible_shell, shell_color, outline_width)
-        draw.convex_fill(button_geometry.fill, fill_color)
-    if button in ("wheel", "middle"):
-        wheel = mouse_wheel_geometry(
-            x,
-            y,
-            width,
-            height,
-            outline_width=outline_width,
-            pixel_size=pixel_size,
-            geometry=geometry,
-        )
-        draw.rect_filled(
-            wheel.lo,
-            wheel.hi,
-            fill_color,
-            rounding=wheel.rounding,
-            smoothing=smoothing,
-        )
+    ink = theme.text_disabled if muted else theme.text
+    return (*ink[:3], ink[3] * 0.55), ink, ink
 
 
 def draw_mouse_hint_glyph(
@@ -195,32 +134,20 @@ def draw_mouse_hint_glyph(
     muted: bool = False,
     icon_color: RGBA | None = None,
 ) -> float:
-    """Draw a Blender-style mouse shell with one semantic control highlighted."""
+    """Draw the shared mouse master with neutral ink and its optional suffix."""
 
     logical_width, logical_height = size or (
         geometry.hint_mouse_width,
         geometry.hint_control_height,
     )
     width = logical_width * scale
-    height = logical_height * scale
-    y = center_y - height * 0.5
-    outline_width = geometry.hint_mouse_stroke * scale
-    shell_color, fill_color, suffix_color = mouse_hint_colors(theme, muted=muted)
+    shell, fill, suffix_color = mouse_hint_colors(theme, muted=muted)
     if icon_color is not None:
-        shell_color = fill_color = icon_color
-    _paint_mouse_shape(
-        draw,
-        x,
-        y,
-        width,
-        height,
-        button,
-        outline_width,
-        pixel_size,
-        geometry,
-        smoothing,
-        shell_color,
-        fill_color,
+        fill = icon_color
+        shell = (*icon_color[:3], icon_color[3] * 0.55)
+    name = "status-mouse-" + ("wheel" if button == "middle" else button)
+    draw_packaged_icon(
+        draw, (x + width / 2, center_y), logical_height * scale, name, fill, stroke_color=shell
     )
     if not suffix:
         return width

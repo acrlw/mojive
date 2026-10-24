@@ -179,9 +179,45 @@ def main(argv=None):
             states["Quiet ground"] = capture(viewer, args.output / "workspace-quiet-ground.png")
         finally:
             viewer.app.set_geometry_style(ground_style, persist=False)
-        for name in ("Control", "Assets", "Pose", "Cameras", "Sensors", "Layers", "Settings"):
+        for level, message in (
+            ("info", "Scene ready"),
+            ("warning", "Review the joint limits before simulation"),
+            ("error", "Example diagnostic for icon verification"),
+        ):
+            viewer.app.output.write(message, level=level)
+        for name in (
+            "Output",
+            "Control",
+            "Assets",
+            "Pose",
+            "Cameras",
+            "Sensors",
+            "Layers",
+            "Settings",
+        ):
             workspace.activate(name)
             states[name] = capture(viewer, args.output / (name.lower() + ".png"))
+            if name == "Output":
+                from mojive.tools.native_ui_review import _NativeInput, _records
+
+                observing = viewer.app.design.observe_components
+                viewer.app.design.observe_components = True
+                try:
+                    with _NativeInput(viewer) as inputs:
+                        inputs.sync()
+                        toolbar = viewer.app.panels.get("output")._toolbar_rect
+                        inputs.move((toolbar[0] + 12 * workspace.s, toolbar[1] + 50 * workspace.s))
+                        states["Output hints"] = capture(viewer, args.output / "output-hints.png")
+                        filters = [
+                            row
+                            for row in _records(viewer)
+                            if row["key"].startswith("output-level-")
+                        ]
+                        assert len(filters) == 3
+                        assert all(row["label"] and not row["clippedLabel"] for row in filters)
+                        report["outputFilters"] = filters
+                finally:
+                    viewer.app.design.observe_components = observing
             if name == "Cameras":
                 from mojive.tools.camera_tracking import click
 

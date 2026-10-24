@@ -15,62 +15,62 @@
     "geometry-default": "mojive/geometry-default.svg",
     "visual": "lucide/palette.svg",
     "collision": "mojive/collision.svg",
-    "both": "lucide/blend.svg",
+    "both": "mojive/both.svg",
     "pose": "mojive/pose.svg",
     "joint": "mojive/joint.svg",
-    "joint-slide": "lucide/move-horizontal.svg",
-    "joint-ball": "lucide/rotate-3d.svg",
-    "joint-free": "lucide/move-3d.svg",
+    "joint-slide": "mojive/joint-slide.svg",
+    "joint-ball": "mojive/joint-ball.svg",
+    "joint-free": "mojive/joint-free.svg",
     "perspective": "mojive/perspective.svg",
     "orthographic": "mojive/orthographic.svg",
     "search": "mojive/search.svg",
-    "filter": "lucide/list-filter.svg",
+    "filter": "mojive/filter.svg",
     "eye": "lucide/eye.svg",
     "eyeoff": "lucide/eye-off.svg",
     "lock": "mojive/follow-locked.svg",
-    "plus": "lucide/plus.svg",
-    "x": "lucide/x.svg",
-    "close": "lucide/x.svg",
-    "chev": "lucide/chevron-down.svg",
-    "down": "lucide/chevron-down.svg",
-    "right": "lucide/chevron-right.svg",
+    "plus": "mojive/plus.svg",
+    "x": "mojive/close.svg",
+    "close": "mojive/close.svg",
+    "chev": "mojive/down.svg",
+    "down": "mojive/down.svg",
+    "right": "mojive/right.svg",
     "camera": "lucide/camera.svg",
-    "video": "lucide/video.svg",
+    "video": "mojive/video.svg",
     "folder": "lucide/folder.svg",
     "assets": "lucide/folder.svg",
-    "gear": "lucide/settings.svg",
-    "settings": "lucide/settings.svg",
+    "gear": "mojive/settings.svg",
+    "settings": "mojive/settings.svg",
     "general": "mojive/general.svg",
     "sliders": "lucide/sliders-horizontal.svg",
     "control": "lucide/sliders-horizontal.svg",
     "chart": "mojive/performance.svg",
-    "terminal": "lucide/square-terminal.svg",
+    "terminal": "mojive/terminal.svg",
     "layers": "mojive/layers.svg",
-    "link": "lucide/link.svg",
+    "link": "mojive/link.svg",
     "light": "lucide/lightbulb.svg",
-    "robot": "lucide/bot.svg",
-    "fit": "lucide/scan.svg",
-    "frame": "lucide/scan.svg",
+    "robot": "mojive/robot.svg",
+    "fit": "mojive/fit.svg",
+    "frame": "mojive/fit.svg",
     "copy": "lucide/copy.svg",
-    "file": "lucide/file.svg",
-    "upload": "lucide/upload.svg",
-    "keyboard": "lucide/keyboard.svg",
-    "mouse": "lucide/mouse.svg",
+    "file": "mojive/file.svg",
+    "upload": "mojive/upload.svg",
+    "keyboard": "mojive/keyboard.svg",
+    "mouse": "mojive/mouse.svg",
     "pin": "mojive/follow-off.svg",
-    "check": "lucide/check.svg",
-    "undo": "lucide/undo-2.svg",
-    "redo": "lucide/redo-2.svg",
-    "target": "lucide/crosshair.svg",
-    "scene": "lucide/list-tree.svg",
-    "tree": "lucide/list-tree.svg",
+    "check": "mojive/check.svg",
+    "undo": "mojive/undo.svg",
+    "redo": "mojive/redo.svg",
+    "target": "mojive/target.svg",
+    "scene": "mojive/scene.svg",
+    "tree": "mojive/scene.svg",
     "select": "lucide/mouse-pointer-2.svg",
     "duplicate": "lucide/copy-plus.svg",
-    "delete": "mojive/trash.svg",
-    "save": "lucide/save.svg",
-    "help": "lucide/circle-question-mark.svg",
-    "inspect": "lucide/panel-right.svg",
-    "export": "lucide/download.svg",
-    "paste": "lucide/clipboard-paste.svg",
+    "delete": "mojive/delete.svg",
+    "save": "mojive/save.svg",
+    "help": "mojive/help.svg",
+    "inspect": "mojive/inspect.svg",
+    "export": "mojive/export.svg",
+    "paste": "mojive/paste.svg",
     "sort": "mojive/sort.svg",
     "move": "mojive/move.svg",
     "rotate": "mojive/rotate.svg",
@@ -121,7 +121,21 @@
     "shape-ellipsoid": "mojive/shape-ellipsoid.svg",
     "shape-plane": "mojive/shape-plane.svg",
     "body-frame": "mojive/body-frame.svg",
-    "capture-image": "mojive/capture-image.svg"
+    "capture-image": "mojive/capture-image.svg",
+    "perturb": "mojive/perturb.svg",
+    "env": "mojive/env.svg",
+    "shading": "mojive/shading.svg",
+    "sphere": "mojive/sphere.svg",
+    "circle": "mojive/circle.svg",
+    "diamond": "mojive/diamond.svg",
+    "key": "mojive/diamond.svg",
+    "info": "mojive/info.svg",
+    "warn": "mojive/warn.svg",
+    "err": "mojive/err.svg",
+    "status-mouse-left": "mojive/status-mouse-left.svg",
+    "status-mouse-right": "mojive/status-mouse-right.svg",
+    "status-mouse-wheel": "mojive/status-mouse-wheel.svg",
+    "sidebar-left": "mojive/sidebar-left.svg"
   },
   "style": {
     "grid": 24,
@@ -132,12 +146,162 @@
   "authored": {
     "directory": "mojive",
     "author": "Mojive contributors",
-    "description": "Domain and transport masters; shared 24-unit grid and 1.5-unit round stroke.",
+    "description": "Adopted rounded outline and hybrid family; 24-unit grid, 1.5-unit strokes, shared optical sizing and open apertures.",
     "adaptations": {
       "mojive/trash.svg": {
         "source": "lucide/trash.svg",
         "license": "ISC",
         "changes": "Continuous handle and lid; separated body and slots for clear compact-size joins."
+      },
+      "mojive/scene.svg": {
+        "source": "lucide/list-tree.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/settings.svg": {
+        "source": "lucide/settings.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/inspect.svg": {
+        "source": "lucide/panel-right.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/terminal.svg": {
+        "source": "lucide/square-terminal.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/fit.svg": {
+        "source": "lucide/scan.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/target.svg": {
+        "source": "lucide/crosshair.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/link.svg": {
+        "source": "lucide/link.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/joint-slide.svg": {
+        "source": "lucide/move-horizontal.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/joint-ball.svg": {
+        "source": "lucide/rotate-3d.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/joint-free.svg": {
+        "source": "lucide/move-3d.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/robot.svg": {
+        "source": "lucide/bot.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/both.svg": {
+        "source": "lucide/blend.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/file.svg": {
+        "source": "lucide/file.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/save.svg": {
+        "source": "lucide/save.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/upload.svg": {
+        "source": "lucide/upload.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/export.svg": {
+        "source": "lucide/download.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/paste.svg": {
+        "source": "lucide/clipboard-paste.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/undo.svg": {
+        "source": "lucide/undo-2.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/redo.svg": {
+        "source": "lucide/redo-2.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/filter.svg": {
+        "source": "lucide/list-filter.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/plus.svg": {
+        "source": "lucide/plus.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/close.svg": {
+        "source": "lucide/x.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/check.svg": {
+        "source": "lucide/check.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/down.svg": {
+        "source": "lucide/chevron-down.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/right.svg": {
+        "source": "lucide/chevron-right.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/help.svg": {
+        "source": "lucide/circle-question-mark.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/keyboard.svg": {
+        "source": "lucide/keyboard.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/mouse.svg": {
+        "source": "lucide/mouse.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/video.svg": {
+        "source": "lucide/video.svg",
+        "license": "ISC",
+        "changes": "Redrawn on the shared grid with revised silhouette, spacing and optical proportions."
+      },
+      "mojive/sidebar-left.svg": {
+        "source": "lucide/panel-right.svg",
+        "license": "ISC",
+        "changes": "Mirrored separator from the adopted right-panel master, retaining its outline and stroke."
       }
     }
   }

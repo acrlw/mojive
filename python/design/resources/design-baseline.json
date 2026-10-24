@@ -18,7 +18,7 @@
     "label_width": 120,
     "label_minimum": 48,
     "label_gap": 12,
-    "icon_size": 18,
+    "icon_size": 20,
     "control_radius": 6,
     "container_radius": 8,
     "radius_popup": 8,
@@ -26,11 +26,11 @@
     "radius_grab": 4,
     "radius_scrollbar": 4,
     "radius_child": 6,
-    "icon_activity_canvas": 24,
+    "icon_activity_canvas": 28,
     "icon_activity_slot": 36,
     "icon_title_canvas": 22,
     "icon_title_slot": 30,
-    "icon_toolbar_canvas": 18,
+    "icon_toolbar_canvas": 20,
     "icon_toolbar_slot": 28,
     "icon_subtle_canvas": 16,
     "icon_subtle_slot": 28,
@@ -120,6 +120,11 @@
     "file_receipt": {
       "paddingY": 12,
       "paddingX": 12
+    },
+    "pose_joint": {
+      "gap": 20,
+      "rowGap": 12,
+      "columnGap": 8
     }
   }
 }

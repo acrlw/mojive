@@ -36,6 +36,7 @@ class _SummaryLayout:
     cell_width: float
     line_height: float
     gap: float
+    label_gap: float
     columns: int
     above: bool
     axis_width: float
@@ -43,7 +44,7 @@ class _SummaryLayout:
 
     @property
     def height(self):
-        return self.line_height * ((3 // self.columns) + self.above)
+        return self.line_height * ((3 // self.columns) + self.above) + self.label_gap
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,7 @@ class NativePoseEditor:
         pads, margin = style.edges("padding", s), style.edges("margin", s)
         inner_width = u.component_box("joint", 0, 0, w, 0, observe=False).content.width
         gap = style.get("rowGap", style.get("gap", 8)) * s
+        item_gap = style.get("gap", 8) * s
         vector_layout = None
         summary_layout = None
         scalar_heights = {}
@@ -211,6 +213,7 @@ class NativePoseEditor:
                 and joint.qpos_adr + size <= len(qpos)
             )
             with u.component_scope("joint"):
+                field_gap = gap
                 if available and joint.type in ("ball", "free"):
                     if expanded:
                         if vector_layout is None:
@@ -220,7 +223,8 @@ class NativePoseEditor:
                         if summary_layout is None:
                             summary_layout = self._summary_layout(body_column.width)
                         row_height = summary_layout.height
-                    field_height = row_height * (2 if joint.type == "free" else 1) + gap * (
+                        field_gap = style.get("summaryGroupGap", 12) * s
+                    field_height = row_height * (2 if joint.type == "free" else 1) + field_gap * (
                         1 if joint.type == "free" else 0
                     )
                 else:
@@ -238,7 +242,7 @@ class NativePoseEditor:
                 + margin[1]
                 + margin[3]
             )
-            bottom = top + height + gap
+            bottom = top + height + item_gap
             # Keep the full scroll extent without submitting offscreen text, icons,
             # quaternion conversions, or controls. An active drag keeps its owner alive.
             if (bottom < clip_top or top > clip_bottom) and self._active_joint != (
@@ -261,7 +265,7 @@ class NativePoseEditor:
             with u.component_scope("joint"):
                 heading_layout = self._heading_layout(joint, bw, foldable)
             regions = {
-                "gap": [x, box.outer.bottom, w, gap],
+                "gap": [x, box.outer.bottom, w, item_gap],
                 "rowGap": [
                     bx,
                     y + heading_height,
@@ -269,6 +273,21 @@ class NativePoseEditor:
                     heading_gap,
                 ],
             }
+            if available and not expanded:
+                if summary_layout.above:
+                    regions["summaryLabelGap"] = [
+                        fields.x,
+                        fields.y + summary_layout.line_height,
+                        fields.width,
+                        summary_layout.label_gap,
+                    ]
+                if joint.type == "free":
+                    regions["summaryGroupGap"] = [
+                        fields.x,
+                        fields.y + summary_layout.height,
+                        fields.width,
+                        field_gap,
+                    ]
             if foldable:
                 regions["columnGap"] = [
                     bx + heading_layout.heading_width,
@@ -327,7 +346,9 @@ class NativePoseEditor:
                         initial_qpos,
                     )
                 elif not expanded:
-                    self._summary(ctx, joint, field_x, field_y, field_width, summary_layout, gap)
+                    self._summary(
+                        ctx, joint, field_x, field_y, field_width, summary_layout, field_gap
+                    )
                 else:
                     self._pose(
                         ctx,
@@ -578,6 +599,7 @@ class NativePoseEditor:
             (available - (columns - 1) * gap) / columns,
             line,
             gap,
+            style.get("summaryLabelGap", 4) * s if above else 0,
             columns,
             above,
             axis_width,
@@ -624,7 +646,7 @@ class NativePoseEditor:
                     alignmentAxis="leading-content",
                 )
             cells_x = x if layout.above else x + layout.label_width
-            cells_y = y + (layout.line_height if layout.above else 0)
+            cells_y = y + (layout.line_height + layout.label_gap if layout.above else 0)
             for index, (axis, value) in enumerate(zip("XYZ", values, strict=True)):
                 cx = cells_x + (index % layout.columns) * (layout.cell_width + layout.gap)
                 cy = cells_y + (index // layout.columns) * layout.line_height

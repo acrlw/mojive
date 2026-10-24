@@ -19,17 +19,14 @@ def prepared_geometry(method):
                 value = method(style, *args, **kwargs)
             finally:
                 style._collecting = parent
-            grouped = {}
-            for origin, field in reads:
-                grouped.setdefault(origin, set()).add(field)
-            cached = (
-                value,
-                tuple(reads),
-                tuple((origin, frozenset(fields)) for origin, fields in grouped.items()),
-            )
+            cached = (value, *_dependency_evidence(style, reads))
             if len(style._geometry_cache) >= 256:
-                style._geometry_cache.clear()
+                # New scene rows must not discard the still-visible rows and
+                # field measurements. Evict one cold entry, not the whole cache.
+                style._geometry_cache.popitem(last=False)
             style._geometry_cache[key] = cached
+        else:
+            style._geometry_cache.move_to_end(key)
         value, reads, grouped = cached
         if style._collecting is not None:
             style._collecting.update(reads)
@@ -38,3 +35,25 @@ def prepared_geometry(method):
         return value
 
     return measured
+
+
+def _dependency_evidence(style, reads):
+    # Different row positions usually read the same specification fields. Share
+    # this immutable evidence within one frozen style, including exact branch reads.
+    key = frozenset(reads)
+    cache = style._geometry_dependencies
+    evidence = cache.get(key)
+    if evidence is None:
+        grouped = {}
+        for origin, field in reads:
+            grouped.setdefault(origin, set()).add(field)
+        evidence = (
+            tuple(reads),
+            tuple((origin, frozenset(fields)) for origin, fields in grouped.items()),
+        )
+        if len(cache) >= 64:
+            cache.popitem(last=False)
+        cache[key] = evidence
+    else:
+        cache.move_to_end(key)
+    return evidence

@@ -31,12 +31,15 @@ def test_native_transform_captions_fit_at_default_narrow_and_wide_widths(
         guide.page, guide.animate = "Inspector", False
         for _ in range(3):
             guide.frame()
-        width, layouts, painted = 320, [], []
+        width, layouts, painted, transform_painted = 320, [], [], []
         vector, text = guide.ui.vector, ImguiDraw2D.text
 
         def observe_vector(*args, **options):
             layouts.append(options["layout"])
-            return vector(*args, **options)
+            start = len(painted)
+            result = vector(*args, **options)
+            transform_painted.extend(painted[start:])
+            return result
 
         def observe_text(draw, position, color, value, **options):
             painted.append(value)
@@ -62,13 +65,15 @@ def test_native_transform_captions_fit_at_default_narrow_and_wide_widths(
             for _ in range(3):
                 layouts.clear()
                 painted.clear()
+                transform_painted.clear()
                 pixels = guide.frame(readback=True)
             assert len(layouts) == 3 and all(layout == layouts[0] for layout in layouts)
             assert len({field[2] for field in layouts[0].fields}) == 1
             for label in ("Position", "Rotation", "Scale"):
-                assert guide.tr(label) in painted
-            assert "(m)" in painted and "(°)" in painted
-            assert not any(value.endswith("…") for value in painted)
+                assert guide.tr(label) in transform_painted
+            assert "(m)" in transform_painted and "(°)" in transform_painted
+            # Other narrow panel sections can truncate their independent headings.
+            assert not any(value.endswith("…") for value in transform_painted)
             if language == "zh_CN":
                 output = Path("output/ui_design/parity-v5") / f"inspector-captions-{backend_name}"
                 output.mkdir(parents=True, exist_ok=True)

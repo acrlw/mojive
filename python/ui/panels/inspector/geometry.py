@@ -63,7 +63,7 @@ def _geometry_shape_rows(
         ctx,
         "##geometry_type",
         types.index(properties.type),
-        tuple(value.title() for value in types),
+        tuple(ctx.tr(value.title()) for value in types),
     )
     edited = replace(properties, type=types[index]) if changed else properties
     resources = _shape_resources(edited)
@@ -79,7 +79,9 @@ def _geometry_shape_rows(
             if resource_changed or not edited.resource_name:
                 edited = replace(edited, resource_name=resources[index])
         else:
-            imgui.text_disabled(ctx.tr(f"no {edited.type} resources in this model"))
+            imgui.text_disabled(
+                ctx.tr("no {kind} resources in this model").format(kind=ctx.tr(edited.type))
+            )
     return edited
 
 
@@ -655,7 +657,7 @@ class _Geometry:
         if import_hfield:
             ctx.request_geometry_resource_import(edited.node_id, "hfield")
         if self._geometry_shape_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_shape_error)
+            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr(self._geometry_shape_error))
             if _property_button(ctx, f"{ctx.tr('Copy error')}##geometry-shape"):
                 imgui.set_clipboard_text(self._geometry_shape_error)
 
@@ -684,7 +686,7 @@ class _Geometry:
         invalid_masks = edited.collision_type_mask < 0 or edited.collision_affinity_mask < 0
         if invalid_masks:
             imgui.text_colored(
-                imgui.ImVec4(*ctx.theme.warning), "Collision masks cannot be negative"
+                imgui.ImVec4(*ctx.theme.warning), ctx.tr("Collision masks cannot be negative")
             )
         if edited != properties and editable and not invalid_masks:
             self._submit_edit(
@@ -777,6 +779,8 @@ class _Geometry:
             self._geometry_advanced_edit = current
             self._geometry_advanced_error = ""
         if self._geometry_advanced_error:
-            imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), self._geometry_advanced_error)
+            imgui.text_colored(
+                imgui.ImVec4(*ctx.theme.warning), ctx.tr(self._geometry_advanced_error)
+            )
             if _property_button(ctx, f"{ctx.tr('Copy error')}##geometry-advanced"):
                 imgui.set_clipboard_text(self._geometry_advanced_error)

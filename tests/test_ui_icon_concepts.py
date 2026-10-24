@@ -38,12 +38,14 @@ from mojive.ui.icons import (
     STROKE_SCALE_LOCKED_ICONS,
     IconTuning,
     draw_concept_icon,
-    draw_icon,
     icon_alignment_anchor,
     icon_alignment_center,
     icon_component_group,
     icon_metrics,
     production_icon_style,
+)
+from mojive.ui.icons import (
+    draw_reference_icon as draw_icon,
 )
 from mojive.ui.icons import drawing as icon_drawing
 from mojive.ui.icons import glyphs as icon_glyphs

@@ -110,7 +110,7 @@ def draw_center_notice(app, overlay, message, *, border=False):
     """Show the existing empty/drop message with catalogue spacing and alignment."""
     ui, scale = app.workspace.ui, app.workspace.s
     style = ui.component_style("empty")
-    lines = message.splitlines()
+    lines = ui.translate(message).splitlines()
     font = style.get("fontSize", BODY_SIZE)
     line_height = max(font, style.line_height(font * 1.4)) * scale
     gap = style.get("rowGap", style.get("gap", 3)) * scale

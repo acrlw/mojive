@@ -50,6 +50,7 @@ LABELS = {
     "key": "Keyframe",
     "fit": "Fit",
     "inspect": "Inspector",
+    "sidebar-left": "Left panel",
     "chev": "Expand",
     "perturb": "Perturb",
     "target": "Target",

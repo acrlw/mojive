@@ -202,6 +202,35 @@ opacity are resolved when replaying the calls. ImGui translates the submitted ve
 their AA fringe, in one native pass, so scrolling reuses the same compiled geometry. Icon Library
 tuning shares this path and adds its complete style parameters to the key; unchanged previews reuse
 the same geometry. Do not put UI state into geometry caches.
+Packaged workspace icons retain their validated triangle and antialias buffers in native
+`DrawMesh` objects. Construction converts the Python data once; frame submission supplies only
+the current origin and color. Buffers hold no context, atlas, draw list or interaction state.
+Geometry-preserving font decorators forward `native_draw_list` so status icons use the same
+submission path. A cache hit must avoid per-vertex language-boundary conversion, not merely
+avoid tessellation. Verify exact vertices, indices, coverage and current UVs against the replay
+path before comparing production frame timings.
+Keep packaged numeric geometry immutable after decoding. Nested mutable coordinate lists
+remain in the cyclic collector's scan graph even when native draw buffers are already cached;
+numeric tuples can leave that graph during normal collection. Once native buffers own their
+data, release Python staging vertices instead of retaining a second cached representation.
+Preserve exact coordinates and topology, and verify serialization and native-buffer parity.
+Do not disable or retune global garbage collection to conceal a retained-data cost.
+Guard diagnostic payload construction at the producing control when observation is disabled.
+An early return inside the recorder cannot avoid lists, dictionaries, or native geometry reads
+already evaluated by its caller. Hit registration and native input submission remain unconditional;
+enabled observation must retain the same bounds, field dependencies, and clipping evidence.
+Share repeated row measurements within their frame and actual style scope, while resolving
+selection, pointer state, dynamic label width, and native item ownership for every row.
+Prefer owner-held reusable buffers with an explicit borrowed lifetime over generic object pools.
+Do not reuse mutable history snapshots or retain frame-owned drawing contexts in a pool.
+Native field painters retain a bounded stack of `ImDrawListSplitter` scratch buffers on their
+`NativePrimitives` owner. Nested fields borrow distinct splitters, merge before returning them,
+and release their draw-list reference even when painting raises. This preserves popup and text
+layer ownership without allocating and freeing channel buffers for every field on every frame.
+Cache frozen button metrics with the same exact field-read evidence as fresh resolution;
+parent paint inheritance, label measurement, input state and hit registration remain live.
+Use `make editor-tail-profile` to correlate
+individual command and drag stalls with collection events, separately from stage attribution.
 `make ui-frame-profile` reports the compilation cache hit/miss counts and timed capsule draws.
 
 Dimension previews similarly reuse their source arrays and node indexes while only size/scale
@@ -221,6 +250,17 @@ single final rebuild.
 
 Workspace menus use the shared `ui/workspace/menus.py` and popup presentation; new workspace
 consumers must retain their measured columns, inherited styles, and input behavior.
+Icon slots are group-local: a separator can introduce a plain-text group without carrying the
+preceding group's empty icon gutter. State, shortcut and submenu columns keep popup-wide widths.
+
+Repeated label elision may reuse a bounded, UI-owned cache keyed by resolved font, pixel size,
+text, available width and coordinate tolerance. Never share a native font cache across viewers.
+Window-to-style-family resolution is frame-local, so docking or reopening a popup cannot retain
+a stale parent. Skip inactive focus painting without skipping native item registration or
+inherited disabled state; compare actual draw geometry and hit bounds when optimizing this path.
+Uniform list rows may share one scoped geometry preparation per draw; selection, expansion,
+native item registration and clipping remain live for each row. Native item flags are integer
+masks on hot paths; avoid constructing Python flag combinations for every control.
 For base ImGui consumers, use `panels.padded_selectable` for standard list rows and native
 `imgui.menu_item` for menus.
 The list helper retains native selection, keyboard navigation, IDs, and highlighting while giving
@@ -308,6 +348,13 @@ or `fringed_concave_fill`. Large or repeatedly drawn shapes with known topology 
 `indexed_fill` with a flat index sequence grouped in threes. Supply the outer contour and hole
 contour for external AA; never add fringes along internal triangle edges. The adapter owns
 ImGui reservation and vertex-offset handling.
+
+Adjacent rail colors use the same stroke contour and AA coverage. Partition the filled,
+change-interval and remaining-track regions rather than painting a differently rasterized
+stroke over a brighter layer; equal nominal widths do not guarantee equal edge coverage.
+Inspect positive and negative deltas at fractional scales and compare their pixel cross-sections
+with an isolated same-color rail. Keep internal joins flat, limit ticks above the rail and the
+current-value thumb above every tick.
 
 For a moving or rotating mesh, keep vertices and contours in local coordinates and pass
 `origin` plus a unit `direction` to `indexed_fill`. Direction is the local X axis in window

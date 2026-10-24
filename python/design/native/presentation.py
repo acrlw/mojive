@@ -33,9 +33,13 @@ class DesignPresentation:
         self.ui, self.runtime = ui, runtime
         self.primitives = NativePrimitives(ui, runtime)
         self._family_override = None
+        self._window_families = {}
         ui.design_primitives = self.primitives
 
     def begin_frame(self):
+        # Native parentage is stable during one frame. Never retain a native
+        # window or infer its family again for every child control's style lookup.
+        self._window_families.clear()
         self.primitives.scale = self.ui.s
         self.primitives.observed.clear()
 
@@ -52,11 +56,16 @@ class DesignPresentation:
         )
         if window is None:
             return None
+        window_id = window.id_
+        if window_id in self._window_families:
+            return self._window_families[window_id]
         while window is not None:
             name = window.name.split("###")[-1]
             if name in PANEL_FAMILIES:
-                return PANEL_FAMILIES[name]
+                family = self._window_families[window_id] = PANEL_FAMILIES[name]
+                return family
             window = window.parent_window
+        self._window_families[window_id] = None
         return None
 
     @contextmanager

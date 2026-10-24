@@ -27,7 +27,7 @@ from ..overlay_geometry import (
     mouse_button_geometry,
     mouse_wheel_geometry,
 )
-from ..severity_icons import severity_icon
+from ..severity_icons import draw_reference_severity as severity_icon
 from .model import (
     ICON_GRID,
     ICON_ROTATE_RING_CAP,

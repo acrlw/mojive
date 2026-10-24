@@ -23,13 +23,17 @@ def geometry_selector(ui, ctx, x, y, width, *, key):
         imgui.StyleVar_.frame_padding,
         ((padding[0] + padding[2]) / 2, DESIGN.control_padding_y(font) * ui.s),
     )
-    show_labels = (
+    # Keep captions legible before adding redundant icons. Combined content
+    # needs a full text inset on both sides, not just enough width to avoid clipping.
+    icon_inset = max(0, 12 * ui.s - (padding[0] + padding[2]) / 2)
+    show_icons = (
         segmented_control_width(
             labels,
             icons=GEOMETRY_ICONS,
             layout="content",
             icon_width=(style.get("iconSize", 16) + style.get("gap", 5)) * ui.s,
         )
+        + 2 * icon_inset * len(labels)
         <= width
     )
     imgui.pop_style_var()
@@ -42,8 +46,8 @@ def geometry_selector(ui, ctx, x, y, width, *, key):
         labels,
         GEOMETRY_VIEWS.index(current) if current in GEOMETRY_VIEWS else -1,
         keys=tuple(key + "-" + view.value for view in GEOMETRY_VIEWS),
-        icons=GEOMETRY_ICONS,
-        show_labels=show_labels,
+        icons=GEOMETRY_ICONS if show_icons else None,
+        show_labels=True,
         layout="content",
         tooltips=(
             "Use scene visibility groups",

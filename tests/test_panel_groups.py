@@ -9,7 +9,7 @@ from mojive.design.groups import CURRENT_GROUPS, component_groups, group_part, g
 from mojive.design.native.controls import NativePrimitives
 from mojive.design.native.geometry import CURRENT_NATIVE_PARTS, part_scope
 from mojive.design.runtime import DesignRuntime
-from mojive.design.specification import DEFAULT, component_catalog, resolve_part_value
+from mojive.design.specification import DEFAULT, component_catalog
 from mojive.design.store import SpecificationStore
 
 GROUPS = [(owner, base) for owner, group in component_groups().items() for base in group["parts"]]
@@ -36,6 +36,11 @@ def test_local_group_edits_do_not_leak_through_shared_controls_or_style_cache(
     }
     changes = {field: value for field, value in changes.items() if field in definition["fields"]}
     baseline = dict(painter.style(base).values)
+    owned_baselines = {}
+    for peer, group in component_groups().items():
+        if base in group["parts"]:
+            with group_scope(peer):
+                owned_baselines[peer] = dict(painter.style(base).values)
     candidate = deepcopy(DEFAULT)
     candidate["parts"][part] = changes
     runtime.update_spec(candidate)
@@ -54,14 +59,11 @@ def test_local_group_edits_do_not_leak_through_shared_controls_or_style_cache(
     for peer in component_groups():
         if peer != owner and base in component_groups()[peer]["parts"]:
             with group_scope(peer):
-                for field in changes:
-                    assert painter.style(base).values[field] == resolve_part_value(
-                        DEFAULT, base, field
-                    )
+                assert dict(painter.style(base).values) == owned_baselines[peer]
             break
     runtime.update_spec(deepcopy(DEFAULT))
     with group_scope(owner):
-        assert dict(painter.style(base).values) == baseline
+        assert dict(painter.style(base).values) == owned_baselines[owner]
 
 
 def test_nested_settings_page_uses_local_content_and_restores_panel_ownership():

@@ -1897,6 +1897,11 @@ def icon_gallery(window, path, *, portable_fonts=False):
             ),
         ),
         (
+            "icon-severity.png",
+            "Icon geometry · diagnostic optical weight and placement",
+            ("info", "warn", "err"),
+        ),
+        (
             "icon-shapes.png",
             "Icon geometry · scene primitives",
             tuple(

@@ -80,6 +80,7 @@ from mojive.render.backend import BackendCaps
 from mojive.scene import Scene
 from mojive.session import Session
 from mojive.types import CameraView, MeshShape
+from mojive.ui.design_palette import rgba as palette_rgba
 from mojive.ui.gizmo import (
     DEFAULT_ROTATION_SNAP_DEG,
     DEFAULT_ROTATION_TICK_SCALE,
@@ -3766,7 +3767,7 @@ def test_limited_joint_gizmo_draws_the_converted_range_and_colored_limits(
     gizmo.draw_joint_limit_label(label_overlay, gizmo.joint_limit_hits[0], 1.0)
     label_text = next(args for name, args, _kwargs in label_overlay.calls if name == "text")
     assert label_text[2] in labels
-    assert np.allclose(label_text[1], (220 / 255, 223 / 255, 227 / 255, 1.0))
+    assert np.allclose(label_text[1], palette_rgba("text"))
 
 
 @pytest.mark.physics
@@ -3898,7 +3899,7 @@ def test_tiny_hinge_range_reveals_a_viewport_precision_rail() -> None:
     rail = gizmo._joint_precision
     assert rail is not None
     assert gizmo.joint_precision_visible
-    assert np.linalg.norm(rail.end - rail.start) == pytest.approx(144.0)
+    assert np.linalg.norm(rail.end - rail.start) == pytest.approx(128.0)
     assert any(
         name == "rect_filled" and args[0] == pytest.approx(rail.panel_rect[:2])
         for name, args, _kwargs in visible.calls
@@ -3906,10 +3907,12 @@ def test_tiny_hinge_range_reveals_a_viewport_precision_rail() -> None:
     track_lines = [
         kwargs
         for name, args, kwargs in visible.calls
-        if name == "line" and np.allclose(args[0], rail.start) and np.allclose(args[1], rail.end)
+        if name == "line"
+        and np.allclose(np.asarray(args[0]) - (args[3] * 0.5, 0.0), rail.start)
+        and np.allclose(np.asarray(args[1]) + np.array((args[3] * 0.5, 0.0)), rail.end)
     ]
     assert len(track_lines) == 1
-    assert all(kwargs.get("cap", "butt") == "butt" for kwargs in track_lines)
+    assert all(kwargs.get("cap") == "round" for kwargs in track_lines)
 
     gizmo._joint_range = _JointRangeState(
         "hinge",
@@ -4016,7 +4019,26 @@ def test_joint_precision_rail_draws_each_colored_stroke_once() -> None:
         if not np.allclose(args[2], JOINT_OUTLINE_COLOR)
     ]
     assert outline_indices == []
-    assert len(core_indices) == 4
+    assert len(core_indices) == 2
+    thumbs = [args for name, args, _kwargs in overlay.calls if name == "circle_filled"]
+    assert len(thumbs) == 1
+    assert np.allclose(thumbs[0][0], gizmo._joint_precision.current)
+    # Endpoint markers retain their full height beneath the round thumb.
+    thumb_index = next(i for i, (name, _, _) in enumerate(overlay.calls) if name == "circle_filled")
+    for point, color in (
+        (gizmo._joint_precision.start, JOINT_LOWER_LIMIT_COLOR),
+        (gizmo._joint_precision.end, JOINT_UPPER_LIMIT_COLOR),
+    ):
+        index, args, kwargs = next(
+            (i, args, kwargs)
+            for i, (name, args, kwargs) in enumerate(overlay.calls)
+            if name == "line" and np.allclose(args[2], color)
+        )
+        assert index < thumb_index
+        assert np.allclose(args[0], point - (0.0, 8.0))
+        assert np.allclose(args[1], point + np.array((0.0, 8.0)))
+        assert args[3] == 3.0
+        assert kwargs["cap"] == "round"
 
 
 @pytest.mark.physics
@@ -4078,17 +4100,13 @@ def test_joint_precision_rail_maps_its_full_width_to_the_authored_range() -> Non
     gizmo._draw_joint_precision(active, 1.0)
     drag_start = np.array((172.0, 100.0))
     assert any(
-        name == "line"
-        and np.allclose(args[0], drag_start)
-        and np.allclose(args[1], cursor)
-        and np.allclose(args[2], JOINT_ACTIVE_DARK_COLOR)
+        name == "circle_filled" and np.allclose(args[0], cursor)
         for name, args, _kwargs in active.calls
     )
     assert any(
         name == "line"
-        and np.allclose(args[2], JOINT_ACTIVE_DARK_COLOR)
-        and args[0][0] == pytest.approx(drag_start[0])
-        and args[1][0] == pytest.approx(drag_start[0])
+        and np.allclose(args[0], drag_start - np.array((0, 4)))
+        and np.allclose(args[1], drag_start + np.array((0, 4)))
         for name, args, _kwargs in active.calls
     )
     line_colors = [args[2] for name, args, _kwargs in active.calls if name == "line"]

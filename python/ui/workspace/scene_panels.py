@@ -200,7 +200,9 @@ def control_panel(workspace, x, y, w):
     )
     row = 0
     imgui.set_cursor_screen_pos((x, y))
-    expanded = property_section(u, ctx.tr("actuators"), imgui.TreeNodeFlags_.default_open)
+    expanded = property_section(
+        u, ctx.tr("actuators"), imgui.TreeNodeFlags_.default_open, divider=False
+    )
     yy = imgui.get_cursor_screen_pos().y
     if session.actuators and expanded and not enabled:
         reason = (

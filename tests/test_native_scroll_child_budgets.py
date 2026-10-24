@@ -99,8 +99,10 @@ def test_owned_children_keep_fields_inside_own_clip_without_ancestor_reflow(
         monkeypatch.setattr(navigation, "scene_rows", lambda _ctx: [(None, 0, True)] * 30)
         monkeypatch.setattr(
             navigation,
-            "draw_scene_row",
-            lambda _ctx, _node, _depth, _leaf, budget: _probe_field(ui, observations, width=budget),
+            "_draw_scene_row",
+            lambda _ctx, _node, _depth, _leaf, budget, _geometry: _probe_field(
+                ui, observations, width=budget
+            ),
         )
         monkeypatch.setattr(
             "mojive.ui.workspace.navigation.publish_focus_item_hint", lambda _ctx: None

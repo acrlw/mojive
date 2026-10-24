@@ -114,6 +114,8 @@ def dashed_paths(points, closed, pattern):
 
 def compile_svg(svg):
     root = ET.fromstring(svg)
+    for element in root.iter():
+        element.tag = element.tag.rsplit("}", 1)[-1]
     view_box = [float(v) for v in root.attrib["viewBox"].split()]
     vx, vy, vw, vh = view_box
     if vw <= 0 or vh <= 0:
@@ -123,7 +125,7 @@ def compile_svg(svg):
     dx, dy = (24 - vw * scale) / 2 - vx * scale, (24 - vh * scale) / 2 - vy * scale
     contours = []
     bounds = [math.inf, math.inf, -math.inf, -math.inf]
-    for e in root:
+    for element_index, e in enumerate(root):
         a = root.attrib | e.attrib
         if "transform" in a:
             raise ValueError("Bake transforms into the shared master before compiling")
@@ -225,6 +227,13 @@ def compile_svg(svg):
                     "dash": [float(v) * scale for v in a.get("stroke-dasharray", "").split()],
                 }
             )
+            if len(paths) > 1 and a.get("fill", "black") != "none":
+                # Subpaths in one SVG element share a fill rule. Separate fills
+                # would close apertures in rings, bearings and outlined handles.
+                rule = a.get("fill-rule", "nonzero")
+                if rule not in ("nonzero", "evenodd"):
+                    raise ValueError(f"Unsupported SVG fill rule: {rule}")
+                contours[-1].update(fill_group=element_index, fill_rule=rule)
             if contours[-1]["dash"]:
                 contours[-1]["stroke_paths"] = dashed_paths(
                     normalized, closed, contours[-1]["dash"]

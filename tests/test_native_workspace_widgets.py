@@ -290,6 +290,7 @@ def test_material_inspector_rgba_fields_consume_their_own_typography(
         projection.initial_entities,
     )
     app.apply_document_edits = projection.apply_document_edits
+    app.initial_entity = projection.initial_entity
     workspace = WorkspaceShell.__new__(WorkspaceShell)
     workspace.app, workspace.ui, workspace.s = app, ui, ui.s
     workspace.pinned, workspace.inspector_tab = None, "Material"

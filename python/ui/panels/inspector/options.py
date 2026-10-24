@@ -55,7 +55,7 @@ class _Options:
             self._physics_text.clear()
             self._physics_error = ""
         if self._physics_error:
-            imgui.text_wrapped(self._physics_error)
+            imgui.text_wrapped(ctx.tr(self._physics_error))
         changes = {}
         invalid = False
         for index, (group, fields) in enumerate(groupby(options, key=lambda option: option.group)):

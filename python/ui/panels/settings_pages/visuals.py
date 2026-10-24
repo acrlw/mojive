@@ -35,7 +35,7 @@ def draw(panel, ctx: PanelContext) -> None:
 
     if panel._message:
         imgui.separator()
-        imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), panel._message)
+        imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr(panel._message))
 
 
 def contact_style(panel, ctx: PanelContext) -> None:

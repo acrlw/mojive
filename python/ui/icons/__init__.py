@@ -8,6 +8,7 @@ from .drawing import draw_concept_icon as draw_concept_icon
 from .drawing import draw_control_icon as draw_control_icon
 from .drawing import draw_icon as draw_icon
 from .drawing import draw_icon_label as draw_icon_label
+from .drawing import draw_reference_icon as draw_reference_icon
 from .drawing import production_helper_strokes as production_helper_strokes
 from .layout import IconMetrics as IconMetrics
 from .layout import icon_alignment_anchor as icon_alignment_anchor

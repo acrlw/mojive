@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
+from itertools import groupby
 from math import ceil
 
 from imgui_bundle import imgui
@@ -458,11 +460,24 @@ class Menus:
         )
         if record is None:
             record = self.observed.setdefault("/".join(path), {"path": list(path), "rows": []})
-        for row in rows:
-            if row is None:
-                self.local_separator()
-            else:
-                self.item(row, path, record)
+        from mojive.ui.workspace.menu_rows import menu_columns
+
+        rows = tuple(rows)
+        previous = getattr(self, "_columns", None)
+        columns = previous or menu_columns(self.ui, rows)
+        try:
+            for separator, entries in groupby(rows, key=lambda row: row is None):
+                if separator:
+                    self.local_separator()
+                    continue
+                entries = tuple(entries)
+                # Checks and trailing columns stay stable across the popup.
+                # Pure-text groups do not inherit an unrelated action's icon slot.
+                self._columns = replace(columns, icon=any(row.icon for row in entries))
+                for row in entries:
+                    self.item(row, path, record)
+        finally:
+            self._columns = previous
 
     def local_item(
         self,

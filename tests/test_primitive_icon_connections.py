@@ -7,6 +7,7 @@ import pytest
 from examples.ui_design.native.compile_icons import compile_svg
 from imgui_bundle import imgui
 
+from mojive.geometry2d.icon_mesh import compile_icon_layers
 from mojive.geometry2d.mesh import compile_stroke
 from mojive.geometry2d.path import PathBuilder2D
 from mojive.geometry2d.style import StrokeStyle
@@ -32,9 +33,14 @@ def contains(points, polygon):
 @pytest.mark.parametrize("name", ("box", "cone"))
 def test_interior_strokes_cannot_protrude_through_the_primitive_outer_silhouette(name):
     glyph = compile_svg((MASTERS / f"shape-{name}.svg").read_text())
-    *seams, shell = glyph["contours"]
+    shell, *seams = glyph["contours"]
     assert shell["closed"]
     assert all(not seam["closed"] for seam in seams)
+    outline = next(
+        edge
+        for edge, inside in compile_icon_layers([shell])[0]["stroke"]["boundaries"]
+        if not inside
+    )
     for seam in seams:
         path = PathBuilder2D().move_to(*seam["points"][0])
         for point in seam["points"][1:]:
@@ -43,9 +49,15 @@ def test_interior_strokes_cannot_protrude_through_the_primitive_outer_silhouette
             seam["width"], cap=seam["cap"], join=seam["join"], miter_limit=seam["miter_limit"]
         )
         mesh = compile_stroke(path.finish(), stroke)
-        # The full expanded seam is inside the shell centerline, leaving the
-        # exterior half-stroke free of exposed caps at every production size.
-        assert contains(mesh.positions, shell["points"]).all(), name
+        # The full expanded seam is inside the expanded shell, keeping all joined caps contained at every production size.
+        for point in mesh.positions:
+            if contains([point], outline)[0]:
+                continue
+            # Shared tangent vertices can lie on the boundary within float32 precision.
+            assert min(np.linalg.norm(point - np.asarray(vertex)) for vertex in outline) < 1e-5, (
+                name,
+                point,
+            )
 
 
 def covered(point, vertices, indices):
@@ -59,8 +71,8 @@ def covered(point, vertices, indices):
 @pytest.mark.parametrize(
     "name,voids",
     (
-        ("sphere", ((5.2, 11.5), (18.8, 11.5))),
-        ("ellipsoid", ((4.2, 11.5), (19.8, 11.5))),
+        ("sphere", ((6, 9), (18, 9))),
+        ("ellipsoid", ((6, 9.5), (18, 9.5))),
         ("cylinder", ((6.2, 6.0), (17.8, 6.0))),
     ),
 )

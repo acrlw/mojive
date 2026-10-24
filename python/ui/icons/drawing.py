@@ -165,10 +165,22 @@ def _place_icon_command(method, before, options, center):
     return (tuple(map(point, before[0])), *before[1:]), options
 
 
+def draw_reference_icon(draw, center, size: float, name: str, color, *, accent_color=None) -> None:
+    """Draw the retained fitted family for feasibility and regression comparisons."""
+    _draw_cached_icon(draw, center, size, name, color, accent_color, None)
+
+
 def draw_icon(draw, center, size: float, name: str, color, *, accent_color=None) -> None:
     """Submit cached production geometry with the current interaction colors."""
 
-    _draw_cached_icon(draw, center, size, name, color, accent_color, None)
+    from mojive.ui.workspace.icon_mesh import draw_packaged_icon
+    from mojive.ui.workspace.widget_icons import COMPILED_ALIASES
+
+    master = COMPILED_ALIASES.get(name, name)
+    if name in COMPILED_ALIASES or name.startswith("status-mouse-"):
+        draw_packaged_icon(draw, center, size, master, color)
+    else:
+        _draw_cached_icon(draw, center, size, name, color, accent_color, None)
 
 
 def draw_icon_label(
@@ -187,9 +199,18 @@ def draw_icon_label(
     size = 16.0 * scale
     if not label:
         center = ((lo[0] + hi[0]) * 0.5 + icon_offset[0], (lo[1] + hi[1]) * 0.5 + icon_offset[1])
-        _draw_cached_icon(draw, center, size, name, color, None, style)
+        if style is None:
+            draw_icon(draw, center, size, name, color)
+        else:
+            _draw_cached_icon(draw, center, size, name, color, None, style)
         return
-    if style is None:
+    from mojive.ui.workspace.widget_icons import COMPILED_ALIASES, GLYPHS
+
+    master = COMPILED_ALIASES.get(name, name)
+    adopted = style is None and master in GLYPHS
+    if adopted:
+        bounds = tuple(value - 12 for value in GLYPHS[master]["bounds"])
+    elif style is None:
         bounds = production_icon_metrics(name).bounds
     else:
         bounds = icon_metrics(
@@ -212,15 +233,11 @@ def draw_icon_label(
     body = draw.text_ink_bounds("x" if label.isascii() else "田")
     center_y = (lo[1] + hi[1]) * 0.5
     text_y = center_y - ((body[1] + body[3]) * 0.5 if body else line_height * 0.5)
-    _draw_cached_icon(
-        draw,
-        (left - bounds[0] * unit + icon_offset[0], center_y + icon_offset[1]),
-        size,
-        name,
-        color,
-        None,
-        style,
-    )
+    center = (left - bounds[0] * unit + icon_offset[0], center_y + icon_offset[1])
+    if adopted:
+        draw_icon(draw, center, size, name, color)
+    else:
+        _draw_cached_icon(draw, center, size, name, color, None, style)
     draw.text((left + glyph_width + gap - ink[0], text_y), color, label, pixel_snap=False)
 
 
@@ -355,6 +372,14 @@ def production_helper_strokes(name: str) -> tuple[IconStrokePath, ...]:
 
     if name not in {"helper-camera", "helper-light"}:
         raise ValueError(f"not a scene helper icon: {name!r}")
-    draw = _StrokePathDraw()
-    draw_icon(draw, (0.0, 0.0), ICON_GRID, name, (1.0, 1.0, 1.0, 1.0))
-    return tuple(draw.paths)
+    from mojive.ui.workspace.widget_icons import COMPILED_ALIASES, GLYPHS
+
+    return tuple(
+        IconStrokePath(
+            tuple((x - 12, y - 12) for x, y in contour["points"]),
+            contour["width"],
+            contour["closed"],
+        )
+        for contour in GLYPHS[COMPILED_ALIASES[name]]["contours"]
+        if contour["stroke"] != "none"
+    )

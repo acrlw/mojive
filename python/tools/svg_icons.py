@@ -22,8 +22,6 @@ from mojive.ui.icon_draw import ImguiIconDraw
 from mojive.ui.icons import (
     ICON_FAMILIES,
     ICON_GRID,
-    REVIEW_LOCKED_ICONS,
-    STROKE_SCALE_LOCKED_ICONS,
     draw_icon,
     production_icon_offset,
     production_icon_style,
@@ -168,8 +166,13 @@ class _SvgDraw:
         origin=None,
         direction=(1.0, 0.0),
         fringe_width=1.0,
+        boundaries=(),
     ):
         if not len(indices):
+            return
+        if boundaries:
+            contours = tuple(boundary for boundary, _inside in boundaries)
+            self._fill(contours, color, fringe=fringe_width)
             return
         if not len(outline):
             raise ValueError("SVG export requires the mesh's exterior boundary")
@@ -255,16 +258,11 @@ def export_icon(name: str) -> str:
     """Export the current production shape, including its optical translation."""
     if name not in ICON_NAMES:
         raise ValueError(f"Unknown production icon: {name}")
-    draw = _SvgDraw(
-        native_strokes=name in STROKE_SCALE_LOCKED_ICONS,
-        device_fringe=name in REVIEW_LOCKED_ICONS,
-    )
+    draw = _SvgDraw()
     draw_icon(
         draw, (ICON_GRID / 2, ICON_GRID / 2), ICON_GRID, name, _FOREGROUND, accent_color=_ACCENT
     )
-    fringe = (
-        1.0 if name in STROKE_SCALE_LOCKED_ICONS else production_icon_style(name).stroke_width / 2
-    )
+    fringe = 0.75
     root = ET.Element(
         "svg",
         {

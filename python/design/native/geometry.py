@@ -1,6 +1,7 @@
 """Catalogue-driven boxes, inheritance and equal-spacing layout."""
 
 import contextvars
+from collections import OrderedDict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -199,7 +200,8 @@ class NativePartStyle:
         self.record_values = dict(self.values)
         self.record_origins = dict(self.origins)
         self._variants = {}
-        self._geometry_cache = {}
+        self._geometry_cache = OrderedDict()
+        self._geometry_dependencies = OrderedDict()
         self._collecting = None
         self._compiled = compiled
         self.values = MappingProxyType(self.values)

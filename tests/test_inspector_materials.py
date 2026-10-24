@@ -13,6 +13,7 @@ from mojive.render.backend import NullBackend
 from mojive.scene import Scene
 from mojive.session import Session
 from mojive.types import Material
+from mojive.ui.localization import Language, Localizer
 from mojive.ui.panels import PanelContext
 from mojive.ui.panels.inspector import InspectorPanel, geometry, materials
 
@@ -183,8 +184,10 @@ def test_surface_and_texture_drag_share_one_undo_transaction(editor, inputs):
     assert not ctx.session.can_undo
 
 
-def test_preset_and_override_controls_preserve_the_disabled_sentinel(editor, inputs):
-    inputs.choices = {"##material_preset": "Metal"}
+@pytest.mark.parametrize("language", (Language.ENGLISH, Language.SIMPLIFIED_CHINESE))
+def test_preset_and_override_controls_preserve_the_disabled_sentinel(editor, inputs, language):
+    editor[1].translate = Localizer(language).text
+    inputs.choices = {"##material_preset": editor[1].tr("Metal")}
     inputs.edits = {"##material_metallic_override": True, "##material_roughness_override": True}
     _draw(editor)
     value = _material(editor)

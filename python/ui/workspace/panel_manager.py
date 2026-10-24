@@ -90,6 +90,10 @@ class WorkspacePanels(PanelManager):
                 from .property_style import NativePropertyPresentation
 
                 native.presentation = NativePropertyPresentation(workspace.ui, prefix=panel.id)
+        if panel.id == "info":
+            native.shortcut = ""
+            native.open = False
+            return native
         native.enabled, native.open = panel.enabled, panel.open
         native.name = PANEL_NAMES.get(panel.id, panel.name)
         return native

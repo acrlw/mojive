@@ -389,9 +389,15 @@ def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
     apply_width, discard_width = apply_size[0], discard_size[0]
     actions_width = apply_width + discard_width + gap
     label_width = box.content.width if stacked else max(0, box.content.width - actions_width - gap)
+    # The caption owns the same text inset as the adjacent buttons; the shell's
+    # inset alone only measures the clearance around their painted surfaces.
+    caption_inset = (
+        0 if compact else ui.component_style("button").edges("padding", scale, (8, 0, 8, 0))[0]
+    )
+    caption_width = max(0, label_width - caption_inset)
     label_rect = style.align_rect(
-        Rect(box.content.x, box.content.y, label_width, row_height),
-        label_width,
+        Rect(box.content.x + caption_inset, box.content.y, caption_width, row_height),
+        caption_width,
         min(row_height, style.line_height(style.get("fontSize", BODY_SIZE) * 1.4) * scale),
         horizontal="start",
     )

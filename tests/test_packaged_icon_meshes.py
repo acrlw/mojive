@@ -1,5 +1,6 @@
 """Fixed SVG topology is packaged once; display size only changes its AA fringe."""
 
+import gc
 import hashlib
 import json
 from collections import Counter
@@ -78,8 +79,37 @@ def test_packaged_meshes_match_every_canonical_master():
             if "fill" in compiled:
                 np.testing.assert_allclose(actual["fill"], compiled["fill"], atol=1e-6, rtol=0)
                 continue
-            mesh, reference = actual["stroke"], compiled["stroke"]
+            kind = "mesh" if "mesh" in compiled else "stroke"
+            mesh, reference = actual[kind], compiled[kind]
             _assert_stroke_matches(mesh, reference)
+
+
+@pytest.mark.parametrize("resource", ("icon_meshes.json", "icons.json"))
+def test_packaged_icon_arrays_preserve_geometry_without_persistent_gc_tracking(resource):
+    source = Path(icon_mesh.__file__).with_name(resource)
+    expected = json.loads(source.read_text())
+    if resource == "icon_meshes.json":
+        layers, expected = icon_mesh._packaged_layers(), expected["icons"]
+    else:
+        layers = widget_icons.GLYPHS
+    assert json.loads(json.dumps(layers)) == expected
+
+    # Immutable numeric tuples can leave the cyclic collector's graph after its
+    # normal collection pass; production code does not change the GC policy.
+    gc.collect()
+    pending = [layers]
+    point_count = 0
+    while pending:
+        value = pending.pop()
+        assert not isinstance(value, list)
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, tuple):
+            if len(value) == 2 and all(type(item) in (int, float) for item in value):
+                point_count += 1
+                assert not gc.is_tracked(value)
+            pending.extend(value)
+    assert point_count > 0
 
 
 def test_mesh_comparison_accepts_equivalent_diagonals_and_rejects_missing_fill():
@@ -108,7 +138,6 @@ def test_first_paint_and_scale_changes_do_not_compile_strokes(monkeypatch):
 
     monkeypatch.setattr(compiler, "compile_stroke", unexpected_compilation)
     compiler.stroke_mesh.cache_clear()
-    icon_mesh.prepared_icon.cache_clear()
     from imgui_bundle import imgui
 
     context = imgui.create_context()
@@ -158,3 +187,45 @@ def test_failed_compilation_leaves_existing_resource_set_untouched(monkeypatch):
     monkeypatch.setattr(Path, "write_text", premature_write)
     with pytest.raises(ValueError, match="Invalid stroke topology"):
         compile_icons.main()
+
+
+@pytest.mark.parametrize("fill_rule, holes", (("evenodd", 1), ("nonzero", 0)))
+def test_compound_fill_preserves_element_fill_rule(fill_rule, holes):
+    from examples.ui_design.native.compile_icons import compile_svg
+
+    glyph = compile_svg(
+        '<svg viewBox="0 0 24 24" fill="currentColor">'
+        f'<path fill-rule="{fill_rule}" d="M2 2H22V22H2Z M8 8H16V16H8Z"/>'
+        "</svg>"
+    )
+    (layer,) = compiler.compile_icon_layers(glyph["contours"])
+    mesh = layer["mesh"]
+    assert sum(inside for _, inside in mesh["boundaries"]) == holes
+    vertices = np.asarray(mesh["vertices"])
+    triangles = vertices[np.asarray(mesh["indices"]).reshape(-1, 3)]
+    a, b = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+    assert np.abs(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]).sum() / 2 == pytest.approx(
+        400 - holes * 64
+    )
+
+
+@pytest.mark.parametrize(
+    "name, openings",
+    (
+        ("pose", ((4.25, 19.5), (9.25, 5), (19.75, 12))),
+        ("joint-ball", ((12, 9),)),
+    ),
+)
+def test_adopted_hollow_nodes_have_no_connector_ink_inside(name, openings):
+    layers = icon_mesh._packaged_layers()[name]
+    for layer in layers:
+        mesh = layer.get("mesh", layer.get("stroke"))
+        triangles = np.asarray(mesh["vertices"])[np.asarray(mesh["indices"]).reshape(-1, 3)]
+        for center in openings:
+            # Probe an interior disk, not only one clear center pixel.
+            angles = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+            for point in np.asarray(center) + np.column_stack((np.cos(angles), np.sin(angles))):
+                edges = np.roll(triangles, -1, axis=1) - triangles
+                offsets = point - triangles
+                cross = edges[..., 0] * offsets[..., 1] - edges[..., 1] * offsets[..., 0]
+                assert not np.any(np.all(cross >= -1e-8, axis=1)), (name, point)

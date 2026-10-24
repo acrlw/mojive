@@ -283,11 +283,20 @@ def dialogs(menu):
                     imgui.dummy((w, body_line))
                 body_rows.append([q.x, q.y, w, imgui.get_item_rect_max().y - q.y])
         else:
-            imgui.text_wrapped(menu.workspace.app.localizer.text("About"))
+            from mojive.build_info import current_build
+
+            version, commit = current_build()
+            for text in (
+                "Backend-neutral 3D scene editing and simulation tools.",
+                "Scene authoring, materials, cameras and lights.",
+                "Joint posing, transform gizmos and simulation playback.",
+                "OpenGL and bgfx rendering; Python APIs and remote scene sources.",
+            ):
+                imgui.text_wrapped(u.translate(text))
             imgui.spacing()
-            imgui.text_disabled(
-                menu.workspace.app.localizer.text("Dear ImGui") + " " + imgui.get_version()
-            )
+            imgui.text(u.translate("Version") + ": " + version)
+            imgui.text(u.translate("Commit") + ": " + (commit or u.translate("Unavailable")))
+            imgui.text_disabled(u.translate("Dear ImGui") + " " + imgui.get_version())
         u.record_component_box("dialog_body", body, key="guide-dialog-body", fields=body_rows)
         imgui.end_child()
         imgui.pop_style_var()

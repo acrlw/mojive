@@ -118,6 +118,13 @@ class _PillowDraw2D:
     def convex_fill(self, points, color) -> None:
         self.draw.polygon(self._points(points), fill=_rgba(color))
 
+    def indexed_fill(self, points, indices, color, **_kwargs) -> None:
+        pixels = self._points(points)
+        for offset in range(0, len(indices), 3):
+            self.draw.polygon(
+                tuple(pixels[index] for index in indices[offset : offset + 3]), fill=_rgba(color)
+            )
+
     def concave_fill(self, points, color) -> None:
         self.draw.polygon(self._points(points), fill=_rgba(color))
 

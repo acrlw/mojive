@@ -15,6 +15,7 @@ from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels import copyable_name_item, pointer_pressed, value_edit
 from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.text_layout import fit_text
+from mojive.ui.value_rail import draw_value_rail
 from mojive.ui.viewport_widgets import draw_reset_glyph
 
 
@@ -372,42 +373,3 @@ def _value_entry(
     if splitter is not None:
         splitter.merge(draw_list)
     return edit
-
-
-def draw_value_rail(
-    draw,
-    left,
-    right,
-    position,
-    radius,
-    theme,
-    scale,
-    *,
-    hovered=False,
-    pressed=False,
-    alpha=1.0,
-    disabled=False,
-    track_size=3,
-):
-    """Paint a subdued rail and separate round handle, with opaque disabled colors."""
-
-    def color(value):
-        opacity = value[3] * alpha
-        if disabled:
-            # Resolve disabled dimming once against the panel surface. The
-            # opaque handle then covers the rail instead of blending it twice.
-            rgb = (
-                b + (c - b) * opacity for c, b in zip(value[:3], theme.bg_window[:3], strict=True)
-            )
-            return (*rgb, 1.0)
-        return (*value[:3], opacity)
-
-    fill = theme.primary_bright if pressed else theme.primary if hovered else theme.primary_dim
-    knob = theme.text if pressed else theme.primary_bright if hovered else theme.primary
-    track = (
-        theme.bg_frame_active if pressed else theme.bg_frame_hovered if hovered else theme.bg_frame
-    )
-    draw.line(left, right, color(track), track_size * scale, cap="round")
-    if position > left[0]:
-        draw.line(left, (position, left[1]), color(fill), track_size * scale, cap="round")
-    draw.circle_filled((position, left[1]), radius, color(knob), segments=24)

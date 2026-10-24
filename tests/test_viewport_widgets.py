@@ -386,10 +386,13 @@ def test_projection_glyph_distinguishes_converging_and_parallel_edges():
     ("kind", "label"),
     (("persp", "persp"), ("ortho", "ortho"), ("persp", "透视"), ("ortho", "正交")),
 )
-def test_projection_labels_keep_the_body_line_and_apply_only_the_icon_offset(scale, kind, label):
+def test_projection_labels_keep_the_body_line_and_canonical_ink_spacing(scale, kind, label):
     ink = (2.0 * scale, 2.0 * scale, (len(label) * 7.0 - 3.0) * scale, 18.0 * scale)
 
     class LabelDraw(_RecordedGlyph):
+        def indexed_fill(self, points, indices, color, **_kwargs):
+            self.mesh = points
+
         def text_size(self, text):
             return len(text) * 7.0 * scale, 18.0 * scale
 
@@ -407,8 +410,8 @@ def test_projection_labels_keep_the_body_line_and_apply_only_the_icon_offset(sca
     lo, hi = (12.25, 24.5), (172.25, 24.5 + 24.0 * scale)
     draw_projection_label(draw, lo, hi, (1.0,) * 4, scale, kind, label)
 
-    points = draw.polylines[0][0][0]
-    stroke = draw.polylines[0][0][2]
+    points = draw.mesh
+    stroke = 0
     expected_y = (lo[1] + hi[1]) * 0.5
     assert (min(p[1] for p in points) + max(p[1] for p in points)) * 0.5 == pytest.approx(
         expected_y
@@ -419,7 +422,7 @@ def test_projection_labels_keep_the_body_line_and_apply_only_the_icon_offset(sca
     icon_right = max(p[0] for p in points) + stroke * 0.5
     label_left = draw.label[1][0] + ink[0]
     label_right = draw.label[1][0] + ink[2]
-    optical_x = 0.27 * 16.0 * scale / 24.0 if kind == "persp" else 0.0
+    optical_x = 0.0
     assert label_left - icon_right == pytest.approx(7.0 * scale - optical_x)
     assert icon_left + label_right == pytest.approx(lo[0] + hi[0] + optical_x)
 
@@ -744,6 +747,7 @@ class _RecordedStatus(_MeasuredText):
         self.circles = []
         self.polylines = []
         self.convex_fills = []
+        self.meshes = []
         self.filled_rects = []
 
     def text(self, position, color, value, *, pixel_snap=True):
@@ -759,6 +763,9 @@ class _RecordedStatus(_MeasuredText):
 
     def polyline(self, *args, **kwargs):
         self.polylines.append((args, kwargs))
+
+    def indexed_fill(self, *args, **kwargs):
+        self.meshes.append((args, kwargs))
 
     def convex_fill(self, *args, **kwargs):
         self.convex_fills.append((args, kwargs))
@@ -1136,8 +1143,10 @@ def test_status_uses_muted_gray_for_chrome_and_context_hints():
     assert draw.lines[0][0][2] == THEME.primary_dim
     assert draw.lines[0][0][3] == pytest.approx(1.0)
     assert draw.circles[0][0][2] == THEME.primary
-    assert draw.polylines[0][0][1] == THEME.text_disabled
-    assert draw.convex_fills[0][0][1] == THEME.bg_frame_active
+    assert {args[2] for args, _kwargs in draw.meshes} == {
+        THEME.text_disabled,
+        (*THEME.text_disabled[:3], THEME.text_disabled[3] * 0.55),
+    }
     status_x = next(position[0] for position, text in draw.text_positions if text == "Saved scene")
     vertical_dividers = [
         args[0][0] for args, _kwargs in draw.lines if args[0][0] == pytest.approx(args[1][0])
@@ -1203,6 +1212,7 @@ class _RecordedMouse(_MeasuredText):
         self.polylines = []
         self.filled_rects = []
         self.convex_fills = []
+        self.meshes = []
         self.events = []
 
     def rect(self, *args, **kwargs):
@@ -1220,6 +1230,9 @@ class _RecordedMouse(_MeasuredText):
         self.filled_rects.append((args, kwargs))
         self.events.append("fill")
 
+    def indexed_fill(self, *args, **kwargs):
+        self.meshes.append((args, kwargs))
+
     def convex_fill(self, *args, **kwargs):
         self.convex_fills.append((args, kwargs))
         self.events.append("fill")
@@ -1229,106 +1242,33 @@ class _RecordedMouse(_MeasuredText):
 
 
 @pytest.mark.parametrize("scale", (1.0, 2.0, 2.25))
-@pytest.mark.parametrize("button", ("left", "right"))
-def test_mouse_hint_button_replaces_its_part_of_the_blender_style_shell(
-    scale: float, button: str
-) -> None:
+@pytest.mark.parametrize("button", ("left", "right", "wheel", "middle"))
+def test_mouse_hints_use_the_adopted_master_with_neutral_ink(scale, button, monkeypatch):
     from mojive.ui.theme import THEME
+    from mojive.ui.viewport_widgets import hints
 
+    calls = []
+    monkeypatch.setattr(
+        hints, "draw_packaged_icon", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
     draw = _RecordedMouse()
     width = draw_mouse_hint_glyph(draw, 10.0, 30.0, button, "", THEME, scale)
-
     assert width == pytest.approx(OVERLAY_GEOMETRY.hint_mouse_width * scale)
-    assert draw.rects == []
-    assert draw.lines == []
-    assert len(draw.polylines) == 1
-    assert len(draw.convex_fills) == 1
-    assert draw.events == ["shell", "fill"]
-    shell_args, shell_kwargs = draw.polylines[0]
-    fill_args, _fill_kwargs = draw.convex_fills[0]
-    shell_points, shell_color, shell_stroke = shell_args
-    fill_points, fill_color = fill_args
-    assert shell_kwargs == {}
-    assert shell_color == THEME.text
-    assert shell_stroke == pytest.approx(OVERLAY_GEOMETRY.hint_mouse_stroke * scale)
-    assert fill_color == THEME.primary
-
-    x = 10.0
-    mouse_width = OVERLAY_GEOMETRY.hint_mouse_width * scale
-    mouse_height = OVERLAY_GEOMETRY.hint_control_height * scale
-    mouse_y = 30.0 - mouse_height * 0.5
-    half_stroke = shell_stroke * 0.5
-    shell_gap = shell_stroke * OVERLAY_GEOMETRY.hint_mouse_button_shell_ratio
-    button_width = (mouse_width + shell_stroke) * OVERLAY_GEOMETRY.hint_mouse_button_width_ratio
-    button_bottom = mouse_y + mouse_height * OVERLAY_GEOMETRY.hint_mouse_button_height_ratio
-    fill_xs = [point[0] for point in fill_points]
-    fill_ys = [point[1] for point in fill_points]
-    assert min(fill_ys) == pytest.approx(mouse_y - half_stroke)
-    assert max(fill_ys) == pytest.approx(button_bottom)
-    if button == "left":
-        assert min(fill_xs) == pytest.approx(x - half_stroke)
-        assert max(fill_xs) - min(fill_xs) == pytest.approx(button_width)
-        assert shell_points[0] == pytest.approx((max(fill_xs) + shell_gap, mouse_y))
-        assert shell_points[-1] == pytest.approx((x, button_bottom + shell_gap))
-    else:
-        assert max(fill_xs) == pytest.approx(x + mouse_width + half_stroke)
-        assert max(fill_xs) - min(fill_xs) == pytest.approx(button_width)
-        assert shell_points[0] == pytest.approx((min(fill_xs) - shell_gap, mouse_y))
-        assert shell_points[-1] == pytest.approx((x + mouse_width, button_bottom + shell_gap))
+    (_draw, center, size, name, color), options = calls[0]
+    assert center == pytest.approx((10 + width / 2, 30))
+    assert size == pytest.approx(OVERLAY_GEOMETRY.hint_control_height * scale)
+    assert name == "status-mouse-" + ("wheel" if button == "middle" else button)
+    assert color == THEME.text
+    assert options["stroke_color"] == (*THEME.text[:3], THEME.text[3] * 0.55)
 
 
 def test_mouse_hint_colors_resolve_active_and_muted_semantics() -> None:
     from mojive.ui.theme import THEME
 
-    assert mouse_hint_colors(THEME) == (THEME.text, THEME.primary, THEME.primary_bright)
-    assert mouse_hint_colors(THEME, muted=True) == (
-        THEME.text_disabled,
-        THEME.bg_frame_active,
-        THEME.text_disabled,
-    )
-
-
-@pytest.mark.parametrize(
-    ("scale", "pixel_size"),
-    ((1.0, 1.0), (1.0, 0.5), (2.0, 1.0), (4.0, 1.0)),
-)
-@pytest.mark.parametrize("button", ("wheel", "middle"))
-def test_mouse_wheel_uses_configured_stroke_gap_with_a_physical_pixel_minimum(
-    button: str,
-    scale: float,
-    pixel_size: float,
-) -> None:
-    from mojive.ui.theme import THEME
-
-    draw = _RecordedMouse()
-    draw_mouse_hint_glyph(
-        draw,
-        10.0,
-        30.0,
-        button,
-        "",
-        THEME,
-        scale,
-        pixel_size=pixel_size,
-    )
-
-    shell_lo, _shell_hi = draw.rects[0][0][:2]
-    wheel_args, wheel_kwargs = draw.filled_rects[0]
-    wheel_lo, wheel_hi = wheel_args[:2]
-    stroke = OVERLAY_GEOMETRY.hint_mouse_stroke * scale
-    expected_gap = max(stroke * OVERLAY_GEOMETRY.hint_mouse_wheel_gap_ratio, pixel_size)
-    assert wheel_lo[1] == pytest.approx(shell_lo[1] + stroke * 0.5 + expected_gap)
-    assert wheel_hi[1] - wheel_lo[1] == pytest.approx(
-        OVERLAY_GEOMETRY.hint_control_height
-        * scale
-        * OVERLAY_GEOMETRY.hint_mouse_wheel_height_ratio
-    )
-    assert wheel_kwargs["rounding"] == pytest.approx(
-        OVERLAY_GEOMETRY.hint_mouse_width
-        * scale
-        * OVERLAY_GEOMETRY.hint_mouse_wheel_width_ratio
-        * 0.42
-    )
+    for muted, ink in ((False, THEME.text), (True, THEME.text_disabled)):
+        shell, control, suffix = mouse_hint_colors(THEME, muted=muted)
+        assert control == suffix == ink
+        assert shell == (*ink[:3], ink[3] * 0.55)
 
 
 @pytest.mark.parametrize("gap_ratio", (0.5, 1.0))
@@ -1515,7 +1455,7 @@ def test_modified_mouse_hint_keeps_its_glyph_and_matches_its_measured_width(scal
 
     assert width == pytest.approx(tool_hints_size(draw, scale, hints)[0])
     assert text == ["Shift", "+", "Select loop range"]
-    assert draw.convex_fills  # The mouse button is drawn as geometry.
+    assert draw.meshes  # The button uses the shared canonical mesh.
     assert fitting_tool_hints(draw, scale, hints, width - 1) == ()
 
 

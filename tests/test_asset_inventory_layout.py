@@ -14,8 +14,9 @@ from mojive.ui.workspace.widgets import UI
 
 @pytest.mark.parametrize("scale", (1, 2))
 @pytest.mark.parametrize("gap", (6, 14))
+@pytest.mark.parametrize("language", (Language.ENGLISH, Language.SIMPLIFIED_CHINESE))
 def test_inventory_separates_type_from_reference_count_without_changing_form_padding(
-    scale, gap, monkeypatch
+    scale, gap, language, monkeypatch
 ):
     context = imgui.create_context()
     io = imgui.get_io()
@@ -27,7 +28,7 @@ def test_inventory_separates_type_from_reference_count_without_changing_form_pad
         SimpleNamespace(style_scale=scale, font_report=SimpleNamespace(cjk_path=None)),
         portable_fonts=True,
     )
-    localizer = Localizer(Language.SIMPLIFIED_CHINESE)
+    localizer = Localizer(language)
     ui.translate = localizer.text
     panel = AssetsPanel()
     panel.presentation = NativePropertyPresentation(ui)
@@ -42,9 +43,10 @@ def test_inventory_separates_type_from_reference_count_without_changing_form_pad
     monkeypatch.setattr(panel, "_import_controls", lambda _ctx: None)
     spans = {}
     original = imgui.text_disabled
+    type_caption = localizer.text("material")
 
     def text_disabled(value):
-        if value in ("material", "2"):
+        if value in (type_caption, "2"):
             x = imgui.get_cursor_screen_pos().x
             spans[value] = (x, x + imgui.calc_text_size(value).x)
         return original(value)
@@ -68,7 +70,8 @@ def test_inventory_separates_type_from_reference_count_without_changing_form_pad
                 assert (restored.x, restored.y) == original_padding
             imgui.end()
             imgui.render()
-        assert spans["2"][0] - spans["material"][1] >= gap * scale - 1
+        assert spans["2"][0] - spans[type_caption][1] >= gap * scale - 1
+        assert panel._assets[0].type == "material" and panel._assets[0].name == "surface"
         assert panel._selected is None
     finally:
         imgui.destroy_context(context)

@@ -1,6 +1,7 @@
 """Native workspace controls sharing painters, hit bounds and gesture state."""
 
-from functools import lru_cache
+from collections import OrderedDict
+from functools import cached_property, lru_cache
 from math import ceil
 from types import SimpleNamespace
 
@@ -102,6 +103,14 @@ class UI(ComponentStyles, _NumericFields):
             tr=lambda value: self.translate(value),
             input_bindings=DEFAULT_INPUT_BINDINGS,
         )
+
+    @cached_property
+    def _fitted_labels(self):
+        return OrderedDict()
+
+    @cached_property
+    def _text_baselines(self):
+        return {}
 
     @property
     def numeric_font(self):
@@ -237,12 +246,33 @@ class UI(ComponentStyles, _NumericFields):
             imgui.push_font(font, pixels)
         try:
             painter = ImguiDraw2D(draw_list)
-            line_y = y if native_line else text_line_y(painter, y + pixels / 2)
+            if native_line:
+                line_y = y
+            else:
+                # Cap-height alignment depends on the resolved font and pixel size.
+                baseline_key = (font, pixels)
+                offset = self._text_baselines.get(baseline_key)
+                if offset is None:
+                    offset = text_line_y(painter, pixels / 2)
+                    if len(self._text_baselines) >= 64:
+                        self._text_baselines.pop(next(iter(self._text_baselines)))
+                    self._text_baselines[baseline_key] = offset
+                line_y = y + offset
             shown = self.translate(str(text)) if translate else str(text)
             if max_width is not None:
-                measured = painter.text_size(shown)[0]
-                budget = text_budget(max(0, max_width), measured, native_epsilon(x, x + max_width))
-                shown = fit_text(painter, shown, budget)
+                epsilon = native_epsilon(x, x + max_width)
+                key = (font, pixels, shown, max_width, epsilon)
+                fitted = self._fitted_labels.get(key)
+                if fitted is None:
+                    measured = painter.text_size(shown)[0]
+                    budget = text_budget(max(0, max_width), measured, epsilon)
+                    fitted = fit_text(painter, shown, budget)
+                    if len(self._fitted_labels) >= 512:
+                        self._fitted_labels.popitem(last=False)
+                    self._fitted_labels[key] = fitted
+                else:
+                    self._fitted_labels.move_to_end(key)
+                shown = fitted
             painter.text(
                 (x, line_y),
                 (*[channel / 255 for channel in c[:3]], c[3] / 255 * imgui.get_style().alpha),
@@ -619,11 +649,29 @@ class UI(ComponentStyles, _NumericFields):
         self.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
         return changed, out
 
-    def search(self, key, x, y, w, value, *, hint=""):
+    def search(
+        self, key, x, y, w, value, *, hint="", search_tooltip="Search", clear_tooltip="Clear search"
+    ):
         if self.design is not None:
-            return self.input_text(
-                key, x, y, w, value, hint=hint, parts=("input_text", "search"), icon="search"
+            painter = self.design.primitives
+            painter.family = self.design.family()
+            parts = ("input_text", "search")
+            style = self.component_style(parts)
+            margin = style.edges("margin", self.s)
+            height = (
+                painter.field_height(parts, DESIGN.control_height) * self.s + margin[1] + margin[3]
             )
+            result = painter.input_text(
+                key,
+                Rect(x, y, w, height),
+                value,
+                hint=hint,
+                parts=parts,
+                icon="search",
+                search_tooltip=search_tooltip,
+                clear_tooltip=clear_tooltip,
+            )
+            return result.changed, result.value
         from mojive.ui.controls import search_input
 
         imgui.set_cursor_screen_pos((x, y))

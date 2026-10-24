@@ -151,7 +151,7 @@ def _material_surface_rows(ctx: PanelContext, material: Material, material_index
     _property_control_row(ctx, "preset", control_part="select")
     if _property_begin_combo(ctx, "##material_preset", ctx.tr("Presets...")):
         for preset, values in _MATERIAL_PRESETS.items():
-            selected, _ = _property_choice(ctx, preset, False)
+            selected, _ = _property_choice(ctx, ctx.tr(preset), False)
             if selected:
                 emission, specular, shininess, reflectance = values
                 changed = True

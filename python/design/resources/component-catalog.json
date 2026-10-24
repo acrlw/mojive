@@ -8536,6 +8536,24 @@
           "column-gap"
         ],
         "group": "边距与间距"
+      },
+      "summaryLabelGap": {
+        "label": "Summary caption gap",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 4,
+        "special": "summaryLabelGap"
+      },
+      "summaryGroupGap": {
+        "label": "Summary group gap",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 12,
+        "special": "summaryGroupGap"
       }
     },
     "sample": {

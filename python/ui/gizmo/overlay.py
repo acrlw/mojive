@@ -65,6 +65,7 @@ from mojive.interaction.gizmo import (
 )
 from mojive.types import CameraView
 from mojive.ui.paint_protocol import Draw2D
+from mojive.ui.workspace.gizmo_readout import draw_gizmo_readout
 
 if TYPE_CHECKING:
     from mojive.session import Session
@@ -204,7 +205,9 @@ class _Overlay:
         self._drawn = bool(backend.set_gizmo(frame))
         return self._drawn
 
-    def draw_overlay(self, cam, rect, overlay: Draw2D, *, style_scale: float = 1.0) -> None:
+    def draw_overlay(
+        self, cam, rect, overlay: Draw2D, *, style_scale: float = 1.0, readout_ui=None
+    ) -> None:
         self._joint_limit_hits = ()
         if not self._visible:
             return
@@ -246,7 +249,7 @@ class _Overlay:
             range_projection,
         )
         if self.joint_precision_visible:
-            self._draw_joint_precision(overlay, style_scale)
+            self._draw_joint_precision(overlay, style_scale, readout_ui=readout_ui)
         if (
             self._using
             and not self._joint_precision_active
@@ -310,13 +313,17 @@ class _Overlay:
                 )
             self._draw_rotation_guide(overlay, cam, rect, style_scale, rotation_dial_projector)
         if self._using and self._label and not self._joint_precision_active:
-            self._draw_value_label(overlay, cam, rect, style_scale, rotation_dial_projector)
+            self._draw_value_label(
+                overlay, cam, rect, style_scale, rotation_dial_projector, ui=readout_ui
+            )
 
     @staticmethod
     def draw_joint_limit_label(
         overlay: Draw2D,
         hit: JointLimitHit,
         style_scale: float,
+        *,
+        ui=None,
     ) -> tuple[float, float, float, float]:
         """Draw the delayed, non-interactive value label for one endpoint tick."""
 
@@ -328,6 +335,7 @@ class _Overlay:
             style_scale,
             above=hit.label_above,
             align_right=hit.label_align_right,
+            ui=ui,
         )
 
     def _draw_flat(self, overlay: Draw2D, cam, rect, style_scale: float) -> None:
@@ -556,9 +564,9 @@ class _Overlay:
         rect,
         style_scale: float,
         dial: _RotationDialProjector | _ScreenRotationDialProjector | None,
+        *,
+        ui=None,
     ) -> None:
-        pad = 6.0 * style_scale
-        gap = 14.0 * style_scale
         anchor_world = self._frame.position
         anchor = None
         if self._active in ROTATE_HANDLES:
@@ -583,7 +591,6 @@ class _Overlay:
             anchor = project(cam, (anchor_world,), rect)[0]
         if anchor[2] <= 0.0:
             return
-        width_f, height_f = overlay.text_size(self._label)
         if self._active_joint is None or self._active is GizmoHandle.ROTATE_TRACKBALL:
             semantic_color = None
         elif self._joint_range is not None:
@@ -601,26 +608,13 @@ class _Overlay:
             _fill, semantic_color, _dark = self._active_rotation_palette()
         else:
             semantic_color = _joint_drag_label_color(None)
-        dot_radius = 3.0 * style_scale if semantic_color is not None else 0.0
-        dot_gap = 6.0 * style_scale if semantic_color is not None else 0.0
-        prefix_width = dot_radius * 2.0 + dot_gap
-        width, height = width_f + 2.0 * pad + prefix_width, height_f + 2.0 * pad
-        x = float(np.clip(anchor[0] + gap, rect[0] + 4.0, rect[0] + rect[2] - width - 4.0))
-        y = float(np.clip(anchor[1] + gap, rect[1] + 4.0, rect[1] + rect[3] - height - 4.0))
-        overlay.rect_filled(
-            (x, y),
-            (x + width, y + height),
-            (0.08, 0.09, 0.11, 0.92),
-            rounding=4.0 * style_scale,
-            smoothing=self._frame.corner_smoothing,
+        draw_gizmo_readout(
+            overlay,
+            anchor,
+            self._label,
+            style_scale,
+            ui=ui,
+            semantic_color=semantic_color,
+            gap=16,
+            viewport=rect,
         )
-        text_x = x + pad
-        if semantic_color is not None:
-            overlay.circle_filled(
-                (text_x + dot_radius, y + height * 0.5),
-                dot_radius,
-                semantic_color,
-                segments=16,
-            )
-            text_x += prefix_width
-        overlay.text((text_x, y + pad), (0.96, 0.96, 0.97, 1.0), self._label)

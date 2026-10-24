@@ -11,6 +11,7 @@ from mojive.ui.workspace.component_layout import (
     control_frame_size,
     control_size,
 )
+from mojive.ui.workspace.widget_icons import icon_role_canvas
 
 
 def _measure(ui, key, icon, label, baseline=28):
@@ -20,11 +21,21 @@ def _measure(ui, key, icon, label, baseline=28):
     pads = style.edges("padding", scale, (8, 0, 8, 0))
     width = baseline
     if label:
-        glyph = style.get("iconSize", 14) * scale
+        glyph = style.get("iconSize", icon_role_canvas("inline"))
+        engine = getattr(getattr(ui.design, "runtime", None), "paint_context", None)
+        if not style.explicit("iconSize") and engine is not None:
+            glyph = engine.inherited("iconSize", glyph)
         gap = style.get("columnGap", style.get("gap", 6)) * scale
         width = max(
             40 if key.startswith("output-level-") else 70,
-            (ui.measure(label, font, font_resolved=True) + glyph + gap + pads[0] + pads[2]) / scale,
+            (
+                ui.measure(label, font, font_resolved=True, style=style)
+                + glyph * scale
+                + gap
+                + pads[0]
+                + pads[2]
+            )
+            / scale,
         )
     return control_size(ui, key, width, 28, icon=icon, label=label)
 
@@ -228,15 +239,12 @@ def draw_output_toolbar(output, ctx, entries, newest):
             + search_margin[1]
             + search_margin[3]
         )
-        clear_size = (
-            _measure(ui, "output-filter-clear", "close", "") if output._filter_text else (0, 0)
-        )
         search_y = box.content.y + flow.height + row_gap
-        search_row_height = max(search_height, clear_size[1])
+        search_row_height = search_height
         search_rect = Rect(
             box.content.x,
             search_y,
-            max(0, box.content.width - clear_size[0] - (gap if clear_size[0] else 0)),
+            box.content.width,
             search_row_height,
         )
         search_at = style.align_rect(
@@ -256,25 +264,6 @@ def draw_output_toolbar(output, ctx, entries, newest):
         fields.append(list(ui.hits["##output-filter"]))
         if changed:
             output._last_sequence = 0
-        if clear_size[0]:
-            clear = style.align_rect(
-                Rect(search_rect.right + gap, search_y, clear_size[0], search_row_height),
-                *clear_size,
-                horizontal="start",
-            )
-            frame = control_frame_size(ui, "output-filter-clear", *clear_size, icon="close")
-            if ui.button(
-                "output-filter-clear",
-                clear.x,
-                clear.y,
-                *frame,
-                icon="close",
-                tooltip=ctx.tr("Clear search"),
-                width_limit=frame[0] * scale,
-            ):
-                output._filter_text = ""
-                output._last_sequence = 0
-            fields.append(list(ui.hits["output-filter-clear"]))
         box = ui.component_box(
             "output_toolbar",
             origin.x,

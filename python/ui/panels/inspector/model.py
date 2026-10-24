@@ -450,7 +450,7 @@ class _Model:
                         )
                 _property_end_combo(ctx)
             if self._component_error:
-                imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._component_error)
+                imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), ctx.tr(self._component_error))
                 if _property_button(ctx, f"{ctx.tr('Copy error')}##component"):
                     imgui.set_clipboard_text(self._component_error)
             canceled, applied = _property_dialog_actions(
@@ -520,7 +520,7 @@ class _Model:
                 ctx, ctx.tr("MjSpec validates and recompiles the model when changes are applied.")
             )
             if self._source_error:
-                imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), self._source_error)
+                imgui.text_colored(imgui.ImVec4(1.0, 0.35, 0.3, 1.0), ctx.tr(self._source_error))
                 if _property_button(ctx, f"{ctx.tr('Copy error')}##source"):
                     imgui.set_clipboard_text(self._source_error)
             canceled, applied = _property_dialog_actions(

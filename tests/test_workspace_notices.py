@@ -7,8 +7,9 @@ import pytest
 from imgui_bundle import imgui
 
 from mojive.ui.imgui_draw import ImguiDraw2D
+from mojive.ui.localization import Language, Localizer
 from mojive.ui.theme import THEME
-from mojive.ui.workspace.notices import draw_file_receipt, draw_operation_notice
+from mojive.ui.workspace.notices import draw_center_notice, draw_file_receipt, draw_operation_notice
 from tests.test_component_appearance import appearance as appearance
 from tests.test_workspace_tooltips import native_state
 
@@ -24,6 +25,38 @@ def _app(ui, *, width=1100):
         _status_path_bounds=None,
         _status_notice_bounds=None,
     )
+
+
+def test_center_notice_translates_complete_template_before_layout_and_paint(
+    appearance, monkeypatch
+):
+    ui, _runtime, _update, frame = appearance
+    localizer = Localizer()
+    ui.translate = localizer.text
+    app = _app(ui)
+    source = "Drop a .mojive.json scene here\nOpen a scene or add an object to begin."
+    painted, measured = [], []
+    paint, measure = ImguiDraw2D.text, ui.measure
+
+    def text(draw, position, color, value, **options):
+        painted.append(value)
+        return paint(draw, position, color, value, **options)
+
+    def width(value, *args, **options):
+        measured.append(value)
+        return measure(value, *args, **options)
+
+    monkeypatch.setattr(ImguiDraw2D, "text", text)
+    monkeypatch.setattr(ui, "measure", width)
+    for language in (Language.ENGLISH, Language.SIMPLIFIED_CHINESE, Language.ENGLISH):
+        localizer.set_language(language, persist=False)
+        painted.clear()
+        measured.clear()
+        frame(lambda: draw_center_notice(app, ImguiDraw2D(), source))
+        lines = localizer.text(source).splitlines()
+        assert all(line in painted and line in measured for line in lines)
+        if language is Language.SIMPLIFIED_CHINESE:
+            assert all(line not in painted and line not in measured for line in source.splitlines())
 
 
 @pytest.mark.parametrize("stacked", (False, True))

@@ -316,7 +316,7 @@ class InspectorPanel(_Model, _Transform, _Physics, _Geometry, _Environment, _Opt
                 )
                 _property_tooltip(ctx, node.name + ("\n" + hint if hint else ""), hovered=True)
         if self._rename_error:
-            imgui.text_wrapped(self._rename_error)
+            imgui.text_wrapped(ctx.tr(self._rename_error))
         if inline:
             imgui.same_line()
         accent = node_filter_color(ctx.theme, node.type)

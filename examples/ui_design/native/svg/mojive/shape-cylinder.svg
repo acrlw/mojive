@@ -1,4 +1,1 @@
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M5 6.5c0 4 14 4 14 0"/>
-  <path d="M5 6.5a7 3 0 0 1 14 0v11a7 3 0 0 1-14 0Z"/>
-</svg>
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 6.8v10.4c0 4.4 15 4.4 15 0V6.8" /><ellipse cx="12" cy="6.8" rx="7.5" ry="3.3" /></svg>

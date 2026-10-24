@@ -8,7 +8,7 @@ from imgui_bundle import imgui
 
 from mojive.design.groups import scoped_parts
 from mojive.design.native.geometry import Rect
-from mojive.ui.controls import clearable_combo
+from mojive.ui.controls import clearable_combo, search_presentation
 from mojive.ui.workspace.choice_popup import ChoicePopup
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN, rail_style
 from mojive.ui.workspace.property_groups import PropertyGroups
@@ -44,7 +44,7 @@ def property_controls(ui):
         imgui.StyleVar_.item_spacing, (DESIGN.item_spacing_x * ui.s, DESIGN.row_gap * ui.s)
     )
     try:
-        with ui.component_scope("section_body"):
+        with ui.component_scope("section_body"), search_presentation(ui):
             yield
     finally:
         imgui.pop_style_var(3)

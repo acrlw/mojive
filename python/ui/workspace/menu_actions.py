@@ -19,6 +19,16 @@ def dispatch(menu, action):
             st.open[value] = False
         else:
             st.activate(value)
+    elif prefix == "toggle-side":
+        from mojive.ui.workspace.constants import LEFT_PANELS
+
+        visible = [name for name in LEFT_PANELS if st.open[name]]
+        if visible:
+            st.left_active = visible[0]
+            for name in visible:
+                st.open[name] = False
+        else:
+            st.activate(st.left_active if st.left_active in LEFT_PANELS else "Scene")
     elif prefix == "extra-panel":
         if app.panels.get(value) is None:
             app.panels.open(value)

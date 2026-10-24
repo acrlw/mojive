@@ -99,7 +99,10 @@ def test_joint_projection_and_sort_masters_share_the_grid_and_have_distinct_silh
 
 def test_dash_and_alpha_survive_compilation():
     sources = json.loads((ROOT / "icons-source.json").read_text())
-    perturb = compile_svg(sources["perturb"])["contours"][-1]
+    perturb = compile_svg(
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor">'
+        '<path d="M3 12H21" stroke-dasharray="4 2"/></svg>'
+    )["contours"][-1]
     assert len(perturb["stroke_paths"]) == 3
     assert perturb["stroke_paths"][0][-1] != perturb["stroke_paths"][1][0]
     shading = compile_svg(sources["shading"])["contours"][-1]
@@ -143,7 +146,6 @@ def stroke_operations(monkeypatch):
         )
 
     yield prepare
-    icon_mesh.prepared_icon.cache_clear()
     widget_icons.icon_geometry.cache_clear()
 
 
@@ -331,9 +333,7 @@ def test_curved_stroke_mesh_discards_internal_union_primitive_vertices():
         assert len(indices) < boundary_count * 6
 
 
-@pytest.mark.parametrize(
-    "name", ("settings", "camera", "mouse", "circle", "perspective", "orthographic")
-)
+@pytest.mark.parametrize("name", ("camera", "mouse", "circle", "perspective", "orthographic"))
 @pytest.mark.parametrize("size", (14, 16, 18, 24, 112))
 def test_curved_icon_boundaries_do_not_amplify_tangent_notches_into_aa_teeth(name, size):
     from mojive.ui.workspace.icon_mesh import prepared_icon

@@ -21,7 +21,10 @@ from mojive.interaction.gizmo import (
     rotation_ring_alpha,
 )
 from mojive.ui.paint_protocol import Draw2D
-from mojive.ui.theme import THEME
+from mojive.ui.value_rail import draw_value_rail
+from mojive.ui.workspace.design import rail_style
+from mojive.ui.workspace.gizmo_readout import draw_gizmo_surface, readout_ink
+from mojive.ui.workspace.widget_style import CONTROL_THEME
 
 if TYPE_CHECKING:
     from mojive.session import Session
@@ -31,11 +34,9 @@ from .joint_labels import _draw_joint_value_label, _joint_limit_label, _joint_li
 from .projection import _rotation_dial_segments, _RotationDialProjector
 from .state import (
     _FULL_TURN,
-    JOINT_ACTIVE_DARK_COLOR,
     JOINT_COMPLEMENT_ALPHA,
     JOINT_COMPLEMENT_HOVER_ALPHA,
     JOINT_CURRENT_TICK_PT,
-    JOINT_DRAG_START_TICK_HALF_PT,
     JOINT_LIMIT_TICK_PT,
     JOINT_LOWER_LIMIT_COLOR,
     JOINT_PRECISION_MARGIN_PT,
@@ -247,7 +248,9 @@ class _JointRanges:
             source,
         )
 
-    def _draw_joint_precision(self, overlay: Draw2D, style_scale: float) -> None:
+    def _draw_joint_precision(
+        self, overlay: Draw2D, style_scale: float, *, readout_ui=None
+    ) -> None:
         """Draw a compact-range rail entirely through backend-neutral viewport primitives."""
 
         rail = self._joint_precision
@@ -264,29 +267,10 @@ class _JointRanges:
         overlay.line(
             rail.source,
             panel_edge,
-            _with_alpha(THEME.text_disabled, 0.60),
+            _with_alpha(readout_ink("disabled", readout_ui), 0.60),
             1.0 * style_scale,
         )
-        overlay.rect_filled(
-            (x0, y0),
-            (x1, y1),
-            (*THEME.bg_popup[:3], 0.94),
-            rounding=5.0 * style_scale,
-            smoothing=self._frame.corner_smoothing,
-        )
-        border = (
-            THEME.primary_dim
-            if self._joint_precision_hovered or self._joint_precision_active
-            else THEME.border
-        )
-        overlay.rect(
-            (x0, y0),
-            (x1, y1),
-            border,
-            1.0 * style_scale,
-            rounding=5.0 * style_scale,
-            smoothing=self._frame.corner_smoothing,
-        )
+        draw_gizmo_surface(overlay, rail.panel_rect, style_scale, ui=readout_ui)
         core = (
             axis_active_color(JOINT_RANGE_COLOR)
             if self._joint_precision_active
@@ -305,48 +289,21 @@ class _JointRanges:
                 )
             )
             drag_start = rail.start + (rail.end - rail.start) * normalized_start
-        endpoint_half = 5.5 * style_scale
-        start_half = JOINT_DRAG_START_TICK_HALF_PT * style_scale
-        current_half = 8.0 * style_scale
-        strokes = [
-            (rail.start, rail.end, core, JOINT_RANGE_WIDTH_PT * style_scale, None),
-        ]
-        if drag_start is not None and float(np.linalg.norm(rail.current - drag_start)) > 1e-6:
-            strokes.append(
-                (
-                    drag_start,
-                    rail.current,
-                    JOINT_ACTIVE_DARK_COLOR,
-                    JOINT_RANGE_WIDTH_PT * style_scale,
-                    None,
-                )
-            )
-        if drag_start is not None:
-            start_a = drag_start - np.array((0.0, start_half))
-            start_b = drag_start + np.array((0.0, start_half))
-            strokes.append(
-                (
-                    start_a,
-                    start_b,
-                    JOINT_ACTIVE_DARK_COLOR,
-                    JOINT_RANGE_WIDTH_PT * style_scale,
-                    "round",
-                )
-            )
-        current_a = rail.current - np.array((0.0, current_half))
-        current_b = rail.current + np.array((0.0, current_half))
-        strokes.append((current_a, current_b, core, 4.0 * style_scale, "round"))
-        for point, color in (
-            (rail.start, JOINT_LOWER_LIMIT_COLOR),
-            (rail.end, JOINT_UPPER_LIMIT_COLOR),
-        ):
-            a = point - np.array((0.0, endpoint_half))
-            b = point + np.array((0.0, endpoint_half))
-            strokes.append((a, b, color, 3.0 * style_scale, "round"))
-
-        for start, end, color, width, cap in strokes:
-            kwargs = {} if cap is None else {"cap": cap}
-            overlay.line(start, end, color, width, **kwargs)
+        style = rail_style()
+        draw_value_rail(
+            overlay,
+            rail.start,
+            rail.end,
+            float(rail.current[0]),
+            style.thumb_size * style_scale * 0.5,
+            CONTROL_THEME,
+            style_scale,
+            hovered=self._joint_precision_hovered,
+            pressed=self._joint_precision_active,
+            track_size=style.track_size,
+            limit_colors=(JOINT_LOWER_LIMIT_COLOR, JOINT_UPPER_LIMIT_COLOR),
+            reference_position=float(drag_start[0]) if drag_start is not None else None,
+        )
         if self._joint_precision_active and self._label:
             _draw_joint_value_label(
                 overlay,
@@ -357,6 +314,7 @@ class _JointRanges:
                 above=True,
                 align_right=False,
                 centered=True,
+                ui=readout_ui,
             )
 
     def _hinge_range_projection(

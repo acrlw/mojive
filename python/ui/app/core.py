@@ -178,7 +178,7 @@ class ViewerApp(
         self.camera.attach(self.camera_out)
         self.camera_preview = CameraPreview()
         self._scene_capture = SceneCapture()
-        self.gizmo = ObjectGizmo(enabled=False)
+        self.gizmo = ObjectGizmo(enabled=False, translate=self.localizer.text)
         self.gizmo.remember_precise_input_choices = (
             editor_preferences.remember_precise_input_choices
         )

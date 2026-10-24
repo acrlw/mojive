@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
-from mojive.design.groups import scoped_parts
-from mojive.design.native.geometry import CURRENT_NATIVE_PARTS, Box, Rect, part_scope
+from mojive.design.groups import CURRENT_GROUPS, scoped_parts
+from mojive.design.native.geometry import (
+    CURRENT_NATIVE_PARTS,
+    Box,
+    Rect,
+    classify_button,
+    part_scope,
+    scoped_corner_radius,
+)
 from mojive.ui.design_palette import rgba8
 from mojive.ui.panels import (
     activate_edit_gizmo,
@@ -43,6 +50,18 @@ NODE_ICONS = {
     "flex": "geom",
     "skin": "body",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class _SceneRowMetrics:
+    row_gap: float
+    column_gap: float
+    indent: float
+    radius: float
+    expander_frame: tuple[float, float]
+    visibility_frame: tuple[float, float]
+    label_margin: tuple[float, float, float, float]
+    visibility_radius: float | None
 
 
 def node_icon(node, session):
@@ -208,7 +227,9 @@ class Navigation:
                 "scene-type-filters",
                 (u.hits["scene-filter-" + kind] for kind, _ in filters),
             )
-            if u.design is not None:
+            if u.design is not None and u.design.runtime.observes(
+                scoped_parts(("panel_tools", "scene_tools"))
+            ):
                 u.design.record(
                     "scene-panel-tools",
                     ("panel_tools", "scene_tools"),
@@ -257,9 +278,10 @@ class Navigation:
             clipper.begin(len(rows), stride)
             try:
                 with u.component_scope("tree_row"), u.component_font("tree_row"):
+                    geometry = self._scene_row_geometry()
                     while clipper.step():
                         for index in range(clipper.display_start, clipper.display_end):
-                            self.draw_scene_row(ctx, *rows[index], width)
+                            self._draw_scene_row(ctx, *rows[index], width, geometry)
             finally:
                 # Release native clipper state while its owning context is alive,
                 # even when a row fails and its traceback outlives the window.
@@ -272,7 +294,7 @@ class Navigation:
             imgui.end_child()
 
     def _scene_row_geometry(self):
-        from mojive.ui.workspace.component_layout import control_size
+        from mojive.ui.workspace.component_layout import control_frame_size, control_size
 
         ui, scale = self.workspace.ui, self.workspace.s
         parents = CURRENT_NATIVE_PARTS.get()
@@ -281,6 +303,11 @@ class Navigation:
             imgui.get_frame_count(),
             scale,
             namespace,
+            CURRENT_GROUPS.get(),
+            scoped_corner_radius(namespace),
+            scoped_corner_radius(scoped_parts("icon_button")),
+            ui.typography,
+            ui.design.family() if ui.design is not None else None,
             ui.design.runtime.revision if ui.design is not None else None,
         )
         if getattr(self, "_row_geometry_key", None) == key:
@@ -291,6 +318,24 @@ class Navigation:
             expander = control_size(ui, "expand-measure", 18, 28, icon="right")
             label = control_size(ui, "entity-measure", 100, 28, label="?", icon="tree")
             visibility = control_size(ui, "visible-measure", 24, 22, icon="eye")
+            label_parts = (
+                ui.design.button_parts("entity-measure", "?")
+                if ui.design is not None
+                else classify_button("entity-measure", "?")
+            )
+            visibility_style = ui.component_style("icon_button")
+            # These authored metrics are uniform within this frame and component
+            # scope. Pointer state, available width and hit geometry remain per row.
+            self._row_metrics = _SceneRowMetrics(
+                ui.metric("tree_row", "rowGap", 2),
+                ui.metric("tree_row", "columnGap", ui.metric("tree_row", "gap", 0)) * scale,
+                ui.metric("tree_row", "indent", 14) * scale,
+                ui.metric("tree_row", "radius", DESIGN.control_radius),
+                control_frame_size(ui, "expand-measure", *expander, icon="right"),
+                control_frame_size(ui, "visible-measure", *visibility, icon="eye"),
+                ui.component_style(label_parts).edges("margin", scale),
+                visibility_style.get("radius") if visibility_style.explicit("radius") else None,
+            )
         height = max(
             style.get("height", 28) * scale,
             max(
@@ -308,21 +353,17 @@ class Navigation:
 
     def draw_scene_row(self, ctx, node, depth, leaf, width):
         with self.workspace.ui.component_scope("tree_row"):
-            return self._draw_scene_row(ctx, node, depth, leaf, width)
+            return self._draw_scene_row(ctx, node, depth, leaf, width, self._scene_row_geometry())
 
-    def _draw_scene_row(self, ctx, node, depth, leaf, width):
-        from mojive.ui.workspace.component_layout import control_frame_size
-
+    def _draw_scene_row(self, ctx, node, depth, leaf, width, geometry):
         u, s = self.workspace.ui, self.workspace.s
         pos = imgui.get_cursor_screen_pos()
         selected = (
             node.node_id in self.hierarchy._batch_selected or ctx.session.selected_node is node
         )
-        height, padding, margin, expander_size, label_size, visibility_size = (
-            self._scene_row_geometry()
-        )
-        row_gap = u.metric("tree_row", "rowGap", 2)
-        gap = u.metric("tree_row", "columnGap", u.metric("tree_row", "gap", 0)) * s
+        height, padding, margin, expander_size, label_size, visibility_size = geometry
+        metrics = self._row_metrics
+        row_gap, gap = metrics.row_gap, metrics.column_gap
         origin_x, origin_y = pos.x, pos.y
         outer = Rect(pos.x, pos.y, width, height + margin[1] + margin[3])
         frame = Rect(
@@ -330,9 +371,7 @@ class Navigation:
         )
         box = Box(outer, frame, frame.inset(*padding), padding, margin)
         content = box.content
-        indent = min(
-            depth * u.metric("tree_row", "indent", 14) * s, max(0, content.width - 110 * s)
-        )
+        indent = min(depth * metrics.indent, max(0, content.width - 110 * s))
         hovered = imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
             (frame.x, frame.y), (frame.right, frame.bottom)
         )
@@ -340,15 +379,13 @@ class Navigation:
             u.rect(
                 *frame.tuple(),
                 rgba8("primary", 30) if selected else (255, 255, 255, 12),
-                r=u.metric("tree_row", "radius", DESIGN.control_radius),
+                r=metrics.radius,
             )
         if not leaf:
             opened = self.hierarchy._open_state.get(
                 node.node_id, depth < self.hierarchy._default_open_depth
             )
-            ew, eh = control_frame_size(
-                u, "expand-" + str(node.node_id), *expander_size, icon="right"
-            )
+            ew, eh = metrics.expander_frame
             if u.button(
                 "expand-" + str(node.node_id),
                 content.x + indent,
@@ -363,13 +400,9 @@ class Navigation:
         label_x = content.x + indent + expander_size[0] + gap
         visibility_right = content.right - min(4 * s, max(0, content.width - visibility_size[0]))
         label_width = max(0, visibility_right - visibility_size[0] - gap - label_x)
-        lw, lh = control_frame_size(
-            u,
-            "entity-" + str(node.node_id),
-            label_width,
-            label_size[1],
-            label=node.name or "?",
-            icon=node_icon(node, ctx.session),
+        lw, lh = (
+            max(0, label_width - metrics.label_margin[0] - metrics.label_margin[2]) / s,
+            max(0, label_size[1] - metrics.label_margin[1] - metrics.label_margin[3]) / s,
         )
         pressed = u.button(
             "entity-" + str(node.node_id),
@@ -398,7 +431,7 @@ class Navigation:
                 range_select=imgui.get_io().key_shift,
             )
         self._scene_context(ctx, node)
-        vw, vh = control_frame_size(u, "visible-" + str(node.node_id), *visibility_size, icon="eye")
+        vw, vh = metrics.visibility_frame
         visibility_rect = Rect(
             visibility_right - visibility_size[0],
             content.y + (content.height - visibility_size[1]) / 2,
@@ -411,12 +444,11 @@ class Navigation:
             visibility_rect.y - frame.y,
             frame.bottom - visibility_rect.bottom,
         )
-        visibility_radius = max(
-            0, u.metric("tree_row", "radius", DESIGN.control_radius) - visibility_inset / s
+        visibility_radius = (
+            max(0, metrics.radius - visibility_inset / s)
+            if metrics.visibility_radius is None
+            else metrics.visibility_radius
         )
-        visibility_style = u.component_style("icon_button")
-        if visibility_style.explicit("radius"):
-            visibility_radius = visibility_style.get("radius", visibility_radius)
         visibility_id = imgui.get_id("visible-" + str(node.node_id))
         context = imgui.get_current_context()
         show_visibility = (
@@ -450,7 +482,7 @@ class Navigation:
         imgui.dummy(
             (outer.width, max(0, outer.height + row_gap * s - imgui.get_style().item_spacing.y))
         )
-        if u.design is not None:
+        if u.design is not None and u.design.runtime.observes(scoped_parts(("tree_row",))):
             next_y = imgui.get_cursor_screen_pos().y
             u.design.record(
                 "tree-row-" + str(node.node_id),
@@ -688,7 +720,9 @@ class Navigation:
             )
             gap = tools.get("rowGap", tools.get("gap", 10)) * scale
             y = imgui.get_item_rect_max().y + gap
-            if ui.design is not None:
+            if ui.design is not None and ui.design.runtime.observes(
+                scoped_parts(("panel_tools", "pose_tools"))
+            ):
                 ui.design.record(
                     "pose-panel-tools",
                     ("panel_tools", "pose_tools"),

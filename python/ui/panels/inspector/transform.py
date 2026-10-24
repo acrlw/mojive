@@ -144,7 +144,7 @@ class _Transform:
             return
         imgui.separator()
         imgui.text_colored(imgui.ImVec4(*ctx.theme.warning), ctx.tr("gizmo hidden"))
-        imgui.text_wrapped(reason)
+        imgui.text_wrapped(ctx.tr(reason))
 
     def _velocity(self, ctx: PanelContext, node: SceneNode) -> None:
         self.show_velocity = _property_section(ctx, "velocity", 0)

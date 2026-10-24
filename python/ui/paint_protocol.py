@@ -57,6 +57,7 @@ class Draw2D(Protocol):
         indices,
         color,
         *,
+        boundaries=(),
         outline=(),
         hole=(),
         origin=None,

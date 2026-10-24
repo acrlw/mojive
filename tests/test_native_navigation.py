@@ -35,7 +35,7 @@ def test_row_failure_releases_clipper_before_window_and_context_close(monkeypatc
         def fail_row(*args):
             raise RuntimeError("Row paint failed")
 
-        monkeypatch.setattr(navigation, "draw_scene_row", fail_row)
+        monkeypatch.setattr(navigation, "_draw_scene_row", fail_row)
         imgui.new_frame()
         imgui.set_next_window_size((400, 300))
         imgui.begin("Scene navigation")

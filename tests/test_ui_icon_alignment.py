@@ -15,7 +15,8 @@ NAMES = tuple(name for _, icons in ICON_FAMILIES for _, name in icons)
 
 @pytest.mark.parametrize("size", (14.0, 24.0, 56.0, 112.0))
 def test_default_library_matches_production_placement_and_shape_at_each_size(size):
-    from mojive.ui.icons import draw_concept_icon, draw_icon
+    from mojive.ui.icons import draw_concept_icon
+    from mojive.ui.icons import draw_reference_icon as draw_icon
     from tests.test_ui_icon_concepts import _RecordingDraw
 
     state = ProbeState()

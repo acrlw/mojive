@@ -48,35 +48,29 @@ def _visible_gap(first, second):
 
 @pytest.mark.parametrize("size", (14, 16, 18, 24, 56, 112))
 def test_isometric_arrow_keeps_clearance_from_both_open_frame_ends(size):
-    frame, shaft, head = _master("view-iso")["contours"]
-    for arrow in (shaft, head):
-        # The old five-unit arrow arms left only 0.5 grid units of visible air.
-        # This budget includes both strokes and scales with the whole glyph.
-        assert _visible_gap(frame, arrow) * size / 24 >= 2.5 * size / 24 - 1e-6
+    frame, arrow = _master("view-iso")["contours"]
+    # Include both strokes in the visible clearance budget.
+    assert _visible_gap(frame, arrow) * size / 24 >= 2.5 * size / 24 - 1e-6
 
 
 @pytest.mark.parametrize("size", (14, 16, 18, 24, 56, 112))
 def test_delete_handle_lid_and_body_have_no_intersecting_end_caps(size):
-    lid, body, first_slot, second_slot = _master("trash")["contours"]
-    # The handle is part of the lid's single continuous path. Its only open
-    # endpoints are outside the can, so no handle cap can protrude below the lid.
-    assert lid["points"][0] == (3.5, 6.5)
-    assert lid["points"][-1] == (20.5, 6.5)
-    assert min(point[1] for point in lid["points"]) == 3
-    assert max(point[1] for point in lid["points"]) == 6.5
-    assert _visible_gap(lid, body) * size / 24 >= 2 * size / 24 - 1e-6
+    body, first_slot, second_slot, lid, _handle = _master("delete")["contours"]
+    assert _visible_gap(lid, body) * size / 24 >= 2.5 * size / 24 - 1e-6
     for slot in (first_slot, second_slot):
-        assert _visible_gap(body, slot) * size / 24 >= 1.75 * size / 24 - 1e-6
+        assert _visible_gap(body, slot) * size / 24 >= 2 * size / 24 - 1e-6
     assert _visible_gap(first_slot, second_slot) >= 2.5
 
 
-@pytest.mark.parametrize("name", ("view-iso", "trash"))
+@pytest.mark.parametrize("name", ("view-iso", "delete"))
 def test_local_camera_and_delete_masters_keep_the_family_weight_and_safe_area(name):
     glyph = _master(name)
     assert glyph["viewBox"] == [0, 0, 24, 24]
     assert min(glyph["bounds"]) >= 2
     assert max(glyph["bounds"]) <= 22
     for contour in glyph["contours"]:
+        if contour["stroke"] == "none":
+            continue
         assert (contour["width"], contour["cap"], contour["join"]) == (1.5, "round", "round")
 
 
@@ -86,28 +80,20 @@ def test_gauge_pointer_has_visible_clearance_from_its_frame(size):
     assert _visible_gap(frame, mark) * size / 24 >= 1.5 * size / 24 - 1e-6
 
 
-@pytest.mark.parametrize("size", (14, 16, 18, 24, 56, 112))
-def test_pose_object_keeps_a_clear_gap_below_the_rotation_arrow(size):
+def test_pose_uses_three_open_handles_and_remains_distinct_from_joint_and_robot():
     glyph = _master("pose")
-    body, arc, head = glyph["contours"]
-    assert body["closed"]
-    assert not arc["closed"] and not head["closed"]
-    for contour in glyph["contours"]:
-        assert (contour["width"], contour["cap"], contour["join"]) == (1.5, "round", "round")
-    # Include the closing segment when measuring the whole expanded object.
-    closed_body = dict(body, points=[*body["points"], body["points"][0]])
-    for contour in (arc, head):
-        assert _visible_gap(closed_body, contour) * size / 24 >= 2.5 * size / 24 - 1e-6
-    # The arc terminates at the arrow tip without overshooting its round join.
-    assert arc["points"][-1] == pytest.approx(head["points"][1])
+    assert len(glyph["contours"]) == 4
+    assert all(contour["closed"] for contour in glyph["contours"])
+    assert len({contour["fill_group"] for contour in glyph["contours"]}) == 1
     sources = library_masters()
-    for name in ("shape-box", "view-iso", "rotate", "joint-free"):
+    for name in ("joint", "robot", "joint-ball"):
         assert glyph != compile_svg(sources[name])
 
 
 @pytest.mark.parametrize("size", (14, 16, 18, 24, 56, 112))
-def test_sensor_reception_arcs_do_not_merge_with_the_sensing_point(size):
-    left, right, point = _master("sensor")["contours"]
+def test_sensor_module_has_a_clear_sensing_point_and_four_external_pins(size):
+    frame, *details = _master("sensor")["contours"]
+    *pins, point = details
+    assert len(pins) == 4
     assert point["fill"] == "currentColor" and point["stroke"] == "none"
-    for arc in (left, right):
-        assert _visible_gap(arc, point) * size / 24 >= 5.5 * size / 24 - 1e-6
+    assert _visible_gap(frame, point) * size / 24 >= 3 * size / 24 - 1e-6

@@ -7,6 +7,31 @@ from mojive.design.native.style_cache import prepared_geometry
 
 
 @prepared_geometry
+def button_metrics(style, icon, label, icon_fallback, authored_icon_size, radius, align):
+    """Resolve frozen control metrics; input state and parent paint remain live."""
+    corner_radius = (
+        style.get("radius", 6.0)
+        if radius is None
+        or style.explicit("radius")
+        or style.origins.get("radius") == "parent_corner"
+        else radius
+    )
+    font_size = style.get("fontSize", 14.0)
+    icon_size = (
+        (
+            style.get("iconSize", icon_fallback)
+            if style.explicit("iconSize") or authored_icon_size is None
+            else authored_icon_size
+        )
+        if icon
+        else 0.0
+    )
+    gap = style.get("columnGap", style.get("gap", 6.0)) if icon and label else 0.0
+    line_height = style.line_height(font_size * 1.4) if label else 0.0
+    return corner_radius, font_size, icon_size, gap, line_height, style.get("align", align)
+
+
+@prepared_geometry
 def button_layout(
     style, rect, scale, padding, text_width, line_height, icon_size, gap, horizontal, width_limit
 ):

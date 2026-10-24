@@ -424,3 +424,183 @@ def test_empty_scene_authoring_materials_without_joints(reference):
     study.activate("Control")
     study.frame(3)
     assert "reset-actuators" in study.ui.hits
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.5))
+def test_production_gizmo_readouts_share_numeric_style(scale, backend_name, monkeypatch, tmp_path):
+    from mojive.app.composition import build_workspace
+    from mojive.assets import resolve
+    from mojive.config import LayoutConfig, ViewerConfig
+    from mojive.interaction.gizmo import RING_RADIUS
+    from mojive.tools.native_ui_review import _NativeInput
+    from mojive.ui.gizmo import joint_labels, overlay
+    from mojive.ui.workspace.gizmo_readout import draw_gizmo_readout
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    bounds = []
+
+    def readout(*args, **kwargs):
+        result = draw_gizmo_readout(*args, **kwargs)
+        bounds.append(result)
+        return result
+
+    monkeypatch.setattr(overlay, "draw_gizmo_readout", readout)
+    monkeypatch.setattr(joint_labels, "draw_gizmo_readout", readout)
+    with (
+        build_workspace(
+            resolve("joint_types"),
+            renderer=backend_name,
+            width=1600,
+            height=1000,
+            config=ViewerConfig(
+                layout=LayoutConfig(persistence=False), debug_server=False, threaded_physics=False
+            ),
+        ) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        app = viewer.app
+        app.set_language("zh_CN")
+        inputs.sync(8)
+        app.workspace.activate("Pose")
+        inputs.sync()
+        output = OUTPUT / backend_name / "readouts" / f"{scale:g}x"
+        output.mkdir(parents=True, exist_ok=True)
+
+        def capture_readout(name, label):
+            inputs.sync()
+            record = next(item for item in inputs.emitted if item["text"] == label)
+            ui = app.workspace.ui
+            style = ui.component_style("input_number")
+            assert record["fontId"] == ui.resolve_font(style, mono=True).font_id
+            assert record["fontPixels"] == pytest.approx(style.get("fontSize", 14) * ui.s)
+            pixels = np.asarray(viewer.window.read_frame())[::-1].copy()
+            image = Image.fromarray(pixels)
+            image.save(output / f"{name}.png")
+            density = imgui.get_io().display_framebuffer_scale
+            x0, y0, x1, y1 = bounds[-1]
+            image.crop(
+                (
+                    (x0 - 20) * density.x,
+                    (y0 - 20) * density.y,
+                    (x1 + 20) * density.x,
+                    (y1 + 20) * density.y,
+                )
+            ).save(output / f"{name}-detail.png")
+
+        for name, tool, handle in (
+            ("ball_body", "rotate", GizmoHandle.ROTATE_Z),
+            ("free_box", "scale", GizmoHandle.X),
+        ):
+            node = next(n for n in app.session.nodes if n.name == name)
+            app.session.submit(cmd.SelectNode(node.node_id))
+            app.tool = tool
+            inputs.sync()
+            gizmo = app.gizmo
+            frame, camera, rect = gizmo._frame, app._camera_view(), app._viewport_rect
+            length = world_scale(
+                camera, frame.position, rect[3], SIZE_PT * viewer.window.style_scale
+            )
+            if tool == "rotate":
+
+                def point(angle, frame=frame, camera=camera, rect=rect, length=length):
+                    radial = frame.rotation[:, 0] * np.cos(angle) + frame.rotation[:, 1] * np.sin(
+                        angle
+                    )
+                    return project(camera, (frame.position + radial * length * RING_RADIUS,), rect)[
+                        0, :2
+                    ]
+
+                for angle in np.linspace(0, 2 * np.pi, 96, endpoint=False):
+                    inputs.move(point(angle), frames=2)
+                    if gizmo.hovered_handle is handle:
+                        break
+                else:
+                    raise AssertionError("No visible ball rotation handle")
+                start, end = point(angle), point(angle + 0.35)
+            else:
+                center = project(camera, (frame.position,), rect)[0, :2]
+                start = project(
+                    camera,
+                    (frame.position + frame.rotation[:, 0] * length * AXIS_END * 0.85,),
+                    rect,
+                )[0, :2]
+                end = start + (start - center) / np.linalg.norm(start - center) * 30 * scale
+            inputs.move(start)
+            Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(
+                output / f"{name}-hover.png"
+            )
+            assert gizmo.hovered_handle is handle, (
+                start,
+                rect,
+                app._state,
+                app.router.claim,
+                gizmo._interactive,
+            )
+            inputs.event("add_mouse_button_event", 0, True)
+            inputs.move(end)
+            assert gizmo.using and gizmo.value_label
+            assert (gizmo._active_joint is None) == (tool == "scale")
+            capture_readout(name, gizmo.value_label)
+            inputs.event("add_mouse_button_event", 0, False)
+            inputs.sync()
+            if tool == "scale":
+                Image.fromarray(np.asarray(viewer.window.read_frame())[::-1]).save(
+                    output / "pending-edits.png"
+                )
+                inputs.click("discard-model-edits")
+                assert not app.model_edits.active
+            else:
+                assert app.session.submit(cmd.Undo()).ok
+
+        node = next(n for n in app.session.nodes if n.name == "hinge_body")
+        app.session.submit(cmd.SelectNode(node.node_id))
+        app.tool = "rotate"
+        inputs.sync()
+        hit = app.gizmo.joint_limit_hits[0]
+        inputs.move(hit.tick_end, frames=90)
+        capture_readout("joint-limit", hit.label)
+
+    with (
+        build_workspace(
+            resolve("joint_gizmo"),
+            renderer=backend_name,
+            width=1600,
+            height=1000,
+            config=ViewerConfig(
+                layout=LayoutConfig(persistence=False), debug_server=False, threaded_physics=False
+            ),
+        ) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        app = viewer.app
+        app.set_language("zh_CN")
+        inputs.sync(8)
+        for name, tool in (("06_precision_hinge", "rotate"), ("07_precision_slide", "move")):
+            node = next(n for n in app.session.nodes if n.name == name)
+            app.session.submit(cmd.SelectNode(node.node_id))
+            app.tool = tool
+            inputs.sync()
+            camera = app._camera_view()
+            center = app.gizmo._frame.position.copy()
+            viewer.set_camera(
+                replace(camera, eye=camera.eye + center - camera.target, target=center)
+            )
+            inputs.sync()
+            gizmo = app.gizmo
+            hit = gizmo.joint_limit_hits[0]
+            inputs.move(hit.tick_end, frames=90)
+            assert gizmo.joint_precision_visible
+            rail = gizmo._joint_precision
+            inputs.move(rail.current)
+            inputs.event("add_mouse_button_event", 0, True)
+            inputs.move(rail.start + (rail.end - rail.start) * 0.3)
+            assert gizmo._joint_precision_active and gizmo.value_label
+            capture_readout(name, gizmo.value_label)
+            for stop, fraction in (("min", 0.0), ("middle", 0.5), ("max", 1.0)):
+                inputs.move(rail.start + (rail.end - rail.start) * fraction)
+                assert gizmo._joint_precision_active
+                capture_readout(f"{name}-{stop}", gizmo.value_label)
+            inputs.escape()
+            inputs.event("add_mouse_button_event", 0, False)
+            assert not gizmo.using

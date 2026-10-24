@@ -103,4 +103,4 @@ def mouse_shortcuts(panel, ctx: PanelContext) -> None:
                     panel._pointer_error = str(error)
         panel._end_properties()
     if panel._pointer_error:
-        imgui.text_wrapped(panel._pointer_error)
+        imgui.text_wrapped(ctx.tr(panel._pointer_error))

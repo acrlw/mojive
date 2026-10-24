@@ -43,6 +43,7 @@ class NativePrimitives:
         self._style_requests = {}
         self._request_typography = None
         self._style_revision = -1
+        self._field_splitters = []
 
     def style(self, parts, *, authored_defaults=False):
         if self._style_revision != self.runtime.revision:
@@ -207,7 +208,12 @@ class NativePrimitives:
             self._field_radius(style, box.frame) * s,
         )
         g.push_style_var(g.StyleVar_.frame_border_size, 0.0)
-        for color in (g.Col_.frame_bg, g.Col_.frame_bg_hovered, g.Col_.frame_bg_active):
+        for color in (
+            g.Col_.frame_bg,
+            g.Col_.frame_bg_hovered,
+            g.Col_.frame_bg_active,
+            g.Col_.nav_cursor,
+        ):
             g.push_style_color(color, (0.0, 0.0, 0.0, 0.0))
         draw = self.ui.draw
         draw.push_clip_rect((content.x, content.y), (content.right, content.bottom), True)
@@ -215,7 +221,7 @@ class NativePrimitives:
             yield content
         finally:
             draw.pop_clip_rect()
-            g.pop_style_color(4)
+            g.pop_style_color(5)
             g.pop_style_var(3)
             g.pop_font()
 
@@ -385,40 +391,24 @@ class NativePrimitives:
                 ):
                     overrides[dimension] = (fallback, style.origins[dimension])
         style = style.with_overrides(overrides)
-        corner_radius = (
-            style.get("radius", 6.0)
-            if radius is None
-            or style.explicit("radius")
-            or style.origins.get("radius") == "parent_corner"
-            else radius
-        )
-        font_size = style.get("fontSize", 14.0)
-        authored_icon_size = icon_size
+        from mojive.design.native.button_layout import button_layout, button_metrics
         from mojive.ui.workspace.widget_icons import icon_role_canvas
 
         icon_fallback = icon_role_canvas(icon_role or ("inline" if label else "toolbar"))
-        icon_size = (
-            (
-                style.get("iconSize", icon_fallback)
-                if style.explicit("iconSize") or authored_icon_size is None
-                else authored_icon_size
-            )
-            if icon
-            else 0.0
+        corner_radius, font_size, icon_size, gap, line_height, horizontal = button_metrics(
+            style, bool(icon), bool(label), icon_fallback, icon_size, radius, align
         )
         layout_engine = getattr(self.runtime, "paint_context", None)
         if icon and not style.explicit("iconSize") and layout_engine is not None:
             icon_size = layout_engine.inherited("iconSize", icon_size)
-        gap = style.get("columnGap", style.get("gap", 6.0)) * s if icon and label else 0.0
+        gap *= s
+        line_height *= s
         shown = ui.translate(str(label)) if translate else str(label)
         text_width = (
             ui.measure(shown, font_size, translate=False, font_resolved=True, style=style)
             if label
             else 0.0
         )
-        line_height = style.line_height(font_size * 1.4) * s if label else 0.0
-        from mojive.design.native.button_layout import button_layout
-
         get_context = getattr(g, "get_current_context", None)
         context = get_context() if get_context is not None else None
         window = (
@@ -428,7 +418,6 @@ class NativePrimitives:
         if window is not None:
             margin = style.edges("margin", s)
             limit = min(limit, max(0.0, window.work_rect.max.x - rect.x - margin[0] - margin[2]))
-        horizontal = style.get("align", align)
         box, icon_x, icon_y, text_x, text_y, visible_text_width, icon_extent = button_layout(
             style,
             rect,
@@ -444,12 +433,18 @@ class NativePrimitives:
         text_y += (line_height - font_size * s) / 2
         content = box.content
         g.set_cursor_screen_pos((box.frame.x, box.frame.y))
-        g.begin_disabled(not enabled)
-        g.push_style_color(g.Col_.nav_cursor, (0.0, 0.0, 0.0, 0.0))
+        if not enabled:
+            g.begin_disabled(True)
+        # Mouse-driven frames have no navigation cursor to suppress. Avoid a
+        # native style-stack round trip for every tree row and toolbar button.
+        nav_visible = context is None or context.nav_cursor_visible
+        if nav_visible:
+            g.push_style_color(g.Col_.nav_cursor, (0.0, 0.0, 0.0, 0.0))
         hit = g.invisible_button(
             key, (max(1.0, box.frame.width), max(1.0, box.frame.height)), g.ButtonFlags_.enable_nav
         )
-        g.pop_style_color()
+        if nav_visible:
+            g.pop_style_color()
         paint = ItemPaint.capture(g)
         hovered, held = paint.hovered, paint.active
         if background:
@@ -463,7 +458,7 @@ class NativePrimitives:
                 )
             elif held or hovered or filled:
                 tint = (
-                    ItemPaint(hovered, held).color()
+                    paint.color()
                     if filled
                     else rgba8("primary", 55)
                     if held
@@ -481,9 +476,9 @@ class NativePrimitives:
         )
         glyph = ui.style_color(style, "iconColor", ui.ink(icon_color or c, style))
         c = ui.style_color(style, "textColor", ui.ink(c, style))
-        disabled = bool(g.get_item_flags() & g.ItemFlags_.disabled)
+        disabled = bool(context.last_item_data.item_flags & g.ItemFlags_.disabled.value)
         if disabled:
-            original_alpha = g.get_current_context().disabled_alpha_backup
+            original_alpha = context.disabled_alpha_backup
             opacity = g.get_style().alpha / max(original_alpha, 1e-9)
             panel = ui.ink(rgba8("background"), style)
 
@@ -524,39 +519,43 @@ class NativePrimitives:
         )
         hint = tooltip or (shown if clipped_label else "")
         if hint and g.is_item_hovered(
-            g.HoveredFlags_.delay_normal | g.HoveredFlags_.allow_when_disabled
+            g.HoveredFlags_.delay_normal.value | g.HoveredFlags_.allow_when_disabled.value
         ):
             ui.tooltip(hint, translate=translate if tooltip else False)
-        g.end_disabled()
+        if not enabled:
+            g.end_disabled()
         from mojive.ui.compound_fields import draw_focus_frame
 
-        draw_focus_frame(
-            g.ImVec2(box.frame.x, box.frame.y),
-            g.ImVec2(box.frame.right, box.frame.bottom),
-            rounding=corner_radius * s,
-            item_id=g.get_item_id(),
-        )
-        self.record(
-            key,
-            style,
-            box,
-            "button",
-            background=background,
-            active=active,
-            filled=filled,
-            hovered=hovered,
-            enabled=enabled,
-            fontSize=font_size,
-            iconSize=icon_size,
-            iconPosition=[icon_x, icon_y],
-            textPosition=[text_x, text_y],
-            gap=gap,
-            iconRect=[icon_x, icon_y, icon_extent, icon_extent] if icon else None,
-            textRect=[text_x, text_y, visible_text_width, font_size * s] if label else None,
-            label=shown,
-            icon=icon,
-            clippedLabel=clipped_label,
-        )
+        if nav_visible:
+            draw_focus_frame(
+                g.ImVec2(box.frame.x, box.frame.y),
+                g.ImVec2(box.frame.right, box.frame.bottom),
+                rounding=corner_radius * s,
+                item_id=g.get_item_id(),
+            )
+        self.ui.hits[key] = box.frame.tuple()
+        if self.runtime.observes(style.part_ids):
+            self.record(
+                key,
+                style,
+                box,
+                "button",
+                background=background,
+                active=active,
+                filled=filled,
+                hovered=hovered,
+                enabled=enabled,
+                fontSize=font_size,
+                iconSize=icon_size,
+                iconPosition=[icon_x, icon_y],
+                textPosition=[text_x, text_y],
+                gap=gap,
+                iconRect=[icon_x, icon_y, icon_extent, icon_extent] if icon else None,
+                textRect=[text_x, text_y, visible_text_width, font_size * s] if label else None,
+                label=shown,
+                icon=icon,
+                clippedLabel=clipped_label,
+            )
         return PrimitiveResult(bool(hit), bool(hit), box)
 
     def input_text(
@@ -573,6 +572,8 @@ class NativePrimitives:
         flags=0,
         icon=None,
         mono=False,
+        search_tooltip="Search",
+        clear_tooltip="Clear search",
     ):
         style = self.style(parts or ("textarea" if multiline else "input_text"))
         if multiline:
@@ -594,10 +595,11 @@ class NativePrimitives:
             box = Box(outer, frame, frame.inset(*padding), padding, margin)
         else:
             box = self.field_box(style, rect)
-        with FieldLayer(self.imgui, self.ui.draw) as layer:
+        with FieldLayer(self.imgui, self.ui.draw, self._field_splitters) as layer:
             g, scale = self.imgui, self.scale
             glyph_size = min(style.get("iconSize", 14) * scale, box.content.height) if icon else 0
             icon_gap = style.get("columnGap", style.get("gap", 8)) * scale if icon else 0
+            search = "search" in style.part_ids
             text_box = box
             glyph = None
             if icon:
@@ -609,9 +611,38 @@ class NativePrimitives:
                     (box.padding[0] + glyph_size + icon_gap, *box.padding[1:]),
                     box.margin,
                 )
+            if search:
+                # End-circle centers and a reserved trailing slot stay stable while typing.
+                slot = min(box.frame.height, box.frame.width / 2)
+                inset = min(box.frame.width / 2, slot / 2 + glyph_size / 2 + icon_gap)
+                glyph = Rect(
+                    box.frame.x + (slot - glyph_size) / 2,
+                    box.frame.y + (box.frame.height - glyph_size) / 2,
+                    glyph_size,
+                    glyph_size,
+                )
+                text_box = Box(
+                    box.outer,
+                    box.frame,
+                    box.content.inset(
+                        max(0, inset - box.padding[0]), 0, max(0, inset - box.padding[2]), 0
+                    ),
+                    (inset, box.padding[1], inset, box.padding[3]),
+                    box.margin,
+                )
             empty_content = text_box.content.width <= 0 or text_box.content.height <= 0
             g.begin_disabled(not enabled or empty_content)
-            with self.native_field(style, text_box, mono=mono, multiline=multiline):
+            editor_box = text_box
+            if search:
+                # Native text input must not own the clear button's hit region.
+                editor_box = Box(
+                    text_box.outer,
+                    Rect(text_box.content.x, box.frame.y, text_box.content.width, box.frame.height),
+                    text_box.content,
+                    (0, text_box.padding[1], 0, text_box.padding[3]),
+                    text_box.margin,
+                )
+            with self.native_field(style, editor_box, mono=mono, multiline=multiline):
                 if native_call is not None:
                     changed, out = native_call(box)
                 elif multiline:
@@ -623,11 +654,13 @@ class NativePrimitives:
                     )
                 else:
                     changed, out = g.input_text("##" + key, str(value), flags)
+                input_id = g.get_item_id()
+                disabled = bool(g.get_item_flags() & g.ItemFlags_.disabled)
                 paint = ItemPaint.capture(g)
                 active = g.is_item_active()
                 result = self._result(out, changed, box)
                 native_child = None
-                if multiline:
+                if multiline and self.runtime.observes(style.part_ids):
                     parent, item_id = g.internal.get_current_window(), g.get_item_id()
                     native_child = next(
                         (
@@ -659,31 +692,76 @@ class NativePrimitives:
                     icon, glyph.x, glyph.y, glyph_size / scale, rgba8("secondary"), style=style
                 )
                 self.ui.draw.pop_clip_rect()
-            self.record(
-                key,
-                style,
-                box,
-                "textarea" if multiline else "search" if icon else "input_text",
-                fontSize=style.get("fontSize", 14.0),
-                textAlign=style.get("textAlign", "left"),
-                emptyContent=empty_content,
-                nativeMinimumHit=1
-                if (multiline and empty_content) or box.frame.width <= 0 or box.frame.height <= 0
-                else None,
-                **({"constraint": "parent budget exhausted"} if empty_content else {}),
-                **({"nativeChildWindowId": native_child} if native_child is not None else {}),
-                **(
-                    {
-                        "iconSize": glyph_size / scale,
-                        "iconRect": list(glyph.tuple()),
-                        "columnGap": icon_gap / scale,
-                        "textRect": list(text_box.content.tuple()),
-                    }
-                    if icon
-                    else {}
-                ),
-            )
-            self.focus_frame(style, box.frame)
+            self.ui.hits[key] = box.frame.tuple()
+            if self.runtime.observes(style.part_ids):
+                self.record(
+                    key,
+                    style,
+                    box,
+                    "textarea" if multiline else "search" if icon else "input_text",
+                    fontSize=style.get("fontSize", 14.0),
+                    textAlign=style.get("textAlign", "left"),
+                    emptyContent=empty_content,
+                    nativeMinimumHit=1
+                    if (multiline and empty_content)
+                    or box.frame.width <= 0
+                    or box.frame.height <= 0
+                    else None,
+                    **({"constraint": "parent budget exhausted"} if empty_content else {}),
+                    **({"nativeChildWindowId": native_child} if native_child is not None else {}),
+                    **(
+                        {
+                            "iconSize": glyph_size / scale,
+                            "iconRect": list(glyph.tuple()),
+                            "columnGap": icon_gap / scale,
+                            "textRect": list(text_box.content.tuple()),
+                        }
+                        if icon
+                        else {}
+                    ),
+                )
+            self.focus_frame(style, box.frame, item_id=input_id)
+            if search:
+                g.begin_disabled(disabled)
+                focus_requested = False
+                if (
+                    not disabled
+                    and g.is_window_hovered()
+                    and g.is_mouse_hovering_rect(
+                        (box.frame.x, box.frame.y), (box.frame.x + slot, box.frame.bottom)
+                    )
+                ):
+                    self.ui.tooltip(search_tooltip)
+                    focus_requested = g.is_mouse_clicked(g.MouseButton_.left)
+                if out:
+                    clear_x = box.frame.right - slot
+                    g.set_cursor_screen_pos((clear_x, box.frame.y))
+                    clicked = g.invisible_button(
+                        "##clear-" + key, (slot, box.frame.height), g.ButtonFlags_.enable_nav
+                    )
+                    self.ui.icon(
+                        "close",
+                        clear_x + (slot - glyph_size) / 2,
+                        glyph.y,
+                        glyph_size / scale,
+                        rgba8("secondary"),
+                        style=style,
+                    )
+                    if g.is_item_hovered():
+                        self.ui.tooltip(clear_tooltip)
+                    if clicked:
+                        result.value, result.changed = "", True
+                        focus_requested = True
+                    self.focus_frame(style, Rect(clear_x, box.frame.y, slot, box.frame.height))
+                    self.ui.hits[key + "-clear"] = (clear_x, box.frame.y, slot, box.frame.height)
+                if focus_requested:
+                    g.internal.activate_item_by_id(input_id)
+                    g.get_current_context().nav_next_activate_flags = (
+                        g.internal.ActivateFlags_.prefer_input
+                    )
+                g.set_cursor_screen_pos((box.outer.x, box.outer.y))
+                g.dummy((box.outer.width, box.outer.height))
+                g.end_disabled()
             layer.background()
             self.field_background(style, box, paint.color(), draw=layer.draw)
             return result
@@ -777,7 +855,7 @@ class NativePrimitives:
             style, rect, (3, 0, 3, 0) if axis else (8, 0, 8, 0), minimum_height=minimum_height
         )
         paint_visible = self._field_paint_visible(box.frame)
-        with FieldLayer(self.imgui, self.ui.draw) as layer:
+        with FieldLayer(self.imgui, self.ui.draw, self._field_splitters) as layer:
             g, ui, s = self.imgui, self.ui, self.scale
             axis_size = style.get("axisWidth", 18.0) * s if axis else 0.0
             badge = min(axis_size, max(0.0, box.frame.width - 1.0))
@@ -895,19 +973,21 @@ class NativePrimitives:
                 g.pop_font()
                 if clipped:
                     ui.tooltip(format % result.value, translate=False)
-            self.record(
-                key,
-                style,
-                box,
-                "input_number",
-                fontSize=style.get("fontSize", 14.0),
-                textAlign=style.get("textAlign", "center"),
-                axisWidth=badge,
-                numericRect=numeric_frame.tuple(),
-                emptyContent=content.width <= 0 or content.height <= 0,
-                nativeMinimumHit=1 if empty_frame else None,
-                constraint="parent budget exhausted" if empty_frame else None,
-            )
+            self.ui.hits[key] = box.frame.tuple()
+            if self.runtime.observes(style.part_ids):
+                self.record(
+                    key,
+                    style,
+                    box,
+                    "input_number",
+                    fontSize=style.get("fontSize", 14.0),
+                    textAlign=style.get("textAlign", "center"),
+                    axisWidth=badge,
+                    numericRect=numeric_frame.tuple(),
+                    emptyContent=content.width <= 0 or content.height <= 0,
+                    nativeMinimumHit=1 if empty_frame else None,
+                    constraint="parent budget exhausted" if empty_frame else None,
+                )
             ui.hits[key + "-frame"] = box.frame.tuple()
             if paint_visible:
                 self.focus_frame(style, box.frame)
@@ -956,7 +1036,7 @@ class NativePrimitives:
         """Open native choices after drawing the catalogue-controlled select field."""
         style = self.style(parts)
         box = self.field_box(style, rect)
-        with FieldLayer(self.imgui, self.ui.draw) as layer:
+        with FieldLayer(self.imgui, self.ui.draw, self._field_splitters) as layer:
             g, ui, s = self.imgui, self.ui, self.scale
             self.aligned_text(
                 style, box.content.inset(0, 0, box.frame.height, 0), ui.translate(str(preview))
@@ -979,18 +1059,20 @@ class NativePrimitives:
                 style=style,
             )
             empty_content = box.content.width <= 0 or box.content.height <= 0
-            self.record(
-                key,
-                style,
-                box,
-                "select",
-                iconRect=glyph.tuple(),
-                textAlign=style.get("textAlign", "left"),
-                preview=str(preview),
-                emptyContent=empty_content,
-                nativeMinimumHit=1 if box.frame.width <= 0 or box.frame.height <= 0 else None,
-                **({"constraint": "parent budget exhausted"} if empty_content else {}),
-            )
+            self.ui.hits[key] = box.frame.tuple()
+            if self.runtime.observes(style.part_ids):
+                self.record(
+                    key,
+                    style,
+                    box,
+                    "select",
+                    iconRect=glyph.tuple(),
+                    textAlign=style.get("textAlign", "left"),
+                    preview=str(preview),
+                    emptyContent=empty_content,
+                    nativeMinimumHit=1 if box.frame.width <= 0 or box.frame.height <= 0 else None,
+                    **({"constraint": "parent budget exhausted"} if empty_content else {}),
+                )
             disabled = not enabled or empty_content
             if disabled:
                 g.begin_disabled()
@@ -1154,17 +1236,19 @@ class NativePrimitives:
                 row_height - label_margin[1] - label_margin[3],
             )
             self.aligned_text(label_style, label_rect, shown, color=rgba8("text"))
-        self.record(
-            key,
-            style,
-            box,
-            "checkbox",
-            size=extent,
-            requestedSize=requested_extent,
-            emptyContent=extent <= 0,
-            radius=style.get("radius", 3.0),
-            **({"labelRect": list(label_rect.tuple()), "label": shown} if label_rect else {}),
-        )
+        self.ui.hits[key] = box.frame.tuple()
+        if self.runtime.observes(style.part_ids):
+            self.record(
+                key,
+                style,
+                box,
+                "checkbox",
+                size=extent,
+                requestedSize=requested_extent,
+                emptyContent=extent <= 0,
+                radius=style.get("radius", 3.0),
+                **({"labelRect": list(label_rect.tuple()), "label": shown} if label_rect else {}),
+            )
         return result
 
     def switch(
@@ -1230,33 +1314,35 @@ class NativePrimitives:
         ui.draw.pop_clip_rect()
         result = self._result(out, bool(hit), box)
         g.end_disabled()
-        self.record(
-            key,
-            style,
-            box,
-            "switch",
-            switchRect=[sx, sy, width, height],
-            switchWidth=width,
-            switchHeight=height,
-            switchThumb=thumb,
-            textPresent=bool(label),
-            emptyContent=empty_frame,
-            constraint="parent budget exhausted" if empty_frame else None,
-            gap=gap,
-            **(
-                {
-                    "labelRect": list(label_rect.tuple()),
-                    "label": shown,
-                    "fontSize": font,
-                    "lineHeight": label_style.line_height(),
-                    "labelOrigins": {
-                        field: label_style.origins.get(field) for field in INHERITED_TEXT_FIELDS
-                    },
-                }
-                if label
-                else {}
-            ),
-        )
+        self.ui.hits[key] = box.frame.tuple()
+        if self.runtime.observes(style.part_ids):
+            self.record(
+                key,
+                style,
+                box,
+                "switch",
+                switchRect=[sx, sy, width, height],
+                switchWidth=width,
+                switchHeight=height,
+                switchThumb=thumb,
+                textPresent=bool(label),
+                emptyContent=empty_frame,
+                constraint="parent budget exhausted" if empty_frame else None,
+                gap=gap,
+                **(
+                    {
+                        "labelRect": list(label_rect.tuple()),
+                        "label": shown,
+                        "fontSize": font,
+                        "lineHeight": label_style.line_height(),
+                        "labelOrigins": {
+                            field: label_style.origins.get(field) for field in INHERITED_TEXT_FIELDS
+                        },
+                    }
+                    if label
+                    else {}
+                ),
+            )
         self.focus_frame(style, box.frame)
         return result
 
@@ -1312,7 +1398,9 @@ class NativePrimitives:
         )
         result = self._result(out, out != value, box)
         g.end_disabled()
-        self.record(key, style, box, "range", trackSize=track, thumbSize=thumb)
+        self.ui.hits[key] = box.frame.tuple()
+        if self.runtime.observes(style.part_ids):
+            self.record(key, style, box, "range", trackSize=track, thumbSize=thumb)
         self.focus_frame(style, box.frame)
         return result
 
@@ -1371,30 +1459,42 @@ class NativePrimitives:
                 horizontal="start",
                 fit_line=True,
             )
-            self.ui.design.record(
-                key + "/unit",
-                ("vector_heading",),
-                box.content.tuple(),
-                "vector_heading",
-                gap=gap,
-                fieldRegions={
-                    name: [left - gap, group.y, gap, group.height] for name in ("gap", "columnGap")
-                },
-                unitRect=[left, group.y, max(0, group.right - left), group.height],
-            )
+            if self.runtime.observes(scoped_parts(("vector_heading",))):
+                self.ui.design.record(
+                    key + "/unit",
+                    ("vector_heading",),
+                    box.content.tuple(),
+                    "vector_heading",
+                    gap=gap,
+                    fieldRegions={
+                        name: [left - gap, group.y, gap, group.height]
+                        for name in ("gap", "columnGap")
+                    },
+                    unitRect=[left, group.y, max(0, group.right - left), group.height],
+                )
         else:
             self.aligned_text(style, box.content, shown, color=color, fit_line=True)
-        self.record(
-            key,
-            style,
-            box,
-            "label",
-            fontSize=style.get("fontSize", 14.0),
-            lineHeight=style.line_height(),
-            textAlign=style.get("textAlign", "left"),
-            **({"compoundParts": list(compound_parts), "owner": owner} if compound_parts else {}),
-            **({"labelGap": label_gap, "gapOrigin": gap_origin} if label_gap is not None else {}),
-        )
+        self.ui.hits[key] = box.frame.tuple()
+        if self.runtime.observes(style.part_ids):
+            self.record(
+                key,
+                style,
+                box,
+                "label",
+                fontSize=style.get("fontSize", 14.0),
+                lineHeight=style.line_height(),
+                textAlign=style.get("textAlign", "left"),
+                **(
+                    {"compoundParts": list(compound_parts), "owner": owner}
+                    if compound_parts
+                    else {}
+                ),
+                **(
+                    {"labelGap": label_gap, "gapOrigin": gap_origin}
+                    if label_gap is not None
+                    else {}
+                ),
+            )
         return box
 
     def shell_numeric_height(self, parts="input_number", *, unit=True):
@@ -1448,7 +1548,7 @@ class NativePrimitives:
         self, key, rect, value, unit="", *, toggle_unit=None, compact_caption=False, **kwargs
     ):
         """Lay out one value/unit caption without changing the native edit transaction."""
-        with FieldLayer(self.imgui, self.ui.draw) as layer:
+        with FieldLayer(self.imgui, self.ui.draw, self._field_splitters) as layer:
             s, g = self.scale, self.imgui
             style = self.style("input_shell", authored_defaults=True)
             parts = kwargs.get("parts") or (
@@ -1573,25 +1673,27 @@ class NativePrimitives:
                 if unit
                 else (result.box.frame.right, result.box.frame.y, 0, result.box.frame.height)
             )
-            self.record(
-                key + "-shell",
-                style,
-                box,
-                "input_shell",
-                unitSize=unit_size,
-                gap=gap,
-                columnGap=gap / s,
-                unit=unit,
-                numericFormat=kwargs.get("format", "%.3f"),
-                numericRect=list(result.box.frame.tuple()),
-                unitRect=list(suffix_rect.tuple()),
-                textRect=[value_x, caption.y, text_width, line_height],
-                textPosition=[value_x, caption.y],
-                valueTextPosition=[value_x, caption.y + (line_height - font_size * s) / 2],
-                unitTextPosition=[suffix_rect.x, caption.y + (line_height - unit_size * s) / 2],
-                fontSize=font_size,
-                readonly=False,
-            )
+            self.ui.hits[key + "-shell"] = box.frame.tuple()
+            if self.runtime.observes(style.part_ids):
+                self.record(
+                    key + "-shell",
+                    style,
+                    box,
+                    "input_shell",
+                    unitSize=unit_size,
+                    gap=gap,
+                    columnGap=gap / s,
+                    unit=unit,
+                    numericFormat=kwargs.get("format", "%.3f"),
+                    numericRect=list(result.box.frame.tuple()),
+                    unitRect=list(suffix_rect.tuple()),
+                    textRect=[value_x, caption.y, text_width, line_height],
+                    textPosition=[value_x, caption.y],
+                    valueTextPosition=[value_x, caption.y + (line_height - font_size * s) / 2],
+                    unitTextPosition=[suffix_rect.x, caption.y + (line_height - unit_size * s) / 2],
+                    fontSize=font_size,
+                    readonly=False,
+                )
             self.imgui.set_cursor_screen_pos((box.outer.x, box.outer.y))
             self.imgui.internal.item_size((box.outer.width, box.outer.height))
             layer.background()

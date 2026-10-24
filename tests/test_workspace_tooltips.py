@@ -430,7 +430,7 @@ def test_precise_gizmo_clipped_title_uses_the_workspace_help_font(tooltip_frame,
     title = "A deliberately long object and axis title that exceeds the precise editor width"
     app = SimpleNamespace(
         _precise_gizmo_edit=SimpleNamespace(
-            action="Translate", label=title, unit="m", absolute_value=None
+            action="Translate", label=title, unit="m", absolute_value=None, joint_id=-1
         ),
         _open_precise_gizmo_popup=True,
         _viewport_rect=(0, 0, 1000 * ui.s, 600 * ui.s),

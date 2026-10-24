@@ -656,11 +656,11 @@ class _Dragging:
             shown_span = float(np.degrees(span))
             decimals = 3 if shown_span < 1.0 else 2 if shown_span < 10.0 else 1
             label = f"{name} {shown:+.{decimals}f}°"
-            snap_label = f" · SNAP {_format_step(self.rotation_snap_deg)}°"
+            snap_label = f" · {self._tr('SNAP')} {_format_step(self.rotation_snap_deg)}°"
         else:
             decimals = 5 if span < 0.01 else 4 if span < 0.1 else 3
             label = f"{name} {value:+.{decimals}f} m"
-            snap_label = f" · SNAP {_format_step(self.translation_snap_m)} m"
+            snap_label = f" · {self._tr('SNAP')} {_format_step(self.translation_snap_m)} m"
         self._label = label + (snap_label if snap else "")
 
     def _rebase_clamped_joint_drag(self, cam, rect, cursor, position) -> None:
@@ -761,10 +761,14 @@ class _Dragging:
         axis = _axis_of(self._active)
         if self._active is GizmoHandle.ROTATE_TRACKBALL:
             degrees = np.degrees(self._trackball_angles)
-            snap = f" · SNAP {_format_step(self.rotation_snap_deg)}°" if self._snapping else ""
-            return f"Trackball {degrees[0]:+.1f}° {degrees[1]:+.1f}°{snap}"
+            snap = (
+                f" · {self._tr('SNAP')} {_format_step(self.rotation_snap_deg)}°"
+                if self._snapping
+                else ""
+            )
+            return f"{self._tr('Trackball')} {degrees[0]:+.1f}° {degrees[1]:+.1f}°{snap}"
         name = (
-            "Screen"
+            self._tr("Screen")
             if self._active is GizmoHandle.ROTATE_SCREEN
             else ("XYZ"[axis] if axis >= 0 else "")
         )
@@ -777,7 +781,11 @@ class _Dragging:
             degrees = round(float(np.degrees(angle)), 1)
             turns = int(abs(degrees) // 360.0)
             suffix = f" · {turns}×360°" if turns else ""
-            snap = f" · SNAP {_format_step(self.rotation_snap_deg)}°" if self._snapping else ""
+            snap = (
+                f" · {self._tr('SNAP')} {_format_step(self.rotation_snap_deg)}°"
+                if self._snapping
+                else ""
+            )
             return f"{name} {degrees:+.1f}°{suffix}{snap}"
         delta = np.asarray(position, np.float64) - self._start_pos
         local = self._start_basis.T @ delta
@@ -808,7 +816,7 @@ class _Dragging:
         if self._active is GizmoHandle.SCREEN and len(shown) > 1:
             longest = int(np.argmax(dimensions.values))
             factor = shown[longest] / dimensions.values[longest]
-            return self._with_translation_snap(f"Scale {factor:.3f}×")
+            return self._with_translation_snap(f"{self._tr('Scale')} {factor:.3f}×")
         if self._active in PLANE_HANDLES:
             labels = {
                 item.parameter: item.label
@@ -816,20 +824,20 @@ class _Dragging:
                 if item.axis != _axis_of(self._active)
             }
             label = "  ".join(
-                f"{name.title()} {shown[index]:.3f} m" for index, name in labels.items()
+                f"{self._tr(name).title()} {shown[index]:.3f} m" for index, name in labels.items()
             )
         else:
             axis = None if self._active is GizmoHandle.SCREEN else _axis_of(self._active)
             mapping = dimensions.handle(axis)
             if mapping is None:
                 return ""
-            label = f"{mapping.label.title()} {shown[mapping.parameter]:.3f} m"
+            label = f"{self._tr(mapping.label).title()} {shown[mapping.parameter]:.3f} m"
         return self._with_translation_snap(label)
 
     def _with_translation_snap(self, value: str) -> str:
         if not self._snapping:
             return value
-        return f"{value} · SNAP {_format_step(self.translation_snap_m)} m"
+        return f"{value} · {self._tr('SNAP')} {_format_step(self.translation_snap_m)} m"
 
     def _start_edit(self, session: Session) -> bool:
         if not session.adapter.caps.edit_history:

@@ -226,16 +226,13 @@ def test_status_text_vertices_remain_centered_at_fractional_coordinates(canvas, 
 @pytest.mark.parametrize("scale", (0.65, 1.0, 1.5))
 @pytest.mark.parametrize("button", ("left", "right", "wheel"))
 def test_mouse_shell_corners_do_not_accumulate_alpha(canvas, monkeypatch, scale, button):
-    from dataclasses import replace
-
     from mojive.ui.app import status as app_status
-    from mojive.ui.theme import THEME
-    from mojive.ui.viewport_widgets import draw_mouse_hint_glyph
+    from mojive.ui.viewport_widgets import OVERLAY_GEOMETRY
+    from mojive.ui.workspace.icon_mesh import draw_packaged_icon
 
     viewer, _scene = canvas
     original_status = app_status.draw_status
     crop_rect = None
-    theme = replace(THEME, text=(1.0, 1.0, 1.0, 0.5), primary=(0.0, 0.0, 0.0, 0.0))
 
     def draw_status(draw, origin, width, height, *args, **kwargs):
         nonlocal crop_rect
@@ -243,15 +240,14 @@ def test_mouse_shell_corners_do_not_accumulate_alpha(canvas, monkeypatch, scale,
         x, y = origin
         crop_rect = (x + 60, y, x + 120, y + height)
         draw.rect_filled(crop_rect[:2], crop_rect[2:], (0.0, 0.0, 0.0, 1.0))
-        draw_mouse_hint_glyph(
+        # Isolate the shell; button fills now use neutral ink rather than primary.
+        draw_packaged_icon(
             draw,
-            x + 80.25,
-            y + height * 0.5,
-            button,
-            "",
-            theme,
-            scale,
-            pixel_size=viewer.window.pixels_to_points(1.0),
+            (x + 80.25 + OVERLAY_GEOMETRY.hint_mouse_width * scale / 2, y + height * 0.5),
+            OVERLAY_GEOMETRY.hint_control_height * scale,
+            "status-mouse-" + button,
+            (0.0, 0.0, 0.0, 0.0),
+            stroke_color=(1.0, 1.0, 1.0, 0.5),
         )
         return result
 
@@ -262,8 +258,8 @@ def test_mouse_shell_corners_do_not_accumulate_alpha(canvas, monkeypatch, scale,
     x0, y0, x1, y1 = (round(v * viewer.window.pixel_scale) for v in crop_rect)
     shell = pixels[y0:y1, x0:x1]
     # A half-transparent white shell over black cannot exceed one application
-    # of its alpha. Include ImGui's subpixel coverage attenuation below 1 u.
-    maximum = round(255 * 0.5 * min(scale, 1.0))
+    # of its alpha. Canonical meshes scale their complete silhouette uniformly.
+    maximum = round(255 * 0.5)
     assert shell.max() <= maximum + 1
     assert shell.max() >= maximum * 0.7
 
@@ -483,7 +479,7 @@ def test_interactive_capture_scopes_and_recording_lifecycle(canvas, tmp_path):
     assert frames >= 2
 
 
-def test_editor_actions_save_and_restore_an_authored_scene(tmp_path, monkeypatch):
+def test_editor_actions_save_and_restore_an_authored_scene(tmp_path):
     viewer = build_scene(Scene(), vsync=False, width=960, height=640)
     document = tmp_path / "editor.mojive.json"
     try:
@@ -519,14 +515,19 @@ def test_editor_actions_save_and_restore_an_authored_scene(tmp_path, monkeypatch
 
         viewer.app._add_scene_object(MeshShape.SPHERE, "sphere")
         viewer.app._request_document_action("new_scene")
-        original_button = imgui.button
-
-        def discard_changes(label, *args, **kwargs):
-            clicked = original_button(label, *args, **kwargs)
-            return True if label == "Discard" else clicked
-
-        monkeypatch.setattr(imgui, "button", discard_changes)
+        for _ in range(3):
+            viewer.sync()
+        assert viewer.session.source.instance_count == 3
+        assert viewer.app._pending_document_action is not None
+        x, y, w, h = viewer.app._floating_ui.hits[viewer.app.localizer.text("Discard")]
+        io = imgui.get_io()
+        io.add_mouse_pos_event(x + w / 2, y + h / 2)
         viewer.sync()
+        io.add_mouse_button_event(0, True)
+        viewer.sync()
+        io.add_mouse_button_event(0, False)
+        viewer.sync()
+        assert viewer.app._pending_document_action is None
         assert viewer.session.source.instance_count == 0
     finally:
         viewer.release()
@@ -1050,6 +1051,7 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
     from mojive.ui import icons
     from mojive.ui.app import status as app_status
     from mojive.ui.imgui_draw import ImguiDraw2D
+    from mojive.ui.workspace.icon_mesh import draw_packaged_icon
 
     viewer, _scene = canvas
     names = (
@@ -1065,6 +1067,7 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
         "key-follow-locked",
         "key-view",
         "key-snapshot",
+        "inspect",
     )
     scales = (0.65, 1.0, 1.25, 1.5)
     original = app_status.draw_status
@@ -1077,9 +1080,14 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
         for row, scale in enumerate(scales):
             for col, name in enumerate(names):
                 slot = (
-                    23.6 if name.startswith("tool-") else 20 if name.startswith("playback-") else 16
+                    23.6
+                    if name.startswith("tool-") or name == "inspect"
+                    else 20
+                    if name.startswith("playback-")
+                    else 16
                 )
-                icons.draw_icon(
+                painter = draw_packaged_icon if name == "inspect" else icons.draw_icon
+                painter(
                     draw,
                     (55 + col * 75 + phase, 70 + row * 145 + phase),
                     slot * scale,
@@ -1099,9 +1107,6 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
 
     areas = np.zeros((len(names), len(scales)))
     widths = np.zeros((len(scales), 2))
-    from mojive.ui.icons.layout import _production_icon_layout
-
-    _, (fit, offset, _) = _production_icon_layout("tool-body")
     # Average pixel phases: an isolated subpixel corner can land directly on
     # or between samples, especially at 1x display density. The invariant is
     # scale-dependent weight, independent of that placement variation.
@@ -1116,17 +1121,19 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
                     coverage((x - 32, y - 32, x + 32, y + 32)) / (scale * density) ** 2
                 )
         for row, scale in enumerate(scales):
-            slot = 23.6 * scale / icons.ICON_GRID
-            unit = slot * fit
-            x = 355 + phase + offset[0] * slot
-            y = 70 + row * 145 + phase + offset[1] * slot
-            for col, center in enumerate((0, 7.5)):
+            size = 23.6 * scale
+            unit = size / icons.ICON_GRID
+            x = 55 + names.index("inspect") * 75 + phase - size / 2
+            y = 70 + row * 145 + phase - size / 2
+            # The adopted Inspect master's divider and right shell are at
+            # x=15 and x=21. Sample their straight centers, clear of joins.
+            for col, center in enumerate((15, 21)):
                 widths[row, col] += coverage(
                     (
                         x + (center - 2.5) * unit,
-                        y + 2 * unit,
+                        y + 10 * unit,
                         x + (center + 2.5) * unit,
-                        y + 4 * unit,
+                        y + 14 * unit,
                     )
                 )
 
@@ -1137,6 +1144,6 @@ def test_icon_weight_remains_proportional_at_small_ui_scales(canvas, monkeypatch
         assert max(values) / min(values) < 1.2, (name, values)
 
     for scale, (inside, outside) in zip(scales, widths, strict=True):
-        # Compare the vertical interior spoke and the parallel outer edge at
+        # Compare the vertical interior divider and the parallel outer edge at
         # the same height. Equal nominal widths must produce equal coverage.
         assert inside == pytest.approx(outside, rel=0.2), (scale, inside, outside)

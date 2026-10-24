@@ -1,3 +1,1 @@
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <path d="m6 16.75 4-9.5m2.5-.5 5 5.5"/><circle cx="5" cy="19" r="2.25"/><circle cx="11" cy="5" r="2.25"/><circle cx="19" cy="14" r="2.25"/>
-</svg>
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="5.5" r="2.5" /><circle cx="4.5" cy="19" r="2" /><circle cx="19.5" cy="19" r="2" /><path d="M10.78589267205342 7.685393190303844L5.471285862357264 17.251685447756923" /><path d="M13.21410732794658 7.685393190303844L18.528714137642737 17.251685447756923" /></svg>

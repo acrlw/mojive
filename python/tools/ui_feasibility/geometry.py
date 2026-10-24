@@ -13,8 +13,9 @@ from mojive.ui.icons import draw_concept_icon
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels import PanelContext
 from mojive.ui.panels.filters import filter_pills, severity_color, severity_icon, severity_meshes
-from mojive.ui.panels.value_cards import draw_value_rail, interval_text, value_card, value_rail
+from mojive.ui.panels.value_cards import interval_text, value_card, value_rail
 from mojive.ui.theme import rgb8
+from mojive.ui.value_rail import draw_value_rail
 from mojive.ui.viewport_widgets import (
     capsule_points,
     draw_mouse_hint_glyph,

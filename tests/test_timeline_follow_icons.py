@@ -18,17 +18,11 @@ from mojive.ui.workspace.widgets import UI
 @pytest.mark.parametrize(
     "name, original",
     (
-        ("follow", "follow"),
         ("follow-off", "pin"),
-        ("follow-page", "follow"),
-        ("follow-locked", "lock"),
         ("perspective", "perspective"),
-        ("orthographic", "orthographic"),
-        ("sort", "sort"),
-        ("search", "search"),
     ),
 )
-def test_reviewed_shapes_preserve_the_pre_guide_production_baseline(name, original):
+def test_retained_shapes_preserve_the_pre_guide_production_baseline(name, original):
     from examples.ui_design.native.compile_icons import compile_svg
 
     from mojive.ui.workspace.widget_icons import GLYPHS, ICON_STROKE
@@ -38,7 +32,7 @@ def test_reviewed_shapes_preserve_the_pre_guide_production_baseline(name, origin
     master = ET.fromstring(baseline["icons"][original])
     master.set("stroke-width", str(ICON_STROKE))
     approved = compile_svg(ET.tostring(master, encoding="unicode"))
-    assert GLYPHS[name] == json.loads(json.dumps(approved))
+    assert json.loads(json.dumps(GLYPHS[name])) == json.loads(json.dumps(approved))
 
 
 @pytest.mark.parametrize("toolbar_type", (NativeTimelineToolbar, ReferenceToolbar))

@@ -123,6 +123,18 @@ def severity_meshes(size: float, kind: str, smoothing: float = CORNER_SMOOTHING)
 def severity_icon(draw, center, size: float, kind: str, color) -> None:
     """Draw one severity glyph centered on the requested point.
 
+    Output, filters and workspace status share the adopted semantic master.
+    """
+
+    from mojive.ui.workspace.icon_mesh import draw_packaged_icon
+
+    name = {"info": "info", "warning": "warn", "error": "err"}[kind]
+    draw_packaged_icon(draw, center, size, name, color)
+
+
+def draw_reference_severity(draw, center, size: float, kind: str, color) -> None:
+    """Draw the retained circular-frame feasibility reference.
+
     Every severity uses the same circular frame, optical size, and baseline.
     """
 

@@ -115,7 +115,9 @@ def floating_segment(ui, key, labels, selected, *, theme, width=None):
     from mojive.ui.controls import segmented_control
 
     if ui is None:
-        return segmented_control(key, labels, selected, theme=theme, width=width)
+        return segmented_control(
+            key, labels, selected, theme=theme, width=0.0 if width is None else width
+        )
     pos = imgui.get_cursor_screen_pos()
     width = imgui.get_content_region_avail().x if width is None else width
     return ui.segmented(key, pos.x, pos.y, width / ui.s, labels, selected)

@@ -4,6 +4,7 @@ import ast
 import math
 import sys
 from pathlib import Path
+from string import Formatter
 from types import SimpleNamespace
 
 import numpy as np
@@ -694,6 +695,9 @@ def test_language_preference_round_trip(tmp_path, monkeypatch):
         ("12 active, 8 deferred", "12 个生效，8 个暂未使用"),
         ("7 active, 0 used by export", "7 个生效，导出使用 0 个"),
         ("0 active, export-only plan", "0 个生效，仅用于导出规划"),
+        ("reused", "已复用"),
+        ("unchanged", "未更改"),
+        ("16384 bytes", "16384 字节"),
         ("custom backend diagnostic", "custom backend diagnostic"),
         (0, "0"),
         (28, "28"),
@@ -746,6 +750,27 @@ def test_every_literal_translation_source_has_a_simplified_chinese_entry() -> No
 
     missing = {value: locations for value, locations in sources.items() if value not in _ZH_CN}
     assert not missing
+
+
+def test_translation_templates_preserve_fields_and_catalog_keys_are_unique():
+    import mojive.ui.localization as localization
+
+    tree = ast.parse(Path(localization.__file__).read_text(encoding="utf-8"))
+    catalog = next(
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_ZH_CN" for target in node.targets)
+    )
+    keys = [ast.literal_eval(key) for key in catalog.keys]
+    assert len(keys) == len(set(keys))
+    formatter = Formatter()
+    for source, translated in _ZH_CN.items():
+        source_fields = [field for _, field, _, _ in formatter.parse(source) if field is not None]
+        translated_fields = [
+            field for _, field, _, _ in formatter.parse(translated) if field is not None
+        ]
+        assert sorted(source_fields) == sorted(translated_fields), source
 
 
 def test_fixed_imgui_copy_uses_the_localization_boundary() -> None:
@@ -802,7 +827,10 @@ def test_fixed_imgui_copy_uses_the_localization_boundary() -> None:
                 isinstance(item, ast.Call)
                 and (
                     (isinstance(item.func, ast.Name) and item.func.id == "t")
-                    or (isinstance(item.func, ast.Attribute) and item.func.attr in {"tr", "text"})
+                    or (
+                        isinstance(item.func, ast.Attribute)
+                        and item.func.attr in {"tr", "text", "translate"}
+                    )
                 )
                 for item in ast.walk(label)
             )

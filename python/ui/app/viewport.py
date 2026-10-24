@@ -323,6 +323,7 @@ class _Viewport:
                 self._viewport_rect,
                 overlay,
                 style_scale=self.window.style_scale,
+                readout_ui=self._floating_ui,
             )
         if self.viewport_layers.viewport_ui:
             self.view_cube.draw(overlay, self.window.style_scale)

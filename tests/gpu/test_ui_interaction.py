@@ -2346,10 +2346,10 @@ def test_limited_hinge_drag_keeps_feedback_and_claim_until_mouse_release() -> No
         original_draw = v.app.gizmo.draw_overlay
         recorders = []
 
-        def spy(cam, rect, overlay, *, style_scale=1.0):
+        def spy(cam, rect, overlay, **kwargs):
             recorder = Recorder(overlay)
             recorders.append(recorder)
-            return original_draw(cam, rect, recorder, style_scale=style_scale)
+            return original_draw(cam, rect, recorder, **kwargs)
 
         v.app.gizmo.draw_overlay = spy
         try:
@@ -3189,10 +3189,10 @@ def test_gizmo_drag_feedback_matches_in_2d_and_3d(
     orig_draw = v.app.gizmo.draw_overlay
     recorders = []
 
-    def spy(cam, rect, overlay, *, style_scale=1.0):
+    def spy(cam, rect, overlay, **kwargs):
         recorder = Recorder(overlay)
         recorders.append(recorder)
-        return orig_draw(cam, rect, recorder, style_scale=style_scale)
+        return orig_draw(cam, rect, recorder, **kwargs)
 
     v.app.gizmo.draw_overlay = spy
     try:
@@ -3338,10 +3338,10 @@ def test_rotation_feedback_matches_in_2d_and_3d(free_body_viewer, style, monkeyp
     orig_draw = v.app.gizmo.draw_overlay
     recorders = []
 
-    def spy(cam, rect, overlay, *, style_scale=1.0):
+    def spy(cam, rect, overlay, **kwargs):
         recorder = Recorder(overlay)
         recorders.append(recorder)
-        return orig_draw(cam, rect, recorder, style_scale=style_scale)
+        return orig_draw(cam, rect, recorder, **kwargs)
 
     v.app.gizmo.draw_overlay = spy
     try:
@@ -3481,10 +3481,10 @@ def test_pressed_screen_rotation_ring_keeps_its_idle_pixel_geometry(
     recorders = []
     original = v.app.gizmo.draw_overlay
 
-    def spy(cam, rect, overlay, *, style_scale=1.0):
+    def spy(cam, rect, overlay, **kwargs):
         recorder = Recorder(overlay)
         recorders.append(recorder)
-        return original(cam, rect, recorder, style_scale=style_scale)
+        return original(cam, rect, recorder, **kwargs)
 
     try:
         io.add_mouse_button_event(0, True)
@@ -3828,8 +3828,16 @@ def test_closing_one_window_leaves_glfw_alive_for_the_other():
 
     from mojive.ui.window import Window, WindowConfig
 
-    a = Window(WindowConfig(title="a", width=320, height=240, vsync=False, ini_path=""))
-    b = Window(WindowConfig(title="b", width=320, height=240, vsync=False, ini_path=""))
+    a = Window(
+        WindowConfig(
+            title="a", width=320, height=240, vsync=False, ini_path="", show_on_start=False
+        )
+    )
+    b = Window(
+        WindowConfig(
+            title="b", width=320, height=240, vsync=False, ini_path="", show_on_start=False
+        )
+    )
     try:
         a.close()
 
@@ -3838,5 +3846,9 @@ def test_closing_one_window_leaves_glfw_alive_for_the_other():
     finally:
         b.close()
 
-    c = Window(WindowConfig(title="c", width=320, height=240, vsync=False, ini_path=""))
+    c = Window(
+        WindowConfig(
+            title="c", width=320, height=240, vsync=False, ini_path="", show_on_start=False
+        )
+    )
     c.close()

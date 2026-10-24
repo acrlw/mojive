@@ -97,6 +97,11 @@ class ImguiDraw2D:
         self._dl = draw_list if draw_list is not None else imgui.get_window_draw_list()
         self.corner_smoothing = float(corner_smoothing)
 
+    @property
+    def native_draw_list(self):
+        """Expose untransformed native submission to geometry-preserving decorators."""
+        return self._dl
+
     def with_corner_smoothing(self, value: float):
         """Share the draw list while selecting one element family's curve profile."""
         return ImguiDraw2D(self._dl, corner_smoothing=value)
@@ -239,6 +244,7 @@ class ImguiDraw2D:
         origin=None,
         direction=(1.0, 0.0),
         fringe_width=1.0,
+        boundaries=(),
     ) -> None:
         """Submit precomputed triangles and antialias only the external contours."""
         if not len(indices):
@@ -271,6 +277,8 @@ class ImguiDraw2D:
             self._write_anti_alias_fringe(outline, rgba, width=fringe_width)
         if len(hole):
             self._write_anti_alias_fringe(hole, rgba, inside=True, width=fringe_width)
+        for boundary, inside in boundaries:
+            self._write_anti_alias_fringe(boundary, rgba, inside=inside, width=fringe_width)
         if origin is not None:
             # Transform the submitted range, including AA, in one native pass.
             # Local vertex and fringe caches survive movement and rotation.

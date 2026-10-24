@@ -5,13 +5,17 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
-from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.design import DESIGN
 from mojive.ui.workspace.inspector_components import draw_component
-from mojive.ui.workspace.property_style import property_toggle, switch_form_layout
+from mojive.ui.workspace.property_style import (
+    NativePropertyPresentation,
+    property_controls,
+    property_toggle,
+    switch_form_layout,
+)
 from mojive.ui.workspace.section_columns import section_column
 from mojive.ui.workspace.widgets import (
     MUTED,
-    TEXT,
 )
 from mojive.ui.workspace.window_chrome import fit_native_content_width
 
@@ -64,11 +68,9 @@ def inspector(workspace, x, y, w, h):
 
 def _draw_body(workspace, e, bx, yy, bw):
     u, s = workspace.ui, workspace.s
-    original = next(
-        (value for value in workspace.app.initial_entities if value["identity"] == e["identity"]),
-        None,
-    )
-    if draw_component(workspace, workspace._panel_context, e, workspace.inspector_tab):
+    handled = draw_component(workspace, workspace._panel_context, e, workspace.inspector_tab)
+    original = None if handled else workspace.app.initial_entity(e["identity"])
+    if handled:
         yy = max(yy, imgui.get_cursor_screen_pos().y)
     elif workspace.inspector_tab == "Properties":
         if u.section("TRANSFORM", bx, yy, bw - 32 * s, workspace.expanded["TRANSFORM"]):
@@ -154,11 +156,18 @@ def _draw_body(workspace, e, bx, yy, bw):
             workspace.expanded["IDENTITY"] = not workspace.expanded["IDENTITY"]
         yy += u.section_offset(42) * s
         if workspace.expanded["IDENTITY"]:
-            u.text(bx, yy, "Object ID", MUTED, BODY_SIZE)
-            u.text(bx + 100 * s, yy, str(e["object_id"]), TEXT, BODY_SIZE)
-            u.text(bx, yy + 30 * s, "Type", MUTED, BODY_SIZE)
-            u.text(bx + 100 * s, yy + 30 * s, e["type"], TEXT, BODY_SIZE)
-            yy += 64 * s
+            identity = getattr(workspace, "identity_presentation", None)
+            if identity is None:
+                identity = workspace.identity_presentation = NativePropertyPresentation(
+                    u, prefix="identity"
+                )
+            imgui.set_cursor_screen_pos((bx, yy))
+            with property_controls(u):
+                if identity.begin_table("identity"):
+                    identity.labeled(u.translate("Object ID"), str(e["object_id"]))
+                    identity.labeled(u.translate("Type"), u.translate(e["type"]))
+                    identity.end_table()
+            yy = imgui.get_cursor_screen_pos().y + 16 * s
         imgui.set_cursor_screen_pos((bx, yy))
         draw_component(workspace, workspace._panel_context, e, "Properties", details="geometry")
         yy = imgui.get_cursor_screen_pos().y

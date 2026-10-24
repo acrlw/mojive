@@ -6,7 +6,7 @@ from mojive.capture import CaptureSurface, RecordingPhase
 from mojive.ui.app.support import _model_filters
 from mojive.ui.input_bindings import InputAction
 
-from .constants import PANEL_ICONS, PANELS, VIEWPORT_TOOLS
+from .constants import LEFT_PANELS, PANEL_ICONS, PANELS, VIEWPORT_TOOLS
 from .menu_item import Item
 from .panel_manager import PANEL_NAMES
 
@@ -26,13 +26,13 @@ def items(menu, name):
     if name == "File":
         models = bool(_model_filters(caps))
         return [
-            Item("New Scene", "file:new", "file", enabled=caps.supports("scene_new")),
-            Item("Open Scene...", "file:load", "assets", enabled=caps.supports("scene_open")),
-            Item("Save", "file:save", "save", enabled=caps.supports("scene_save")),
-            Item("Save As...", "file:save_as", "save", enabled=caps.supports("scene_save")),
+            Item("New Scene", "file:new", enabled=caps.supports("scene_new")),
+            Item("Open Scene...", "file:load", enabled=caps.supports("scene_open")),
+            Item("Save", "file:save", enabled=caps.supports("scene_save")),
+            Item("Save As...", "file:save_as", enabled=caps.supports("scene_save")),
             None,
-            Item("Open Model...", "file:model", "body", enabled=models),
-            Item("Add Models...", "file:add", "plus", enabled=models and caps.model_composition),
+            Item("Open Model...", "file:model", enabled=models),
+            Item("Add Models...", "file:add", enabled=models and caps.model_composition),
             Item(
                 "Remove Model",
                 submenu="Remove Model",
@@ -41,7 +41,6 @@ def items(menu, name):
             Item(
                 "Reload Model",
                 "file:reload",
-                "reset",
                 enabled=caps.reload and st.app.session.asset_path is not None,
             ),
             Item(
@@ -50,7 +49,7 @@ def items(menu, name):
                 enabled=caps.scene_authoring,
             ),
             None,
-            Item("Quit", "file:quit", "close"),
+            Item("Quit", "file:quit"),
         ]
     if name == "Remove Model":
         return [
@@ -65,7 +64,7 @@ def items(menu, name):
         ]
     if name == "Capture":
         return [
-            Item(label, "capture:" + surface.value, "capture-image")
+            Item(label, "capture:" + surface.value)
             for label, surface in (
                 ("Scene Image", CaptureSurface.SCENE),
                 ("Viewport with UI", CaptureSurface.VIEWPORT),
@@ -147,15 +146,11 @@ def items(menu, name):
             Item("Frame all", "frame", "frame", _shortcut(st.app, InputAction.FRAME_SCENE)),
             Item("Capture", submenu="Capture", icon="capture-image"),
             *recording,
-            Item("Recording Settings...", "recording-settings", "video"),
             None,
-            Item(
-                "Projection",
-                icon="orthographic" if st.app.camera.orthographic else "perspective",
-                submenu="Projection",
-            ),
-            Item("Transform tool", icon=st.app.tool, submenu="Transform tool"),
-            Item("Gizmo orientation", icon="world", submenu="Gizmo orientation"),
+            Item("Recording Settings...", "recording-settings"),
+            Item("Projection", submenu="Projection"),
+            Item("Transform tool", submenu="Transform tool"),
+            Item("Gizmo orientation", submenu="Gizmo orientation"),
             None,
             Item("Transform handles", "gizmos", "move", checkable=True, checked=st.app.gizmos),
         ]
@@ -215,8 +210,6 @@ def items(menu, name):
                 _shortcut(st.app, InputAction.TOGGLE_PAUSE),
             ),
             Item("Go to start", "start", "reset"),
-            Item("Playback speed", icon="play", submenu="Playback speed"),
-            None,
             Item(
                 "Stop recording" if st.app.session.state_take_recording else "Record simulation",
                 "record",
@@ -225,11 +218,12 @@ def items(menu, name):
                 checkable=True,
                 checked=st.app.session.state_take_recording,
             ),
-            Item("Physics adapter", "panel:Control", "control"),
+            None,
+            Item("Playback speed", submenu="Playback speed"),
+            Item("Physics adapter", "panel:Control"),
             Item(
                 "Physics Options...",
                 "physics-options",
-                "control",
                 enabled=caps.simulation or caps.supports("physics.options"),
             ),
         ]
@@ -243,10 +237,9 @@ def items(menu, name):
             Item("Previous frame", "step:-1", "previous", enabled=not st.playing),
             Item("Next frame", "step:1", "next", enabled=not st.playing),
             None,
-            Item("Playback speed", icon="play", submenu="Playback speed"),
+            Item("Playback speed", submenu="Playback speed"),
             Item(
                 "Loop playback",
-                "loop",
                 "loop",
                 checkable=True,
                 checked=st.loop,
@@ -256,31 +249,41 @@ def items(menu, name):
         ]
     if name == "Window":
         return [
-            Item("Panels", icon="scene", submenu="Panels"),
-            Item("Inspector position", icon="inspect", submenu="Inspector position"),
+            Item(
+                "Hide left panel"
+                if any(st.open.get(n, False) for n in LEFT_PANELS)
+                else "Show left panel",
+                "toggle-side:left",
+                "sidebar-left",
+            ),
+            Item(
+                "Hide right panel" if st.open["Inspector"] else "Show right panel",
+                "toggle:Inspector",
+                "inspect",
+            ),
             None,
-            Item("Save layout", "layout:save", "save"),
+            Item("Panels", submenu="Panels"),
+            Item("Inspector position", submenu="Inspector position"),
+            None,
+            Item("Save layout", "layout:save"),
             Item(
                 "Restore saved layout",
                 "layout:restore",
-                "undo",
                 enabled=bool(st.saved),
                 reason="Save a layout first.",
             ),
-            Item("Reset Layout", "layout:reset", "reset"),
+            Item("Reset Layout", "layout:reset"),
             None,
             Item(
                 "Show Viewport tab",
                 "viewport-tab",
-                "inspect",
                 checkable=True,
                 checked=st.show_viewport_tab,
             ),
-            Item("Settings", "panel:Settings", "settings", "F9"),
+            Item("Settings", "panel:Settings", shortcut="F9"),
             Item(
                 "Physics Options...",
                 "physics-options",
-                "control",
                 enabled=caps.simulation or caps.supports("physics.options"),
             ),
         ]
@@ -325,13 +328,14 @@ def items(menu, name):
                     "inspector",
                     "keyframes",
                     "settings",
+                    "info",
                 )
                 and p.enabled
             ),
             *(
                 Item(title, "extra-panel:" + panel_id, PANEL_ICONS.get(panel_id, "inspect"))
                 for title, panel_id in unloaded.items()
-                if title not in (*PANELS, "Inspector", "Timeline")
+                if title not in (*PANELS, "Inspector", "Timeline") and panel_id != "info"
             ),
             None,
             Item(
@@ -354,9 +358,9 @@ def items(menu, name):
         ]
     if name == "Inspector position":
         return [
-            Item("Float", "layout:float", "inspect"),
-            Item("Dock on the right", "layout:dock", "inspect"),
-            Item("Group with Scene", "layout:group", "scene"),
+            Item("Float", "layout:float"),
+            Item("Dock on the right", "layout:dock"),
+            Item("Group with Scene", "layout:group"),
         ]
     if name == "Shading":
         return [
@@ -365,8 +369,8 @@ def items(menu, name):
         ]
     if name == "Help":
         return [
-            Item("Documentation", "documentation", "file"),
-            Item("Interaction guide", "dialog:Interaction guide", "help"),
-            Item("About Mojive", "extra-panel:info", "info"),
+            Item("Documentation", "documentation"),
+            Item("Interaction guide", "dialog:Interaction guide"),
+            Item("About Mojive", "dialog:About Mojive"),
         ]
     raise ValueError(name)

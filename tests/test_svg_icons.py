@@ -16,7 +16,8 @@ from mojive.tools.svg_icons import (
 )
 from mojive.tools.ui_feasibility.svg_icons import SvgStudy
 from mojive.ui.icons import drawing as icon_drawing
-from mojive.ui.severity_icons import severity_frame, severity_meshes
+from mojive.ui.workspace.icon_mesh import _packaged_layers
+from mojive.ui.workspace.widget_icons import COMPILED_ALIASES, GLYPHS
 
 
 @pytest.mark.parametrize("name", ICON_NAMES)
@@ -39,74 +40,47 @@ def test_exported_production_assets_have_finite_geometry_and_preserve_holes(name
             triangles = points[np.array(indices).reshape(-1, 3)]
             ab, ac = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
             area = np.abs(ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]).sum() / 2
-            expected = (
-                sum(
-                    (1 if i == 0 else -1) * abs(signed_polygon_area(path))
-                    for i, path in enumerate(shape.contours)
-                )
-                * (size / 24) ** 2
-            )
+            expected = sum(signed_polygon_area(path) for path in shape.contours) * (size / 24) ** 2
             assert area == pytest.approx(expected, rel=2e-5, abs=2e-5)
             assert len(loops) == len(shape.contours)
-            assert sum(inside for _points, inside in loops) == len(shape.contours) - 1
+            assert sum(inside for _points, inside in loops) == sum(
+                signed_polygon_area(path) < 0 for path in shape.contours
+            )
         assert prepare_svg(icon, size) is prepared
 
 
-def test_svg_export_consumes_production_optical_translation(monkeypatch):
+def test_svg_export_ignores_retained_experimental_optical_translation(monkeypatch):
     original = parse_svg(export_icon("playback-play"))
     monkeypatch.setattr(icon_drawing, "production_icon_offset", lambda _name: (2.0, -1.0))
     shifted = parse_svg(export_icon("playback-play"))
-    assert np.array(shifted.bounds) - np.array(original.bounds) == pytest.approx([2, -1, 2, -1])
+    assert np.array(shifted.bounds) - np.array(original.bounds) == pytest.approx([0, 0, 0, 0])
 
 
 @pytest.mark.parametrize("kind", ("info", "warning", "error"))
 def test_svg_severity_uses_the_reviewed_output_master(kind):
+    name = COMPILED_ALIASES[f"status-{kind}"]
     icon = parse_svg(export_icon(f"status-{kind}"))
-    frame = icon.shapes[0]
-    radius, stroke = severity_frame(24)
-    assert frame.circle == pytest.approx((12, 12, radius))
-    assert frame.stroke_width == pytest.approx(stroke)
-    assert frame.segment_basis == "size"
-    for size in (14, 24, 56, 112):
-        prepared = prepare_svg(icon, size)[0]
-        expected = severity_meshes(size, kind)[0]
-        assert np.asarray(prepared[1]) == pytest.approx(np.asarray(expected[0]))
-    for shape, (_vertices, _indices, outline, hole) in zip(
-        icon.shapes[1:], severity_meshes(24, kind)[1:], strict=True
-    ):
-        assert shape.aa == "device-fringe"
-        expected = (outline, hole) if len(hole) else (outline,)
-        for actual, contour in zip(shape.contours, expected, strict=True):
-            assert np.asarray(actual) - 12 == pytest.approx(np.asarray(contour), abs=1e-8)
+    layers = _packaged_layers()[name]
+    assert len(icon.shapes) == len(layers)
+    for shape, layer in zip(icon.shapes, layers, strict=True):
+        mesh = layer.get("mesh", layer.get("stroke"))
+        assert len(shape.contours) == len(mesh["boundaries"])
+        for actual, (expected, _inside) in zip(shape.contours, mesh["boundaries"], strict=True):
+            assert np.asarray(actual) == pytest.approx(np.asarray(expected), abs=1e-7)
 
 
-def test_svg_info_and_warning_share_mirrored_marks_and_centered_bounds():
-    icons = [parse_svg(export_icon(f"status-{kind}")) for kind in ("info", "warning")]
+def test_svg_diagnostics_have_distinct_frames_and_open_marker_surrounds():
+    icons = [parse_svg(export_icon(f"status-{kind}")) for kind in ("info", "warning", "error")]
+    assert len({repr(icon.shapes[0].contours) for icon in icons}) == 3
     for icon in icons:
-        mark = np.concatenate([np.asarray(shape.contours[0]) for shape in icon.shapes[1:]])
-        assert (mark.min(axis=0) + mark.max(axis=0)) / 2 == pytest.approx((12, 12))
-    for info, warning in zip(icons[0].shapes[1:], icons[1].shapes[1:], strict=True):
-        reflected = np.asarray(info.contours[0])
-        reflected[:, 1] = 24 - reflected[:, 1]
-        a = np.array(sorted(map(tuple, reflected)))
-        b = np.array(sorted(warning.contours[0]))
-        assert a == pytest.approx(b, abs=1e-8)
+        assert any(signed_polygon_area(path) < 0 for path in icon.shapes[0].contours)
 
 
 @pytest.mark.parametrize("name", ("tool-scale", "tool-snap"))
-def test_tool_exports_keep_balanced_ink_without_centering_their_asymmetric_bounds(name):
+def test_tool_exports_keep_canonical_placement_without_per_icon_fitting(name):
     icon = parse_svg(export_icon(name))
-    area_sum, moment = 0.0, np.zeros(2)
-    for _shape, points, indices, _loops, _contours in prepare_svg(icon, 24):
-        triangles = np.asarray(points)[np.asarray(indices).reshape(-1, 3)]
-        ab, ac = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
-        areas = np.abs(ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]) / 2
-        area_sum += areas.sum()
-        moment += (triangles.mean(axis=1) * areas[:, None]).sum(axis=0)
-    assert moment / area_sum == pytest.approx((0, 0), abs=0.02)
-    if name == "tool-scale":
-        bounds = np.asarray(icon.bounds)
-        assert ((bounds[:2] + bounds[2:]) / 2)[1] < 10.1
+    bounds = GLYPHS[COMPILED_ALIASES[name]]["bounds"]
+    assert icon.bounds == pytest.approx(bounds, abs=0.02)
 
 
 def test_rectangular_viewbox_is_centered_without_stretching():
@@ -160,7 +134,7 @@ def test_reload_uses_file_edits_and_retains_previous_set_after_invalid_svg(tmp_p
 
 def test_prepared_geometry_is_independent_of_color_role():
     icon = parse_svg(export_icon("status-mouse-left"))
-    assert {shape.role for shape in icon.shapes} == {"foreground", "accent"}
+    assert {shape.role for shape in icon.shapes} == {"foreground"}
     edited = replace(icon, shapes=tuple(replace(shape, role="accent") for shape in icon.shapes))
     for before, after in zip(prepare_svg(icon, 24), prepare_svg(edited, 24), strict=True):
         assert before[1:] == after[1:]

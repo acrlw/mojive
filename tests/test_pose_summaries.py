@@ -404,3 +404,77 @@ def test_missing_frame_values_do_not_leave_stale_summary_numbers(editor, monkeyp
     _click(editor, key)
     assert not any(key.startswith("##pose-joint-") for key in editor.ui.hits)
     assert key in editor.ui.hits
+
+
+@pytest.mark.parametrize("width", (160, 280, 640))
+@pytest.mark.parametrize("kind", ("ball", "free"))
+@pytest.mark.parametrize("label_gap", (4, 6))
+def test_collapsed_pose_reserves_caption_to_value_gap(editor, tmp_path, width, kind, label_gap):
+    runtime = DesignRuntime(SpecificationStore(tmp_path / "spec.json"))
+    spec = deepcopy(runtime.spec)
+    spec["parts"]["pose_joint"] = {"summaryLabelGap": label_gap}
+    runtime.update_spec(spec)
+    runtime.observe_components = True
+    editor.ui.design = DesignPresentation(editor.ui, runtime)
+    editor.width = width
+    with group_scope("Pose"):
+        _summary(editor, kind)
+    prefix = f"pose-summary-{editor.joint.joint_id}-"
+    cells = editor.ui.hits
+    for name in ("position", "rotation") if kind == "free" else ("rotation",):
+        label = next(
+            row["labelRect"]
+            for row in reversed(runtime.observed)
+            if row["key"] == f"pose-summary-label-{editor.joint.joint_id}-{name}"
+        )
+        value = cells[prefix + name + "-X"]
+        if width < 640:
+            assert value[1] - label[1] - label[3] == pytest.approx(label_gap * editor.ui.s)
+        else:
+            assert value[1] == pytest.approx(label[1])
+        field = cells[f"pose-fields-{editor.joint.joint_id}"]
+        assert value[1] + value[3] <= field[1] + field[3] + 1e-5
+
+
+@pytest.mark.parametrize("width", (160, 280))
+def test_collapsed_pose_spacing_expresses_group_ownership(editor, tmp_path, monkeypatch, width):
+    runtime = DesignRuntime(SpecificationStore(tmp_path / "spec.json"))
+    runtime.observe_components = True
+    editor.ui.design = DesignPresentation(editor.ui, runtime)
+    editor.width = width
+    free = next(joint for joint in editor.session.joints if joint.type == "free")
+    ball = next(joint for joint in editor.session.joints if joint.type == "ball")
+    draw = editor.panel.draw
+
+    def draw_neighbors(*args, **kwargs):
+        return draw(*args, **(kwargs | {"joints": (free, ball)}))
+
+    monkeypatch.setattr(editor.panel, "draw", draw_neighbors)
+    with group_scope("Pose"):
+        _summary(editor)
+    labels = {
+        name: next(
+            row["labelRect"]
+            for row in reversed(runtime.observed)
+            if row["key"] == f"pose-summary-label-{free.joint_id}-{name}"
+        )
+        for name in ("position", "rotation")
+    }
+    cells = editor.ui.hits
+    prefix = f"pose-summary-{free.joint_id}-"
+
+    def last_value_bottom(name):
+        return max(
+            cells[prefix + name + "-" + axis][1] + cells[prefix + name + "-" + axis][3]
+            for axis in "XYZ"
+        )
+
+    within = [cells[prefix + name + "-X"][1] - rect[1] - rect[3] for name, rect in labels.items()]
+    between_fields = labels["rotation"][1] - last_value_bottom("position")
+    next_heading = cells[f"pose-joint-{ball.joint_id}"]
+    between_joints = next_heading[1] - last_value_bottom("rotation")
+    heading = cells[f"pose-joint-{free.joint_id}"]
+    heading_gap = labels["position"][1] - heading[1] - heading[3]
+    assert within[0] == pytest.approx(within[1])
+    assert 0 < within[0] < between_fields < between_joints
+    assert heading_gap > within[0]

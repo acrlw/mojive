@@ -219,7 +219,7 @@ class AssetsPanel(Panel):
         if self._asset_type not in types:
             self._asset_type = "all"
         slot = types.index(self._asset_type)
-        type_labels = tuple(ctx.tr("All") if item == "all" else item for item in types)
+        type_labels = tuple(ctx.tr("All" if item == "all" else item) for item in types)
         imgui.set_next_item_width(-1.0)
         changed, slot = self._combo("##asset-type", slot, type_labels)
         if changed:
@@ -265,7 +265,7 @@ class AssetsPanel(Panel):
                             self._selected = key
                         imgui.table_next_column()
                         imgui.align_text_to_frame_padding()
-                        imgui.text_disabled(item.type)
+                        imgui.text_disabled(ctx.tr(item.type))
                         imgui.table_next_column()
                         imgui.align_text_to_frame_padding()
                         imgui.text_disabled(str(len(item.references)))
@@ -398,7 +398,7 @@ class AssetsPanel(Panel):
             self._hfield_size = _parse_vector(fields.get("size", ""), 4, (1.0, 1.0, 1.0, 0.1))
             self._hfield_source_size = self._hfield_size.copy()
         imgui.separator()
-        imgui.text(f"{item.type}: {item.name}")
+        imgui.text(f"{ctx.tr(item.type)}: {item.name}")
         opened = (
             self.presentation.begin_table("asset_details")
             if self.presentation

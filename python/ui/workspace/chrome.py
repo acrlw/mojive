@@ -70,7 +70,11 @@ def chrome(workspace):
     with u.component_scope("title_actions"):
         action_sizes = tuple(
             control_size(u, key, 26, 28, icon=icon)
-            for key, icon in (("toggle-inspector", "inspect"), ("preferences", "settings"))
+            for key, icon in (
+                ("toggle-left", "sidebar-left"),
+                ("toggle-inspector", "inspect"),
+                ("preferences", "settings"),
+            )
         )
     with u.component_scope("titlebar"):
         menu_sizes = tuple(
@@ -142,12 +146,10 @@ def chrome(workspace):
                 )
             actions = u.component_style("title_actions")
             action_gap = actions.get("columnGap", actions.get("gap", 2)) * scale
-            action_width = sum(v[0] for v in action_sizes) + action_gap
+            action_width = sum(v[0] for v in action_sizes) + action_gap * (len(action_sizes) - 1)
             action_y = style.align_rect(
                 content, action_width, max(v[1] for v in action_sizes), horizontal="end"
             ).y
-            first_size = control_frame_size(u, "toggle-inspector", *action_sizes[0], icon="inspect")
-            second_size = control_frame_size(u, "preferences", *action_sizes[1], icon="settings")
             with u.component_scope("titlebar"):
                 workspace.menus.bar(
                     region=content,
@@ -218,33 +220,52 @@ def chrome(workspace):
                     ),
                 )
             with u.component_scope("title_actions"):
-                if u.button(
-                    "toggle-inspector",
-                    content.right - action_width,
-                    action_y,
-                    *first_size,
-                    icon="inspect",
-                    active=workspace.open["Inspector"],
-                    tooltip="Toggle Inspector",
-                    width_limit=first_size[0] * scale,
+                left_open = any(workspace.open[name] for name in LEFT_PANELS)
+                actions = (
+                    (
+                        "toggle-left",
+                        "sidebar-left",
+                        "Hide left panel" if left_open else "Show left panel",
+                        left_open,
+                        "toggle-side:left",
+                    ),
+                    (
+                        "toggle-inspector",
+                        "inspect",
+                        "Hide right panel" if workspace.open["Inspector"] else "Show right panel",
+                        workspace.open["Inspector"],
+                        "toggle:Inspector",
+                    ),
+                    (
+                        "preferences",
+                        "settings",
+                        ShortcutHint("Settings", "F9"),
+                        workspace.open["Settings"],
+                        "panel:Settings",
+                    ),
+                )
+                action_x = content.right - action_width
+                for (key, icon, tip, active, action), size in zip(
+                    actions, action_sizes, strict=True
                 ):
-                    workspace.open["Inspector"] = not workspace.open["Inspector"]
-                if u.button(
-                    "preferences",
-                    content.right - action_sizes[1][0],
-                    action_y,
-                    *second_size,
-                    icon="settings",
-                    tooltip=ShortcutHint("Settings", "F9"),
-                    active=workspace.open["Settings"],
-                    width_limit=second_size[0] * scale,
-                ):
-                    workspace.activate("Settings")
+                    frame = control_frame_size(u, key, *size, icon=icon)
+                    if u.button(
+                        key,
+                        action_x,
+                        action_y,
+                        *frame,
+                        icon=icon,
+                        active=active,
+                        tooltip=tip,
+                        width_limit=frame[0] * scale,
+                    ):
+                        workspace.menus.dispatch(action)
+                    action_x += size[0] + action_gap
                 record_group(
                     u,
                     "title_actions",
                     "title-actions",
-                    (u.hits[key] for key in ("toggle-inspector", "preferences")),
+                    (u.hits[key] for key in ("toggle-left", "toggle-inspector", "preferences")),
                 )
             gap = style.get("columnGap", style.get("gap", 10)) * scale
             after_logo = content.x + 26 * scale
@@ -255,7 +276,7 @@ def chrome(workspace):
                 fields=[
                     workspace.rects["application-logo"],
                     *workspace.menus.menu_rects.values(),
-                    *(u.hits[key] for key in ("toggle-inspector", "preferences")),
+                    *(u.hits[key] for key in ("toggle-left", "toggle-inspector", "preferences")),
                 ],
                 fieldRegions={
                     name: [

@@ -170,7 +170,7 @@
       "description": "原生共用表单中标签与输入框之间的间距。"
     },
     "icon_size": {
-      "default": 18,
+      "default": 20,
       "group": "图标",
       "label": "工具栏图标尺寸",
       "type": "number",
@@ -250,7 +250,7 @@
       "description": "原生设置页导航子容器的圆角半径。"
     },
     "icon_activity_canvas": {
-      "default": 24,
+      "default": 28,
       "group": "图标",
       "label": "活动栏图标画布",
       "type": "number",
@@ -290,7 +290,7 @@
       "description": "此角色图标默认占位尺寸；原生单个控件明确指定的占位几何保持其既有设置。"
     },
     "icon_toolbar_canvas": {
-      "default": 18,
+      "default": 20,
       "group": "图标",
       "label": "工具栏图标画布",
       "type": "number",
