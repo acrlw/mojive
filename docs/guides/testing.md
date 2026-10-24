@@ -32,6 +32,17 @@ matrix; other agent guidance links here.
 
 ## Change mapping
 
+`make ui-control-review BACKEND=opengl` (or `bgfx`) uses hidden production windows at normal
+and fractional UI scales. It exercises shared search inputs, typing/clearing and keyboard focus,
+localized tooltips, panel visibility, read-only identity rows and the About modal. Inspect the
+PNG captures under `output/control-consistency-2026-10-24/`; no desktop input is generated.
+
+`make ui-menu-review BACKEND=opengl` (or `bgfx`) captures production geometry-mode selectors
+and menus in English and Chinese at normal and fractional scale. It exercises mode selection
+and the playback-speed submenu, and checks debug-helper coverage across selected silhouettes
+without losing depth occlusion. Inspect `output/editor-tail-and-menu-2026-10-24/menus/` and
+`output/editor-tail-and-menu-2026-10-24/outline/`. All windows remain hidden.
+
 `make ui-floating BACKEND=opengl` (or `bgfx`) exercises joint choice, double-click focus,
 closing and reopening the chooser, and precise edits after dismissal. Inspect the captures
 under `output/ui-floating/`, including `joint-focused.png` with the unobstructed gizmo.
@@ -186,6 +197,9 @@ quality labels, and Transform height after reflow. Images and measured bounds ar
 `output/ui-layout-audit/`; inspect the images as well as the assertions. The native input
 regressions in `tests/gpu/test_ui_layout_input.py` exercise dock splitters, popup dismissal,
 checkbox label/keyboard activation, and the timeline's distinct wheel and right-drag gestures.
+Drive shared controls through queued native events at their registered targets. Mocking a painter
+that no longer owns the control does not exercise its action. Instrumentation wrappers must forward
+the current call arguments so the test retains the production painting and input paths.
 
 Golden comparison and baseline updates are separate actions. Scope them to the affected cases:
 
@@ -573,6 +587,14 @@ close other viewer instances before collecting performance evidence.
 Add `--visible --vsync` for the presented window's display-paced cadence; keep these settings
 equal in the paired runs and separate those numbers from uncapped application throughput.
 Profiling uses isolated preferences and disables layout persistence in both modes.
+Use `--empty-objects 3` to start a new scene with three authored boxes, or
+`--empty-objects 0 --cases idle orbit` for an empty workspace. The additional `selection`,
+`transform`, `create-delete`, `drag`, and `idle-after-edits` cases exercise local authoring
+and recovery. `drag` holds and releases a real move handle using queued native input events;
+it does not move the OS cursor or show a window. `--tool move` includes the gizmo before
+and after editing. A `create-delete` sample includes two syncs; other samples include one.
+Reports retain the individual wall/CPU samples and frames per sample so operation latency
+is not confused with frame time.
 Add `--settings Interaction --cases idle` to measure the Interaction settings page,
 including its shortcut and mouse-gesture editors. Compare with `--settings General`
 under the same window size and UI scale; the window capture records the visible page.
@@ -590,6 +612,68 @@ Ratios describe this run, not a portable FPS threshold. Add `--visible --vsync` 
 presented window cadence.
 Run each comparison in a fresh process at the same `MOJIVE_UI_SCALE`; never time it beside
 another viewer or test suite.
+
+`make editor-soak ARGS="--cycles 300 --checkpoint-every 50"` keeps one hidden production
+workspace alive through repeated unique-identity object creation/deletion, held native gizmo
+drags and activity/Inspector tab clicks. It starts with three authored objects; `--asset joint_gizmo`
+retains a model alongside them. `--undo-every 10` restores and re-deletes the last removed object
+every ten cycles, checking the identity after both operations. Input is queued inside ImGui without
+moving the OS cursor.
+The reference follows twelve warmup cycles when `--warmup-cycles 12` is specified. Undo history
+is preserved throughout the workload, including checkpoints. Each checkpoint restores the same
+scene poses, selection, camera, hierarchy and Inspector geometry, then measures three contiguous
+idle windows and a held drag. Setup/release, churn and panel-switch frames have separate samples.
+Reports retain individual wall/CPU frame times, slow-frame counts, RSS, Restore snapshots,
+Undo/Redo memory, bounded UI/icon caches, fonts, native windows and renderer resource counts.
+Endpoint resource samples follow their captures, so the initial sample already includes the
+reusable window readback buffer; its byte size is reported separately. Match capture ownership
+before interpreting RSS growth. RSS also includes allocator residency and graphics resources,
+so distinguish retained live allocations from reserved memory in a separate diagnostic run.
+Creation and deletion additionally retain command-plus-next-frame wall/CPU latency so synchronous
+snapshot and history-accounting costs cannot disappear outside the frame timer. `--profile`
+records initial/final idle attribution after timing, in separate files.
+Only equivalent state and draw counts produce idle slowdown ratios. Compare checkpoints after
+Undo reaches its limit and caches have warmed; distinguish retained peak allocation and report
+sample storage from continued per-entity growth. Capture and resource inspection occur outside
+the frame timer. An independent fixed Python workload is sampled outside frame timing as context
+for host CPU variability; it does not normalize or replace application timings. This is uncapped
+application throughput, not presented display cadence.
+
+`make editor-tail-profile ARGS="--asset joint_gizmo --cycles 120 --checkpoint-every 40"`
+reuses the sustained hidden workload and saves chronological events in `tail-events.json`.
+Inspect p95, p99, maximum and slow-event counts by phase and command, with separate wall/CPU
+times, rather than judging intermittent stalls from average FPS. Command, next-frame and
+combined edit intervals are retained separately; the combined interval includes tracing metadata
+between its children, reported as `observer_gap_ms` without subtraction. Frame gizmo states
+identify press, held and release transitions. Run `--stages` separately for inclusive attribution;
+nested stage times overlap and must not be added or compared directly with baseline throughput.
+Stage labels distinguish each panel, OpenGL pass preparation/execution, ImGui finalization and
+submission, and the platform swap call. `--profile` also saves initial/final idle cProfile files;
+those diagnostic frames are identified by their own phase and are not throughput samples.
+Normal GC callbacks correlate collection generation and duration with events; callback and event
+allocation overhead can change GC cadence. Baseline records must contain only untracked scalar
+values from creation: replacing a temporary mutable value does not untrack its dictionary until
+a full collection. Even untracked dictionaries contribute to GC allocation thresholds while
+retained, so pack completed records into non-GC-capable bytes outside child intervals and decode
+them only after the workload. Report their count, packed size and tracked subset. Verify that
+retaining a large batch does not itself trigger collections; checking tracked status alone is
+insufficient. Stage records remain separate diagnostic evidence. Keep GC settings and timed
+workloads matched, preserve outliers,
+and run each measurement without concurrent viewers or test suites.
+For submission stalls, distinguish requested VSync from the context's actual swap interval.
+Use a separate native-stack sample to identify driver or window-server waits; off-CPU time alone
+does not establish either cause. Hidden-window rendering still enters the platform presentation
+path, so its swap latency does not establish visible display cadence. Do not omit swaps from a
+comparison run to present a rendering-only measurement as an end-to-end improvement.
+
+A full collection that reclaims zero objects can still recur: allocation and promotion counters
+trigger scans independently of the previous collection's yield. In CPython 3.11, the pending
+long-lived counter accumulates promotions until a full scan, including objects subsequently
+released by reference counting. Diagnose promotion types and cache eviction separately from
+normal timing; do not retain sampled object graphs in the measured run. Keep interpreter-specific
+counter probes read-only and outside product code. See the matching
+[CPython collector implementation](https://github.com/python/cpython/blob/v3.11.15/Modules/gcmodule.c#L1142-L1156)
+and its [full-collection heuristic](https://github.com/python/cpython/blob/v3.11.15/Modules/gcmodule.c#L1310-L1357).
 
 `make timeline-benchmark ARGS="--editable --markers 20000"` uses real MuJoCo presets
 and measures held drag, area selection, and release separately from static browsing. Edit completion

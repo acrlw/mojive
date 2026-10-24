@@ -96,6 +96,8 @@ help:
 		'  make model-composition  add and remove MJCF/URDF models at runtime' \
 		'  make mjcf-roundtrip     export edited workspaces as re-loadable MJCF' \
 		'  make editor-performance composition editing performance baseline' \
+		'  make editor-soak        sustained hidden editing and recovery measurements' \
+		'  make editor-tail-profile attribute slow editing frames and GC pauses' \
 		'  make stability          long-frame, large-model, and multi-camera gates' \
 		'  make rpc-soak           persistent RPC, concurrency, timeout, and recovery' \
 		'  make rpc-benchmark      real socket load, frame budgets, and input latency' \
@@ -524,6 +526,14 @@ editor-profile:
 .PHONY: inspector-profile
 inspector-profile:
 	$(PY) -m mojive.tools.inspector_profile --renderer $(BACKEND) $(ARGS)
+
+.PHONY: editor-soak
+editor-soak:
+	$(PY) -m mojive.tools.editor_soak --renderer $(BACKEND) $(ARGS)
+
+.PHONY: editor-tail-profile
+editor-tail-profile:
+	$(PY) -m mojive.tools.editor_tail_profile --renderer $(BACKEND) $(ARGS)
 
 .PHONY: hierarchy-benchmark
 hierarchy-benchmark:
@@ -1266,6 +1276,16 @@ ui-native-workspace:
 ui-native-capture:
 	$(PY) -m mojive.tools.native_workspace --capture --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
 
+.PHONY: ui-control-review
+## Verify filters, focus, side panels and About through hidden production windows.
+ui-control-review:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_control_consistency.py $(ARGS)
+
+.PHONY: ui-menu-review
+## Verify mode captions, semantic menu groups and helper/outline overlap in hidden windows.
+ui-menu-review:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_menu_density.py tests/gpu/test_outline.py $(ARGS)
+
 ## Capture complete production notice surfaces and inline/stacked file actions.
 ui-notice-review:
 	$(PY) -m mojive.tools.native_notice_review --backend $(BACKEND) --output output/ui_design/notices/$(BACKEND) $(ARGS)
@@ -1284,7 +1304,7 @@ ui-design-native-check:
 
 ## Verify native scene interactions, flat gizmos and settings; capture representative states.
 ui-design-gizmos:
-	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_design_gizmos.py
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_ui_design_gizmos.py tests/gpu/test_value_rails.py
 
 ## Verify scaled panels, scene selection, numeric edits, timeline and file actions.
 ui-design-runtime:
