@@ -2257,8 +2257,8 @@ class BgfxRenderer final : public Renderer {
                 renderEnvironment(current, t, camera);
                 renderSurfaces(current, t, camera);
                 drawTransparent();
-                renderDebug(current, t, camera, view, projection);
                 renderOutline(current, t, view, projection);
+                renderDebug(current, t, camera, view, projection);
                 renderGizmos(current, t, view, projection);
             }
             t.reflectionKey = reflectionKey;

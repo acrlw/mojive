@@ -161,6 +161,35 @@ def test_outline_ring_surrounds_the_selected_object(rig):
     assert not row[left - 13 : left - 8].any()
 
 
+@pytest.mark.parametrize("occlusion", ("always", "depth"))
+def test_editor_helper_covers_selection_outline_at_crossing(rig, backend_name, occlusion):
+    from pathlib import Path
+
+    from PIL import Image
+
+    from mojive.render.debugdraw import Occlusion
+
+    base = rig.draw(_box(), selected=SEL)
+    crossing = rig.outline_mask(base)
+    crossing[: H // 2 - 1] = False
+    crossing[H // 2 + 1 :] = False
+    assert crossing.sum() >= 4
+    layer = rig.backend.debug.layer("editor-helper", Occlusion(occlusion))
+    # This uses the same debug stroke path as joint manipulation helpers.
+    layer.line("handle", (-0.8, 0, 0.3), (0.8, 0, 0.3), (1, 1, 1, 1), 6)
+    image = rig.draw(_box(), selected=SEL)
+    assert np.all(image[crossing, :3] >= 245)
+    # Depth-tested diagnostics behind the object must remain occluded.
+    if occlusion == "depth":
+        layer.line("handle", (-0.8, 0, -0.3), (0.8, 0, -0.3), (1, 1, 1, 1), 6)
+        hidden = rig.draw(_box(), selected=SEL)
+        assert np.any(hidden[H // 2, W // 2, :3] < 245)
+    output = Path("output/editor-tail-and-menu-2026-10-24/outline")
+    output.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(base).save(output / f"{backend_name}-{occlusion}-scene.png")
+    Image.fromarray(image).save(output / f"{backend_name}-{occlusion}-helper.png")
+
+
 def test_outline_is_solid_through_an_occluder(rig):
     if not rig.backend.caps.outline:
         pytest.skip("outline unsupported by this backend")
@@ -195,7 +224,7 @@ def test_no_outline_without_selection(rig):
 
 
 @pytest.mark.parametrize("occlusion", ("depth", "always"))
-def test_selection_outline_covers_debug_arrows_but_stays_below_gizmo(rig, occlusion):
+def test_selection_outline_stays_below_debug_arrows_and_gizmo(rig, occlusion):
     from pathlib import Path
 
     from PIL import Image
@@ -204,6 +233,7 @@ def test_selection_outline_covers_debug_arrows_but_stays_below_gizmo(rig, occlus
     from mojive.render.debugdraw import Occlusion
 
     boxes = _box()
+    plain = rig.draw(boxes)
     baseline = rig.draw(boxes, selected=SEL)
     outline = rig.outline_mask(baseline)
     layer = rig.backend.debug.layer("crossing-arrows", Occlusion(occlusion))
@@ -219,10 +249,16 @@ def test_selection_outline_covers_debug_arrows_but_stays_below_gizmo(rig, occlus
         shaft_radius=0.045,
     )
     without_outline = rig.draw(boxes)
-    colored = (without_outline[..., 0] > 128) | (without_outline[..., 1] > 128)
+    red, green, blue = np.moveaxis(without_outline[..., :3], -1, 0)
+    # MSAA edge samples still blend with the underlying selection ring. Only
+    # fully covered samples should equal the unselected helper pixel exactly.
+    colored = ((red > 128) & (green == 0) | (green > 128) & (red == 0)) & (blue == 0)
     assert np.count_nonzero(outline & colored) > 20
     result = rig.draw(boxes, selected=SEL)
-    np.testing.assert_array_equal(result[outline], baseline[outline])
+    crossing = outline & colored
+    np.testing.assert_allclose(result[crossing], without_outline[crossing], atol=1)
+    untouched = outline & np.all(without_outline == plain, axis=-1)
+    np.testing.assert_array_equal(result[untouched], baseline[untouched])
 
     # Put the transform handle directly on the right selection edge.
     rig.backend.set_gizmo(GizmoFrame(position=np.array((0.35, 0, 0.4), np.float32)))

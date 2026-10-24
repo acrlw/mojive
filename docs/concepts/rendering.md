@@ -60,7 +60,7 @@ scene preparation and revision tracking
          ↓
 requested shadow / reflection / opaque / identity / export passes
          ↓
-skybox / tendons / transparency / debug / outline / gizmo
+skybox / tendons / transparency / outline / debug / gizmo
          ↓
 presentation or image readback
 ```
@@ -74,6 +74,16 @@ in per-instance data; different logical materials need not create separate draws
 instances retain camera-dependent ordering. Pose, visual and identity revisions allow independent
 buffer updates, and unchanged shadow/reflection products are reused. Custom sources with revision
 zero use conservative change detection. Do not bypass invalidation to improve a benchmark.
+
+OpenGL selection outlines bound their screen-space filtering to the selected mesh projections,
+including the full antialias kernel and a rasterization margin. Static mesh bounds are computed
+lazily from uploaded positions. Meshes receiving dynamic vertex updates retain the full-viewport
+path until replacement, avoiding a per-frame bounds scan for selected deformables; rigid instance
+transforms still use bounded filtering. Bounds crossing the near plane, or unavailable/nonfinite
+bounds, also retain the full-viewport path. Clears and cached-alpha invalidation
+remain complete; clipping reduces raster work without changing the outline shader or coverage.
+`tests/gpu/test_outline_scissor.py` compares bounded output with the full-viewport reference at
+screen edges, through selection and resize changes, with deformation, MSAA and x-ray selection.
 
 Adapters use `FrameNeeds` to avoid extracting invisible contacts, sensors, tendons or other
 optional diagnostics. Normal UI rendering samples the scene texture on the GPU; full-frame

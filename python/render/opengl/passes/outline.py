@@ -14,6 +14,8 @@ from .base import BasePass, PassContext, state_overlay
 from .idbuffer import IdGeometry
 
 OUTLINE_RADIUS = 3
+_SCISSOR_PADDING = OUTLINE_RADIUS + 2  # Shader AA radius plus one rasterization pixel.
+_BOX_CORNERS = np.array([(x, y, z) for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype=bool)
 
 
 OUTLINE_COLOR = (1.0, 0.63, 0.20, 1.0)
@@ -75,6 +77,7 @@ class OutlinePass(BasePass):
         self._cache_key: tuple | None = None
         self._pending_key: tuple | None = None
         self._build_alpha = False
+        self._scissor: tuple[int, int, int, int] | None = None
         self.cache_status = "off"
         self.color: tuple[float, float, float, float] = OUTLINE_COLOR
         self.xray = False
@@ -116,6 +119,8 @@ class OutlinePass(BasePass):
             return False
         self._geom.upload(ctx)
         self._ensure_mask(ctx)
+        if not stable:
+            self._scissor = self._selected_scissor(ctx, sel)
         # A changing selection uses the original single-pass kernel. Only a
         # repeated managed input pays for the extra cached-alpha product.
         self._build_alpha = stable
@@ -166,7 +171,7 @@ class OutlinePass(BasePass):
                 assert vao is not None and uniforms is not None
                 self._bind_mask(uniforms)
             uniforms.set("u_color", self.color)
-            vao.render(moderngl.TRIANGLES, vertices=3)
+            self._draw_fullscreen(gl, vao)
         finally:
             if shared_id:
                 ctx.target.fbo.color_mask = (
@@ -214,7 +219,63 @@ class OutlinePass(BasePass):
         self._alpha_fbo.use()
         ctx.ctx.enable_only(moderngl.NOTHING)
         self._bind_mask(self._alpha_uniforms)
-        self._alpha_vao.render(moderngl.TRIANGLES, vertices=3)
+        self._draw_fullscreen(ctx.ctx, self._alpha_vao, clear=self._alpha_fbo)
+
+    def _draw_fullscreen(self, gl, vao, *, clear=None) -> None:
+        previous = gl.scissor
+        scissor = self._scissor
+        if previous is not None:
+            if scissor is None:
+                scissor = previous
+            else:
+                x, y = max(previous[0], scissor[0]), max(previous[1], scissor[1])
+                right = min(previous[0] + previous[2], scissor[0] + scissor[2])
+                top = min(previous[1] + previous[3], scissor[1] + scissor[3])
+                scissor = x, y, max(0, right - x), max(0, top - y)
+        try:
+            if clear is not None:
+                # A moved selection must not retain alpha outside its new bounds.
+                gl.scissor = None
+                clear.clear(0.0, 0.0, 0.0, 0.0)
+            gl.scissor = scissor
+            vao.render(moderngl.TRIANGLES, vertices=3)
+        finally:
+            gl.scissor = previous
+
+    def _selected_scissor(self, ctx: PassContext, selected: int) -> tuple | None:
+        """Conservatively bound the exact mesh/instance inputs consumed by id.vert."""
+        width, height = ctx.target.width, ctx.target.height
+        lower, upper = np.full(2, np.inf), np.full(2, -np.inf)
+        corners = np.ones((8, 4), dtype=np.float64)
+        for bucket in self._buckets:
+            mesh = ctx.meshes[bucket] if bucket < len(ctx.meshes) else None
+            # Deformables must not acquire a per-frame vertex reduction for outlining.
+            if getattr(mesh, "has_vertex_updates", False):
+                return None
+            bounds = getattr(mesh, "local_bounds", None)
+            if bounds is None:
+                return None
+            corners[:, :3] = np.where(_BOX_CORNERS, bounds[1], bounds[0])
+            start, stop = ctx.scene.bucket_ranges[bucket]
+            for index in np.flatnonzero(ctx.scene.object_id[start:stop] == selected) + start:
+                world = corners @ ctx.scene.transforms[index].T
+                clip = world @ ctx.view_proj.T
+                # Projecting a box across the eye/near plane can miss clipped edges.
+                # Unknown or nonfinite geometry retains the full-frame reference path.
+                if (
+                    not np.isfinite(clip).all()
+                    or np.any(clip[:, 3] <= 1e-6)
+                    or np.any(clip[:, 2] <= -clip[:, 3])
+                ):
+                    return None
+                pixels = (clip[:, :2] / clip[:, 3, None] + 1) * (width / 2, height / 2)
+                lower = np.minimum(lower, pixels.min(axis=0))
+                upper = np.maximum(upper, pixels.max(axis=0))
+        if not np.isfinite(lower).all() or not np.isfinite(upper).all():
+            return None
+        x0, y0 = np.clip(np.floor(lower) - _SCISSOR_PADDING, 0, (width, height)).astype(int)
+        x1, y1 = np.clip(np.ceil(upper) + _SCISSOR_PADDING, 0, (width, height)).astype(int)
+        return int(x0), int(y0), int(x1 - x0), int(y1 - y0)
 
     def _bind_mask(self, uniforms: UniformCache) -> None:
         assert self._mask_tex is not None
@@ -287,6 +348,7 @@ class OutlinePass(BasePass):
         self._last_scene = None
         self._last_key = None
         self._cache_key = None
+        self._scissor = None
         if self._mask_ms_fbo is not None and self._mask_ms_fbo is not self._mask_fbo:
             self._mask_ms_fbo.release()
         if self._mask_ms_tex is not None and self._mask_ms_tex is not self._mask_tex:

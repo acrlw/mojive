@@ -11,9 +11,9 @@ Occlusion modes:
 - `ALWAYS`: overlay visible above scene geometry;
 - `GHOST`: depth-aware diagnostic overlay.
 
-Debug drawing is composited before the selection outline. The outline remains visible
-over diagnostics; transform gizmos and viewport UI appear above both. `ALWAYS` bypasses
-scene occlusion, not the visual priority of editor selection and interaction feedback.
+Debug drawing is composited after the selection outline, so joint manipulation helpers
+remain continuous where they cross a selected silhouette. Transform gizmos and viewport UI
+appear above both. `DEPTH` still respects scene occlusion; `ALWAYS` bypasses scene depth.
 
 ## Offscreen rendering
 

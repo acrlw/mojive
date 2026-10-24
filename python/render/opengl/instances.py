@@ -91,7 +91,15 @@ class Strategy(enum.StrEnum):
 
 
 class GpuMesh:
-    __slots__ = ("_vertices", "ibo", "index_count", "triangle_count", "vbo")
+    __slots__ = (
+        "_local_bounds",
+        "_vertices",
+        "has_vertex_updates",
+        "ibo",
+        "index_count",
+        "triangle_count",
+        "vbo",
+    )
 
     def __init__(self, ctx: moderngl.Context, positions, normals, uvs, indices) -> None:
         n = len(positions)
@@ -103,6 +111,18 @@ class GpuMesh:
         self.ibo = ctx.buffer(np.ascontiguousarray(indices, np.uint32).tobytes())
         self.index_count = len(indices)
         self.triangle_count = self.index_count // 3
+        self._local_bounds: np.ndarray | None = None
+        self.has_vertex_updates = False
+
+    @property
+    def local_bounds(self) -> np.ndarray | None:
+        # Only selected meshes need outline bounds; unrelated deformables pay no scan.
+        if self._local_bounds is None and len(self._vertices):
+            positions = self._vertices[:, :3]
+            self._local_bounds = np.array(
+                (positions.min(axis=0), positions.max(axis=0)), dtype=np.float32
+            )
+        return self._local_bounds
 
     def update(self, positions: np.ndarray, normals: np.ndarray) -> None:
         shape = self._vertices[:, :3].shape
@@ -114,6 +134,8 @@ class GpuMesh:
         np.copyto(self._vertices[:, :3], positions, casting="unsafe")
         np.copyto(self._vertices[:, 3:6], normals, casting="unsafe")
         self.vbo.write(self._vertices)
+        self._local_bounds = None
+        self.has_vertex_updates = True
 
     def release(self) -> None:
         self.vbo.release()
