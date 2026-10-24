@@ -199,7 +199,11 @@ class _Editing:
         if state is None:
             raise RuntimeError(f"{self._adapter.caps.name} did not provide an edit state")
         return _DocumentState(
-            state, self._selected, deepcopy(self._scene_overrides), self._selected_node_id
+            state,
+            self._selected,
+            deepcopy(self._scene_overrides),
+            self._selected_node_id,
+            self._document_node_identities(),
         )
 
     def _restore_document_state(self, state: _DocumentState) -> bool:

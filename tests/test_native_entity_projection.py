@@ -11,6 +11,7 @@ from mojive.adapters.base import FrameNeeds
 from mojive.adapters.static import StaticSceneAdapter
 from mojive.scene.queries import node_world_pose
 from mojive.session import Session
+from mojive.types import MeshShape
 from mojive.ui.theme import THEME
 from mojive.ui.workspace.entities import EntityProjection
 
@@ -119,6 +120,118 @@ def test_deleted_entity_projection_is_evicted_and_undo_preserves_restore_baselin
             sum(entry["identity"] == original["identity"] for entry in projection.initial_entities)
             == 1
         )
+        assert session.submit(cmd.Redo()).ok
+        projection.refresh_document()
+        assert projection.initial_entity(original["identity"]) is original
+        assert session.submit(cmd.Undo()).ok
+        projection.refresh_document()
+        assert _original(projection, session.node_by_object_id(obj.object_id)) is original
+    finally:
+        session.release()
+
+
+def test_restore_baselines_are_bounded_by_live_entities_and_reachable_history():
+    session = Session(StaticSceneAdapter(Scene()), history_record_limit=4)
+    try:
+        projection = EntityProjection(_app(session))
+        initial_count = len(projection.initial_entities)
+        identities = []
+        for index in range(12):
+            result = session.submit(cmd.AddSceneObject(MeshShape.BOX, name=f"temporary-{index}"))
+            assert result.ok
+            projection.refresh_document()
+            node = session.node_by_object_id(result.entity_id)
+            identities.append(projection._identity(node))
+            assert session.submit(cmd.RemoveSceneEntity(result.entity_id)).ok
+            projection.refresh_document()
+            assert len(projection.initial_entities) <= initial_count + session._history.record_limit
+            assert set(projection._initial_by_identity) <= session.retained_node_identities
+        assert projection.initial_entity(identities[0]) is None
+        assert projection.initial_entity(identities[-1]) is not None
+    finally:
+        session.release()
+
+
+def test_nonstructural_history_eviction_releases_retired_restore_baselines():
+    scene = Scene()
+    anchor = scene.box(name="anchor")
+    temporary = scene.box(name="temporary")
+    session = Session(StaticSceneAdapter(scene), history_record_limit=3)
+    try:
+        projection = EntityProjection(_app(session))
+        identity = projection._identity(session.node_by_object_id(temporary.object_id))
+        assert session.submit(cmd.RemoveSceneEntity(temporary.object_id)).ok
+        projection.refresh_document()
+        assert projection.initial_entity(identity) is not None
+        generation = session.structure_generation
+        for index in range(5):
+            node = session.node_by_object_id(anchor.object_id)
+            assert session.submit(
+                cmd.SetPose(node.node_id, np.array((index + 1, 0, 0)), np.eye(3))
+            ).ok
+            projection.refresh_document()
+        assert session.structure_generation == generation
+        assert identity not in session.retained_node_identities
+        assert projection.initial_entity(identity) is None
+        assert len(projection.initial_entities) == len(session.nodes)
+    finally:
+        session.release()
+
+
+def test_discarded_redo_branch_releases_its_restore_baselines():
+    scene = Scene()
+    anchor = scene.box(name="anchor")
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        projection = EntityProjection(_app(session))
+        result = session.submit(cmd.AddSceneObject(MeshShape.BOX, name="temporary"))
+        assert result.ok
+        projection.refresh_document()
+        original = _original(projection, session.node_by_object_id(result.entity_id))
+        assert session.submit(cmd.Undo()).ok
+        projection.refresh_document()
+        assert projection.initial_entity(original["identity"]) is original
+        node = session.node_by_object_id(anchor.object_id)
+        assert session.submit(cmd.SetPose(node.node_id, np.array((2, 0, 0)), np.eye(3))).ok
+        projection.refresh_document()
+        assert not session.can_redo
+        assert projection.initial_entity(original["identity"]) is None
+    finally:
+        session.release()
+
+
+def test_active_deletion_preserves_restore_baseline_through_cancel():
+    scene = Scene()
+    obj = scene.box(name="original", position=(1, 2, 3))
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        projection = EntityProjection(_app(session))
+        original = _original(projection, session.node_by_object_id(obj.object_id))
+        assert session.submit(cmd.BeginEditTransaction("Remove original")).ok
+        assert session.submit(cmd.RemoveSceneEntity(obj.object_id)).ok
+        projection.refresh_document()
+        assert projection.initial_entity(original["identity"]) is original
+        assert not session.can_undo
+        assert session.submit(cmd.CancelEditTransaction()).ok
+        projection.refresh_document()
+        assert _original(projection, session.node_by_object_id(obj.object_id)) is original
+    finally:
+        session.release()
+
+
+def test_restore_reachability_reuses_identity_sets_without_structure_changes():
+    scene = Scene()
+    obj = scene.box(name="original")
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        reachable = session.retained_node_identities
+        assert session.retained_node_identities is reachable
+        node = session.node_by_object_id(obj.object_id)
+        assert session.submit(cmd.SetPose(node.node_id, np.array((2, 0, 0)), np.eye(3))).ok
+        record = session._undo_stack[-1]
+        assert record.before.node_identities is record.after.node_identities
+        assert session.retained_node_identities == reachable
+        assert session.retained_node_identities is session.retained_node_identities
     finally:
         session.release()
 
@@ -147,6 +260,42 @@ def test_new_document_resets_transform_snapshots_even_when_ids_are_reused():
     finally:
         first_session.release()
         second_session.release()
+
+
+@pytest.mark.physics
+def test_source_preview_retains_committed_baselines_and_discards_abandoned_creations(tmp_path):
+    from mojive.adapters.mujoco import MuJoCoAdapter
+    from mojive.adapters.workspace import WorkspaceAdapter
+    from mojive.session.model_edits import ModelEditDraft
+
+    path = tmp_path / "preview.xml"
+    path.write_text('<mujoco><worldbody><geom name="original" size=".1"/></worldbody></mujoco>')
+    session = Session(WorkspaceAdapter(MuJoCoAdapter(path), Scene()))
+    draft = ModelEditDraft(session)
+    assert session.submit(cmd.Pause()).ok
+    try:
+        projection = EntityProjection(_app(session))
+        node = next(node for node in session.nodes if node.name == "original")
+        original = _original(projection, node)
+        assert draft.stage(cmd.RemoveModelElement(node.node_id)).ok
+        projection.refresh_document()
+        assert all(node.name != "original" for node in session.nodes)
+        assert projection.initial_entity(original["identity"]) is original
+        draft.clear()
+        projection.refresh_document()
+        assert projection.initial_entity(original["identity"]) is original
+        world = next(node for node in session.nodes if node.name == "world")
+        assert draft.stage(cmd.AddModelElement(world.node_id, "geom:sphere", "temporary")).ok
+        projection.refresh_document()
+        created = next(node for node in session.nodes if node.name == "temporary")
+        identity = projection._identity(created)
+        assert projection.initial_entity(identity) is not None
+        draft.clear()
+        projection.refresh_document()
+        assert identity not in session.retained_node_identities
+        assert projection.initial_entity(identity) is None
+    finally:
+        session.release()
 
 
 @pytest.mark.physics
@@ -224,6 +373,7 @@ def test_material_axis_click_restores_load_time_color_and_undo(scale, axis):
     app = ViewerApp(session, NullBackend())
     projection = EntityProjection(app)
     app.initial_entities, app.entities = projection.initial_entities, projection.entities
+    app.initial_entity = projection.initial_entity
     app.apply_document_edits, app.refresh_document = (
         projection.apply_document_edits,
         projection.refresh_document,

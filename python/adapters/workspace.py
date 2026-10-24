@@ -86,6 +86,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._path: Path | None = None
         self._resource_roots: tuple[Path, ...] = ()
         self._source: SceneSource | None = None
+        self._frame = SceneFrame()
         self._primary_revision = primary.structure_revision
         self._scene_revision = -1
         self._node_to_scene: dict[int, int] = {}
@@ -445,7 +446,10 @@ class WorkspaceAdapter(SceneAdapterBase):
         source = self.scene_source()
         primary = self.primary.frame(needs)
         authored = self.scene.frame
-        frame = replace(primary)
+        frame = self._frame
+        # Frames are borrowed until the next call. Refresh every primary field,
+        # including absent optional data, before composing into this owner's buffers.
+        frame.__dict__.update(primary.__dict__)
         if needs.poses:
             self._geom_xpos, frame.geom_xpos = _frame_rows(
                 self._geom_xpos, primary.geom_xpos, authored.geom_xpos
@@ -894,6 +898,7 @@ class WorkspaceAdapter(SceneAdapterBase):
         self._light_to_scene.clear()
         self._camera_to_scene.clear()
         self._geom_xpos = self._geom_xmat = self._body_xpos = self._body_xmat = None
+        self._frame = SceneFrame()
 
     def _invalidate(self) -> None:
         self._source = None

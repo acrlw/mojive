@@ -70,8 +70,26 @@ def _load_gl() -> ctypes.CDLL | None:
     return None
 
 
+_UInt4 = c_uint * 4
+_Int4 = c_int * 4
+_Float4 = c_float * 4
+_UInt1 = c_uint * 1
+_Float2 = c_float * 2
+
+
+class _ClearBuffers(threading.local):
+    def __init__(self) -> None:
+        self.uint = _UInt4()
+        self.int = _Int4()
+        self.float = _Float4()
+
+
 class GLNative:
     def __init__(self) -> None:
+        # ctypes caches array types weakly; constructing a type in a frame path
+        # leaves a cyclic type graph for GC. Keep types alive and reuse clear
+        # arguments per thread, since POSIX entry points are shared by viewers.
+        self._clear_buffers = _ClearBuffers()
         self._lib = _load_gl()
         self._current_context = lambda: None
         if self._lib is not None and sys.platform == "win32":
@@ -210,14 +228,16 @@ class GLNative:
     def clear_color_uint(self, draw_buffer: int, value: int = 0) -> bool:
         if not self.has_clear_buffer_uiv:
             return False
-        buf = (c_uint * 4)(value, 0, 0, 0)
+        buf = self._clear_buffers.uint
+        buf[0] = value
         self._glClearBufferuiv(GL_COLOR, draw_buffer, buf)  # type: ignore[attr-defined]
         return True
 
     def clear_color_int(self, draw_buffer: int, values: tuple[int, int, int, int]) -> bool:
         if not self.has_clear_buffer_iv:
             return False
-        buf = (c_int * 4)(*values)
+        buf = self._clear_buffers.int
+        buf[:] = values
         self._glClearBufferiv(GL_COLOR, draw_buffer, buf)  # type: ignore[attr-defined]
         return True
 
@@ -249,7 +269,8 @@ class GLNative:
     def clear_color_float(self, draw_buffer: int, rgba: tuple[float, float, float, float]) -> bool:
         if not self.has_clear_buffer_fv:
             return False
-        buf = (c_float * 4)(*rgba)
+        buf = self._clear_buffers.float
+        buf[:] = rgba
         self._glClearBufferfv(GL_COLOR, draw_buffer, buf)  # type: ignore[attr-defined]
         return True
 
@@ -305,12 +326,12 @@ class GLNative:
         return True
 
     def gen_query(self) -> int:
-        out = (c_uint * 1)()
+        out = _UInt1()
         self._glGenQueries(1, out)  # type: ignore[attr-defined]
         return int(out[0])
 
     def delete_query(self, qid: int) -> None:
-        buf = (c_uint * 1)(qid)
+        buf = _UInt1(qid)
         self._glDeleteQueries(1, buf)  # type: ignore[attr-defined]
 
     def begin_time_query(self, qid: int) -> None:
@@ -399,7 +420,7 @@ class GLNative:
         fn = getattr(self, "_glGetFloatv", None)
         if fn is None:
             return (1.0, 1.0)
-        out = (c_float * 2)()
+        out = _Float2()
         fn(0x846E, out)  # GL_ALIASED_LINE_WIDTH_RANGE
         return (float(out[0]), float(out[1]))
 

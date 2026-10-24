@@ -88,3 +88,43 @@ def test_patch_reads_utf8_sources_on_non_utf8_hosts(tmp_path, monkeypatch):
     build_imgui.replace_source(path, "old", "new")
     build_imgui.replace_source(path, "old", "new")
     assert path.read_bytes() == "// \u2014 upstream comment\nnew\n".encode("utf-8")
+
+
+@pytest.fixture
+def binding_sources(tmp_path):
+    root = tmp_path / "external/bindings_generation/cpp"
+    root.mkdir(parents=True)
+    registrations, sources = [], []
+    for name, variable, initializer, directory in build_imgui.UNUSED_BINDINGS:
+        registrations.append(
+            f'    _register_submodule("{name}");\n'
+            f'    auto module_{variable} =  m.def_submodule("{name}");\n'
+            f"    py_init_module_{initializer}(module_{variable});"
+        )
+        sources.append(f"    ${{external_dir}}/{directory}/bindings/pybind_{initializer}.cpp")
+    entry = root / "pybind_imgui_bundle.cpp"
+    entry.write_text("\n".join(registrations), encoding="utf-8")
+    cmake = root / "all_pybind_files.cmake"
+    cmake.write_text("\n".join(sources), encoding="utf-8")
+    return tmp_path, entry, cmake
+
+
+def test_binding_trim_is_repeatable_and_preserves_required_core(binding_sources):
+    root, entry, cmake = binding_sources
+    core = "\n    py_init_module_imgui(module_imgui);\n    py_init_module_portable_file_dialogs(module_pfd);"
+    entry.write_text(entry.read_text() + core)
+    build_imgui.trim_unused_bindings(root)
+    result = entry.read_text(), cmake.read_text()
+    build_imgui.trim_unused_bindings(root)
+    assert result == (entry.read_text(), cmake.read_text())
+    assert entry.read_text().endswith(core)
+    assert "m.def_submodule" not in result[0]
+    assert "${external_dir}" not in result[1]
+
+
+def test_binding_trim_rejects_upstream_registration_drift(binding_sources):
+    root, entry, cmake = binding_sources
+    entry.write_text(entry.read_text().replace("py_init_module_hello_imgui", "renamed_initializer"))
+    with pytest.raises(RuntimeError, match="unexpected upstream binding registration: hello_imgui"):
+        build_imgui.trim_unused_bindings(root)
+    assert "${external_dir}" in cmake.read_text()

@@ -99,7 +99,7 @@ class SceneLight:
         self.scene.remove_light(self.light_id)
 
 
-@dataclass
+@dataclass(slots=True)
 class _Item:
     object_id: int
     name: str
@@ -111,6 +111,25 @@ class _Item:
     rotation: np.ndarray
     initial_position: np.ndarray
     initial_rotation: np.ndarray
+
+    def __deepcopy__(self, memo: dict[int, object]) -> _Item:
+        # History copies these records on every edit. Copy fields directly to
+        # avoid generic reconstruction dictionaries; the shared memo preserves
+        # aliases while keeping all writable arrays private to the snapshot.
+        result = _Item(
+            self.object_id,
+            self.name,
+            copy.deepcopy(self.mesh, memo),
+            copy.deepcopy(self.size, memo),
+            copy.deepcopy(self.color, memo),
+            copy.deepcopy(self.material, memo),
+            copy.deepcopy(self.position, memo),
+            copy.deepcopy(self.rotation, memo),
+            copy.deepcopy(self.initial_position, memo),
+            copy.deepcopy(self.initial_rotation, memo),
+        )
+        memo[id(self)] = result
+        return result
 
     @property
     def rgba(self) -> np.ndarray:
@@ -154,8 +173,8 @@ class Scene:
         if camera is not None:
             self.add_camera("camera", camera)
         self._built_revision = -1
-        self._source = SceneSource()
-        self._frame = SceneFrame()
+        self._source: SceneSource | None = None
+        self._frame: SceneFrame | None = None
         self._oid_to_index: dict[int, int] = {}
         self._node_to_oid: dict[int, int] = {}
         self._geom_node_to_oid: dict[int, int] = {}
@@ -177,12 +196,27 @@ class Scene:
         Mutable transforms, materials, cameras, and lights are copied. Asset arrays
         are read-only snapshots; replace resources to edit them.
         """
-        self._rebuild()
+        self._sync_light_items()
         memo = {id(mesh): _immutable_mesh(mesh) for mesh in self._meshes.values()}
+        # Resource keys contain only an enum and an integer. Sharing them avoids
+        # a duplicate object/dict per entity in every retained Undo snapshot.
+        memo.update((id(item.mesh), item.mesh) for item in self._items)
+        memo.update((id(key), key) for key in self._meshes)
         memo.update(
             {id(texture): _immutable_texture(texture) for texture in self.textures.values()}
         )
-        return copy.deepcopy(self, memo)
+        # Undo owns authored values, not a second render projection of each value.
+        # Rebuild derived arrays and lookup tables only when the copy is used.
+        result = copy.copy(self)
+        result._built_revision = -1
+        result._source = None
+        result._frame = None
+        result._oid_to_index = {}
+        result._node_to_oid = {}
+        result._geom_node_to_oid = {}
+        memo[id(self)] = result
+        result.__dict__ = copy.deepcopy(result.__dict__, memo)
+        return result
 
     def restore(self, state: Scene) -> None:
         """Restore a snapshot without invalidating this scene's surviving handles.
@@ -194,8 +228,6 @@ class Scene:
         revision = max(self._revision, state._revision) + 1
         for name in ("_next_object_id", "_next_mesh_id", "_next_camera_id", "_next_light_id"):
             setattr(restored, name, max(getattr(self, name), getattr(restored, name)))
-        if restored._built_revision == restored._revision:
-            restored._built_revision = revision
         restored._revision = revision
         self.__dict__.update(restored.__dict__)
 
@@ -210,12 +242,14 @@ class Scene:
     def source(self) -> SceneSource:
         """Return stable render structure for the current revision."""
         self._rebuild()
+        assert self._source is not None
         return self._source
 
     @property
     def frame(self) -> SceneFrame:
         """Return current object, camera, and light state."""
         self._rebuild()
+        assert self._frame is not None
         return self._frame
 
     def add(
@@ -355,6 +389,7 @@ class Scene:
         if item is self._cameras[0]:
             self.camera = view
         if self._built_revision == self._revision:
+            assert self._source is not None and self._frame is not None
             self._source.cameras = tuple(camera.view for camera in self._cameras)
             self._frame.cameras = self._source.cameras
         return True
@@ -426,6 +461,9 @@ class Scene:
 
     def set_pose_by_node(self, node_id: int, position, rotation) -> bool:
         """Set an object's world pose through its hierarchy node ID."""
+        # Keep published node IDs until a source/frame read rebuilds the projection.
+        if self._source is None:
+            self._rebuild()
         oid = self._node_to_oid.get(int(node_id))
         if oid is None:
             return False
@@ -453,6 +491,8 @@ class Scene:
 
     def set_geometry_size(self, node_id: int, size) -> bool:
         """Set geometry size through a hierarchy node ID."""
+        if self._source is None:
+            self._rebuild()
         object_id = self._geom_node_to_oid.get(int(node_id))
         if object_id is None:
             return False
@@ -468,6 +508,8 @@ class Scene:
 
     def set_scale(self, node_id: int, scale) -> bool:
         """Bake scale through either the object's link or its geometry node."""
+        if self._source is None:
+            self._rebuild()
         object_id = self._node_to_oid.get(node_id, self._geom_node_to_oid.get(node_id))
         if object_id is None:
             return False
@@ -494,6 +536,7 @@ class Scene:
         lights[i] = light
         self.lights = replace(self.lights, lights=tuple(lights))
         if self._built_revision == self._revision:
+            assert self._source is not None and self._frame is not None
             self._source.lights = self.lights
             self._frame.lights = self.lights
         return True
@@ -502,6 +545,7 @@ class Scene:
         """Replace the scene environment and update the current frame."""
         self.lights = self.lights.with_environment(environment)
         if self._built_revision == self._revision:
+            assert self._source is not None and self._frame is not None
             self._source.lights = self.lights
             self._frame.lights = self.lights
         return True
@@ -509,6 +553,7 @@ class Scene:
     def set_material(self, material_index: int, material: Material) -> bool:
         """Replace a material by its current scene-source array index."""
         self._rebuild()
+        assert self._source is not None
         i = int(material_index)
         if not 0 <= i < len(self._source.materials):
             return False
@@ -523,12 +568,15 @@ class Scene:
 
     def set_geometry_color(self, node_id: int, rgba) -> bool:
         """Set geometry color through a hierarchy node ID."""
+        if self._source is None:
+            self._rebuild()
         object_id = self._geom_node_to_oid.get(int(node_id))
         if object_id is None:
             return False
         item = self._item(object_id)
         item.color = np.asarray(rgba, np.float32).reshape(4).copy()
         if self._built_revision == self._revision:
+            assert self._source is not None
             self._source.geom_rgba[self._oid_to_index[object_id]] = item.rgba
         self._revision += 1
         return True
@@ -754,6 +802,7 @@ class Scene:
         self._built_revision = self._revision
 
     def _write_pose(self, index: int, item: _Item) -> None:
+        assert self._frame is not None
         assert self._frame.geom_xpos is not None and self._frame.geom_xmat is not None
         assert self._frame.body_xpos is not None and self._frame.body_xmat is not None
         self._frame.geom_xpos[index] = item.position

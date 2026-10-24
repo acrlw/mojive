@@ -153,6 +153,10 @@ class Session(_Editing, _Playback, _Source):
         self._saved_revision = 0
         self._next_document_revision = 1
         self._structure_generation = 0
+        self._node_identity_generation = -1
+        self._node_identities: frozenset[tuple[int | str, ...]] = frozenset()
+        self._retained_node_identity_key = None
+        self._retained_node_identities: frozenset[tuple[int | str, ...]] = frozenset()
         self._adapter_revision = -1
         self._refresh_structure()
 
@@ -599,6 +603,60 @@ class Session(_Editing, _Playback, _Source):
     def history_bytes(self) -> int:
         """Return estimated Python/NumPy storage retained by Undo and Redo."""
         return self._history.bytes
+
+    @staticmethod
+    def node_identity(node: SceneNode) -> tuple[int | str, ...]:
+        """Identify a node across structure rebuilds within one document."""
+        if node.source_editable:
+            return node.model_id, node.type.value, node.source_name or node.name
+        if node.object_id:
+            return "object", node.object_id
+        return "node", node.node_id, node.type.value, node.model_id
+
+    def _document_node_identities(self) -> frozenset[tuple[int | str, ...]]:
+        if self._node_identity_generation != self._structure_generation:
+            # Most identities survive a structural edit. Share their immutable
+            # tuples across Undo snapshots instead of retaining a new copy per node.
+            previous = {identity: identity for identity in self._node_identities}
+            identities = (self.node_identity(node) for node in self._nodes)
+            self._node_identities = frozenset(
+                previous.get(identity, identity) for identity in identities
+            )
+            self._node_identity_generation = self._structure_generation
+        return self._node_identities
+
+    @property
+    def retained_node_identities(self) -> frozenset[tuple[int | str, ...]]:
+        """Nodes reachable in the live scene, preview, active edit, or Undo/Redo.
+
+        Presentation baselines may be discarded only after their identity leaves
+        this set. Snapshot metadata shares each immutable structure's identities;
+        consumers do not traverse adapter-specific history snapshots.
+        """
+        preview = self._model_edit_preview
+        visible = preview is not None and preview.visible
+        key = (
+            self._structure_generation,
+            self.structure_generation,
+            self._history.revision,
+            id(self._edit_before),
+            id(preview) if visible else None,
+        )
+        if key != self._retained_node_identity_key:
+            current = self._document_node_identities()
+            structures = {id(current): current}
+            for record in (*self._undo_stack, *self._redo_stack):
+                for state in (record.before, record.after):
+                    structures[id(state.node_identities)] = state.node_identities
+            if self._edit_before is not None:
+                state = self._edit_before.node_identities
+                structures[id(state)] = state
+            if visible:
+                current = frozenset(self.node_identity(node) for node in preview.nodes)
+                structures[id(current)] = current
+            self._retained_node_identities = frozenset().union(*structures.values())
+            self._retained_node_identity_key = key
+        return self._retained_node_identities
 
     @property
     def structure_generation(self) -> int:

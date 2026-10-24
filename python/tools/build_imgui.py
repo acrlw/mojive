@@ -21,9 +21,49 @@ URL = "https://files.pythonhosted.org/packages/18/47/ff477f7258baddf0c02bbcf6406
 SHA256 = "1476409b76c7f600d0da472aed87e96382444df50695280b3ed9acd5065cb6c2"
 FREETYPE_URL = "https://codeload.github.com/freetype/freetype/tar.gz/refs/tags/VER-2-13-3"
 FREETYPE_SHA256 = "bc5c898e4756d373e0d991bab053036c5eb2aa7c0d5c67e8662ddc6da40c4103"
+# Keep HelloImGui for GLFW/OpenGL and FreeType support, plus the
+# always-built portable file dialogs. Unused bindings otherwise enlarge every GC scan.
+UNUSED_BUNDLE_MODULES = (
+    "IMMAPP",
+    "IMGUI_MD",
+    "NANOVG",
+    "IMPLOT",
+    "IMPLOT3D",
+    "IMGUI_NODE_EDITOR",
+    "IMGUIZMO",
+    "IMGUI_TEX_INSPECT",
+    "IMFILEDIALOG",
+    "IMMVISION",
+    "IMANIM",
+    "IMGUI_EXPLORER_LIB",
+    "MICROTEX",
+)
+# These upstream bindings are unconditional or coupled to required native support.
+# Keep HelloImGui's FreeType/GLFW build, but omit its unused Python application API.
+UNUSED_BINDINGS = (
+    ("hello_imgui", "himgui", "hello_imgui", "hello_imgui"),
+    (
+        "imgui_color_text_edit",
+        "imgui_color_text_edit",
+        "imgui_color_text_edit",
+        "ImGuiColorTextEdit",
+    ),
+    ("imgui_knobs", "imgui_knobs", "imgui_knobs", "imgui-knobs"),
+    ("imspinner", "imspinner", "imspinner", "imspinner"),
+    ("imgui_toggle", "imgui_toggle", "imgui_toggle", "imgui_toggle"),
+    (
+        "imgui_command_palette",
+        "imgui_command_palette",
+        "imgui_command_palette",
+        "imgui-command-palette",
+    ),
+    ("imcoolbar", "imcooolbar", "imcoolbar", "ImCoolBar"),
+)
 # Restore every historically patched file before applying a changed recipe.
 # This also removes obsolete patches from an existing incremental build.
 RESTORED_FILES = (
+    "external/bindings_generation/cpp/pybind_imgui_bundle.cpp",
+    "external/bindings_generation/cpp/all_pybind_files.cmake",
     "pyproject.toml",
     "external/imgui/imgui/imgui.h",
     "external/imgui/imgui/imgui_internal.h",
@@ -80,11 +120,39 @@ def replace_source(path: Path, old: str, new: str, *, count: int = 1) -> None:
     path.write_text(content.replace(old, new, count), encoding="utf-8", newline="\n")
 
 
+def trim_unused_bindings(source: Path) -> None:
+    """Exclude unused binding creation without changing upstream Python import semantics."""
+    import re
+
+    root = source / "external/bindings_generation/cpp"
+    entry = root / "pybind_imgui_bundle.cpp"
+    content = entry.read_text(encoding="utf-8")
+    for name, variable, initializer, directory in UNUSED_BINDINGS:
+        replacement = f'    _register_submodule("{name}", false); // Mojive: native support only'
+        if replacement not in content:
+            pattern = (
+                rf'    _register_submodule\("{name}"\);\n'
+                rf'    auto module_{variable} = +m.def_submodule\("[^"]+"\);\n'
+                rf"    py_init_module_{initializer}\(module_{variable}\);"
+            )
+            content, count = re.subn(pattern, replacement, content)
+            if count != 1:
+                raise RuntimeError(f"unexpected upstream binding registration: {name}")
+        replace_source(
+            root / "all_pybind_files.cmake",
+            f"    ${{external_dir}}/{directory}/bindings/pybind_{initializer}.cpp",
+            f"    # Mojive: omit unused {name} Python bindings",
+        )
+    if entry.read_text(encoding="utf-8") != content:
+        entry.write_text(content, encoding="utf-8", newline="\n")
+
+
 def patch(source: Path) -> None:
     def change(relative, old, new, *, count=1):
         replace_source(source / relative, old, new, count=count)
 
     imgui = "external/imgui/imgui/"
+    trim_unused_bindings(source)
     # Preserve Bundle's FreeType version without fetching the complete Git history.
     change(
         "external/hello_imgui/hello_imgui/hello_imgui_cmake/hello_imgui_build_lib.cmake",
@@ -134,7 +202,7 @@ def patch(source: Path) -> None:
     change(
         binding,
         '#include "imgui_pywrappers.h"',
-        '#include "imgui_pywrappers.h"\n#include "ImguiCallbacks.hpp"',
+        '#include "imgui_pywrappers.h"\n#include "ImguiCallbacks.hpp"\n#include "ImguiDrawMesh.hpp"',
     )
     change(
         binding,
@@ -151,7 +219,26 @@ def patch(source: Path) -> None:
         """        .def_prop_ro("callback_kind", &mojive::imguiBridge::callbackKind)
         .def_rw("clip_rect", &ImDrawCmd::ClipRect,""",
     )
+    change(
+        binding,
+        "    auto pyClassImDrawList =",
+        """    nb::class_<mojive::imguiBridge::DrawMesh>(m, "DrawMesh")
+        .def(nb::init<std::vector<ImVec2>, std::vector<unsigned int>, std::vector<bool>>(),
+             nb::arg("positions"), nb::arg("indices"), nb::arg("opaque"))
+        .def("draw", &mojive::imguiBridge::DrawMesh::draw,
+             nb::arg("draw_list"), nb::arg("origin"), nb::arg("color"));
+    auto pyClassImDrawList =""",
+    )
     stubs = "bindings/imgui_bundle/imgui/__init__.pyi"
+    change(
+        stubs,
+        "class ImDrawList:",
+        """class DrawMesh:
+    def __init__(self, positions: List[ImVec2Like], indices: List[int], opaque: List[bool]) -> None: ...
+    def draw(self, draw_list: ImDrawList, origin: ImVec2Like, color: ImU32) -> None: ...
+
+class ImDrawList:""",
+    )
     change(
         stubs,
         "class ImDrawCmd:",
@@ -356,8 +443,11 @@ def main() -> None:
     if not source.exists():
         with tarfile.open(archive) as tf:
             tf.extractall(build, filter="data")
-    callbacks = (ROOT / "cpp/bindings/ImguiCallbacks.hpp").read_bytes()
-    recipe_bytes = Path(__file__).read_bytes() + callbacks
+    headers = {
+        name: (ROOT / "cpp/bindings" / name).read_bytes()
+        for name in ("ImguiCallbacks.hpp", "ImguiDrawMesh.hpp")
+    }
+    recipe_bytes = Path(__file__).read_bytes() + b"".join(headers.values())
     recipe = hashlib.sha256(recipe_bytes).hexdigest()
     prepared = build / "source-patch.sha256"
     unchanged = {}
@@ -373,9 +463,10 @@ def main() -> None:
                 path.write_bytes(member.read())
     (source / "external/imgui/imgui/mojive_g3.h").unlink(missing_ok=True)
     patch(source)
-    callback_header = source / "external/imgui/bindings/ImguiCallbacks.hpp"
-    if not callback_header.exists() or callback_header.read_bytes() != callbacks:
-        callback_header.write_bytes(callbacks)
+    for name, content in headers.items():
+        header = source / "external/imgui/bindings" / name
+        if not header.exists() or header.read_bytes() != content:
+            header.write_bytes(content)
     # A recipe change must not rebuild every translation unit when the final
     # patched headers are unchanged.
     for path, (content, modified) in unchanged.items():
@@ -417,6 +508,15 @@ def main() -> None:
                 str(wheels),
                 "-C",
                 f"build-dir={build / 'cmake'}",
+                *(
+                    option
+                    for module in UNUSED_BUNDLE_MODULES
+                    for option in ("-C", f"cmake.define.IMGUI_BUNDLE_WITH_{module}=OFF")
+                ),
+                "-C",
+                "cmake.define.IMGUI_BUNDLE_BUILD_DEMOS=OFF",
+                "-C",
+                "cmake.define.HELLOIMGUI_WITH_TEST_ENGINE=OFF",
                 str(source),
             ],
             check=True,

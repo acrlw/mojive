@@ -31,7 +31,6 @@ _live_windows = 0
 
 
 glfw: Any = None
-gl: Any = None
 imgui: Any = None
 
 
@@ -156,23 +155,6 @@ def _load_window_deps() -> None:
     glfw, imgui = _glfw, _imgui
 
 
-def _load_gl_deps(context_api: str) -> None:
-    global gl
-    _load_window_deps()
-    if gl is not None:
-        return
-    # Select PyOpenGL's loader after GLFW selects the actual window system;
-    # its default GLX loader cannot serve a Wayland/EGL context.
-    if sys.platform.startswith("linux"):
-        platform = (
-            "egl" if context_api == "egl" or glfw.get_platform() == glfw.PLATFORM_WAYLAND else "glx"
-        )
-        os.environ.setdefault("PYOPENGL_PLATFORM", platform)
-    from OpenGL import GL as _gl
-
-    gl = _gl
-
-
 @dataclass(frozen=True)
 class WindowConfig:
     title: str = "Mojive"
@@ -274,7 +256,9 @@ class Window:
         self._native_drop_token = 0
 
         glfw.make_context_current(self._window)
-        _load_gl_deps(self._context_api)
+        from .opengl_surface import OpenGLSurface
+
+        self._gl_surface = OpenGLSurface(glfw.get_proc_address)
         self.set_vsync(self.config.vsync)
         log.info(
             "OpenGL {}.{} core context created with GLFW {}",
@@ -383,11 +367,11 @@ class Window:
 
     @property
     def gl_version(self) -> str:
-        return gl.glGetString(gl.GL_VERSION).decode()
+        return self._gl_surface.version
 
     @property
     def renderer_name(self) -> str:
-        return gl.glGetString(gl.GL_RENDERER).decode()
+        return self._gl_surface.renderer
 
     @property
     def clipboard_publisher(self) -> Any:
@@ -688,13 +672,7 @@ class Window:
         imgui.render()
         draw_data = imgui.get_draw_data()
         fb_w, fb_h = self.size_pixels
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-        gl.glViewport(0, 0, fb_w, fb_h)
-
-        gl.glDisable(gl.GL_SCISSOR_TEST)
-        gl.glDepthMask(gl.GL_TRUE)
-        gl.glClearColor(*self.config.clear_color)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self._gl_surface.clear(fb_w, fb_h, self.config.clear_color)
         self._impl.render(draw_data)
 
         frame = self.read_frame() if readback else None
@@ -713,10 +691,7 @@ class Window:
         w, h = self.size_pixels
         if self._readback is None or self._readback.shape[:2] != (h, w):
             self._readback = np.empty((h, w, 3), np.uint8)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-        gl.glReadBuffer(gl.GL_BACK)
-        gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
-        gl.glReadPixels(0, 0, w, h, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, self._readback)
+        self._gl_surface.read_rgb(self._readback)
         return self._readback
 
     def viewport_texture_ref(self, image: ViewportImage) -> Any:

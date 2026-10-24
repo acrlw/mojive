@@ -11,6 +11,7 @@ from mojive import commands as cmd
 from mojive import math3d
 from mojive.adapters.base import NodeType
 from mojive.scene.queries import node_geometry_indices, node_world_pose
+from mojive.session import Session
 
 
 def rgba(value):
@@ -23,6 +24,8 @@ class EntityProjection:
         self.app = app
         self.entities = []
         self.initial_entities = []
+        self._initial_by_identity = {}
+        self._retained_identities = None
         self._entity_cache = {}
         self._document_id = None
         self._structure_generation = -1
@@ -64,21 +67,34 @@ class EntityProjection:
         new_document = self._document_id != self.app.session.document_id
         if new_document:
             self.initial_entities.clear()
+            self._initial_by_identity.clear()
             if getattr(self.app, "workspace", None) is not None:
                 self.app.workspace.pinned = None
+        retained = session.retained_node_identities
+        originals_changed = False
+        if retained is not self._retained_identities:
+            self._retained_identities = retained
+            removed = self._initial_by_identity.keys() - retained
+            for identity in removed:
+                del self._initial_by_identity[identity]
+            originals_changed = bool(removed)
         if new_document or self._structure_generation != session.structure_generation:
             self._entity_cache.clear()
             self._node_ids_by_identity = {
                 self._identity(node): node.node_id for node in session.nodes
             }
-            originals = {e["identity"] for e in self.initial_entities}
             for node in session.nodes:
-                if self._identity(node) not in originals:
-                    self.initial_entities.append(
-                        {**self._transform_snapshot(node), "rgba": self._node_rgba(node)}
-                    )
+                identity = self._identity(node)
+                if identity not in self._initial_by_identity:
+                    self._initial_by_identity[identity] = {
+                        **self._transform_snapshot(node),
+                        "rgba": self._node_rgba(node),
+                    }
+                    originals_changed = True
             self._structure_generation = session.structure_generation
             self._document_id = session.document_id
+        if originals_changed:
+            self.initial_entities[:] = self._initial_by_identity.values()
         active = []
         node = session.selected_node
         if node is not None:
@@ -100,11 +116,11 @@ class EntityProjection:
 
     @staticmethod
     def _identity(node):
-        if node.source_editable:
-            return node.model_id, node.type.value, node.source_name or node.name
-        if node.object_id:
-            return "object", node.object_id
-        return "node", node.node_id, node.type.value, node.model_id
+        return Session.node_identity(node)
+
+    def initial_entity(self, identity):
+        """Look up a retained load-time Restore baseline without scanning history."""
+        return self._initial_by_identity.get(identity)
 
     def _project_node(self, node):
         from .navigation import node_accent, node_icon

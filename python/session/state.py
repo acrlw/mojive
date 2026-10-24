@@ -51,6 +51,7 @@ class _DocumentState:
     selected: int
     overrides: SceneOverrides
     selected_node_id: int
+    node_identities: frozenset[tuple[int | str, ...]] = frozenset()
 
 
 @dataclass(frozen=True)

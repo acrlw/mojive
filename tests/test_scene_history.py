@@ -1,6 +1,7 @@
 """Programmatic handles and immutable resources across authored edit history."""
 
-from dataclasses import replace
+import sys
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
@@ -12,6 +13,7 @@ from mojive.adapters.static import StaticSceneAdapter
 from mojive.adapters.toy import ToyPhysicsAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
 from mojive.session import Session
+from mojive.session.history import _snapshot_allocations
 from mojive.types import CameraView, Light, MeshData, MeshShape, TextureData, TextureType
 
 
@@ -22,6 +24,125 @@ def triangle():
         np.zeros((3, 2), np.float32),
         np.arange(3, dtype=np.uint32),
     )
+
+
+def test_snapshots_share_resource_keys_but_own_editable_values():
+    scene = Scene()
+    box = scene.box(position=(1, 2, 3))
+    mesh = scene.mesh(triangle())
+    snapshots = [scene.clone(), scene.clone()]
+    for snapshot in snapshots:
+        assert snapshot._items[0].mesh is box.mesh_key
+        assert snapshot._items[1].mesh is mesh.mesh_key
+        assert next(iter(snapshot._meshes)) is mesh.mesh_key
+        assert snapshot._items[0].position is not scene._items[0].position
+        assert snapshot._items[0].material.rgba is not scene._items[0].material.rgba
+    box.set_pose((4, 5, 6))
+    for snapshot in snapshots:
+        np.testing.assert_array_equal(snapshot._items[0].position, (1, 2, 3))
+
+
+def test_snapshot_preserves_array_aliases_without_sharing_writable_state():
+    scene = Scene()
+    scene.box()
+    item = scene._items[0]
+    item.initial_position = item.position
+    snapshot = scene.clone()
+    saved = snapshot._items[0]
+    assert saved.position is saved.initial_position
+    assert not np.shares_memory(saved.position, item.position)
+    item.position[:] = 9
+    np.testing.assert_array_equal(saved.position, 0)
+
+
+def test_history_accounting_includes_dataclass_namespaces_and_inherited_slots():
+    @dataclass(slots=True)
+    class Slotted:
+        first: object
+
+    @dataclass
+    class Mixed(Slotted):
+        second: object
+
+    first, second = np.zeros(4), np.ones(5)
+    value = Mixed(first, second)
+    allocations = _snapshot_allocations(value)
+    assert allocations[id(first)] == sys.getsizeof(first)
+    assert allocations[id(second)] == sys.getsizeof(second)
+    assert allocations[id(value)] == sys.getsizeof(value) + sys.getsizeof(vars(value))
+
+
+def test_unchanged_node_identities_are_shared_across_structural_snapshots():
+    scene = Scene()
+    original = scene.box()
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        before = {identity: identity for identity in session._document_node_identities()}
+        added = session.submit(cmd.AddSceneObject(shape=MeshShape.BOX))
+        assert added.ok
+        after = {identity: identity for identity in session._document_node_identities()}
+        assert after.keys() > before.keys()
+        assert all(after[value] is identity for value, identity in before.items())
+        added_identity = ("object", added.entity_id)
+        assert added_identity in after
+        assert session.submit(cmd.RemoveSceneObject(added.entity_id)).ok
+        assert session._document_node_identities() == before.keys()
+        assert added_identity in session.retained_node_identities
+        assert session.submit(cmd.Undo()).ok
+        assert session.node_by_object_id(added.entity_id) is not None
+        assert ("object", original.object_id) in session._document_node_identities()
+        session._history.clear()
+        assert session.submit(cmd.RemoveSceneObject(added.entity_id)).ok
+        session._history.clear()
+        assert added_identity not in session.retained_node_identities
+    finally:
+        session.release()
+
+
+@pytest.mark.parametrize("build_source", [False, True])
+def test_scene_snapshot_retains_authored_state_without_render_caches(build_source):
+    scene = Scene(camera=CameraView(eye=np.array([3, 2, 1], np.float32)))
+    box = scene.box(position=(1, 2, 3))
+    light = scene.add_light("key", Light(intensity=2))
+    if build_source:
+        assert scene.source.instance_count == 1
+    before_source, before_frame = scene._source, scene._frame
+    snapshot = scene.clone()
+    assert scene._source is before_source and scene._frame is before_frame
+    assert snapshot._source is None and snapshot._frame is None
+    box.set_pose((9, 8, 7))
+    light.set(replace(light.value, intensity=4))
+    scene.set_camera(0, CameraView(eye=np.zeros(3)))
+    np.testing.assert_array_equal(snapshot.frame.geom_xpos[0], [1, 2, 3])
+    np.testing.assert_array_equal(snapshot.frame.cameras[0].eye, [3, 2, 1])
+    assert snapshot.source.lights.lights[0].intensity == 2
+    np.testing.assert_array_equal(scene.frame.geom_xpos[0], [9, 8, 7])
+    assert snapshot.frame is not scene.frame
+
+
+@pytest.mark.parametrize("restore", [False, True])
+@pytest.mark.parametrize("edit", ["pose", "size", "scale", "color"])
+def test_cold_scene_snapshot_supports_node_edits_without_reading_source(restore, edit):
+    scene = Scene()
+    scene.box()
+    source = scene.source
+    link_id, geom_id = source.nodes[1].node_id, source.nodes[2].node_id
+    snapshot = scene.clone()
+    if restore:
+        scene.restore(snapshot)
+        snapshot = scene
+    if edit == "pose":
+        assert snapshot.set_pose_by_node(link_id, (1, 2, 3), np.eye(3))
+        np.testing.assert_array_equal(snapshot.frame.geom_xpos[0], [1, 2, 3])
+    elif edit == "size":
+        assert snapshot.set_geometry_size(geom_id, (1, 2, 3))
+        np.testing.assert_array_equal(snapshot.source.geom_size[0], [1, 2, 3])
+    elif edit == "scale":
+        assert snapshot.set_scale(link_id, (2, 2, 2))
+        np.testing.assert_array_equal(snapshot.source.geom_size[0], [1, 1, 1])
+    else:
+        assert snapshot.set_geometry_color(geom_id, (0, 1, 0, 1))
+        np.testing.assert_array_equal(snapshot.source.geom_rgba[0], [0, 1, 0, 1])
 
 
 def test_scene_override_names_share_state_across_undo():
@@ -37,6 +158,23 @@ def test_scene_override_names_share_state_across_undo():
     assert session.submit(cmd.Undo()).ok
     assert session.authored_overlay is session.scene_overrides
     session.release()
+
+
+def test_node_edits_keep_published_ids_until_the_next_source_read():
+    scene = Scene()
+    first, second = scene.box(), scene.box()
+    source = scene.source
+    link_id, geom_id = source.nodes[3].node_id, source.nodes[4].node_id
+    first.remove()
+    assert scene.set_geometry_size(geom_id, (1, 2, 3))
+    assert scene.set_geometry_color(geom_id, (0, 1, 0, 1))
+    assert scene.set_pose_by_node(link_id, (3, 2, 1), np.eye(3))
+    assert scene.set_scale(link_id, (2, 2, 2))
+    assert scene._source is source
+    np.testing.assert_array_equal(scene.source.geom_object_id, [second.object_id])
+    np.testing.assert_array_equal(scene.source.geom_size[0], [2, 4, 6])
+    np.testing.assert_array_equal(scene.source.geom_rgba[0], [0, 1, 0, 1])
+    np.testing.assert_array_equal(scene.frame.geom_xpos[0], [3, 2, 1])
 
 
 @pytest.mark.parametrize(

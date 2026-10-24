@@ -38,12 +38,14 @@ class EditHistory(Generic[State]):
         self.undo: list[EditRecord[State]] = []
         self.redo: list[EditRecord[State]] = []
         self.bytes = 0
+        self.revision = 0
         self._allocations: dict[int, dict[int, int]] = {}
         self._references: dict[int, int] = {}
 
     def append(self, record: EditRecord[State]) -> bool:
         """Append an edit, pruning oldest records; return whether it was retained."""
         allocations = _snapshot_allocations(record)
+        self.revision += 1
         self.clear_redo()
         self._allocations[id(record)] = allocations
         for identity, size in allocations.items():
@@ -58,12 +60,15 @@ class EditHistory(Generic[State]):
 
     def clear_redo(self) -> None:
         """Discard the alternate edit branch after a new mutation."""
+        if self.redo:
+            self.revision += 1
         for record in self.redo:
             self._discard(record)
         self.redo.clear()
 
     def clear(self) -> None:
         """Release both history branches and their accounting."""
+        self.revision += 1
         self.undo.clear()
         self.redo.clear()
         self._allocations.clear()
@@ -99,6 +104,11 @@ def _snapshot_allocations(root: object) -> dict[int, int]:
         elif isinstance(value, (tuple, list, set, frozenset)):
             pending.extend(value)
         elif is_dataclass(value) and not isinstance(value, type):
+            namespace = getattr(value, "__dict__", None)
+            if namespace is not None:
+                # The instance owns its field storage. Charge it with the owner,
+                # without a second history reference table entry for every dict.
+                sizes[identity] += sys.getsizeof(namespace)
             pending.extend(getattr(value, field.name) for field in fields(value))
         elif not isinstance(value, type) and hasattr(value, "__dict__"):
             pending.append(vars(value))

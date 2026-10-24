@@ -73,12 +73,36 @@ Bundle's FreeType dependency remains `VER-2-13-3`; the recipe downloads its chec
 source archive instead of cloning the full Git history. The package version and Dear ImGui
 core version are distinct: the current recipe uses Bundle `1.92.900`, with core
 `1.92.9`, whereas this tracked core baseline is `1.92.9b-docking`.
+The recipe disables unused Bundle extensions and their demos rather than loading their
+Python bindings into every editor process. It retains HelloImGui's GLFW/OpenGL and FreeType
+support, core ImGui and portable file dialogs. Mojive owns its plotting,
+gizmos and editor panels; it does not depend on Bundle's optional plot, node-editor,
+Markdown/math, image-inspection or application-framework extensions. Keeping these out of
+the wheel reduces the permanently reachable binding graph without changing GC policy.
+Mojive's tests submit native ImGui input directly; the unused bundled test engine is also
+disabled, including its per-item hooks and Python binding graph. The recipe also removes
+unconditional widget bindings (text editor, knobs, spinner, toggle, command palette and coolbar)
+and HelloImGui's Python application API from the binding aggregator and source manifest. Native
+HelloImGui support remains enabled for the existing font and platform build; its Python helpers
+and notebook/async imports are not initialized. Importing then deleting modules would retain the
+native type graph and is not a substitute for this build-time exclusion.
+
+Keep upstream upgrades small and reproducible: update the pinned archive/version together, restore
+original sources, and reapply the guarded recipe. Changed registrations for excluded bindings fail
+the build; audit newly added upstream modules as part of the upgrade. Verify core/internal/backends, FreeType font
+rendering, hidden OpenGL/bgfx frames and portable file-dialog availability after each upgrade.
+`tests/test_build_imgui.py` checks patch repeatability and rejects upstream registration drift.
 
 `cpp/bindings/ImguiCallbacks.hpp` supplies read-only callback classification for the Python
 ImGui backends. The build recipe copies it into Bundle and includes its content in the build
 signature. Backends distinguish ordinary draws, render-state resets and unsupported callbacks;
 they do not add external renderer insertion markers. Rebuild with `make setup-imgui` after
 changing the header or recipe.
+`cpp/bindings/ImguiDrawMesh.hpp` adds immutable local mesh submission to the same Bundle
+recipe. It validates owned vertices, indices and coverage on construction, then appends them
+with the current origin, color and atlas UV. The bounded Python icon cache owns these buffers;
+they do not retain an ImGui context or draw list. `tests/test_draw2d.py` compares every packaged
+icon's native vertices, indices and antialias coverage with the original submission path.
 
 Shared custom widgets use continuous-curvature geometry from `geometry2d/curves.py` through
 the `ui/paint_protocol.py` contract; `ui/imgui_draw.py` adapts that contract to ImGui. To extend it

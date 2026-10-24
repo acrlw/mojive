@@ -1,6 +1,8 @@
 """Native ImGui renderer resources remain owned by their OpenGL window."""
 
 import ctypes
+import subprocess
+import sys
 from contextlib import ExitStack
 
 import numpy as np
@@ -11,6 +13,24 @@ from mojive.ui import window as window_module
 from mojive.ui.window import Window, WindowConfig
 
 pytestmark = pytest.mark.gpu
+
+
+def test_production_window_does_not_load_pyopengl_wrappers():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from mojive.ui.window import Window, WindowConfig; "
+            "w = Window(WindowConfig(show_on_start=False, vsync=False, width=101, height=79)); "
+            "w.begin_frame(); a = w.end_frame(readback=True); "
+            "assert a.shape == (*w.size_pixels[::-1], 3); "
+            "assert w.gl_version and w.renderer_name; "
+            "w.close(); assert 'OpenGL.GL' not in sys.modules",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _assert_current(window):
@@ -87,10 +107,7 @@ def test_peer_shutdown_keeps_font_uploads_and_reinitialization_working(require_o
         def render_peer_before_submit():
             # Poison A's back buffer so a misplaced clear cannot pass because
             # the previous buffer happened to have the expected background.
-            gl = window_module.gl
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-            gl.glClearColor(0.0, 1.0, 0.0, 1.0)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+            first._gl_surface.clear(*first.size_pixels, (0.0, 1.0, 0.0, 1.0))
             _text_frame(second, "Context B")
 
         interleaved = _text_frame(first, "Context A", before_submit=render_peer_before_submit)

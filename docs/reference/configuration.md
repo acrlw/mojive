@@ -545,9 +545,10 @@ site belong under the repository's ignored `output/` directory.
 
 OpenGL is the default. Interactive windows require a desktop OpenGL 3.3 core profile. On Linux,
 interactive GLFW normally chooses the native context API (EGL on Wayland, GLX on X11); set
-`MOJIVE_GL=egl PYOPENGL_PLATFORM=egl` to force and verify EGL for the interactive window
-(or use `make egl-viewer`). Set both variables before starting Python: GLFW and the ImGui
-PyOpenGL backend must agree on the context API.
+`MOJIVE_GL=egl` to force and verify EGL for the interactive window (or use `make egl-viewer`).
+Window clear/readback entry points are resolved by that GLFW context; ImGui uses its compiled
+OpenGL backend. Mojive's window does not load PyOpenGL. Independent comparison tools that use
+PyOpenGL must still set `PYOPENGL_PLATFORM=egl` before importing it on Wayland.
 
 If EGL fails with `eglInitialize failed (0x3001)` in a Conda shell, check
 `printenv __EGL_VENDOR_LIBRARY_DIRS`. A Conda activation hook can restrict EGL vendor discovery

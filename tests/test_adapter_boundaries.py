@@ -89,11 +89,15 @@ def test_workspace_reuses_owned_pose_buffers_and_handles_layout_changes():
     adapter = WorkspaceAdapter(StaticSceneAdapter(primary), authored)
     try:
         first = adapter.frame(FrameNeeds())
+        owned = {
+            name: getattr(first, name)
+            for name in ("geom_xpos", "geom_xmat", "body_xpos", "body_xmat")
+        }
         main.set_pose((3, 0, 0))
         extra.set_pose((4, 0, 0))
         second = adapter.frame(FrameNeeds())
-        for name in ("geom_xpos", "geom_xmat", "body_xpos", "body_xmat"):
-            assert getattr(first, name) is getattr(second, name)
+        for name, buffer in owned.items():
+            assert buffer is getattr(second, name)
             assert not np.shares_memory(getattr(second, name), getattr(primary.frame, name))
             assert not np.shares_memory(getattr(second, name), getattr(authored.frame, name))
         np.testing.assert_array_equal(second.geom_xpos[:, 0], [3, 4])
@@ -104,12 +108,16 @@ def test_workspace_reuses_owned_pose_buffers_and_handles_layout_changes():
         assert empty.geom_xpos is primary.frame.geom_xpos
         authored.box(position=(5, 0, 0))
         restored = adapter.frame(FrameNeeds())
-        assert restored.geom_xpos is first.geom_xpos
+        for name, buffer in owned.items():
+            assert getattr(restored, name) is buffer
         np.testing.assert_array_equal(restored.geom_xpos[:, 0], [3, 5])
         np.testing.assert_array_equal(primary.frame.geom_xpos[:, 0], [3])
+        previous = {name: buffer.copy() for name, buffer in owned.items()}
         authored.box(position=(6, 0, 0))
         enlarged = adapter.frame(FrameNeeds())
-        assert enlarged.geom_xpos is not restored.geom_xpos
+        for name, buffer in owned.items():
+            assert getattr(enlarged, name) is not buffer
+            np.testing.assert_array_equal(buffer, previous[name])
         np.testing.assert_array_equal(enlarged.geom_xpos[:, 0], [3, 5, 6])
     finally:
         adapter.release()

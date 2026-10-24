@@ -89,6 +89,9 @@ class WorkspaceApp(ViewerApp):
     def initial_entities(self):
         return self.projection.initial_entities
 
+    def initial_entity(self, identity):
+        return self.projection.initial_entity(identity)
+
     @property
     def selected(self):
         return self.projection.selected

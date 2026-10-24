@@ -193,6 +193,28 @@ one final atlas; it constructs only the selected panel implementation. Fixed ico
 are generated with the packaged resources, while runtime painting handles scale-dependent AA.
 An unobserved control must not assemble diagnostic geometry. Reuse validated design snapshots
 until their file identity changes, and bound caches keyed by entity or bookmark identities.
+Restore baselines follow live entities plus identities reachable through retained Undo/Redo,
+active edits and model previews. Deletion alone must not discard a baseline still needed by Undo;
+history eviction must release unreachable baselines even when subsequent edits are nonstructural.
+Keep this reachability in Session snapshot metadata instead of traversing adapter internals from UI.
+Reuse equal immutable node identities from the preceding structure when capturing the next one.
+Keep that reuse bounded to live structures and retained history rather than a permanent intern pool.
+Authored scene snapshots retain editable values and immutable assets, not derived render sources,
+frames or node lookup tables. Rebuild those projections on demand after cloning or restoration;
+node-based edits must also work before a source has been requested. Do not pool mutable snapshots
+while Undo, Redo or an active transaction still owns them.
+Share immutable resource identities across snapshots, but copy writable array-backed values even
+when their enclosing dataclass is frozen. Compact private snapshot records may copy their fields
+directly, preserving aliases through the deepcopy memo. Byte accounting includes dataclass
+namespaces as well as inherited slots; a storage change must not hide retained allocations.
+Native call argument buffers may be reused only within
+their owning thread. Retain fixed ctypes array types outside frame paths: the weak type cache can
+otherwise leave cyclic type graphs for repeated collection, even when each buffer is short-lived.
+Window clear/readback uses a small set of context-owned GLFW-resolved OpenGL entry points.
+Avoid loading a general Python GL wrapper registry for these operations: its retained objects
+increase full-GC traversal even when no scene entities are being edited. Validate readback array
+ownership, channel layout and contiguity before passing native pointers, and retain driver error
+reporting at operation boundaries.
 Automatic window reveal waits for a successfully submitted frame and resolved native docking.
 Reuse normal frames for this preparation; do not add hidden physics ticks or a fixed warmup delay.
 Inactive dock tabs do not block reveal. An explicitly hidden viewer remains hidden until requested.
@@ -201,6 +223,8 @@ Use `make startup-profile` for fresh-process first presentation and `make inspec
 real tab/section interactions followed by recovery to the idle state. Collect timing separately
 from tracing and other CPU/GPU checks. Compare the same design digest, fonts, scale, viewport
 and renderer; verify pixels and hit rectangles before accepting a frame-cost improvement.
+Use `make editor-soak` for continuous create/delete, held-gizmo and panel-switch workloads past
+history saturation, with matched-state checkpoints and bounded resource counters.
 
 ## Public control operations
 
