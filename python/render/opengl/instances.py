@@ -92,8 +92,12 @@ class Strategy(enum.StrEnum):
 
 class GpuMesh:
     __slots__ = (
+        "_indices",
         "_local_bounds",
         "_vertices",
+        "_wire_dirty",
+        "_wire_vbo",
+        "_wire_vertices",
         "has_vertex_updates",
         "ibo",
         "index_count",
@@ -108,11 +112,28 @@ class GpuMesh:
         self._vertices[:, 3:6] = normals
         self._vertices[:, 6:8] = uvs
         self.vbo = ctx.buffer(self._vertices.tobytes())
-        self.ibo = ctx.buffer(np.ascontiguousarray(indices, np.uint32).tobytes())
+        self._indices = np.array(indices, dtype=np.uint32, copy=True).reshape(-1)
+        self.ibo = ctx.buffer(self._indices.tobytes())
         self.index_count = len(indices)
         self.triangle_count = self.index_count // 3
         self._local_bounds: np.ndarray | None = None
         self.has_vertex_updates = False
+        self._wire_vbo = None
+        self._wire_vertices = None
+        self._wire_dirty = True
+
+    def wire_buffer(self, ctx: moderngl.Context) -> moderngl.Buffer:
+        """Expand indexed corners once, avoiding a per-triangle geometry shader."""
+        if self._wire_dirty:
+            if self._wire_vertices is None:
+                self._wire_vertices = np.empty((self.index_count, 3), np.float32)
+            np.take(self._vertices[:, :3], self._indices, axis=0, out=self._wire_vertices)
+            if self._wire_vbo is None:
+                self._wire_vbo = ctx.buffer(self._wire_vertices)
+            else:
+                self._wire_vbo.write(self._wire_vertices)
+            self._wire_dirty = False
+        return self._wire_vbo
 
     @property
     def local_bounds(self) -> np.ndarray | None:
@@ -136,10 +157,15 @@ class GpuMesh:
         self.vbo.write(self._vertices)
         self._local_bounds = None
         self.has_vertex_updates = True
+        self._wire_dirty = True
 
     def release(self) -> None:
         self.vbo.release()
         self.ibo.release()
+        if self._wire_vbo is not None:
+            self._wire_vbo.release()
+        self._wire_vbo = self._wire_vertices = None
+        self._wire_dirty = True
 
 
 class InstanceStore:
@@ -156,6 +182,7 @@ class InstanceStore:
         self._bucket_buffers: list[tuple[moderngl.Buffer, ...]] = []
         self._ranges: tuple[tuple[int, int], ...] = ()
         self._program: moderngl.Program | None = None
+        self._wireframe = False
         self._generation = -1
         self._meshes: list[GpuMesh | None] = []
         self._keys = ()
@@ -243,25 +270,33 @@ class InstanceStore:
         self._release_vaos()
         self._ensure_capacity(max(scene.count, 1))
         self._program = program
+        self._wireframe = "in_wire_position" in program
         self._generation = generation
         self._meshes = meshes
         self._keys = scene.bucket_keys
         self._ranges = scene.bucket_ranges
 
         mesh_layout, mesh_names = build_layout(program, MESH_ATTRIBUTES)
+
+        def geometry(mesh):
+            if self._wireframe:
+                return (mesh.wire_buffer(self.ctx), "3f", "in_wire_position"), None
+            return (mesh.vbo, mesh_layout, *mesh_names), mesh.ibo
+
         if self.strategy is Strategy.SHARED:
             for b, (start, _stop) in enumerate(scene.bucket_ranges):
                 mesh = meshes[b] if b < len(meshes) else None
                 if mesh is None:
                     self._vaos.append(None)
                     continue
+                vertices, indices = geometry(mesh)
                 vao = self.ctx.vertex_array(
                     program,
                     [
-                        (mesh.vbo, mesh_layout, *mesh_names),
+                        vertices,
                         *instance_content(program, self.buffers),
                     ],
-                    mesh.ibo,
+                    indices,
                     index_element_size=4,
                 )
                 if not self._bind_shared_offsets(vao, program, start):
@@ -282,11 +317,12 @@ class InstanceStore:
                 if mesh is None:
                     self._vaos.append(None)
                     continue
+                vertices, indices = geometry(mesh)
                 self._vaos.append(
                     self.ctx.vertex_array(
                         program,
-                        [(mesh.vbo, mesh_layout, *mesh_names), *instance_content(program, buffers)],
-                        mesh.ibo,
+                        [vertices, *instance_content(program, buffers)],
+                        indices,
                         index_element_size=4,
                     )
                 )
@@ -443,6 +479,8 @@ class InstanceStore:
         count = (stop - start) if instances is None else instances
         if count <= 0:
             return 0
+        if self._wireframe:
+            self._meshes[bucket].wire_buffer(self.ctx)
         vao.render(moderngl.TRIANGLES, instances=count)
         self.draw_calls += 1
         return count

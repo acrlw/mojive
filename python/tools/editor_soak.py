@@ -22,6 +22,7 @@ from PIL import Image
 from mojive import commands as cmd
 from mojive.app.composition import build_workspace
 from mojive.config import LayoutConfig, ViewerConfig
+from mojive.render.backend import DebugView
 from mojive.scene.assets import resolve
 from mojive.scene.queries import node_world_pose
 from mojive.tools.editor_profile import _drag, _summary
@@ -137,6 +138,10 @@ def resources(viewer):
             textures=len(backend.textures._textures),
             vaos=len(backend.instances._vaos),
             instance_capacity=backend.instances.capacity,
+            wire_buffers=sum(m._wire_vbo is not None for m in backend.meshes._meshes.values()),
+            wire_buffer_bytes=sum(
+                m._wire_vbo.size for m in backend.meshes._meshes.values() if m._wire_vbo is not None
+            ),
         )
     return row
 
@@ -174,6 +179,7 @@ def run(args):
     report = {
         "platform": platform.platform(),
         "asset": args.asset,
+        "shading": args.shading,
         "cycles": args.cycles,
         "warmup_cycles": args.warmup_cycles,
         "objects_per_cycle": args.objects,
@@ -198,6 +204,7 @@ def run(args):
         height=1000,
         config=ViewerConfig(layout=LayoutConfig(persistence=False)),
     ) as viewer:
+        viewer.backend.set_debug_view(DebugView(args.shading))
         if not args.asset:
             checked(viewer, cmd.NewScene())
         anchors = [
@@ -439,6 +446,7 @@ def main(argv=None):
         "--asset", help="Keep this model alongside authored objects; default is a new scene"
     )
     parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
+    parser.add_argument("--shading", choices=("shaded", "wireframe"), default="shaded")
     parser.add_argument(
         "--profile", action="store_true", help="Profile initial/final idle separately after timing"
     )

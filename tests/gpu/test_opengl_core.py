@@ -402,6 +402,49 @@ def test_capacity_grows_by_doubling(gl):
         inst.release()
 
 
+def test_wireframe_corner_stream_keeps_instance_offsets_in_both_strategies(gl):
+    from mojive.render.backend import DebugView
+    from mojive.render.opengl.passes.opaque import OpaquePass
+
+    if not G.native().has_attrib_pointer:
+        pytest.skip("shared instance buffers unavailable")
+    scene = _build_scene()
+    meshes = MeshStore(gl)
+    meshes.sync({MeshKey(MeshShape.BOX): _quad(), MeshKey(MeshShape.SPHERE): _tri()})
+    bucket_meshes = [meshes.get(key) for key, _ in scene.bucket_keys]
+    programs = ProgramCache(gl)
+    program = programs.get(OpaquePass()._spec(DebugView.WIREFRAME, True, False))
+    program["u_view_proj"].write(M.to_gl(scene.camera.proj_matrix() @ scene.camera.view_matrix()))
+    program["u_clip_plane"].value = (0, 0, 0, 1)
+    program["u_selected_id"].value = 0
+    program["u_wire_width"].value = 1.2
+    fbo = gl.simple_framebuffer((256, 256))
+    images = []
+    try:
+        for strategy in (Strategy.SHARED, Strategy.PER_BUCKET):
+            instances = InstanceStore(gl)
+            instances.strategy = strategy
+            try:
+                instances.rebuild(scene, program, bucket_meshes, generation=0)
+                instances.upload(scene)
+                fbo.use()
+                fbo.clear(0, 0, 0, 1)
+                gl.enable_only(moderngl.NOTHING)
+                assert sum(instances.draw(b) for b in range(scene.bucket_count())) == 9
+                images.append(np.frombuffer(fbo.read(components=3), np.uint8).reshape(256, 256, 3))
+            finally:
+                instances.release()
+        assert np.array_equal(*images)
+        # Nine separately colored objects span two meshes and material buckets.
+        assert len(np.unique(images[0].reshape(-1, 3), axis=0)) == len(_COLORS) + 1
+        assert len({id(mesh._wire_vbo) for mesh in bucket_meshes}) == 2
+        assert G.native().drain_errors() == 0
+    finally:
+        fbo.release()
+        meshes.release()
+        programs.release()
+
+
 def test_pose_revision_uploads_only_changed_transform_range(gl):
     if not G.native().has_attrib_pointer:
         pytest.skip("shared instance buffers unavailable")

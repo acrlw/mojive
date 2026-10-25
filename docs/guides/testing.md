@@ -604,6 +604,13 @@ Use `--cases idle orbit --timing-only` for repeated frame timing without the sep
 and cProfile phases. The report includes the UI scale, framebuffer dimensions, design digest,
 and ImGui command/vertex/index counts. Keep UI scale and design digest equal in comparisons;
 close other viewer instances before collecting performance evidence.
+Add `--shading wireframe` to compare the wire path with the default `shaded` path.
+OpenGL wire geometry uses a lazy mesh-owned corner stream; unchanged frames must not upload
+it again, and deformation must refresh it before drawing. `tests/test_wireframe_mesh.py`
+checks cache lifetime and failed-upload retry; the shading, pipeline and OpenGL core GPU tests
+cover edge appearance, full-surface picking, deformation and both instance-buffer strategies.
+Compare completed render cost separately from UI and submission, rather than interpreting
+fewer visible wire pixels as less GPU work.
 Add `--visible --vsync` for the presented window's display-paced cadence; keep these settings
 equal in the paired runs and separate those numbers from uncapped application throughput.
 Profiling uses isolated preferences and disables layout persistence in both modes.
@@ -639,6 +646,9 @@ drags and activity/Inspector tab clicks. It starts with three authored objects; 
 retains a model alongside them. `--undo-every 10` restores and re-deletes the last removed object
 every ten cycles, checking the identity after both operations. Input is queued inside ImGui without
 moving the OS cursor.
+Use `--shading wireframe` for the same sustained workload in wire mode. OpenGL checkpoints
+include the live wire-buffer count and bytes; these should return to the reference size after
+temporary entities are deleted, even while Undo history remains available.
 The reference follows twelve warmup cycles when `--warmup-cycles 12` is specified. Undo history
 is preserved throughout the workload, including checkpoints. Each checkpoint restores the same
 scene poses, selection, camera, hierarchy and Inspector geometry, then measures three contiguous

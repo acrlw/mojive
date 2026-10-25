@@ -21,6 +21,7 @@ from mojive import commands as cmd
 from mojive.adapters.base import NodeType
 from mojive.app.composition import build, build_workspace
 from mojive.config import LayoutConfig, ViewerConfig
+from mojive.render.backend import DebugView
 from mojive.scene.assets import resolve
 from mojive.types import MeshShape
 
@@ -125,6 +126,7 @@ def _run(args):
         "frames": args.frames,
         "empty_objects": args.empty_objects,
         "tool": args.tool,
+        "shading": args.shading,
         "scope": (
             "Uninstrumented wall/CPU samples, inclusive stage timers and cProfile run separately. "
             "Nested stage times must not be added. sync return is not display scanout latency. "
@@ -143,6 +145,7 @@ def _run(args):
         height=args.height,
         config=ViewerConfig(layout=LayoutConfig(persistence=False)),
     ) as viewer:
+        viewer.backend.set_debug_view(DebugView(args.shading))
         if args.empty_objects is not None:
             result = viewer.session.submit(cmd.NewScene())
             if not result.ok:
@@ -327,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tool", choices=("select", "move", "rotate", "scale"))
     parser.add_argument("--joint", help="Select a named joint and enable its rotation gizmo")
     parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
+    parser.add_argument("--shading", choices=("shaded", "wireframe"), default="shaded")
     parser.add_argument("--visible", action="store_true", help="Present the native window")
     parser.add_argument(
         "--vsync", action="store_true", help="Synchronize presentation to the display"

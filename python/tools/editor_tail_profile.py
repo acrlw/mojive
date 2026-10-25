@@ -371,6 +371,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asset", help="Keep this model alongside authored objects")
     parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
+    parser.add_argument("--shading", choices=("shaded", "wireframe"), default="shaded")
     parser.add_argument(
         "--stages", action="store_true", help="Separate diagnostic run with inclusive stage timing"
     )

@@ -122,7 +122,6 @@ class OpaquePass(BasePass):
                 name="wireframe",
                 vertex="wireframe.vert",
                 fragment="wireframe.frag",
-                geometry="wireframe.geom",
             )
         defines: dict[str, object] = {"DEBUG_VIEW": DEBUG_DEFINE.get(view, 0)}
         if use_shadow:
@@ -376,8 +375,8 @@ class OpaquePass(BasePass):
         gl.multisample = bool(ctx.flag(RenderFlag.MSAA))
 
         draw_buckets(ctx, ctx.scene.opaque_buckets)
-        # The wireframe geometry stage is not depth-invariant with the ID vertex
-        # program on every driver. Rebuild ID depth instead of leaving picking holes.
+        # Wireframe leaves face interiors untouched. Rebuild solid ID depth so
+        # picking still covers the complete surface rather than only its edges.
         ctx.opaque_depth_ready = not (
             overdraw or self._wireframe_on(ctx.debug_view, ctx.flag(RenderFlag.WIREFRAME, False))
         )
