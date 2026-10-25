@@ -443,6 +443,7 @@ class OpenGLBackend:
         self.stats.cpu_ms = self.timing.cpu_table()
         self.stats.gpu_ms = self.timing.gpu_table()
         self.stats.frame_cpu_ms = (time.perf_counter() - t0) * 1000.0
+        self.stats.notes["GPU sample interval"] = self.timing.gpu_sample_interval
         self._update_light_stats(scene)
         self.stats.notes["render products"] = plan.request.products.name
         self.stats.notes["render passes"] = ", ".join(plan.passes)

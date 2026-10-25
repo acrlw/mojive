@@ -24,13 +24,17 @@ class PassTimer:
         self.cpu_ms = 0.0
         self.gpu_ms = 0.0
         self._cpu_start = 0.0
-        self.pending: deque[int] = deque()
+        self.pending: deque[tuple[int, int]] = deque()
         self.free: list[int] = []
         self.active: int | None = None
 
 
 class FrameTiming:
-    def __init__(self, ctx: moderngl.Context, enabled: bool = True) -> None:
+    def __init__(
+        self, ctx: moderngl.Context, enabled: bool = True, *, gpu_sample_interval: int = 4
+    ) -> None:
+        if gpu_sample_interval < 1:
+            raise ValueError("GPU sample interval must be positive")
         self.ctx = ctx
         self._gl = G.native()
         self._timers: dict[str, PassTimer] = {}
@@ -38,6 +42,9 @@ class FrameTiming:
         self._frame_order: list[str] = []
         self._depth = 0
         self.enabled = enabled
+        self.gpu_sample_interval = gpu_sample_interval
+        self._frame_index = -1
+        self._sample_gpu = True
 
         self._u32 = (ctypes.c_uint * 1)()
         self._u64 = (ctypes.c_uint64 * 1)()
@@ -76,7 +83,11 @@ class FrameTiming:
 
         # Skip instrumentation while earlier samples are delayed. Rendering must
         # neither wait for a timestamp nor grow an unbounded query backlog.
-        if self.gpu_available and self._depth == 0 and len(t.pending) < _POOL_LIMIT:
+        # GPU queries perturb driver submission even when results are read later.
+        # Sample the graph periodically, and newly encountered passes immediately.
+        # CPU timing and rendering still run on every frame.
+        sample = self._sample_gpu or not (t.pending or t.free)
+        if self.gpu_available and sample and self._depth == 0 and len(t.pending) < _POOL_LIMIT:
             qid = t.free.pop() if t.free else self._gl.gen_query()
             self._gl.begin_time_query(qid)
             t.active = qid
@@ -87,7 +98,7 @@ class FrameTiming:
         self._depth = max(0, self._depth - 1)
         if t.active is not None:
             self._gl.end_time_query()
-            t.pending.append(t.active)
+            t.pending.append((self._frame_index, t.active))
             t.active = None
         self._gl.pop_debug_group()
         t.cpu_ms = (time.perf_counter() - t._cpu_start) * 1000.0
@@ -96,8 +107,8 @@ class FrameTiming:
         if not self.gpu_available:
             return
         for t in self._timers.values():
-            while len(t.pending) > LATENCY:
-                qid = t.pending[0]
+            while t.pending and self._frame_index - t.pending[0][0] >= LATENCY:
+                _, qid = t.pending[0]
                 if not self._gl.query_ready(qid, self._u32):
                     break
                 t.gpu_ms = self._gl.query_result_ns(qid, self._u64) / 1e6
@@ -111,6 +122,8 @@ class FrameTiming:
         """Start a new timing table without discarding delayed GPU samples."""
 
         self._frame_order = []
+        self._frame_index += 1
+        self._sample_gpu = self._frame_index % self.gpu_sample_interval == 0
 
     def cpu_table(self) -> dict[str, float]:
         return {n: self._timers[n].cpu_ms for n in self._frame_order}
@@ -125,7 +138,9 @@ class FrameTiming:
 
     def release(self) -> None:
         for t in self._timers.values():
-            for qid in (*t.pending, *t.free):
+            for _, qid in t.pending:
+                self._gl.delete_query(qid)
+            for qid in t.free:
                 self._gl.delete_query(qid)
             t.pending.clear()
             t.free.clear()

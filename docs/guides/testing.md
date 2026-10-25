@@ -695,6 +695,17 @@ Use a separate native-stack sample to identify driver or window-server waits; of
 does not establish either cause. Hidden-window rendering still enters the platform presentation
 path, so its swap latency does not establish visible display cadence. Do not omit swaps from a
 comparison run to present a rendering-only measurement as an end-to-end improvement.
+For ctypes-backed presentation, measure the native call separately from the Python wrapper
+before attributing a wait to GIL reacquisition. Pair CPU-stage evidence with GPU samples from
+the same originating frame: delayed query results cannot be assigned to their readback frame.
+A separate diagnostic drain before swap can distinguish prior GPU work from later platform
+waiting, but it changes overlap and is neither a production optimization nor baseline throughput.
+Measure query overhead separately, and retain the normal swap path in reported editing runs.
+OpenGL samples GPU pass timings every four rendered frames by default (new passes immediately),
+while CPU pass timings remain per-frame. Completed samples are read nonblockingly after at least
+two rendered frames, independently of sampling cadence. For a dedicated every-frame GPU probe,
+set `backend.timing.gpu_sample_interval = 1`; report that instrumentation separately from normal
+throughput. The render statistics notes expose the current interval.
 
 A full collection that reclaims zero objects can still recur: allocation and promotion counters
 trigger scans independently of the previous collection's yield. In CPython 3.11, the pending
