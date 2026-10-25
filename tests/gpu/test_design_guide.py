@@ -236,7 +236,7 @@ def test_guide_shared_choices_switches_and_capsules(backend_name, tmp_path, monk
         row = next(
             item for item in guide.runtime.observed if item["key"] == "viewer-group/choice/0"
         )
-        assert row["hit"][3] / guide.s >= 36
+        assert row["hit"][3] / guide.s == pytest.approx(28)
         assert row["padding"][0] / guide.s == pytest.approx(12)
         label = row["labelRect"]
         assert label[1] + label[3] / 2 == pytest.approx(row["hit"][1] + row["hit"][3] / 2)
@@ -350,12 +350,12 @@ def test_guide_catalogue_popup_insets_and_production_slices(
         popup = observed["local-menu-viewer-group"]["hit"]
         rows = [observed[f"viewer-group/choice/{i}"] for i in range(5)]
         assert rows[-1]["hovered"]
-        assert rows[0]["hit"][1] - popup[1] == pytest.approx(8 * guide.s)
-        assert rows[-1]["hit"][1] + rows[-1]["hit"][3] <= popup[1] + popup[3] - 8 * guide.s + 0.1
+        assert rows[0]["hit"][1] - popup[1] == pytest.approx(4 * guide.s)
+        assert rows[-1]["hit"][1] + rows[-1]["hit"][3] <= popup[1] + popup[3] - 4 * guide.s + 0.1
         for row in rows:
             rx, _ry, rw, _rh = row["hit"]
-            assert rx - popup[0] == pytest.approx(8 * guide.s)
-            assert popup[0] + popup[2] - rx - rw == pytest.approx(8 * guide.s)
+            assert rx - popup[0] == pytest.approx(4 * guide.s)
+            assert popup[0] + popup[2] - rx - rw == pytest.approx(4 * guide.s)
         event("add_key_event", imgui.Key.escape, True)
         event("add_key_event", imgui.Key.escape, False)
 

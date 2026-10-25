@@ -256,16 +256,24 @@ def test_color_popup_formats_clipboard_cancel_and_single_undo(runtime):
     study.click_hit("material-color")
     study.frame(2)
     assert "color-editor-copy" in study.ui.hits
+    picker_size = None
     for mode in (0, 1, 2):
         study.click_hit("color-editor-format-" + str(mode))
         study.frame(2)
         popup_window = imgui.get_current_context().open_popup_stack[0].window
         sv = study.ui.hits["color-editor-sv"]
         assert sv[2] == pytest.approx(sv[3])
-        # This viewport fits the compact requested picker without shrinking it
-        # or enlarging it at the expense of the channel row and footer.
-        picker_height = study.ui.component_style("color_editor").get("pickerHeight", 160)
-        assert sv[3] == pytest.approx(picker_height * study.s)
+        # The responsive picker fits both content width and viewport height,
+        # reserving the channel row and footer without jumping between formats.
+        picker = study.ui.hits["color-editor-picker"]
+        editor = study.menus.color_editor
+        assert picker[0] + picker[2] / 2 == pytest.approx(
+            editor.content_origin[0] + editor.content_width / 2
+        )
+        assert picker[2] <= editor.content_width
+        if picker_size is not None:
+            assert picker[2:] == pytest.approx(picker_size)
+        picker_size = picker[2:]
         assert popup_window.scroll_max.y == 0
         clip = popup_window.inner_clip_rect
         assert clip.min.x <= sv[0] < sv[0] + sv[2] <= clip.max.x + 1

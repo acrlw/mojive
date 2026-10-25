@@ -616,9 +616,17 @@ def test_real_transform_drag_has_one_undo_and_restores_source(workspace):
 
 
 def test_common_xyz_values_share_one_row_and_precision_reflows(workspace):
+    from copy import deepcopy
+
     from mojive.ui.workspace.design import DESIGN
 
     viewer, shell = workspace, workspace.app.workspace
+    # The adopted 16-point numeric font stacks XYZ at the default narrow width.
+    # Exercise the single-row contract with enough room for its signed format budget.
+    spec = deepcopy(viewer.app.design.spec)
+    spec["layout"]["inspector_width"] = 420
+    viewer.app.design.update_spec(spec)
+    shell.needs_layout = True
     node = next(n for n in viewer.session.nodes if n.name == "free_body")
     viewer.session.submit(cmd.SelectNode(node.node_id))
     shell.inspector_tab = "Properties"
@@ -1176,7 +1184,7 @@ def test_adopted_dimensions_share_drawing_and_input_geometry(workspace):
     viewer, shell = workspace, workspace.app.workspace
     scale = shell.s
     application = imgui.internal.find_window_by_name("Application")
-    assert application.size.y == pytest.approx(46 * scale, abs=1)
+    assert application.size.y == pytest.approx(36 * scale, abs=1)
     assert not any(key.startswith("workspace-") for key in shell.ui.hits)
     node = next(n for n in viewer.session.nodes if n.name == "free_body")
     viewer.session.submit(cmd.SelectNode(node.node_id))

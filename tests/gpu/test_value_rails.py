@@ -68,8 +68,11 @@ def test_disabled_handle_stays_opaque_and_preserves_rail_contrast(backend_name, 
             y = (25 + row * 32) * scale
             center = sample(220 * scale, y).astype(int)
             shaft = sample(170 * scale, y).astype(int)
+            unfilled = sample(270 * scale, y).astype(int)
             off_shaft = sample(220 * scale, y + 1.5 * scale).astype(int)
-            assert np.all(center > shaft)
+            # The pressed thumb and filled rail share the same solid accent.
+            assert np.all(center >= shaft)
+            assert np.all(center > unfilled)
             assert np.max(np.abs(center - off_shaft)) <= 1
         assert np.all(sample(220 * scale, 121 * scale) < sample(220 * scale, 25 * scale))
         output = Path("output/value-rail-disabled")

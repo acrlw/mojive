@@ -35,7 +35,7 @@ class WorkspaceDesign:
     label_width: float = 120
     label_minimum: float = 48
     label_gap: float = 12
-    application_height: float = 46
+    application_height: float = 36
     sidebar_width: float = 48
     scene_width: float = 252
     inspector_width: float = 320

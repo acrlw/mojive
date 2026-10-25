@@ -58,7 +58,7 @@
     "g3_capsule_optical": true
   },
   "layout": {
-    "application_height": 46,
+    "application_height": 36,
     "sidebar_width": 48,
     "scene_width": 252,
     "inspector_width": 320,
@@ -100,7 +100,7 @@
       "marginRight": 0
     },
     "titlebar": {
-      "height": 46
+      "height": 36
     },
     "camera_preview": {
       "rowGap": 0,

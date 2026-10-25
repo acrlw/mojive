@@ -84,6 +84,7 @@ examples when changing the corresponding factory defaults.
 |---|---|
 | Body / title / numeric size | `body_font_size=14`, `title_font_size=16`, `mono_font_size=16` |
 | Control height / panel insets | `control_height=28`; horizontal `12`, vertical `10` |
+| Application menu bar height | `application_height=36`; existing 28-point triggers centered vertically |
 | Ordinary control radius / menu and choice row height | `control_radius=4`; `28` |
 | Row gap / numeric gap | `row_gap=8`, `numeric_gap=4` |
 | Preferred label width / minimum / control gap | `120 / 48 / 12` |
@@ -185,6 +186,9 @@ their separate 10-point budget. Compact density changes row and shell budgets wi
 shrinking typography or flattening the larger separation between semantic groups.
 Menu rows retain 10-point horizontal content insets in addition to the shell's
 4-point inset. Removing an unused icon column must not remove the text's breathing room.
+The application menu bar uses a 36-point shell around its existing 28-point controls.
+Reduce surplus vertical clearance before shrinking captions or hit targets. Larger authored
+controls still expand the shell, and fractional scales reserve the complete native row.
 Ordinary framed controls use a 4-point radius at their existing 28-point height.
 Floating surfaces continue to derive their child corners from actual insets; these
 component defaults do not give every surface the same radius.
