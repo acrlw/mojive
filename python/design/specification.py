@@ -158,6 +158,13 @@ def validate_spec(value):
         or value["version"] != 1
     ):
         raise ValueError("需要第 1 版设计规范")
+    from mojive.design.themes import PRESETS
+
+    palette = value.get("palette", {})
+    if not isinstance(palette, dict) or any(
+        role not in PRESETS["dark"] or not _valid_color(ink) for role, ink in palette.items()
+    ):
+        raise ValueError("Invalid theme palette")
     validate_tokens(value.get("tokens"))
     if set(value["tokens"]) != set(DEFAULT["tokens"]):
         raise ValueError("保存的规范必须包含全部全局参数")

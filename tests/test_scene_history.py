@@ -571,3 +571,29 @@ def test_material_base_color_undo_restores_inheritance():
         np.testing.assert_array_equal(session.source.geom_rgba[0], (0, 0, 1, 1))
     finally:
         session.release()
+
+
+def test_operation_notice_identity_tracks_committed_edits_only():
+    scene = Scene()
+    box = scene.box()
+    session = Session(StaticSceneAdapter(scene))
+    try:
+        node = session.node_by_object_id(box.object_id)
+        session.submit(cmd.BeginEditTransaction("Translate transform"))
+        session.submit(cmd.SetPose(node.node_id, np.array([1.0, 0.0, 0.0]), np.eye(3)))
+        assert session.last_message_undo is None
+        session.submit(cmd.EndEditTransaction())
+        identity = session.last_message_undo
+        assert identity == (session.document_id, session.document_revision)
+        session.submit(cmd.Undo())
+        assert session.last_message_undo is None
+        assert session.document_revision != identity[1]
+        session.submit(cmd.Redo())
+        assert session.last_message_undo is None
+        session.report_message("Saved")
+        assert session.last_message_undo is None
+        session.submit(cmd.AddSceneObject(shape=MeshShape.BOX))
+        assert session.last_message_undo == (session.document_id, session.document_revision)
+        assert session.last_message_undo != identity
+    finally:
+        session.release()

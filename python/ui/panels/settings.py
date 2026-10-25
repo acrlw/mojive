@@ -150,6 +150,9 @@ class SettingsPanel(Panel):
         imgui.pop_style_var()
         imgui.end_child()
 
+    def _theme_settings(self, ctx: PanelContext) -> None:
+        """Let the workspace add its palette choice to the general property grid."""
+
     def _general(self, ctx: PanelContext) -> None:
         t = ctx.tr
         languages = tuple(Language)
@@ -157,6 +160,7 @@ class SettingsPanel(Panel):
         labels = [LANGUAGE_LABELS[language] for language in languages]
         if not self._begin_properties("settings_general"):
             return
+        self._theme_settings(ctx)
         self._property(t("Language"), control_part="select")
         changed, index = self._combo("##ui_language", languages.index(current), labels)
         if changed and ctx.set_language is not None:
@@ -277,6 +281,7 @@ class SettingsPanel(Panel):
     def _geometry_view(self, ctx):
         from mojive.ui.geometry_view import draw_geometry_view
 
+        imgui.text(ctx.tr("Geometry view"))
         draw_geometry_view(ctx.backend, ctx.tr, compact=True, theme=ctx.theme, combo=self._combo)
 
     def _mujoco_visuals(self, ctx: PanelContext) -> None:

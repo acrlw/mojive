@@ -437,6 +437,10 @@ def test_noncheckable_menu_omits_empty_slots_and_intrinsic_width_can_be_below_22
     assert all(bool(row["iconSlotRect"][2]) == bool(icon) for row in records)
     assert len({row["labelRect"][0] for row in records}) == 1
     assert state.menus.observed["Commands"]["rect"][2] < 224 * ui.s
+    inset = native_unit(10 * ui.s)
+    assert all(row["content"][0] - row["hit"][0] == inset for row in records)
+    if not icon:
+        assert all(row["labelRect"][0] - row["hit"][0] == inset for row in records)
 
 
 def test_checkable_menu_keeps_columns_when_all_options_are_off(compact_menu):

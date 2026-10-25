@@ -69,3 +69,32 @@ def test_choice_surface_alpha_and_selected_mark_remain_independent(
         assert observed["background"] in observed["colors"]
     if checked and not paint.disabled:
         assert observed["check"] in observed["colors"]
+
+
+@pytest.mark.parametrize("theme", ("dark", "light"))
+@pytest.mark.parametrize("held", (False, True))
+def test_range_handle_keeps_theme_accent_when_held(appearance, theme, held):
+    from mojive.design.native.geometry import Rect
+    from mojive.design.themes import select_theme
+    from mojive.ui.workspace.widgets import color
+
+    ui, runtime, _update, frame = appearance
+    select_theme(runtime, theme, persist=False)
+    observed = {}
+
+    def draw():
+        draw_list = imgui.get_window_draw_list()
+        first = len(draw_list.vtx_buffer)
+        with reference_paint(ItemPaint(hovered=True, active=held)):
+            ui.design.primitives.range(
+                "range-color", Rect(40 * ui.s, 50 * ui.s, 240 * ui.s, 28 * ui.s), 0.5, 0, 1
+            )
+        observed["colors"] = {
+            draw_list.vtx_buffer[i].col for i in range(first, len(draw_list.vtx_buffer))
+        }
+        observed["accent"] = color(ui.palette("primary_bright"))
+        observed["text"] = color(ui.palette("text"))
+
+    frame(draw)
+    assert observed["accent"] in observed["colors"]
+    assert observed["text"] not in observed["colors"]

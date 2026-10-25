@@ -809,7 +809,7 @@ def test_native_dialog_wrapped_body_uses_its_exact_font_and_ink(appearance, monk
         dialog_pending=dialog,
         dialog=None,
         style=lambda controls=False: menu_popup_style(ui, controls, part="dialog"),
-        shadow_and_record=lambda *args: None,
+        record_window=lambda *args: None,
         workspace=SimpleNamespace(
             app=SimpleNamespace(
                 localizer=SimpleNamespace(text=str),
@@ -1347,3 +1347,73 @@ def test_output_filter_measurement_preserves_count_beside_shared_icon(appearance
     assert row["label"] == count
     assert not row["clippedLabel"]
     assert row["textRect"][2] > 0
+
+
+@pytest.mark.parametrize("production", (False, True))
+def test_axis_badge_type_is_independent_of_numeric_type_and_hit_bounds(
+    appearance, monkeypatch, production
+):
+    ui, _runtime, update, frame = appearance
+    _runtime.authored_defaults = production
+    primitive = ui.design.primitives
+    aligned = primitive.aligned_text
+    painted = {}
+
+    def text(style, rect, value, **options):
+        painted[value] = style.get("fontSize"), rect.tuple()
+        return aligned(style, rect, value, **options)
+
+    monkeypatch.setattr(primitive, "aligned_text", text)
+
+    def draw():
+        for index, axis in enumerate("XYZRGBA"):
+            ui.input(axis, 20 * ui.s, (30 + index * 50) * ui.s, 130 * ui.s, 0.375, axis=axis)
+
+    update({"input_number": {"fontSize": 18}})
+    frame(draw)
+    before = dict(ui.hits)
+    assert all(painted[axis][0] == 12 for axis in "XYZRGBA")
+    assert painted["0.375"][0] == 18
+    update({"axis_input": {"axisWidth": 20, "badgeFontSize": 10}})
+    frame(draw)
+    assert all(painted[axis][0] == 10 for axis in "XYZRGBA")
+    assert painted["0.375"][0] == 18
+    assert ui.hits == before
+
+
+def test_button_hierarchy_keeps_primary_text_readable_through_feedback(appearance):
+    from mojive.design.themes import select_theme
+    from mojive.ui.interaction_paint import ItemPaint, reference_paint
+    from mojive.ui.theme import relative_luminance
+
+    ui, runtime, _update, frame = appearance
+    runtime.observe_components = True
+
+    def draw(state, **options):
+        with reference_paint(state):
+            ui.button("action", 40 * ui.s, 40 * ui.s, 160, 28, label="Apply", **options)
+        return ui.design.primitives.observed[-1]
+
+    for theme in ("light", "dark"):
+        select_theme(runtime, theme, persist=False)
+        colors = []
+        for state in (ItemPaint(), ItemPaint(hovered=True), ItemPaint(active=True)):
+            row = frame(lambda state=state: draw(state, active=True, solid=True))
+            colors.append(row["backgroundColor"])
+            low, high = sorted(
+                relative_luminance(tuple(v / 255 for v in row[key][:3]))
+                for key in ("backgroundColor", "textColor")
+            )
+            if theme == "light":
+                assert (high + 0.05) / (low + 0.05) >= 4.5
+        if theme == "dark":
+            assert colors == [
+                ui.palette(role) for role in ("primary", "primary_dim", "primary_bright")
+            ]
+        secondary = frame(lambda: draw(ItemPaint(), filled=True))
+        selected = frame(lambda: draw(ItemPaint(), active=True))
+        ghost = frame(lambda: draw(ItemPaint()))
+        assert secondary["textColor"] == ui.palette("text")
+        assert secondary["backgroundColor"] != colors[0]
+        assert selected["backgroundColor"][3] < secondary["backgroundColor"][3]
+        assert ghost["backgroundColor"] is None

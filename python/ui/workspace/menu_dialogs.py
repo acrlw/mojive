@@ -54,7 +54,10 @@ def dialogs(menu):
         imgui.pop_style_var(2)
         if not opened:
             return
-        menu.shadow_and_record("Dialog", ("Dialog",))
+        from mojive.ui.workspace.window_chrome import draw_floating_shadow
+
+        draw_floating_shadow(menu.ui)
+        menu.record_window("Dialog", ("Dialog",))
         s = scale
         origin = imgui.get_window_pos()
         frame = u.component_box("dialog", origin.x, origin.y, width, height, key="guide-dialog")
@@ -317,7 +320,7 @@ def dialogs(menu):
                 button.y,
                 *button_frame,
                 label="Done",
-                active=True,
+                filled=True,
                 width_limit=button_frame[0] * s,
             ):
                 imgui.close_current_popup()

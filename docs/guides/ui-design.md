@@ -82,7 +82,7 @@ examples when changing the corresponding factory defaults.
 
 | Role | Factory token/value |
 |---|---|
-| Body / title / numeric size | `body_font_size=14`, `title_font_size=16`, `mono_font_size=14` |
+| Body / title / numeric size | `body_font_size=14`, `title_font_size=16`, `mono_font_size=16` |
 | Control height / panel insets | `control_height=28`; horizontal `12`, vertical `10` |
 | Ordinary control radius / menu and choice row height | `control_radius=4`; `28` |
 | Row gap / numeric gap | `row_gap=8`, `numeric_gap=4` |
@@ -93,6 +93,20 @@ examples when changing the corresponding factory defaults.
 | Sage accent / amber warning | `#9CBF8D / #E8B04F` |
 
 Use semantic theme and component roles instead of copying these hex values into new callers.
+The named Dark and Light palettes live in `design/resources/themes.json`. Settings > General >
+Theme uses two labeled sun/moon segments. A separate titlebar action toggles the same
+persisted choice, without an extra confirmation or redundant hint. Both apply color roles
+through the workspace's design store and preserve geometry, fonts,
+and component overrides. Resolve colors before blending surfaces or semantic entity tints;
+blending a source dark color first produces an unrecognized ink in the light theme. Test both
+themes in independent workspaces, after restart, and with readable text/action contrast.
+Backend-neutral painters must receive the cached effective control theme, including nested
+viewport chrome. A themed overlay surface does not theme a rail or shortcut badge drawn
+inside it. Verify held gizmo feedback and status help as well as idle panels; keep world-axis
+and range-endpoint hues independent from the surrounding UI surface.
+Readout markers retain those hues but need at least 3:1 contrast on their UI surface. Resolve
+their opaque contrast-corrected ink once per color/surface pair; camera-facing world opacity
+must not wash out a label marker.
 Compact geometry-mode selectors retain readable captions at the normal body size. Add icons
 only when the combined content leaves a full text inset on both sides of each segment;
 otherwise omit the redundant icons before shrinking text or hiding the mode names.
@@ -118,7 +132,10 @@ resource names, source values, or copied diagnostics. Verify English/Chinese swi
 running workspace as well as the initial language; dictionary coverage alone misses callers
 that bypass translation.
 Frequent, recognizable actions can use icons with a short delayed tooltip. Unfamiliar actions
-still need an understandable label. Shortcut hints use the shared key badges.
+still need an understandable label. Do not repeat a fully visible caption in a hover hint;
+keep hints for hidden or clipped captions, shortcuts, unavailable-action reasons, and additional
+meaning. Tool names should stay brief. Shortcut hints use the shared 14-point monospace key
+badges; axis/channel labels retain their separate 12-point role.
 
 ## Spacing, alignment, and corners
 
@@ -143,6 +160,12 @@ About is a modal in the shared dialog shell, with localized features and the run
 revision. It must not open a legacy diagnostic dictionary panel. Left and right panel visibility
 controls name their side and restore the last active left panel.
 Settings has one rule below its window title; category headings use spacing.
+Related settings share one property table and its measured label column. Adding a theme
+selector must not create a separate full-width group: align its field with Language and
+Model updates, and keep its caption beside the control while the row has room.
+The same page shares its measured label column across independent sections, including
+Geometry display, Both appearance and Contact points. Keep section spacing and collapsing
+behavior, but align full-width fields on both sides rather than fitting each table in isolation.
 
 Adjacent nested rounded surfaces share one resolved corner budget:
 
@@ -160,9 +183,73 @@ Menus and choice lists use `8 / 4 / 4` at scale 1 for outer radius / inset / inn
 radius. Both use 28-point rows with 2-point within-group gaps; menu dividers retain
 their separate 10-point budget. Compact density changes row and shell budgets without
 shrinking typography or flattening the larger separation between semantic groups.
+Menu rows retain 10-point horizontal content insets in addition to the shell's
+4-point inset. Removing an unused icon column must not remove the text's breathing room.
 Ordinary framed controls use a 4-point radius at their existing 28-point height.
 Floating surfaces continue to derive their child corners from actual insets; these
 component defaults do not give every surface the same radius.
+An operation notice's Undo action pairs its icon with its caption. Its painted trailing
+inset matches the vertical button clearance, and the child radius derives from that actual
+inset. The notice text retains its own leading padding. Routine notices use an 8-point
+outer corner and 4-point vertical/action inset; the embedded action derives a 4-point
+corner. Reserve the 28-point action height even for messages without an action, keeping
+the shell 36 points high before and after Undo. The icon-to-caption gap is 8 points;
+the caption-to-action gap is 16 points, separating feedback from the available command.
+Keep this shell for both committed and pending operation messages; larger authored fonts
+or controls expand both states equally.
+On light surfaces, filled secondary actions use a subtle tonal step from their host. Keep
+the icon and caption readable, with stronger feedback on hover and press; a darker fill must
+not make an optional action compete with the message or the primary action. Derive the fill
+from semantic field and text inks. Do not impose a text-contrast threshold on the difference
+between two background surfaces, darken every input, or change established dark-theme colors.
+Use solid accent for the committing action in an action group (Apply, Save, or color Done),
+tonal neutral fill for secondary actions (Undo, Cancel, or dialog dismissal), and unfilled
+buttons for lightweight utilities. Selected navigation and filter states retain their own
+tinted treatment; they are not a substitute for a committing action. Primary hover feedback
+must preserve caption contrast rather than washing out its fill. Native extension buttons
+and workspace painters share the secondary palette. Inspect real popup footers, pending-edit
+actions, panel actions and toolbar buttons in idle, hover, held and disabled states.
+
+Plain help and status tooltips resolve the active control radius rather than an
+import-time geometry constant. They own a separate surface, so a caller's nested
+corner constraint must not leak into them. Shortcut hints retain the corner budget
+derived from their keycap and inset. Form and color popups use an 8-point inset;
+modals use 12 points, deriving their outer corners from the controls inside.
+Floating menus, choices, color editors and modals have one neutral native border. Their
+shadow has a broad, continuous Gaussian-like falloff outside that border, slightly heavier
+below the surface. Reuse local native gradient meshes when moving or repainting a window;
+do not rebuild blur textures every frame. Avoid narrow linear fringes that read as another
+border, stepped outline rings, or an accent halo around an entire popup. Each popup owner
+paints its shadow once; the renderer needs no extra blur pass.
+
+Slider thumbs retain their solid accent identity across idle, hover and held states.
+Use restrained accent and track changes for feedback; do not switch the thumb to text ink,
+white, or an outlined control on press. Keep it above the track and min/max ticks.
+Inspect idle, hover, held, endpoint overlap and release in both themes.
+
+Verify the resolved startup specification as well as isolated factory defaults.
+Saved specifications and live drafts override the packaged preset; an earlier full
+snapshot can retain old geometry or literal dark-theme text colors even when the factory
+comparison is correct. Settings navigation uses semantic text/accent inks in both themes.
+When adopting a geometry revision into an existing profile, back it up and update
+only the agreed fields, preserving fonts, navigation geometry and other authored
+values. Do not silently reset a customized profile on application startup.
+
+Numeric and hexadecimal input share the numeric typography role. A color editor's
+smaller caption font must not shrink the editable color code. Fit the SV square and
+hue/alpha bars to the content width, bounded by the available viewport height;
+only an explicitly authored picker height constrains that default. Align a footer
+hint to the input text inset, while footer buttons align to the control frames.
+Measure native font quantization before deriving field padding so fractional scale
+does not introduce a scrollbar and change popup width on alternating frames.
+Axis/channel badges have their own `badgeFontSize=12` role and a 20-point strip;
+they do not inherit the 16-point numeric role. Keep the label and value centered on the
+same row, leaving visible space on both sides of the badge glyph. Computed typography
+must survive the production authored-default resolver. Verify emitted native font sizes,
+not only the specification or isolated specimen; changing font size alone must not
+change the badge reset target.
+The adopted 12/14/16 type steps are a project convention, not a requirement that
+every font or scaled raster size be even. Judge visible glyph size and baseline together.
 
 Where the navigation rail follows a rounded native window edge, its outer radius uses native
 window points, independently of application zoom. Derive its inner corner from the actual
@@ -218,18 +305,24 @@ gap in both measurement and painting; inline summary captions have no vertical c
 
 ## Stable fields and component behavior
 
+Settings option groups such as Theme and Geometry view occupy the normal label/control
+row when width permits. Use the same property-row owner, control height and centerline
+as selects and numeric fields; reflow only when the measured content cannot fit.
+
 | Surface | Required behavior |
 |---|---|
 | Property rows | One label/control grid; vertically aligned captions; labels shrink or move above controls according to measured budgets. Boolean rows fit their actual caption and switch, independently of XYZ field minima. |
 | XYZ and color fields | Joined axis badge and field form one surface. Use stable format budgets and equal columns. Use a complete vector/channel row or a complete stack, not an accidental two-plus-one layout. |
 | Numeric text | Value changes do not choose another layout. Reduce display precision or use complete scientific notation within the allocated field; viewing a value never rounds stored data. Editing retains full precision and native caret/scrolling. Units belong to the shared field presentation. |
 | Status metrics | Stable text boxes, digit cells, decimal anchors, and unit ends. Keep label/value/unit gaps and divider clearances independently adjustable. Compact large steps/time values, expose the exact value on hover, and copy the exact value on right-click. |
+| Projection changes | Menu and view-cube actions share the camera's eased projection transition and target-scale matching. Reversing an unfinished transition starts at its current blend. Programmatic camera restoration can remain immediate. |
 | Switches | Right-align in property rows, with shared track/thumb/hit geometry. Hover and press are distinguishable; the light thumb stays readable against the accent track. |
 | Search | One production painter resolves icon size, capsule geometry, text padding and the reserved trailing clear slot for every panel. Native text input excludes the icon hit regions. Paint one inset keyboard focus contour; suppress the native input outline when the compound field owns it. Clearing a filter does not delete the underlying data. |
 | Exclusive choices | Use shared segmented controls or choices; preserve the selected value and keyboard behavior during reflow. |
 | Menus, More, and choices | Measure each popup's own longest title, shortcut, and optional columns. Check, icon, title, shortcut, and submenu arrow have distinct aligned slots. Omit a check column only if the entire menu has no checkable entries; selection changes must not shift columns. |
 | Menu activation | Click activates a top-menu group; hover then switches menus. Escape, outside click, or completed action ends that mode. Ordinary inactive hover does not open menus. |
 | Tooltips and notices | Use shared surfaces and typography. Keep complete corners and centered content within the clip. File-action buttons align right when wrapped below text. Text-only captions beside action buttons need their own text inset in addition to the shell-to-button clearance. Avoid duplicate status messages or competing tooltip implementations. |
+| Operation Undo | Bind the notice action to the exact committed history revision or latest pending-operation checkpoint. Retain earlier drafts when reverting one pending operation; invalidate the token on a later write, clear, apply or incompatible document. Mixed direct/draft writes must not expose a partial undo. Preserve the undo identity when a command interceptor forwards an already published result. Recheck eligibility on click. Translate built-in command and transaction captions at presentation, including Create, Apply and Undo, while preserving user names. |
 | Gizmo value feedback | Transform drags, joint precision rails, and range endpoints share `workspace/gizmo_readout.py`: the numeric field’s resolved font, height, padding and radius on the floating surface. Center text by cap height, retain semantic axis dots, and scale viewport-edge clearance with the UI. Precision rails paint the track first, full-height limit ticks centered across it second, and the round thumb last. Inset the painted track by its cap radius so it cannot protrude past the ticks; preserve full-range hit and value mapping. During a gesture, a shorter tick marks the starting value on the rail and a distinct darker segment spans the start and current values in either direction. The change segment has flat caps at the reference boundary so no rounded bulge protrudes beneath the origin tick. The thumb covers the origin tick when they coincide. |
 | Floating forms | Reuse `ui/workspace/floating.py` and the shared popup geometry. Closing a chooser preserves the selected joint; double-click focus can dismiss the chooser while retaining the gizmo. |
 | Inspector | Properties owns geometry shape/dimensions; Physics owns contact/mass; Material owns appearance. A presentation refactor must not hide or duplicate these capabilities. |

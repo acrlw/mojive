@@ -211,7 +211,7 @@ def draw_tabs(workspace, x, y, width):
             ui.draw.add_line(
                 (rect.x + 8 * s, rect.bottom),
                 (rect.right - 8 * s, rect.bottom),
-                imgui.get_color_u32(tuple(c / 255 for c in ACCENT)),
+                imgui.get_color_u32(tuple(c / 255 for c in ui.ink(ACCENT))),
                 2 * s,
             )
     return box.outer.bottom + 12 * s

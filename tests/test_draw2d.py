@@ -154,7 +154,11 @@ def test_value_rail_marks_the_gesture_delta_in_both_directions(scale, fraction, 
     )
     assert (origin[0][1] + origin[1][1]) * 0.5 == left[1]
     assert origin[1][1] - origin[0][1] + origin[3] < 2 * radius
-    assert draw.calls[-1][0] == "circle_filled"
+    name, (center, thumb_radius, ink) = draw.calls[-1]
+    assert name == "circle_filled"
+    assert center == (position, left[1])
+    assert thumb_radius == pytest.approx(radius)
+    assert ink == THEME.primary_bright
 
 
 class RecordingDraw2D:
@@ -884,3 +888,19 @@ def test_retained_native_mesh_rejects_invalid_geometry(points, indices, opaque):
 
     with pytest.raises(ValueError):
         imgui.DrawMesh(points, indices, opaque)
+
+
+def test_floating_shadow_reuses_native_geometry_when_moved(native_draw):
+    from mojive.ui.floating_shadow import _shadow_meshes, draw_surface_shadow
+
+    _shadow_meshes.cache_clear()
+    try:
+        for x in range(100):
+            native_draw._dl._reset_for_new_frame()
+            draw_surface_shadow(native_draw._dl, (x, 40), (280, 400), 10, 1.25, 0x1C000000)
+        cache = _shadow_meshes.cache_info()
+        assert (cache.misses, cache.hits, cache.currsize) == (1, 99, 1)
+        # All layers share one ordinary UI draw command; no extra texture/pass.
+        assert len(native_draw._dl.cmd_buffer) == 1
+    finally:
+        _shadow_meshes.cache_clear()

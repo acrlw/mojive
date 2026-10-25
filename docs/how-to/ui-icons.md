@@ -9,7 +9,7 @@ Mojive draws compact UI icons from filled vector contours. Treat an icon family 
 system: its members share a canvas, proportions, weight, cap style, alignment, and scaling rules.
 Changing one contour in isolation usually produces a visible mismatch at Output-row sizes.
 
-The adopted workspace family contains 124 identifiers for 107 semantic masters on a
+The adopted workspace family contains 126 identifiers for 109 semantic masters on a
 24-unit grid with a 1.5-unit round stroke. General and domain redraws live in
 `examples/ui_design/native/svg/mojive/`; retained Lucide geometry keeps its pinned source.
 `examples/ui_design/native/svg/sources.json` records source, license and stroke policy.
@@ -47,6 +47,9 @@ authored placement than a rounded square or octagon to balance its bottom-heavy 
 Compare Info, Warning and Error side by side at Output sizes and enlarged sizes; equal bounding
 boxes do not imply equal apparent size or optical center. `icon-severity.png` in the production
 reference gallery keeps these three masters in one row for that review.
+
+Theme actions use an outlined sun and crescent on the same grid. The titlebar shows the
+destination theme; Settings shows both labeled choices with the current one selected.
 
 The titlebar's left/right panel controls share a mirrored panel outline; their interior separator
 identifies the side. Scene navigation retains its object-on-stage symbol.

@@ -1,8 +1,11 @@
 """Shared numeric feedback for transform drags and joint range endpoints."""
 
+from functools import lru_cache
+
 from mojive.design.native.geometry import part_scope
 from mojive.ui.design_palette import rgba8
 from mojive.ui.text_layout import text_line_y
+from mojive.ui.theme import relative_luminance
 from mojive.ui.workspace.design import DESIGN
 from mojive.ui.workspace.floating import floating_number
 
@@ -10,6 +13,30 @@ from mojive.ui.workspace.floating import floating_number
 def readout_ink(role, ui=None):
     color = ui.ink(rgba8(role)) if ui is not None else rgba8(role)
     return tuple(channel / 255 for channel in color)
+
+
+@lru_cache(maxsize=128)
+def readout_marker_ink(color, surface):
+    """Keep world-space marker hues legible on a themed, opaque readout."""
+    background = relative_luminance(surface)
+
+    def contrast(candidate):
+        foreground = relative_luminance(candidate)
+        return (max(background, foreground) + 0.05) / (min(background, foreground) + 0.05)
+
+    opaque = (*color[:3], 1.0)
+    if contrast(opaque) >= 3:
+        return opaque
+    target = 0.0 if background > 0.5 else 1.0
+    lo, hi = 0.0, 1.0
+    for _ in range(12):
+        amount = (lo + hi) / 2
+        candidate = (*(v + (target - v) * amount for v in color[:3]), 1.0)
+        if contrast(candidate) >= 3:
+            hi = amount
+        else:
+            lo = amount
+    return (*(v + (target - v) * hi for v in color[:3]), 1.0)
 
 
 @part_scope("input_number", inherit=False)
@@ -73,6 +100,10 @@ def draw_gizmo_readout(
         draw_gizmo_surface(draw, (x, y, x + width, y + height), scale, ui=ui)
         center_y = y + height / 2
         if semantic_color is not None:
-            draw.circle_filled((x + padding[0] + dot_radius, center_y), dot_radius, semantic_color)
+            draw.circle_filled(
+                (x + padding[0] + dot_radius, center_y),
+                dot_radius,
+                readout_marker_ink(tuple(semantic_color), ink("floating")),
+            )
         draw.text((x + padding[0] + prefix, text_line_y(draw, center_y)), ink("text"), label)
         return (x, y, x + width, y + height)

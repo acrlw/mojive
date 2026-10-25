@@ -155,6 +155,13 @@ def _content_window(fragment):
         for window in imgui.get_current_context().windows
         if window.active and fragment in window.name
     ]
+    matches = [
+        window
+        for window in matches
+        if not any(
+            window.name.startswith(parent.name + "/") for parent in matches if parent is not window
+        )
+    ]
     assert len(matches) == 1, (fragment, [window.name for window in matches])
     return matches[0]
 

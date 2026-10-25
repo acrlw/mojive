@@ -11,7 +11,7 @@ from mojive.ui.workspace.corner_geometry import nested_corners
 from mojive.ui.workspace.design import BODY_SIZE
 from mojive.ui.workspace.menu_geometry import native_edges, native_unit
 from mojive.ui.workspace.panel_geometry import corner_inset
-from mojive.ui.workspace.window_chrome import surface_ink
+from mojive.ui.workspace.window_chrome import draw_floating_shadow, surface_ink
 
 
 @dataclass(frozen=True)
@@ -125,14 +125,18 @@ def form_popup(ui, key, layout):
         imgui.push_style_color(
             imgui.Col_.popup_bg, tuple(v / 255 for v in surface_ink(ui, "form_popup", "popup"))
         )
+        imgui.push_style_color(imgui.Col_.border, tuple(v / 255 for v in ui.palette("border")))
+        imgui.push_style_var(imgui.StyleVar_.popup_border_size, ui.s)
         imgui.push_font(ui.resolve_font(style), style.get("fontSize", BODY_SIZE) * ui.s)
         opened = imgui.begin_popup(key)
         try:
+            if opened:
+                draw_floating_shadow(ui)
             with ui.corner_scope(layout.inner_radius, ("input_number", "axis_input")):
                 yield opened
         finally:
             if opened:
                 imgui.end_popup()
             imgui.pop_font()
-            imgui.pop_style_color()
-            imgui.pop_style_var(4)
+            imgui.pop_style_color(2)
+            imgui.pop_style_var(5)

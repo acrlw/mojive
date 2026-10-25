@@ -7,8 +7,24 @@ from imgui_bundle import imgui
 
 from mojive.design.native.geometry import part_scope
 from mojive.ui.design_palette import rgba8
+from mojive.ui.floating_shadow import draw_surface_shadow
 from mojive.ui.workspace.menu_geometry import native_epsilon
 from mojive.ui.workspace.panel_geometry import floating_panel_geometry
+
+
+def draw_floating_shadow(ui):
+    """Diffuse falloff outside the native fill and its single neutral border."""
+    window = imgui.internal.get_current_window()
+    ink = ui.palette("shadow")
+    color = imgui.get_color_u32(tuple(channel / 255 for channel in ink))
+    draw_surface_shadow(
+        imgui.get_window_draw_list(),
+        window.pos,
+        window.size,
+        window.window_rounding,
+        ui.s,
+        color,
+    )
 
 
 def native_child_extent(origin, extent):

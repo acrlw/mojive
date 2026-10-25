@@ -142,9 +142,9 @@ def test_catalogue_action_groups_paint_the_production_corner_budget(appearance, 
     painted = []
     original = ui.rect
 
-    def rectangle(x, y, w, h, ink, r=0):
+    def rectangle(x, y, w, h, ink, r=0, **options):
         painted.append(((x, y, w, h), r * ui.s))
-        return original(x, y, w, h, ink, r)
+        return original(x, y, w, h, ink, r, **options)
 
     monkeypatch.setattr(ui, "rect", rectangle)
     owner = SimpleNamespace(values={})

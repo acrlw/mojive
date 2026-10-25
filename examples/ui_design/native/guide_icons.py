@@ -14,6 +14,8 @@ from mojive.ui.workspace.widget_icons import (
 )
 
 LABELS = {
+    "sun": "Light theme",
+    "moon": "Dark theme",
     "geometry-default": "Default",
     "general": "General",
     "mujoco-visuals": "Content visualization",

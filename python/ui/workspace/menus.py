@@ -17,7 +17,6 @@ from mojive.ui.workspace.design import BODY_SIZE, DESIGN
 from mojive.ui.workspace.menu_catalog import TOP_MENUS
 from mojive.ui.workspace.menu_geometry import native_unit, popup_padding
 from mojive.ui.workspace.menu_item import Item as Item
-from mojive.ui.workspace.widgets import color
 
 _POPUP_CACHE_LIMIT = 128
 
@@ -289,21 +288,9 @@ class Menus:
                 self.content(name, (name,))
                 imgui.end_popup()
 
-    def shadow_and_record(self, name, path):
+    def record_window(self, name, path):
         p, size = imgui.get_window_pos(), imgui.get_window_size()
         radius = imgui.internal.get_current_window().window_rounding / self.s
-        dl = imgui.get_window_draw_list()
-        dl.push_clip_rect_full_screen()
-        for outset, alpha in ((7, 4), (5, 8), (3, 14), (1.5, 20)):
-            d = outset * self.s
-            dl.add_rect(
-                (p.x - d, p.y - d + self.s),
-                (p.x + size.x + d, p.y + size.y + d + self.s),
-                color((0, 0, 0, alpha)),
-                rounding=(radius + outset) * self.s,
-                thickness=2 * self.s,
-            )
-        dl.pop_clip_rect()
         record = {
             "name": name,
             "path": list(path),
@@ -319,8 +306,10 @@ class Menus:
         from mojive.design.native.geometry import Rect
         from mojive.ui.workspace.menu_rows import menu_columns
         from mojive.ui.workspace.popup_style import popup_box
+        from mojive.ui.workspace.window_chrome import draw_floating_shadow
 
-        record = self.shadow_and_record(name, path)
+        draw_floating_shadow(self.ui)
+        record = self.record_window(name, path)
         ui = self.ui
         rows = self.items(name)
         position, size = imgui.get_window_pos(), imgui.get_window_size()

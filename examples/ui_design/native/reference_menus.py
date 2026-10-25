@@ -15,7 +15,7 @@ from mojive.ui.workspace.color_editor import ColorEditor
 from mojive.ui.workspace.menu_catalog import TOP_MENUS
 from mojive.ui.workspace.menu_item import Item
 from mojive.ui.workspace.menus import Menus as WorkspaceMenus
-from mojive.ui.workspace.widgets import DIM, MUTED, TEXT, color
+from mojive.ui.workspace.widgets import DIM, MUTED, TEXT
 from mojive.ui.workspace.window_chrome import surface_ink
 
 DISABLED = (126, 136, 149, 255)
@@ -429,29 +429,16 @@ class Menus:
                 self.content(name, (name,))
                 imgui.end_popup()
 
+    def record_window(self, name, path):
+        from mojive.ui.workspace.menus import Menus as WorkspaceMenus
+
+        return WorkspaceMenus.record_window(self, name, path)
+
     def shadow_and_record(self, name, path):
-        p, size = imgui.get_window_pos(), imgui.get_window_size()
-        dl = imgui.get_window_draw_list()
-        dl.push_clip_rect_full_screen()
-        for outset, alpha in ((7, 4), (5, 8), (3, 14), (1.5, 20)):
-            d = outset * self.s
-            dl.add_rect(
-                (p.x - d, p.y - d + self.s),
-                (p.x + size.x + d, p.y + size.y + d + self.s),
-                color((0, 0, 0, alpha)),
-                rounding=(8 + outset) * self.s,
-                thickness=2 * self.s,
-            )
-        dl.pop_clip_rect()
-        record = {
-            "name": name,
-            "path": list(path),
-            "rect": [p.x, p.y, size.x, size.y],
-            "scroll_max": imgui.get_scroll_max_y(),
-            "rows": [],
-        }
-        self.observed["/".join(path)] = record
-        return record
+        from mojive.ui.workspace.window_chrome import draw_floating_shadow
+
+        draw_floating_shadow(self.ui)
+        return self.record_window(name, path)
 
     def content(self, name, path):
         from mojive.ui.workspace.menus import Menus as WorkspaceMenus

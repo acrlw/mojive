@@ -225,7 +225,10 @@ def test_shortcut_tag_actual_first_window_and_painted_badge_are_concentric(
 
 def test_wrapped_shortcut_help_uses_a_compact_row_and_independent_corners(tooltip_frame):
     state, ui = tooltip_frame, tooltip_frame.ui
-    action = "Rotate the selection around its local body frame while preserving the origin"
+    action = (
+        "Rotate the selection around its local body frame while preserving the origin. "
+        "Hold the configured shortcut throughout the gesture."
+    )
 
     def paint():
         with ui.corner_scope(0, "badge"):
@@ -246,11 +249,20 @@ def test_wrapped_shortcut_help_uses_a_compact_row_and_independent_corners(toolti
     assert (w, h) == tuple(value + 2 * inset for value in record["contentSize"])
 
 
-def test_plain_help_keeps_its_own_radius_without_a_keycap(tooltip_frame):
+@pytest.mark.parametrize("radius", (4, 7))
+def test_plain_help_resolves_current_radius_independently_of_its_caller(tooltip_frame, radius):
     state, ui = tooltip_frame, tooltip_frame.ui
-    state.frame(lambda: ui.tooltip("Rotate the selection"))
+    spec = deepcopy(state.runtime.spec)
+    spec["tokens"]["control_radius"] = radius
+    state.runtime.update_spec(spec)
+
+    def paint():
+        with ui.corner_scope(0, "button"):
+            ui.tooltip("Rotate the selection")
+
+    state.frame(paint)
     record = next(row for row in state.runtime.observed if row.get("kind") == "tooltip")
-    assert record["nativeRadius"] == pytest.approx(6 * ui.s)
+    assert record["nativeRadius"] == pytest.approx(radius * ui.s)
     assert record["badgeRect"] is None and record["badgeRadius"] is None
     assert not state.badges
 

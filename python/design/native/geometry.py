@@ -274,6 +274,9 @@ class NativePartStyle:
         style.__dict__ = self.__dict__.copy()
         style.values, style.origins = dict(self.values), dict(self.origins)
         style.edge_sources = dict(self.edge_sources)
+        # Computed control overrides are resolved values even in production's
+        # authored-default mode; falling back would discard their measured font/slot.
+        style._explicit_fields = self._explicit_fields | overrides.keys()
         for field, (value, origin) in overrides.items():
             style.values[field], style.origins[field] = value, origin
         if len(self._variants) >= 128:

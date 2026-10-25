@@ -138,6 +138,8 @@ class Session(_Editing, _Playback, _Source):
         self._last_message_level = "info"
         self._last_message_duration: float | None = 5.0
         self._last_message_copy_text: str | None = None
+        self._last_message_undo: tuple[str, int] | None = None
+        self._last_message_pending_undo: tuple[str, int] | None = None
         self._history: EditHistory[_DocumentState] = EditHistory(
             record_limit=history_record_limit, byte_limit=history_byte_limit
         )
@@ -528,6 +530,16 @@ class Session(_Editing, _Playback, _Source):
     def last_message_copy_text(self) -> str | None:
         return self._last_message_copy_text
 
+    @property
+    def last_message_undo(self) -> tuple[str, int] | None:
+        """Identify the committed edit associated with the latest message, if any."""
+        return self._last_message_undo
+
+    @property
+    def last_message_pending_undo(self) -> tuple[str, int] | None:
+        """Identify a pending edit checkpoint owned by the latest operation notice."""
+        return self._last_message_pending_undo
+
     def report_message(
         self,
         message: str,
@@ -554,14 +566,22 @@ class Session(_Editing, _Playback, _Source):
         self._last_message_level = str(level)
         self._last_message_duration = duration
         self._last_message_copy_text = copy_text
+        self._last_message_undo = None
+        self._last_message_pending_undo = None
 
-    def _record_result(self, result: CommandResult) -> CommandResult:
+    def _record_result(
+        self, result: CommandResult, *, undo=False, pending_undo=None
+    ) -> CommandResult:
         if result.message:
             self._publish_message(
                 result.message,
                 level="info" if result.ok else "error",
                 duration=5.0 if result.ok else 10.0,
             )
+            if result.ok:
+                self._last_message_pending_undo = pending_undo
+            if undo and result.ok and self.can_undo and not self.editing:
+                self._last_message_undo = (self.document_id, self.document_revision)
         return result
 
     @property

@@ -140,6 +140,7 @@ def _menu_popup_style(ui, controls, *, part):
     outer_radius = popup_radius(ui, part, resolved_padding)
     inner_radius = max(0, outer_radius - resolved_padding[0])
     imgui.push_style_var(imgui.StyleVar_.popup_rounding, outer_radius)
+    imgui.push_style_var(imgui.StyleVar_.popup_border_size, scale)
     imgui.push_style_var(
         imgui.StyleVar_.menu_item_rounding,
         inner_radius if part in ("menu", "select_popup") else row_radius(item, scale),
@@ -151,10 +152,10 @@ def _menu_popup_style(ui, controls, *, part):
     imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, DESIGN.scrollbar_padding * scale)
     colors = [
         (imgui.Col_.popup_bg, surface_ink(ui, part, "popup")),
-        (imgui.Col_.border, (76, 86, 99, 150)),
-        (imgui.Col_.header, rgba8("primary", 24)),
-        (imgui.Col_.header_hovered, (255, 255, 255, 13)),
-        (imgui.Col_.header_active, (255, 255, 255, 18)),
+        (imgui.Col_.border, ui.palette("border")),
+        (imgui.Col_.header, ui.ink(rgba8("primary", 24))),
+        (imgui.Col_.header_hovered, ui.palette("hover_overlay")),
+        (imgui.Col_.header_active, ui.ink(rgba8("primary", 40))),
     ]
     for key, value in colors:
         imgui.push_style_color(key, imgui.ImVec4(*(v / 255 for v in value)))
@@ -174,12 +175,15 @@ def _menu_popup_style(ui, controls, *, part):
         finally:
             imgui.pop_font()
             imgui.pop_style_color(len(colors))
-            imgui.pop_style_var(len(values) + 4)
+            imgui.pop_style_var(len(values) + 5)
 
 
 @contextmanager
 def menu_popup_content(ui, key, *, part="menu"):
     """Budget content after Begin; the caller closes the native popup afterward."""
+    from mojive.ui.workspace.window_chrome import draw_floating_shadow
+
+    draw_floating_shadow(ui)
     scale = ui.s
     pos, size = imgui.get_window_pos(), imgui.get_window_size()
     style = ui.component_style(part)

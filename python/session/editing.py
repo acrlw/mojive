@@ -91,8 +91,16 @@ class _Editing:
             if self.editing:
                 self._edit_error = self._edit_error or reason
             return self._record_result(CommandResult.bad(reason))
+        message_revision = self.message_revision
         intercepted = intercept_model_edit(self, command)
         if intercepted is not None:
+            # A deferred transaction may finish a direct scene write through submit().
+            # Preserve the inner result's exact undo identity instead of republishing it.
+            if (
+                self.message_revision != message_revision
+                and self.last_message == intercepted.message
+            ):
+                return intercepted
             return self._record_result(intercepted)
         driver = self._simulation_driver
         # Camera, selection and geometry views only change Session-owned state. Other
@@ -119,8 +127,9 @@ class _Editing:
             result = self._begin_edit(command.label)
             return self._record_result(result)
         if isinstance(command, cmd.EndEditTransaction):
+            revision = self.document_revision
             result = self._end_edit()
-            return self._record_result(result)
+            return self._record_result(result, undo=self.document_revision != revision)
         if isinstance(command, cmd.CancelEditTransaction):
             return self._record_result(self._cancel_edit())
         if isinstance(command, cmd.Undo):
@@ -137,6 +146,7 @@ class _Editing:
             self._edit_error = self._edit_error or message
             return self._record_result(CommandResult.bad(message))
 
+        revision = self.document_revision
         scene_edit = isinstance(command, _SCENE_EDIT_COMMANDS)
         before = (
             self._capture_document_state()
@@ -192,7 +202,7 @@ class _Editing:
         ):
             preview._adapter_revision = self._adapter.structure_revision
             preview.refresh_preview()
-        return self._record_result(result)
+        return self._record_result(result, undo=scene_edit and self.document_revision != revision)
 
     def _capture_document_state(self) -> _DocumentState:
         state = self._adapter.capture_edit_state()

@@ -108,13 +108,15 @@ def test_default_status_hint_has_scaled_padding_and_separate_action_rows(tooltip
     assert rows[2].cursor[1] - rows[1].cursor[1] == rows[1].size + 6 * scale
 
 
-def test_authored_status_hint_uses_its_own_metrics_style(tooltip_frame, tmp_path):
+@pytest.mark.parametrize("radius", (4, 7))
+def test_authored_status_hint_uses_its_own_metrics_style(tooltip_frame, tmp_path, radius):
     scale, rows, frame = tooltip_frame
     ui = UI(SimpleNamespace(style_scale=scale, font_report=SimpleNamespace(cjk_path=None)))
     ui.prepare_fonts("system", ("portable",))
     runtime = DesignRuntime(SpecificationStore(tmp_path / "design.json"))
     ui.design = DesignPresentation(ui, runtime)
     spec = deepcopy(runtime.spec)
+    spec["tokens"]["control_radius"] = radius
     spec["parts"].update(
         {
             "statusbar": {"fontSize": 32, "fontFamily": "system", "textColor": "#ff0000"},
@@ -134,7 +136,7 @@ def test_authored_status_hint_uses_its_own_metrics_style(tooltip_frame, tmp_path
 
     def paint():
         before = _state()
-        with part_scope("statusbar"):
+        with part_scope("statusbar"), ui.corner_scope(0, "button"):
             tooltip_module.status_tooltip(ui, "Physics 100.125 Hz", "Right-click to copy")
         assert _state() == before
 
@@ -143,6 +145,7 @@ def test_authored_status_hint_uses_its_own_metrics_style(tooltip_frame, tmp_path
     assert [row.value for row in rows] == ["Physics 100.125 Hz", "Right-click to copy"]
     assert all(row.padding == (18 * scale, 12 * scale) for row in rows)
     assert all(row.spacing == (0, 10 * scale) for row in rows)
+    assert all(row.rounding == radius * scale for row in rows)
     assert all(row.font == selected_font and row.size == 19 * scale for row in rows)
     assert all(row.tint == pytest.approx((32 / 255, 128 / 255, 224 / 255, 1)) for row in rows)
     assert rows[1].cursor[1] - rows[0].cursor[1] == 29 * scale

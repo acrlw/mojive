@@ -549,3 +549,73 @@ def test_creating_world_geometry_keeps_existing_geometry_edits_bound_to_their_ta
     np.testing.assert_allclose(adapter._m.geom("box").size, (0.4, 0.5, 0.6))
     assert session.submit(cmd.Undo())
     np.testing.assert_allclose(adapter._m.geom("box").size, (0.1, 0.2, 0.3))
+
+
+def test_deferred_mode_keeps_committed_creation_notice_identity(scene):
+    from mojive.types import MeshShape
+
+    session, _adapter, draft = scene
+    app = _editor(session, draft)
+    with model_edit_scope(session, app._intercept_model_edit):
+        app._add_scene_object(MeshShape.SPHERE, "sphere")
+    assert session.last_message == "Create sphere"
+    assert session.last_message_undo == (session.document_id, session.document_revision)
+    assert session.last_message_pending_undo is None
+    assert not draft.active
+    assert session.submit(cmd.Undo()).ok
+    assert not any(node.name == "sphere" for node in session.nodes)
+
+
+def test_pending_notice_undo_preserves_earlier_draft_and_never_undoes_document_history(scene):
+    session, adapter, draft = scene
+    app = _editor(session, draft)
+    box = next(n for n in session.nodes if n.name == "box")
+    assert draft.stage(cmd.SetGeometrySize(box.node_id, np.full(3, 0.4))).ok
+    previous = list(draft.commands)
+    model, revision = adapter.model, session.document_revision
+    with model_edit_scope(session, app._intercept_model_edit):
+        app._add_model_primitive("capsule", "capsule")
+        token = session.last_message_pending_undo
+        assert token is not None and token == draft.undo_token
+        assert session.last_message == "Create capsule"
+        assert session.last_message_undo is None
+        assert any(n.name == "capsule" for n in session.nodes)
+        assert session.submit(cmd.Undo()).ok
+    assert draft.active and draft.commands == previous
+    assert not any(n.name == "capsule" for n in session.nodes)
+    assert adapter.model is model and session.document_revision == revision
+    assert draft.undo_token is None and session.last_message_pending_undo is None
+    np.testing.assert_allclose(session.source.geom_size[0], (0.4, 0.4, 0.4))
+
+
+def test_pending_notice_token_expires_on_new_edits_and_clear(scene):
+    session, _adapter, draft = scene
+    app = _editor(session, draft)
+    box = next(n for n in session.nodes if n.name == "box")
+    with model_edit_scope(session, app._intercept_model_edit):
+        for value in (0.4, 0.6):
+            assert session.submit(cmd.BeginEditTransaction("Resize geometry")).ok
+            assert session.submit(cmd.SetGeometrySize(box.node_id, np.full(3, value))).ok
+            assert draft.undo_token is None
+            assert session.submit(cmd.EndEditTransaction()).ok
+            token = draft.undo_token
+            assert token is not None
+            assert session.last_message_pending_undo == token
+        assert session.submit(cmd.Undo()).ok
+    np.testing.assert_allclose(session.source.geom_size[0], (0.4, 0.4, 0.4))
+    assert draft.undo_token is None
+    draft.clear()
+    assert draft.undo_token is None and not draft.active
+
+
+def test_pending_notice_cannot_undo_after_unrelated_document_change(scene):
+    session, _adapter, draft = scene
+    app = _editor(session, draft)
+    with model_edit_scope(session, app._intercept_model_edit):
+        app._add_model_primitive("capsule", "capsule")
+    assert draft.undo_token is not None
+    from mojive.types import MeshShape
+
+    assert session.submit(cmd.AddSceneObject(MeshShape.BOX, name="other")).ok
+    assert draft.undo_token is None
+    assert not draft.undo().ok

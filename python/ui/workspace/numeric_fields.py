@@ -271,12 +271,13 @@ class _NumericFields:
             )
             splitter.set_current_channel(draw_list, 1)
             draw_list.push_clip_rect((x, y), (x + badge, field_hi.y), True)
+            badge_font = style.get("badgeFontSize", 12)
             self.text(
-                x + (badge - self.measure(axis, font_size, style=style)) / 2,
-                y + DESIGN.control_padding_y(font_size) * s,
+                x + (badge - self.measure(axis, badge_font, style=style, font_resolved=True)) / 2,
+                y + DESIGN.control_padding_y(badge_font) * s,
                 axis,
                 TEXT,
-                font_size,
+                badge_font,
                 style=style,
                 font_resolved=True,
             )

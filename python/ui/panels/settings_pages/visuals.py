@@ -19,7 +19,6 @@ from mojive.ui.pointer_bindings import PointerAction
 
 
 def draw(panel, ctx: PanelContext) -> None:
-    imgui.text(ctx.tr("Geometry view"))
     panel._geometry_view(ctx)
     geometry_style(panel, ctx)
     contact_style(panel, ctx)

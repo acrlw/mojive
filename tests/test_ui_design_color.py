@@ -322,6 +322,10 @@ def test_actual_color_copy_and_paste_preserve_source_range_across_modes(
     assert imgui.get_clipboard_text() == format_color(values, source)
     state.click(state.popup + f"-format-{destination}")
     assert editor.mode == destination
+    anchor = state.ui.hits[state.popup + "-paste"]
+    for _ in range(6):
+        state.frame()
+        assert state.ui.hits[state.popup + "-paste"] == pytest.approx(anchor)
     state.values = [0.8, 0.7, 0.9, 0.8]
     state.frame(2)
     state.click(state.popup + "-paste")

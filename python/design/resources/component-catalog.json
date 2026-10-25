@@ -3449,6 +3449,15 @@
           "field": "lineHeightMode",
           "value": "fixed"
         }
+      },
+      "badgeFontSize": {
+        "label": "轴标签字号",
+        "type": "number",
+        "min": 9,
+        "max": 24,
+        "step": 1,
+        "default": 12,
+        "css": []
       }
     },
     "sample": {
@@ -4402,14 +4411,14 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 4,
         "css": [
           "padding-top",
           "padding-bottom"
         ]
       },
       "gap": {
-        "label": "内容间距",
+        "label": "图标与文字间距",
         "type": "number",
         "min": 0,
         "max": 100,
@@ -4425,7 +4434,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 6,
+        "default": 8,
         "css": [
           "border-radius"
         ]
@@ -4566,12 +4575,12 @@
         }
       },
       "columnGap": {
-        "label": "横向等间距（列距）",
+        "label": "文字与操作间距",
         "type": "number",
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 16,
         "css": [
           "column-gap"
         ],

@@ -66,11 +66,13 @@ def end_sidebar(workspace):
 @part_scope("titlebar")
 def chrome(workspace):
     u, scale = workspace.ui, workspace.s
+    theme_icon = "moon" if u.design and u.design.runtime.active_theme == "light" else "sun"
     style = u.component_style("titlebar")
     with u.component_scope("title_actions"):
         action_sizes = tuple(
             control_size(u, key, 26, 28, icon=icon)
             for key, icon in (
+                ("toggle-theme", theme_icon),
                 ("toggle-left", "sidebar-left"),
                 ("toggle-inspector", "inspect"),
                 ("preferences", "settings"),
@@ -222,6 +224,7 @@ def chrome(workspace):
             with u.component_scope("title_actions"):
                 left_open = any(workspace.open[name] for name in LEFT_PANELS)
                 actions = (
+                    ("toggle-theme", theme_icon, "", False, "toggle-theme"),
                     (
                         "toggle-left",
                         "sidebar-left",
@@ -265,7 +268,15 @@ def chrome(workspace):
                     u,
                     "title_actions",
                     "title-actions",
-                    (u.hits[key] for key in ("toggle-left", "toggle-inspector", "preferences")),
+                    (
+                        u.hits[key]
+                        for key in (
+                            "toggle-theme",
+                            "toggle-left",
+                            "toggle-inspector",
+                            "preferences",
+                        )
+                    ),
                 )
             gap = style.get("columnGap", style.get("gap", 10)) * scale
             after_logo = content.x + 26 * scale
@@ -276,7 +287,15 @@ def chrome(workspace):
                 fields=[
                     workspace.rects["application-logo"],
                     *workspace.menus.menu_rects.values(),
-                    *(u.hits[key] for key in ("toggle-left", "toggle-inspector", "preferences")),
+                    *(
+                        u.hits[key]
+                        for key in (
+                            "toggle-theme",
+                            "toggle-left",
+                            "toggle-inspector",
+                            "preferences",
+                        )
+                    ),
                 ],
                 fieldRegions={
                     name: [

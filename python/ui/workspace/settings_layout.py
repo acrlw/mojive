@@ -447,6 +447,7 @@ def _draw_page_contents(panel, ctx, style, checkbox_properties):
         use_design(lambda _: dimensions),
         u.component_scope("settings_page"),
         property_controls(u),
+        panel.fields.label_column((panel._category, ctx.language)),
     ):
         panel._control_padding()
         {

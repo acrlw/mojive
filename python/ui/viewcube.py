@@ -230,7 +230,12 @@ class ViewCube:
         )
 
     def draw(
-        self, overlay: Draw2D, style_scale: float = 1.0, *, smoothing: float = CORNER_SMOOTHING
+        self,
+        overlay: Draw2D,
+        style_scale: float = 1.0,
+        *,
+        smoothing: float = CORNER_SMOOTHING,
+        backdrop=BACKDROP_COLOR,
     ) -> None:
         if not self._balls:
             return
@@ -240,7 +245,7 @@ class ViewCube:
         overlay.circle_filled(
             self._center,
             BACKDROP_RADIUS_PT * style_scale,
-            BACKDROP_COLOR,
+            backdrop,
             segments=64,
         )
 

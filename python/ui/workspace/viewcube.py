@@ -13,6 +13,8 @@ class WorkspaceViewCube(ViewCube):
         self.preview_active = False
         self.workspace_scale = 1.0
         self.design_ui = None
+        self._backdrop_ink = None
+        self._backdrop = None
 
     def widget_center(self, rect, style_scale):
         from mojive.ui.viewcube import BACKDROP_RADIUS_PT
@@ -54,6 +56,12 @@ class WorkspaceViewCube(ViewCube):
         return super().update(cam, rect, cursor, self.reference_scale, enabled=enabled)
 
     def draw(self, overlay, style_scale=1.0, **kwargs):
+        if self.design_ui is not None:
+            ink = self.design_ui.palette("chrome")
+            if ink is not self._backdrop_ink:
+                self._backdrop_ink = ink
+                self._backdrop = (*(v / 255 for v in ink[:3]), 0.55)
+            kwargs.setdefault("backdrop", self._backdrop)
         painter = (
             self.design_ui.text_draw(overlay, "nav_widget")
             if self.design_ui is not None

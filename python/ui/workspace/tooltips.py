@@ -6,9 +6,9 @@ from math import ceil
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import independent_corner_scope, part_scope
-from mojive.ui.workspace.design import CONTROL_RADIUS
+from mojive.ui.workspace.design import DESIGN
 from mojive.ui.workspace.menu_geometry import native_unit
-from mojive.ui.workspace.widget_style import CONTROL_THEME, MUTED
+from mojive.ui.workspace.widget_style import MUTED
 
 TOOLTIP_FONT_SIZE = 12
 
@@ -56,7 +56,8 @@ def draw_tooltip(ui, hint, *, translate=True):
                 badge_radius = max(0, min(badge_radius, frame_width / 2 - 1, frame_height / 2 - 1))
                 rounding = badge_radius + padding[0]
             else:
-                padding, rounding = (8 * scale, 6 * scale), CONTROL_RADIUS * scale
+                padding = (8 * scale, 6 * scale)
+                rounding = ui.component_style("button").get("radius", DESIGN.control_radius) * scale
             imgui.push_style_var(imgui.StyleVar_.window_padding, padding)
             imgui.push_style_var(imgui.StyleVar_.window_min_size, (0, 0))
             imgui.push_style_var(imgui.StyleVar_.window_rounding, rounding)
@@ -95,7 +96,7 @@ def draw_tooltip(ui, hint, *, translate=True):
                                         badge_rect[0] - margins[0],
                                         badge_rect[1] - margins[1] + height / 2,
                                         shortcut,
-                                        CONTROL_THEME,
+                                        ui.control_theme(),
                                         muted=True,
                                         width=width,
                                         height=height,

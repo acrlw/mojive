@@ -191,7 +191,7 @@ def test_color_format_growth_keeps_actions_inside_the_viewport(settings, tmp_pat
     authored["parts"]["rgba"] = {"columns": 1}
     # An authored large picker forces upward relocation when channels expand;
     # the compact default can fit at this anchor without moving at all.
-    authored["parts"]["color_editor"] = {"popupWidth": 360, "pickerHeight": 260}
+    authored["parts"]["color_editor"] = {"popupWidth": 360, "pickerHeight": 340}
     runtime.update_spec(authored)
     ui.design = DesignPresentation(ui, runtime)
     settings.window_position, settings.window_size = (

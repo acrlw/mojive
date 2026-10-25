@@ -1,5 +1,6 @@
 """Native timeline details retain real editing, loading and snapshot commands."""
 
+from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -11,12 +12,16 @@ from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds
 from mojive.adapters.mujoco import MuJoCoAdapter
 from mojive.adapters.workspace import WorkspaceAdapter
+from mojive.design.native.presentation import DesignPresentation
+from mojive.design.runtime import DesignRuntime
+from mojive.design.store import SpecificationStore
 from mojive.render.backend import NullBackend
 from mojive.session import Session
 from mojive.ui.app import ViewerApp
 from mojive.ui.keyframe_editor.controller import TimelineEditor
 from mojive.ui.keyframe_editor.properties import draw_selected
 from mojive.ui.panels import PanelContext
+from mojive.ui.workspace import timeline_details
 from mojive.ui.workspace.timeline_details import NativeTimelineDetails
 from mojive.ui.workspace.widgets import UI
 
@@ -175,6 +180,26 @@ def test_native_details_reflow_without_overlapping_fields_or_actions(details, wi
         x, y, w, h = state.ui.hits[key]
         assert x >= state.origin[0] and x + w <= state.origin[0] + state.available + 0.5
         assert y + h <= state.origin[1] + state.height + 0.5
+
+
+@pytest.mark.parametrize("radius", (4, 7))
+def test_detail_presenter_resolves_active_control_corners(details, tmp_path, monkeypatch, radius):
+    state = details
+    runtime = DesignRuntime(SpecificationStore(tmp_path / "design.json"))
+    state.ui.design = DesignPresentation(state.ui, runtime)
+    spec = deepcopy(runtime.spec)
+    spec["tokens"]["control_radius"] = radius
+    runtime.update_spec(spec)
+    original = timeline_details.draw_selected
+    corners = []
+
+    def draw(*args, **kwargs):
+        corners.append(imgui.get_style().frame_rounding)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(timeline_details, "draw_selected", draw)
+    state.frame(3)
+    assert corners == pytest.approx([radius * state.ui.s] * 3)
 
 
 def test_native_details_keep_drafts_until_apply_and_submit_one_undo(details):

@@ -143,6 +143,11 @@ class ModelEditDraft:
         self._property_overrides = {}
         self._creations = {}
         self._next_creation_key = 0
+        self._generation = 0
+        self._undo_state = None
+        self._undo_label = ""
+        self._undo_revision = None
+        self._transaction_revision = None
         session._model_edit_preview = self
 
     @property
@@ -251,9 +256,9 @@ class ModelEditDraft:
                 if not result.ok:
                     break
             completed = result.ok
-            return result
         finally:
-            self.end_transaction(cancel=not completed)
+            outcome = self.end_transaction(cancel=not completed)
+        return replace(result, message=outcome.message) if result.ok and outcome.message else result
 
     def stage(self, command):
         if self.applies_immediately(command):
@@ -328,6 +333,8 @@ class ModelEditDraft:
         else:
             self.commands[index] = deepcopy(command)
         self.error = ""
+        self._generation += 1
+        self._undo_state = None
         self.refresh_preview()
         if isinstance(command, cmd.SelectNode):
             node = self.by_node_id.get(self.command_node_id(command))
@@ -630,21 +637,77 @@ class ModelEditDraft:
         names = {item.name for item in fields(original)}
         return replace(original, **{key: value for key, value in values.items() if key in names})
 
+    def _snapshot(self):
+        # Staged commands are replaced, never mutated; snapshots share their payloads.
+        return (
+            list(self.commands),
+            dict(self._creations),
+            self._next_creation_key,
+            self.session._selected_node_id,
+            self.session._selected,
+        )
+
+    def _restore(self, state):
+        with model_edit_scope(self.session, None):
+            for command in self.commands:
+                if isinstance(command, cmd.SetSceneModelTransform):
+                    self.session.adapter.clear_scene_model_transform_preview(command.model_id)
+            self.commands, self._creations, self._next_creation_key, node, selected = state
+            for command in self.commands:
+                if isinstance(command, cmd.SetSceneModelTransform):
+                    self.session.submit(
+                        cmd.PreviewSceneModelTransform(
+                            command.model_id, command.position, command.rotation
+                        )
+                    )
+        self.refresh_preview()
+        self.session._selected_node_id, self.session._selected = node, selected
+        self.session._selection_revision += 1
+        self._generation += 1
+        self._undo_state = None
+
+    @property
+    def undo_token(self):
+        """Identify only the latest completed, still-compatible pending operation."""
+        if (
+            self._undo_state is not None
+            and self._checkpoint is None
+            and not self.applying
+            and not self.session.editing
+            and self.compatible()
+            and self._undo_revision == self.session.document_revision
+        ):
+            return self.session.document_id, self._generation
+        return None
+
+    def undo(self):
+        if self.undo_token is None:
+            return cmd.CommandResult.bad("Pending edit is no longer the latest operation")
+        label, state = self._undo_label, self._undo_state
+        self._restore(state)
+        return cmd.CommandResult.good("Undo " + label)
+
     def begin_transaction(self, label):
-        self._checkpoint = (list(self.commands), dict(self._creations), self._next_creation_key)
+        self._checkpoint = self._snapshot()
         self._transaction_label = label
+        self._transaction_revision = self.session.document_revision
 
     def end_transaction(self, cancel=False):
-        if cancel and self._checkpoint is not None:
-            # A cancelled gesture drops the elements it staged along with their keys, so
-            # keystrokes bound to them never reach an Apply batch.
-            self.commands, self._creations, self._next_creation_key = (
-                self._checkpoint[0],
-                self._checkpoint[1],
-                self._checkpoint[2],
-            )
-            self.refresh_preview()
-        self._checkpoint = self._transaction_label = None
+        state, label = self._checkpoint, self._transaction_label
+        changed = state is not None and (
+            len(state[0]) != len(self.commands)
+            or any(a is not b for a, b in zip(state[0], self.commands, strict=False))
+        )
+        if cancel and state is not None:
+            self._restore(state)
+        elif changed and self._transaction_revision == self.session.document_revision:
+            # A notice owns one checkpoint, not another unbounded document history.
+            # Mixed direct/draft transactions cannot expose a partial undo action.
+            self._undo_state = state
+            self._undo_label = label
+            self._undo_revision = self.session.document_revision
+        self._checkpoint = self._transaction_label = self._transaction_revision = None
+        return cmd.CommandResult.good(label if changed and not cancel else "")
 
     def clear(self):
         with model_edit_scope(self.session, None):
@@ -665,7 +728,9 @@ class ModelEditDraft:
             self.session._selected_node_id = -1
             self.session._selected = 0
         self.error = ""
-        self.end_transaction()
+        self._checkpoint = self._transaction_label = self._transaction_revision = None
+        self._undo_state = None
+        self._generation += 1
         self.session._mesh_bounds_cache.clear()
         self.session._scene_bounds = None
         self.session._preview_generation += 1

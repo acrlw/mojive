@@ -32,6 +32,26 @@ matrix; other agent guidance links here.
 
 ## Change mapping
 
+`make ui-theme-review BACKEND=opengl` (or `bgfx`) switches and persists the production
+Dark/Light presets through labeled icon segments and the titlebar toggle without changing
+layout or typography. It checks that those obvious controls do not emit redundant help. It also clicks a committed edit's
+Undo notice and checks localized playback help in hidden windows at normal and fractional
+scale. Inspect `output/theme-and-notice-2026-10-25/acceptance/`; no desktop input is generated.
+It also checks localized creation and Apply notices, their real Undo actions, bounded pending
+edit checkpoints, readable Settings navigation, inline geometry selectors, and production
+axis/channel badge typography in narrow and wide Inspectors. Inspect
+`output/ui-consistency-2026-10-25/` for these captures and resolved geometry records.
+The Pose slider also has idle, hover, held and release captures with disk-color checks under
+`output/pose-slider-states-2026-10-25/`; both themes retain a solid accent handle.
+The same target audits menus, dialogs, status/shortcut help and held joint precision rails in
+both themes, and exercises both projection transitions through the native menu. Inspect
+`output/light-theme-audit-2026-10-25/` for captures, typography records and transition animations.
+Use `ARGS='-k light_button'` for the light-theme action hierarchy: real material, color,
+camera, notice, pending-edit and document-confirmation actions, plus toolbar and disabled
+states. It checks readable primary captions, native secondary ink parity and unchanged
+targets through hover, hold and cancellation. Captures and state records are under
+`output/button-hierarchy-2026-10-25/`.
+
 `make ui-control-review BACKEND=opengl` (or `bgfx`) uses hidden production windows at normal
 and fractional UI scales. It exercises shared search inputs, typing/clearing and keyboard focus,
 localized tooltips, panel visibility, read-only identity rows and the About modal. Inspect the

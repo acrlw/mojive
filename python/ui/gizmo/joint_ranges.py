@@ -296,7 +296,7 @@ class _JointRanges:
             rail.end,
             float(rail.current[0]),
             style.thumb_size * style_scale * 0.5,
-            CONTROL_THEME,
+            readout_ui.control_theme() if readout_ui is not None else CONTROL_THEME,
             style_scale,
             hovered=self._joint_precision_hovered,
             pressed=self._joint_precision_active,

@@ -12,6 +12,7 @@ from mojive.ui.workspace import inspector as inspector_module
 from mojive.ui.workspace import inspector_heading, settings_layout
 from mojive.ui.workspace.menu_geometry import native_epsilon
 from mojive.ui.workspace.navigation import Navigation
+from mojive.ui.workspace.property_style import NativePropertyPresentation
 from tests.test_component_appearance import appearance as appearance
 
 pytestmark = pytest.mark.parametrize("appearance", (1.2, 1.25, 2.25), indirect=True)
@@ -66,7 +67,10 @@ def test_owned_children_keep_fields_inside_own_clip_without_ancestor_reflow(
         owner = "Inspector"
     elif kind == "settings":
         panel = SimpleNamespace(
-            workspace=workspace, _category="General", _control_padding=lambda: None
+            workspace=workspace,
+            _category="General",
+            _control_padding=lambda: None,
+            fields=NativePropertyPresentation(ui, prefix="settings", fit_labels=True),
         )
         for category in (
             "_general",
@@ -81,7 +85,7 @@ def test_owned_children_keep_fields_inside_own_clip_without_ancestor_reflow(
         def draw():
             settings_layout._draw_page(
                 panel,
-                SimpleNamespace(tr=str),
+                SimpleNamespace(tr=str, language="en"),
                 Rect(30 * ui.s, 30 * ui.s, width * ui.s, 240 * ui.s),
                 (),
             )

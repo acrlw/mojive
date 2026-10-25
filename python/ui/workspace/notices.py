@@ -1,108 +1,188 @@
 """Compact operation notices using the same native specification and text boxes."""
 
 from mojive.design.native.geometry import Rect, part_scope
-from mojive.ui.design_palette import rgba as palette_rgba
 from mojive.ui.panels.filters import severity_color, severity_group
-from mojive.ui.workspace.design import BODY_SIZE, CONTROL_RADIUS
+from mojive.ui.workspace.corner_geometry import nested_corners
+from mojive.ui.workspace.design import BODY_SIZE
 from mojive.ui.workspace.group_corners import action_corner_scope, action_corners, inset_action_box
 
 
 def _notice_surface(ui, frame, level, radius, draw):
-    background = (
-        (0.20, 0.10, 0.11, 0.94)
+    role = (
+        "error_surface"
         if level == "error"
-        else (0.19, 0.15, 0.09, 0.94)
+        else "warning_surface"
         if level == "warning"
-        else (*palette_rgba("child")[:3], 0.94)
+        else "child"
     )
+    background = (*ui.palette(role)[:3], 240)
     ui.rect(
         *frame.tuple(),
-        tuple(round(channel * 255) for channel in background),
+        background,
         radius / ui.s,
         draw=draw,
+        color_resolved=True,
+    )
+
+
+def notice_can_undo(app, message):
+    """Only offer the exact committed or pending edit while it remains current."""
+    pending = getattr(message, "pending_undo", None)
+    if pending is not None:
+        return pending == app.model_edits.undo_token and not app.gizmo.using
+    identity = getattr(message, "undo", None)
+    if identity is None:
+        return False
+    session = app.session
+    return (
+        identity == (session.document_id, session.document_revision)
+        and session.can_undo
+        and not session.editing
+        and not app.model_edits.active
+        and not app.gizmo.using
     )
 
 
 @part_scope("notice")
 def draw_operation_notice(app, overlay, message):
+    from imgui_bundle import imgui
+
+    from mojive import commands as cmd
+    from mojive.ui.workspace.component_layout import control_frame_size, control_size
+
     ui, scale = app.workspace.ui, app.workspace.s
     x, y, width, height = app._viewport_rect
     style = ui.component_style("notice")
     padding = style.edges("padding", scale, (12, 8, 12, 8))
     margin = style.edges("margin", scale)
     icon_size = style.get("iconSize", 18) * scale
-    gap = style.get("columnGap", style.get("gap", 8)) * scale
+    gap = style.get("gap", 8) * scale
+    action_gap = style.get("columnGap", 16) * scale
     font_size = style.get("fontSize", BODY_SIZE)
     line_height = max(font_size, style.line_height(font_size * 1.4)) * scale
-    box_height = max(line_height, icon_size) + padding[1] + padding[3] + margin[1] + margin[3]
+    undo = notice_can_undo(app, message)
+    # Reserve the same content height after Undo removes the action. Resolve the
+    # actual button size so font and control overrides cannot make the shell jump.
+    action_w, action_h = control_size(ui, "notice-undo", 80, 28, label="Undo", icon="undo")
+    inset = max(padding[1], padding[3])
+    corners = nested_corners(
+        style, scale, (inset,) * 4, ui.component_style("button").get("radius", 4) * scale
+    )
+    radius = corners.radius
+    content_height = max(line_height, icon_size, action_h)
+    padding = (padding[0], inset, padding[2], inset)
+    if undo:
+        # The text keeps its leading inset; the trailing action follows the
+        # shell's vertical clearance, sharing the same concentric corner budget.
+        padding = (padding[0], inset, inset + (content_height - action_h) / 2, inset)
+    box_height = content_height + padding[1] + padding[3] + margin[1] + margin[3]
     inset = 14 * scale
     available = width - 2 * inset
     if height < box_height + 2 * inset or available <= padding[0] + padding[2] + icon_size + gap:
         return
     caption = " ".join(ui.translate(message.text).splitlines())
+    action_space = action_w + action_gap if undo else 0
     box_width = min(
         available,
         ui.measure(caption, font_size, translate=False)
-        + padding[0]
-        + padding[2]
-        + margin[0]
-        + margin[2]
+        + sum(padding[::2])
+        + sum(margin[::2])
         + icon_size
-        + gap,
+        + gap
+        + action_space,
     )
-    box = ui.component_box(
-        "notice",
-        x + inset,
-        y + height - inset - box_height,
-        box_width,
-        box_height,
-        key="operation-notice",
-        padding=padding,
-        draw=overlay._dl,
-        observe=False,
-    )
-    level = severity_group(message.level)
-    foreground = severity_color(app.theme, level)
-    _notice_surface(ui, box.frame, level, style.get("radius", CONTROL_RADIUS) * scale, overlay._dl)
-    rgba = tuple(round(channel * 255) for channel in foreground)
-    icon_y = box.content.y + max(0, (box.content.height - icon_size) / 2)
-    ui.icon(
-        {"info": "info", "warning": "warn", "error": "err"}[level],
-        box.content.x,
-        icon_y,
-        icon_size / scale,
-        rgba,
-        draw=overlay._dl,
-    )
-    ui.component_text(
-        "notice",
-        Rect(
+    # Native windows truncate their origin; apply that same alignment to the
+    # draw-only state so removing an action does not shift fractional-scale text.
+    origin = (float(int(x + inset)), float(int(y + height - inset - box_height)))
+    draw = overlay._dl
+    if undo:
+        flags = (
+            imgui.WindowFlags_.no_decoration
+            | imgui.WindowFlags_.no_docking
+            | imgui.WindowFlags_.no_saved_settings
+            | imgui.WindowFlags_.no_focus_on_appearing
+            | imgui.WindowFlags_.no_move
+            | imgui.WindowFlags_.no_scrollbar
+            | imgui.WindowFlags_.no_scroll_with_mouse
+        )
+        imgui.set_next_window_pos(origin)
+        imgui.set_next_window_size((box_width, box_height))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
+        imgui.push_style_var(imgui.StyleVar_.window_min_size, (0, 0))
+        imgui.push_style_var(imgui.StyleVar_.window_border_size, 0)
+        imgui.push_style_var(imgui.StyleVar_.window_rounding, 0)
+        imgui.push_style_color(imgui.Col_.window_bg, (0, 0, 0, 0))
+        imgui.begin("##operation-notice", None, flags)
+        draw = ui.draw
+        origin = tuple(imgui.get_window_pos())
+    try:
+        box = ui.component_box(
+            "notice",
+            *origin,
+            box_width,
+            box_height,
+            key="operation-notice",
+            padding=padding,
+            draw=draw,
+            observe=False,
+        )
+        level = severity_group(message.level)
+        foreground = severity_color(app.theme, level)
+        draw.push_clip_rect((x, y), (x + width, y + height), False)
+        try:
+            _notice_surface(ui, box.frame, level, radius, draw)
+        finally:
+            draw.pop_clip_rect()
+        rgba = tuple(round(channel * 255) for channel in foreground)
+        icon_y = box.content.y + max(0, (box.content.height - icon_size) / 2)
+        ui.icon(
+            {"info": "info", "warning": "warn", "error": "err"}[level],
+            box.content.x,
+            icon_y,
+            icon_size / scale,
+            rgba,
+            draw=draw,
+        )
+        text_rect = Rect(
             box.content.x + icon_size + gap,
             box.content.y,
-            max(0, box.content.width - icon_size - gap),
+            max(0, box.content.width - icon_size - gap - action_space),
             box.content.height,
-        ),
-        caption,
-        rgba,
-        draw=overlay._dl,
-        translate=False,
-    )
-    ui.record_component_box(
-        "notice",
-        box,
-        key="operation-notice",
-        draw=overlay._dl,
-        fields=[
-            [box.content.x, box.content.y, icon_size, box.content.height],
-            [
-                box.content.x + icon_size + gap,
-                box.content.y,
-                max(0, box.content.width - icon_size - gap),
-                box.content.height,
+        )
+        ui.component_text("notice", text_rect, caption, rgba, draw=draw, translate=False)
+        ui.record_component_box(
+            "notice",
+            box,
+            key="operation-notice",
+            draw=draw,
+            radius=radius,
+            fields=[
+                [box.content.x, box.content.y, icon_size, box.content.height],
+                list(text_rect.tuple()),
             ],
-        ],
-    )
-    app._status_notice_bounds = (box.frame.x, box.frame.y, box.frame.right, box.frame.bottom)
+        )
+        app._status_notice_bounds = (box.frame.x, box.frame.y, box.frame.right, box.frame.bottom)
+        if undo:
+            action_y = box.content.y + (box.content.height - action_h) / 2
+            inset = action_y - box.frame.y
+            with ui.corner_scope(max(0, radius - inset), ("button",)):
+                pressed = ui.button(
+                    "notice-undo",
+                    box.frame.right - inset - action_w,
+                    action_y,
+                    *control_frame_size(ui, "notice-undo", action_w, action_h, label="Undo"),
+                    label="Undo",
+                    icon="undo",
+                    filled=True,
+                )
+            if pressed and notice_can_undo(app, message):
+                app.session.submit(cmd.Undo())
+                app.refresh_document()
+    finally:
+        if undo:
+            imgui.end()
+            imgui.pop_style_color()
+            imgui.pop_style_var(4)
 
 
 @part_scope("empty")
@@ -141,21 +221,21 @@ def draw_center_notice(app, overlay, message, *, border=False):
         overlay.rect(
             (x + 3 * scale, y + 3 * scale),
             (x + width - 3 * scale, y + height - 3 * scale),
-            (0.95, 0.68, 0.24, 0.95),
+            (*(v / 255 for v in ui.palette("warning")[:3]), 0.95),
             2 * scale,
             rounding=8 * scale,
         )
     overlay.rect_filled(
         (box.frame.x, box.frame.y),
         (box.frame.right, box.frame.bottom),
-        (0.08, 0.09, 0.11, 0.88),
+        (*(v / 255 for v in ui.palette("child")[:3]), 0.88),
         rounding=7 * scale,
     )
     icon_rect = style.align_rect(
         box.content, icon, icon, horizontal=style.get("textAlign", "center"), vertical="start"
     )
     ui.icon(
-        "folder", icon_rect.x, icon_rect.y, icon / scale, (165, 180, 198, 255), draw=overlay._dl
+        "folder", icon_rect.x, icon_rect.y, icon / scale, ui.palette("secondary"), draw=overlay._dl
     )
     cursor = icon_rect.bottom + gap
     for line in lines:
@@ -163,7 +243,7 @@ def draw_center_notice(app, overlay, message, *, border=False):
             "empty",
             Rect(box.content.x, cursor, box.content.width, line_height),
             line,
-            (237, 240, 242, 255),
+            ui.palette("text"),
             draw=overlay._dl,
             align="center",
             translate=False,

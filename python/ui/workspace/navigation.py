@@ -75,11 +75,11 @@ def node_icon(node, session):
 def node_accent(theme, kind):
     """Preserve semantic hues while keeping dark node badges readable."""
     color = node_filter_color(theme, kind)
-    amount = 0.4 if max(color[:3]) < 0.4 else 0.0
+    amount = 0.4 if max(color[:3]) < 0.4 and max(theme.bg_window[:3]) < 0.5 else 0.0
     return (*(round((value + (1.0 - value) * amount) * 255) for value in color[:3]), 255)
 
 
-def node_text_color(theme, kind, visible=True):
+def node_text_color(theme, kind, visible=True, *, muted=MUTED):
     """Use a restrained entity hue for names while keeping hidden items muted."""
     if not visible:
         return DIM
@@ -87,7 +87,7 @@ def node_text_color(theme, kind, visible=True):
     return (
         *(
             round(base * 0.55 + tint * 0.45)
-            for base, tint in zip(MUTED[:3], accent[:3], strict=True)
+            for base, tint in zip(muted[:3], accent[:3], strict=True)
         ),
         255,
     )
@@ -413,7 +413,9 @@ class Navigation:
             icon=node_icon(node, ctx.session),
             icon_role="inline",
             label=node.name or "?",
-            text_color=node_text_color(ctx.theme, node.type.value, node.visible),
+            text_color=node_text_color(
+                ctx.theme, node.type.value, node.visible, muted=u.palette("secondary")
+            ),
             icon_color=node_accent(ctx.theme, node.type.value),
             background=False,
             translate=False,

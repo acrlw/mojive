@@ -192,7 +192,7 @@ def viewport(workspace, preview_name=""):
         return
 
     def shell(rx, ry, rw, rh, *, radius=8):
-        u.rect(rx, ry, rw * s, rh * s, (22, 25, 28, 230), radius)
+        u.rect(rx, ry, rw * s, rh * s, (*u.palette("chrome")[:3], 230), radius, color_resolved=True)
         overlay.append((rx, ry, rw * s, rh * s))
 
     if collapsed_controls:
@@ -363,7 +363,12 @@ def pending_model_edits(workspace, x, y, w, h, overlay, *, bottom_limit=None):
         radius=corners.radius,
         childRadius=corners.inner_radius,
     )
-    ui.rect(*box.frame.tuple(), (22, 25, 28, 245), corners.radius / scale)
+    ui.rect(
+        *box.frame.tuple(),
+        (*ui.palette("chrome")[:3], 245),
+        corners.radius / scale,
+        color_resolved=True,
+    )
     overlay.append(box.outer.tuple())
     label = "Applying…" if app.model_edits.applying else "Pending model edits"
     apply_width = (

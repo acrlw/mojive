@@ -106,8 +106,8 @@ class WorkspaceSettings(SettingsPanel):
     def _button(self, label):
         return self.fields.button(label)
 
-    def _segmented(self, key, labels, index, theme=None):
-        return self.fields.segmented(key, labels, index, theme=theme)
+    def _segmented(self, key, labels, index, theme=None, *, icons=None):
+        return self.fields.segmented(key, labels, index, theme=theme, icons=icons)
 
     def _property(self, label, *, control_part="input_number"):
         if control_part == "input_number" and label in self._checkbox_labels:
@@ -222,21 +222,46 @@ class WorkspaceSettings(SettingsPanel):
         from mojive.ui.workspace.geometry_view import geometry_selector
 
         ui = self.workspace.ui
-        position = imgui.get_cursor_screen_pos()
-        height = geometry_selector(
-            ui,
-            ctx,
-            position.x,
-            position.y,
-            imgui.get_content_region_avail().x,
-            key="settings-geometry",
-        )
-        advance(ui, position.x, position.y + height + DESIGN.row_gap * ui.s)
+        if self._begin_properties("settings_geometry"):
+            self._property(ctx.tr("Geometry view"), control_part="segment")
+            position = imgui.get_cursor_screen_pos()
+            geometry_selector(
+                ui,
+                ctx,
+                position.x,
+                position.y,
+                self.fields._field_width(),
+                key="settings-geometry",
+            )
+            self._end_properties()
 
     def _visual_groups(self, ctx):
         from mojive.ui.workspace.settings_visuals import visual_groups
 
         visual_groups(self, ctx)
+
+    def _theme_settings(self, ctx):
+        from mojive.design.themes import select_theme
+
+        design = self.workspace.ui.design
+        if design is None:
+            return
+        runtime = design.runtime
+        names = ("dark", "light")
+        current = runtime.active_theme
+        self._property(ctx.tr("Theme"), control_part="segment")
+        selected = names.index(current) if current in names else -1
+        index = self._segmented(
+            "##ui_theme",
+            [ctx.tr("Dark theme"), ctx.tr("Light theme")],
+            selected,
+            icons=("moon", "sun"),
+        )
+        if index != selected:
+            try:
+                select_theme(runtime, names[index])
+            except (OSError, ValueError) as error:
+                ctx.session.report_message(str(error), level="error")
 
     def _general(self, ctx):
         super()._general(replace(ctx, font_report=None, panels=None))

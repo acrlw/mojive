@@ -145,9 +145,18 @@ class _Loading:
 
     def _queue_model_edit(self, command, completed=None) -> None:
         """Serialize expensive UI edits with loads; notify on the UI thread."""
-        if not self.live_model_updates and isinstance(command, MODEL_REBUILD_COMMANDS):
-            result = self.model_edits.stage(command)
-            self.session._record_result(result)
+        draft = self.model_edits
+        if (
+            not self.live_model_updates
+            and isinstance(command, MODEL_REBUILD_COMMANDS)
+            and not draft.applies_immediately(command)
+        ):
+            result = (
+                draft.stage_many((command,), label=type(command).__name__)
+                if draft._checkpoint is None and not self.session.editing
+                else draft.stage(command)
+            )
+            self.session._record_result(result, pending_undo=draft.undo_token)
             if completed is not None:
                 completed(result)
             return
@@ -164,7 +173,7 @@ class _Loading:
             )
             return
         result = self.model_edits.stage_many(commands, label=label)
-        self.session._record_result(result)
+        self.session._record_result(result, pending_undo=self.model_edits.undo_token)
         if completed is not None:
             completed(result)
 

@@ -158,6 +158,48 @@ def test_section_column_preserves_authored_asymmetric_header_and_body_offsets(ap
     )
 
 
+@pytest.mark.parametrize(
+    "labels",
+    [("Geometry view", "Collision opacity", "Shape"), ("几何显示", "碰撞体不透明度", "形状")],
+)
+def test_settings_page_shares_field_edges_across_sections_and_keeps_collapsed_width(
+    appearance, labels
+):
+    ui, runtime, _update, frame = appearance
+    runtime.observe_components = True
+    fields = NativePropertyPresentation(ui, prefix="alignment", fit_labels=True)
+    show_middle = True
+
+    def draw():
+        runtime.begin_frame()
+        with (
+            _child(ui, 620),
+            group_scope("Settings/MuJoCo Visuals"),
+            property_controls(ui),
+            section_column(ui),
+            fields.label_column("visuals"),
+        ):
+            for index, label in enumerate(labels):
+                if index == 1 and not show_middle:
+                    continue
+                _table(fields, f"aligned-{index}", label)
+
+    for _ in range(3):
+        frame(draw)
+    regions = [
+        _record(ui, runtime, f"aligned-{i}/row/{label}")["fields"][1]
+        for i, label in enumerate(labels)
+    ]
+    expected = regions[0][0], regions[0][2]
+    for region in regions[1:]:
+        assert (region[0], region[2]) == pytest.approx(expected)
+    show_middle = False
+    for _ in range(3):
+        frame(draw)
+    region = _record(ui, runtime, "aligned-0/row/" + labels[0])["fields"][1]
+    assert (region[0], region[2]) == pytest.approx(expected)
+
+
 def test_manual_vector_switch_and_text_share_section_column(appearance, monkeypatch):
     ui, runtime, _update, frame = appearance
     runtime.observe_components = True

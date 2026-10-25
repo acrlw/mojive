@@ -7,8 +7,8 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.keyframe_editor.properties import draw_error, draw_selected
-from mojive.ui.workspace.design import CONTROL_RADIUS
-from mojive.ui.workspace.widgets import ACCENT, MUTED, TEXT
+from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.widgets import MUTED, TEXT
 
 
 class NativeTimelineDetails:
@@ -154,7 +154,10 @@ class NativeTimelineDetails:
             imgui.StyleVar_.frame_padding,
             (8 * scale, max(0, (self._row_height() - font_size * scale) / 2)),
         )
-        imgui.push_style_var(imgui.StyleVar_.frame_rounding, CONTROL_RADIUS * self.workspace.s)
+        imgui.push_style_var(
+            imgui.StyleVar_.frame_rounding,
+            ui.component_style("input_text").get("radius", DESIGN.control_radius) * scale,
+        )
         imgui.begin_group()
         try:
             if editor.selected_snapshot >= 0:
@@ -254,9 +257,9 @@ class NativeTimelineDetails:
                     min(width, self._width) / s,
                     label="" if icon else label,
                     icon=icon,
-                    icon_color=ACCENT if key == "timeline-detail-apply" and active else None,
                     enabled=active,
-                    filled=key == "timeline-detail-apply" and active,
+                    active=key == "timeline-detail-apply",
+                    solid=key == "timeline-detail-apply",
                     align="center",
                     tooltip=label,
                 )

@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import lru_cache
 
 from imgui_bundle import imgui
 
@@ -94,6 +95,33 @@ def _mix_ink(first, second, amount):
     )
 
 
+@lru_cache(maxsize=128)
+def secondary_action_ink(field, text):
+    """Give filled actions a distinct tone on light surfaces; retain dark inks."""
+    from mojive.ui.theme import relative_luminance
+
+    light = relative_luminance(tuple(v / 255 for v in field[:3])) > relative_luminance(
+        tuple(v / 255 for v in text[:3])
+    )
+    return _mix_ink(field, text, 0.12) if light else field
+
+
+@lru_cache(maxsize=128)
+def primary_action_ink(base, hover, pressed, foreground, hovered=False, held=False):
+    """Keep light-theme primary feedback dark enough for its light caption."""
+    from mojive.ui.theme import relative_luminance
+
+    if held:
+        return pressed
+    if not hovered:
+        return base
+    if relative_luminance(tuple(v / 255 for v in foreground[:3])) > relative_luminance(
+        tuple(v / 255 for v in base[:3])
+    ):
+        return _mix_ink(base, pressed, 0.5)
+    return hover
+
+
 def draw_switch(ui, x, y, width, height, thumb, value, paint):
     """Paint one switch track and thumb for production and reference controls."""
     if width <= 0 or height <= 0:
@@ -139,6 +167,8 @@ def draw_switch(ui, x, y, width, height, thumb, value, paint):
     cx = min(max(cx, x + thumb / 2), x + width - thumb / 2)
     # Resolve palette roles before deriving feedback, and submit them once.
     # A neutral thumb retains its edge against an accent-colored track.
+    if not paint.disabled and hasattr(ui, "palette"):
+        tint = ui.palette("switch_thumb")
     ui.draw.add_circle_filled(
         (cx, y + height / 2),
         thumb * (0.46 if held else 0.5),

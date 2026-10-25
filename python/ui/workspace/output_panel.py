@@ -68,7 +68,7 @@ class WorkspaceOutput(OutputPanel):
         imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + width)
         try:
             imgui.text_wrapped(ctx.tr("No matching messages" if filtered else "No messages"))
-            imgui.push_style_color(imgui.Col_.text, tuple(c / 255 for c in MUTED))
+            imgui.push_style_color(imgui.Col_.text, tuple(c / 255 for c in ui.ink(MUTED, style)))
             imgui.text_wrapped(
                 ctx.tr(
                     "Change the search or severity filters."

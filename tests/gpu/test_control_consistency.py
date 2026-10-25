@@ -111,7 +111,9 @@ def test_filters_and_modal_keep_native_focus_and_localized_copy(
             inputs.click("##output-filter-clear")
             assert output._filter_text == ""
             inputs.hover("tool-scale")
-            assert "尺寸：请先选择一个几何体" in native_text
+            assert "尺寸" in native_text
+            tooltip = next(r for r in _records(viewer) if r.get("kind") == "tooltip")
+            assert tooltip["nativeRadius"] == pytest.approx(4 * scale)
             capture(viewer, target / "dimension-tooltip.png")
             inputs.move((0, 0))
             workspace.activate("Control")

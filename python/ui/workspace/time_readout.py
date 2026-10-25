@@ -9,7 +9,7 @@ def draw_time_readout(ui, key, x, y, value, *, width=80):
     imgui.dummy((width * scale, 28 * scale))
     rect = (x, y, width * scale, 28 * scale)
     ui.hits[key] = rect
-    ui.rect(*rect, (24, 27, 30, 255))
+    ui.rect(*rect, ui.palette("child"), color_resolved=True)
     style = ui.component_style("time_field")
     font_size = style.get("fontSize", 14)
     gap = style.get("columnGap", style.get("gap", 4)) * scale

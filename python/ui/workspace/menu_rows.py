@@ -21,7 +21,7 @@ from mojive.ui.workspace.menu_geometry import (
 )
 from mojive.ui.workspace.widgets import ACCENT, DIM, MUTED, TEXT, color
 
-DISABLED = (126, 136, 149, 255)
+DISABLED = rgba8("disabled")
 
 
 @dataclass(frozen=True)

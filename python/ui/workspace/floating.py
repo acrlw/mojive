@@ -151,6 +151,7 @@ def floating_button(ui, label, *, width=0, primary=False):
         label=caption,
         filled=True,
         active=primary,
+        solid=primary,
         translate=False,
         width_limit=width,
     )

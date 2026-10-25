@@ -4,7 +4,7 @@
   "tokens": {
     "body_font_size": 14.0,
     "title_font_size": 16,
-    "mono_font_size": 14,
+    "mono_font_size": 16,
     "font_family": "portable",
     "control_height": 28,
     "panel_padding": 12,
@@ -117,7 +117,7 @@
       "gap": 6,
       "radius": 4,
       "height": 28,
-      "paddingX": 6
+      "paddingX": 10
     },
     "camera_header": {
       "lineHeightMode": "auto",
@@ -137,7 +137,8 @@
       "paddingX": 4
     },
     "axis_input": {
-      "paddingX": 4
+      "paddingX": 4,
+      "axisWidth": 20
     },
     "statusbar": {
       "fontSize": 12,
@@ -245,7 +246,7 @@
     },
     "status_hints_badge": {
       "fontFamily": "mono",
-      "fontSize": 12
+      "fontSize": 14
     },
     "section_header": {
       "paddingX": 6
@@ -254,7 +255,7 @@
       "fontSize": 14
     },
     "color_editor_axis_input": {
-      "axisWidth": 14,
+      "axisWidth": 20,
       "paddingX": 3
     },
     "color_editor": {
@@ -272,6 +273,16 @@
       "gap": 20,
       "rowGap": 12,
       "columnGap": 8
+    },
+    "pending_edits": {
+      "paddingX": 6,
+      "paddingY": 6,
+      "radius": 10
+    },
+    "notice": {
+      "paddingY": 4,
+      "radius": 8,
+      "columnGap": 16
     }
   }
 }

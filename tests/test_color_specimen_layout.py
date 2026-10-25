@@ -28,7 +28,7 @@ def test_color_editor_specimen_keeps_one_inset_budget_and_complete_rgba_row(appe
             }
         )
     specimens = ComponentSpecimens(runtime)
-    bounds = Rect(20 * ui.s, 30 * ui.s, 320 * ui.s, 620 * ui.s)
+    bounds = Rect(20 * ui.s, 30 * ui.s, 380 * ui.s, 620 * ui.s)
 
     def paint():
         record = specimens.paint(ui, "color_editor", bounds)

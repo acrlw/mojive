@@ -668,7 +668,11 @@ class NativePoseEditor:
                     layout.badge_size,
                     tuple(
                         round(channel * 255)
-                        for channel in mix_color(THEME.bg_frame, THEME.axis_color(index), 0.56)
+                        for channel in mix_color(
+                            tuple(channel / 255 for channel in u.palette("field")),
+                            THEME.axis_color(index),
+                            0.56,
+                        )
                     ),
                     layout.badge_size / (2 * u.s),
                     color_resolved=True,

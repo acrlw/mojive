@@ -780,6 +780,7 @@ class NativeInspectorPresentation:
                         half / s,
                         label="Done",
                         active=True,
+                        solid=True,
                         enabled=not editor.error,
                     ):
                         self.color_edit_action = "apply"

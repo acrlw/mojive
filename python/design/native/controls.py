@@ -21,7 +21,13 @@ from mojive.design.native.geometry import (
 from mojive.design.native.style_cache import prepared_geometry
 from mojive.ui.design_palette import rgba8
 from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.interaction_paint import FieldLayer, ItemPaint, draw_switch
+from mojive.ui.interaction_paint import (
+    FieldLayer,
+    ItemPaint,
+    draw_switch,
+    primary_action_ink,
+    secondary_action_ink,
+)
 from mojive.ui.numeric_text import fit_numeric_text, numeric_edit_format, numeric_text
 from mojive.ui.text_layout import fit_text
 from mojive.ui.workspace.design import DESIGN
@@ -447,26 +453,33 @@ class NativePrimitives:
             g.pop_style_color()
         paint = ItemPaint.capture(g)
         hovered, held = paint.hovered, paint.active
+        tint = None
         if background:
             if active:
-                self.ui.rect(
-                    *box.frame.tuple(),
-                    rgba8("primary_bright" if held else "primary_dim" if hovered else "primary")
+                tint = (
+                    primary_action_ink(
+                        ui.ink(rgba8("primary"), style),
+                        ui.ink(rgba8("primary_dim"), style),
+                        ui.ink(rgba8("primary_bright"), style),
+                        ui.palette("on_primary"),
+                        hovered,
+                        held,
+                    )
                     if solid
-                    else rgba8("primary", 75 if held else 55 if hovered else 30),
-                    r=corner_radius,
+                    else ui.ink(rgba8("primary", 75 if held else 55 if hovered else 30), style)
                 )
             elif held or hovered or filled:
                 tint = (
-                    paint.color()
+                    secondary_action_ink(ui.ink(paint.color(), style), ui.palette("text"))
                     if filled
-                    else rgba8("primary", 55)
+                    else ui.ink(rgba8("field_active"), style)
                     if held
-                    else (255, 255, 255, 12)
+                    else ui.palette("hover_overlay")
                 )
-                self.ui.rect(*box.frame.tuple(), tint, r=corner_radius)
+            if tint is not None:
+                self.ui.rect(*box.frame.tuple(), tint, r=corner_radius, color_resolved=True)
         c = text_color or (
-            rgba8("child")
+            ui.palette("on_primary")
             if active and solid
             else rgba8("primary")
             if active
@@ -517,6 +530,10 @@ class NativePrimitives:
             or text_x < content.x
             or text_x + text_width > content.right
         )
+        if tooltip and isinstance(tooltip, str) and not clipped_label:
+            translated_hint = ui.translate(tooltip) if translate else tooltip
+            if translated_hint == shown:
+                tooltip = ""
         hint = tooltip or (shown if clipped_label else "")
         if hint and g.is_item_hovered(
             g.HoveredFlags_.delay_normal.value | g.HoveredFlags_.allow_when_disabled.value
@@ -543,7 +560,12 @@ class NativePrimitives:
                 background=background,
                 active=active,
                 filled=filled,
+                solid=solid,
                 hovered=hovered,
+                held=held,
+                backgroundColor=tint,
+                textColor=c,
+                iconColor=glyph,
                 enabled=enabled,
                 fontSize=font_size,
                 iconSize=icon_size,
@@ -874,7 +896,10 @@ class NativePrimitives:
                 badge_item_id = g.get_item_id()
                 badge_paint = ItemPaint.capture(g)
                 if paint_visible:
-                    self.aligned_text(style, axis_rect, axis, mono=False, horizontal="center")
+                    badge_style = style.with_overrides(
+                        {"fontSize": (style.get("badgeFontSize", 12), "axis_badge")}
+                    )
+                    self.aligned_text(badge_style, axis_rect, axis, mono=False, horizontal="center")
                     self.focus_frame(style, axis_rect, item_id=badge_item_id)
                 ui.hits[key + "-reset"] = axis_rect.tuple()
             numeric_frame = box.frame.inset(badge, 0, 0, 0)
@@ -1021,11 +1046,11 @@ class NativePrimitives:
                     g.ImVec2(axis_rect.right, axis_rect.y),
                     g.ImVec2(box.frame.right, box.frame.bottom),
                     badge_color=mix_color(
-                        tuple(v / 255 for v in badge_paint.color()),
+                        tuple(v / 255 for v in ui.ink(badge_paint.color(), style)),
                         tint,
                         0.88 if badge_paint.active else 0.72 if badge_paint.hovered else 0.56,
                     ),
-                    field_color=tuple(v / 255 for v in paint.color()),
+                    field_color=tuple(v / 255 for v in ui.ink(paint.color(), style)),
                     rounding=style.get("radius", 6.0) * s,
                 )
             return result
@@ -1223,7 +1248,7 @@ class NativePrimitives:
         tint = paint.color("primary", "primary_bright", "primary_dim") if out else paint.color()
         ui.rect(*box.frame.tuple(), tint, r=style.get("radius", 3.0))
         if out:
-            ui.icon("check", box.frame.x, box.frame.y, extent / s, rgba8("child"))
+            ui.icon("check", box.frame.x, box.frame.y, extent / s, ui.palette("on_primary"))
         result = self._result(out, bool(hit), box)
         g.end_disabled()
         self.focus_frame(style, box.frame)
@@ -1393,7 +1418,7 @@ class NativePrimitives:
         ui.draw.add_circle_filled(
             (box.content.x + box.content.width * ratio, cy),
             thumb / 2,
-            color(paint.color("primary", "primary_bright", "text")),
+            color(ui.ink(paint.color("primary", "primary_bright", "primary_bright"), style)),
             num_segments=32,
         )
         result = self._result(out, out != value, box)

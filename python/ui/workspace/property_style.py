@@ -323,6 +323,9 @@ class NativePropertyPresentation:
         self._control_width = None
         self.fit_labels = fit_labels
         self._table_labels = {}
+        self._label_groups = {}
+        self._label_group = None
+        self._shared_label_width = None
         self._label_width = None
         self._labels = []
         self._active_rows = {}
@@ -340,10 +343,32 @@ class NativePropertyPresentation:
         shown = label.split("##", 1)[0]
         return property_section(self.ui, shown, flags, item_id=self.prefix + "-section-" + label)
 
+    @contextmanager
+    def label_column(self, key):
+        """Share a measured label column across independent sections of one page."""
+        previous = self._label_group, self._shared_label_width
+        tables = self._label_groups.setdefault(key, set())
+        size = self.ui.metric("form_label", "fontSize", BODY_SIZE)
+        self._label_group = tables
+        self._shared_label_width = max(
+            (
+                self.ui.measure(label, size, translate=False)
+                for table in tables
+                for label in self._table_labels.get(table, ())
+            ),
+            default=DESIGN.label_width * self.ui.s,
+        )
+        try:
+            yield
+        finally:
+            self._label_group, self._shared_label_width = previous
+
     def begin_table(self, table_id):
         self._control_width = None
         self._labels = []
         self._label_width = None
+        if self._label_group is not None:
+            self._label_group.add(table_id)
         if self.fit_labels and not self.ui.component_style("form_row").explicit("labelWidth"):
             size = self.ui.metric("form_label", "fontSize", BODY_SIZE)
             self._label_width = max(
@@ -353,6 +378,8 @@ class NativePropertyPresentation:
                 ),
                 default=DESIGN.label_width * self.ui.s,
             )
+            if self._shared_label_width is not None:
+                self._label_width = self._shared_label_width
         opened = imgui.begin_table(
             table_id,
             1,
@@ -378,7 +405,11 @@ class NativePropertyPresentation:
             return
         ui = self.ui
         owner = self.groups.tables[-1].key
-        if self.fit_labels and not ui.component_style("form_row").explicit("labelWidth"):
+        if (
+            self.fit_labels
+            and self._shared_label_width is None
+            and not ui.component_style("form_row").explicit("labelWidth")
+        ):
             size = ui.metric("form_label", "fontSize", BODY_SIZE)
             self._label_width = max(ui.measure(label, size, translate=False) for label in labels)
         active = self._active_rows.pop(owner, None)
@@ -555,7 +586,7 @@ class NativePropertyPresentation:
         pos = imgui.get_cursor_screen_pos()
         if icons is not None:
             names = {"persp": "perspective", "ortho": "orthographic"}
-            icons = tuple(names[name] for name in icons)
+            icons = tuple(names.get(name, name) for name in icons)
         return self.ui.segmented(
             item_id,
             pos.x,

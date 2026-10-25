@@ -31,6 +31,30 @@ class RecordingSink:
         self.views.append(camera)
 
 
+def test_projection_menu_animates_and_reverses_without_a_jump():
+    from types import SimpleNamespace
+
+    from mojive.ui.workspace.menu_actions import dispatch
+
+    camera, sink = OrbitCamera(), RecordingSink()
+    menu = SimpleNamespace(
+        workspace=SimpleNamespace(app=SimpleNamespace(camera=camera, session=None))
+    )
+    dispatch(menu, "projection:orthographic")
+    assert camera.animating
+    assert camera.view().projection_blend() == 0
+    camera.advance(0.07, sink)
+    blend = camera.view().projection_blend()
+    assert 0 < blend < 1
+    dispatch(menu, "projection:perspective")
+    assert camera.view().projection_blend() == blend
+    camera.advance(0.07, sink)
+    assert 0 < camera.view().projection_blend() < blend
+    camera.advance(0.28, sink)
+    assert not camera.animating
+    assert camera.view().projection_blend() == 0
+
+
 class RecordingSession:
     def __init__(self) -> None:
         self.commands: list = []

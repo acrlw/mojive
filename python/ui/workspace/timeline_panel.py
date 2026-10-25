@@ -532,7 +532,7 @@ class NativeTimelineToolbar(TimelineToolbar):
             width=28 if compact else 88,
             label="" if compact else "Stop" if recording else "Record simulation state",
             icon="stop" if recording else "record",
-            icon_color=(222, 123, 117, 255),
+            icon_color=self.workspace.ui.palette("danger"),
             filled=True,
             width_limit=width_limit,
             enabled=caps.simulation

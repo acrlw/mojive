@@ -49,7 +49,7 @@ def draw_value_rail(
         return (*value[:3], opacity)
 
     fill = theme.primary_bright if pressed else theme.primary if hovered else theme.primary_dim
-    knob = theme.text if pressed else theme.primary_bright if hovered else theme.primary
+    knob = theme.primary_bright if hovered or pressed else theme.primary
     track = (
         theme.bg_frame_active if pressed else theme.bg_frame_hovered if hovered else theme.bg_frame
     )

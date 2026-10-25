@@ -49,11 +49,17 @@ class _ModelEdits:
             editing = self.session.editing
             result = self.session.submit(command) if editing else cmd.CommandResult.good()
             cancelled = isinstance(command, cmd.CancelEditTransaction) or not result.ok
-            draft.end_transaction(cancelled)
+            pending = draft.end_transaction(cancelled)
             if cancelled and editing and not self.session.editing and draft.active:
                 # The direct writes rolled back; only the draft's earlier edits survive.
                 draft.rebase_after_failure()
+            if result.ok and not result.message:
+                result = pending
+            if draft.undo_token is not None:
+                self.session._record_result(result, pending_undo=draft.undo_token)
             return result
+        if isinstance(command, cmd.Undo) and draft.undo_token is not None:
+            return draft.undo()
         if draft.active and isinstance(
             command,
             (

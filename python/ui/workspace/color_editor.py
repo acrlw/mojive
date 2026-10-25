@@ -14,6 +14,7 @@ from mojive.ui.workspace.corner_geometry import nested_corners
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN
 from mojive.ui.workspace.menu_geometry import native_edges, native_epsilon, native_unit
 from mojive.ui.workspace.panel_geometry import corner_inset
+from mojive.ui.workspace.window_chrome import draw_floating_shadow, surface_ink
 
 
 @independent_corner_scope()
@@ -44,8 +45,15 @@ def color_popup(ui, key):
     imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
     imgui.push_style_var(imgui.StyleVar_.popup_rounding, radius)
     imgui.push_style_var(imgui.StyleVar_.frame_rounding, corners.inner_radius)
+    imgui.push_style_var(imgui.StyleVar_.popup_border_size, ui.s)
+    imgui.push_style_color(imgui.Col_.border, tuple(v / 255 for v in ui.palette("border")))
+    imgui.push_style_color(
+        imgui.Col_.popup_bg, tuple(v / 255 for v in surface_ink(ui, "color_editor", "popup"))
+    )
     opened = imgui.begin_popup(key)
     try:
+        if opened:
+            draw_floating_shadow(ui)
         if opened and ui.design is not None:
             window = imgui.internal.get_current_window()
             ui.design.record(
@@ -77,7 +85,8 @@ def color_popup(ui, key):
             imgui.dummy((0, 0))
             imgui.pop_style_var()
             imgui.end_popup()
-        imgui.pop_style_var(3)
+        imgui.pop_style_color(2)
+        imgui.pop_style_var(4)
 
 
 def place_color_popup(ui, key, *, position=None):
@@ -113,7 +122,7 @@ def color_popup_width(ui, count):
     available = imgui.get_main_viewport().work_size.x - 16 * scale
     requested = style.get("popupWidth", 280) * scale
     if not style.explicit("popupWidth"):
-        with ui.component_scope("rgba"):
+        with ui.component_scope("input_number", "rgba"):
             group = ui.component_style("rgba")
             field = ui.component_style(("input_number", "axis_input"))
             margin = group.edges("margin", scale)
@@ -218,6 +227,7 @@ class ColorField:
                     half / ui.s,
                     label="Done",
                     active=True,
+                    solid=True,
                     enabled=not self.editor.error,
                 ):
                     self.committed = True
@@ -393,7 +403,7 @@ class ColorEditor:
                     self.hex_text, self.error = format_color(out), ""
         picker_y = origin.y + header.height + row_gap
         channel_gap = ui.metric("color_channels", "rowGap", 8) * s
-        with ui.component_scope("rgba"):
+        with ui.component_scope("input_number", "rgba"):
             channel_layout = ui.numeric_layout(
                 width,
                 len(out),
@@ -465,7 +475,8 @@ class ColorEditor:
         remaining -= padding[1] + margins[1] + reserved
         remaining -= picker_padding[1] + picker_padding[3] + picker_margin[1] + picker_margin[3]
         sv_size = min(maximum_sv, max(picker_style.get("minimumHeight", 160) * s, remaining))
-        sv_size = min(sv_size, editor_style.get("pickerHeight", 160) * s)
+        if editor_style.explicit("pickerHeight"):
+            sv_size = min(sv_size, editor_style.get("pickerHeight", 160) * s)
         if editor_style.explicit("pickerShare"):
             sv_size = min(sv_size, width * editor_style.get("pickerShare", 100) / 100)
         if picker_style.explicit("height"):
@@ -533,16 +544,17 @@ class ColorEditor:
         channel_gap = ui.metric("color_channels", "rowGap", 8) * s
         y = format_y + format_height + channel_gap
         if self.mode == 0:
-            submitted, self.hex_text = ui.input_text(
-                key + "-hex",
-                origin.x,
-                y,
-                width,
-                self.hex_text,
-                flags=imgui.InputTextFlags_.enter_returns_true
-                | imgui.InputTextFlags_.auto_select_all,
-                mono=True,
-            )
+            with ui.component_scope("input_number"):
+                submitted, self.hex_text = ui.input_text(
+                    key + "-hex",
+                    origin.x,
+                    y,
+                    width,
+                    self.hex_text,
+                    flags=imgui.InputTextFlags_.enter_returns_true
+                    | imgui.InputTextFlags_.auto_select_all,
+                    mono=True,
+                )
             submitted |= imgui.is_item_deactivated_after_edit()
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
             ui.hits[key + "-hex"] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
@@ -558,7 +570,7 @@ class ColorEditor:
                 self.hex_text = format_color(out)
             bottom = hi.y
         else:
-            with ui.component_scope("rgba"):
+            with ui.component_scope("input_number", "rgba"):
                 factor = 255 if self.mode == 1 else 1
                 number_format = "%.0f" if factor == 255 else "%.3f"
                 layout = ui.numeric_layout(
@@ -602,7 +614,9 @@ class ColorEditor:
         imgui.set_cursor_screen_pos((origin.x, bottom + channel_gap))
         if self.error:
             imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + width)
-            imgui.text_colored((0.94, 0.49, 0.49, 1), ui.translate(self.error))
+            imgui.text_colored(
+                tuple(v / 255 for v in ui.palette("danger")), ui.translate(self.error)
+            )
             imgui.pop_text_wrap_pos()
         bottom = max(imgui.get_cursor_screen_pos().y, imgui.get_item_rect_max().y) + margins[3]
         if ui.design is not None:

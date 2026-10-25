@@ -178,6 +178,19 @@ class UI(ComponentStyles, _NumericFields):
         tint = _style_ink(value)
         return (*tint[:3], round(tint[3] * fallback[3] / 255)) if inherit_alpha else tint
 
+    def palette(self, role):
+        """Resolve semantic colors that cannot share a legacy RGB alias."""
+        from mojive.ui.design_palette import rgba8
+
+        return self.design.runtime.palette[role] if self.design is not None else rgba8(role)
+
+    def control_theme(self):
+        """Share the cached effective palette with backend-neutral control painters."""
+        if self.design is None:
+            return CONTROL_THEME
+        runtime = self.design.runtime
+        return runtime.theme_for(runtime.control_theme, self.design.family())
+
     def ink(self, color, style=None):
         if self.design is None:
             return color
@@ -321,7 +334,7 @@ class UI(ComponentStyles, _NumericFields):
         thickness = self.metric("separator", "thickness", 1) * self.s
         inset = min(w / 2, self.metric("separator", "margin", 0) * self.s)
         rect = Rect(x + inset, y - thickness / 2, max(0, w - 2 * inset), thickness)
-        self.draw.add_line((x + inset, y), (x + w - inset, y), color(LINE), thickness)
+        self.draw.add_line((x + inset, y), (x + w - inset, y), color(self.ink(LINE)), thickness)
         if self.design is not None:
             self.design.record(
                 f"separator/{x:g}/{y:g}",
@@ -440,6 +453,11 @@ class UI(ComponentStyles, _NumericFields):
         radius=None,
     ):
         s = self.s
+        if label and isinstance(tooltip, str):
+            caption = self.translate(label) if translate else label
+            hint = self.translate(tooltip) if translate else tooltip
+            if caption == hint:
+                tooltip = ""
         icon_role = icon_role or ("inline" if label else "toolbar")
         if self.design is not None:
             return self.design.button(
@@ -633,7 +651,10 @@ class UI(ComponentStyles, _NumericFields):
         imgui.push_font(self.numeric_font if mono else self.body, font_size * self.s)
         imgui.push_style_var(
             imgui.StyleVar_.frame_padding,
-            (DESIGN.frame_padding_x * self.s, DESIGN.control_padding_y(font_size) * self.s),
+            (
+                DESIGN.frame_padding_x * self.s,
+                max(0, (DESIGN.control_height * self.s - imgui.get_font_size()) / 2),
+            ),
         )
         imgui.begin_disabled(not enabled)
         item_label = key if key.startswith("##") else "##" + key
@@ -914,14 +935,16 @@ class UI(ComponentStyles, _NumericFields):
             tuple(self.translate(label) for label in labels),
             selected,
             width=content_width,
-            theme=CONTROL_THEME,
+            theme=self.control_theme(),
             icons=icons,
             icon_label_drawer=self._segment_label,
             on_item=record,
             layout=layout,
             show_labels=show_labels,
             caption_tooltips=(
-                (lambda text: self.tooltip(text, translate=False)) if tooltips is None else False
+                (lambda text: self.tooltip(text, translate=False))
+                if tooltips is None and not show_labels
+                else False
             ),
             gap=style.get("columnGap", 0) * self.s,
             item_width=item.get("width", 70) * self.s
@@ -1113,7 +1136,7 @@ class UI(ComponentStyles, _NumericFields):
             draw_focus_frame(
                 imgui.ImVec2(box.frame.x, box.frame.y),
                 imgui.ImVec2(box.frame.right, box.frame.bottom),
-                rounding=CONTROL_RADIUS * s,
+                rounding=DESIGN.control_radius * s,
                 item_id=item_id,
             )
         return hit

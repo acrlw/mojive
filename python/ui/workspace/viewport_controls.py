@@ -5,6 +5,7 @@ from functools import lru_cache
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import Rect, part_scope
+from mojive.ui.design_palette import rgba8
 from mojive.ui.input_bindings import InputAction
 from mojive.ui.workspace.component_layout import (
     FlowLayout,
@@ -17,7 +18,7 @@ from mojive.ui.workspace.group_corners import action_corner_scope, action_corner
 from mojive.ui.workspace.tooltips import ShortcutHint
 from mojive.ui.workspace.widgets import DIM, color
 
-BACKGROUND = (22, 25, 28, 230)
+BACKGROUND = rgba8("chrome", 230)
 
 
 def toolbar_group_gap(style, scale, gap):
@@ -39,7 +40,7 @@ def toolbar_separator(ui, style, before, after, *, horizontal):
         left, right = max(before.x, after.x), min(before.right, after.right)
         rect = Rect(left + inset, before.bottom + gap, max(0, right - left - 2 * inset), thickness)
     if rect.width > 0 and rect.height > 0:
-        ink = ui.style_color(style, "separatorColor", (255, 255, 255, 46), inherit_alpha=False)
+        ink = ui.style_color(style, "separatorColor", ui.palette("border"), inherit_alpha=False)
         ui.draw.add_rect_filled((rect.x, rect.y), (rect.right, rect.bottom), color(ink))
     return rect
 
@@ -234,7 +235,7 @@ def toolbox(workspace, rect, top, horizontal, wrapped, overlay):
         p = positions[n]
         frame = control_frame_size(ui, "tool-" + name, p.width, p.height, icon=name)
         shortcut = "V" if action is None else app.input_bindings.label(action)
-        tip = "Dimensions: select a geometry" if name == "scale" else name.title()
+        tip = "Dimensions" if name == "scale" else name.title()
         if ui.button(
             "tool-" + name,
             p.x,

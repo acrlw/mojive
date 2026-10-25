@@ -18,6 +18,8 @@ class OutputMessage:
     level: str
     text: str
     copy_text: str | None = None
+    undo: tuple[str, int] | None = None
+    pending_undo: tuple[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,8 @@ class OutputBuffer:
         level: str = "info",
         timestamp: str | None = None,
         copy_text: str | None = None,
+        undo: tuple[str, int] | None = None,
+        pending_undo: tuple[str, int] | None = None,
     ) -> OutputMessage | None:
         value = str(text).strip()
         if not value:
@@ -54,6 +58,8 @@ class OutputBuffer:
                 str(level).lower(),
                 value,
                 copy_text,
+                undo,
+                pending_undo,
             )
             self._entries.append(message)
             return message
@@ -65,8 +71,12 @@ class OutputBuffer:
         level: str = "info",
         duration: float | None = 5.0,
         copy_text: str | None = None,
+        undo: tuple[str, int] | None = None,
+        pending_undo: tuple[str, int] | None = None,
     ) -> OutputMessage | None:
-        message = self.write(text, level=level, copy_text=copy_text)
+        message = self.write(
+            text, level=level, copy_text=copy_text, undo=undo, pending_undo=pending_undo
+        )
         if message is None:
             return None
         expires_at = None if duration is None else time.monotonic() + max(0.0, float(duration))

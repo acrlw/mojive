@@ -88,9 +88,9 @@ def test_camera_corner_constraint_reaches_actual_active_action_paint(
     painted = []
     original = ui.rect
 
-    def capture(x, y, width, height, ink, r=0):
+    def capture(x, y, width, height, ink, r=0, **options):
         painted.append(((x, y, width, height), r * ui.s))
-        return original(x, y, width, height, ink, r)
+        return original(x, y, width, height, ink, r, **options)
 
     monkeypatch.setattr(ui, "rect", capture)
     for _ in range(3):

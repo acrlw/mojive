@@ -17,6 +17,7 @@ from mojive.ui.design_palette import PALETTE, rgba8
 from mojive.ui.workspace import panel_host
 from mojive.ui.workspace.panel_host import draw_content
 from mojive.ui.workspace.popup_style import menu_popup_style
+from mojive.ui.workspace.property_style import NativePropertyPresentation
 from mojive.ui.workspace.settings_layout import _draw_page, draw_navigation
 from mojive.ui.workspace.widgets import UI
 from mojive.ui.workspace.window_chrome import panel_surface, surface_ink
@@ -425,7 +426,12 @@ def test_production_panel_content_does_not_paint_over_its_host_surface(surfaces)
 def test_settings_navigation_and_page_children_preserve_parent_background(surfaces):
     ui = surfaces
     workspace = SimpleNamespace(ui=ui, s=ui.s)
-    panel = SimpleNamespace(workspace=workspace, _category="General", _control_padding=lambda: None)
+    panel = SimpleNamespace(
+        workspace=workspace,
+        _category="General",
+        _control_padding=lambda: None,
+        fields=NativePropertyPresentation(ui, prefix="settings", fit_labels=True),
+    )
     for method in (
         "_general",
         "_camera_navigation",
@@ -435,7 +441,7 @@ def test_settings_navigation_and_page_children_preserve_parent_background(surfac
         "_mujoco_visuals",
     ):
         setattr(panel, method, lambda ctx: None)
-    ctx = SimpleNamespace(tr=str)
+    ctx = SimpleNamespace(tr=str, language="en")
     imgui.new_frame()
     imgui.set_next_window_size((850 * ui.s, 600 * ui.s))
     with panel_surface(ui, docked=False):

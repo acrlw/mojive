@@ -135,7 +135,9 @@
     "status-mouse-left": "mojive/status-mouse-left.svg",
     "status-mouse-right": "mojive/status-mouse-right.svg",
     "status-mouse-wheel": "mojive/status-mouse-wheel.svg",
-    "sidebar-left": "mojive/sidebar-left.svg"
+    "sidebar-left": "mojive/sidebar-left.svg",
+    "sun": "mojive/sun.svg",
+    "moon": "mojive/moon.svg"
   },
   "style": {
     "grid": 24,

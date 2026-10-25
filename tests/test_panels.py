@@ -1483,3 +1483,18 @@ def test_inspector_collapsed_components_only_count_and_invalidate_on_model_edits
     panel._refresh_component_cache(ctx, 2)
     assert len(calls) == 15
     assert calls[-1][0] == 2
+
+
+def test_operation_history_captions_translate_without_mutating_command_labels():
+    chinese = Localizer(Language.SIMPLIFIED_CHINESE)
+    english = Localizer(Language.ENGLISH)
+    for source, expected in [
+        ("Translate transform", "平移对象"),
+        ("Resize geometry", "调整几何体尺寸"),
+        ("Undo Rotate transform", "撤销：旋转对象"),
+        ("Redo SetGeometryColor", "重做：修改几何体颜色"),
+        ("Undo AddSceneObject", "撤销：添加对象"),
+    ]:
+        assert chinese.text(source) == expected
+        assert english.text(source) == source
+    assert chinese.text("Undo custom user operation") == "撤销：custom user operation"

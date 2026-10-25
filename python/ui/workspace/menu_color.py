@@ -183,7 +183,7 @@ def color_control(menu, entity, x, y, width):
                 imgui.close_current_popup()
                 return
             menu.color_visible = True
-            record = menu.shadow_and_record("Color", ("Color",))
+            record = menu.record_window("Color", ("Color",))
             record["controls"] = {}
             content_w = imgui.get_content_region_avail().x
             changed, values = menu.color_editor.draw(
@@ -206,7 +206,17 @@ def color_control(menu, entity, x, y, width):
                 )
             content_w = menu.color_editor.content_width
             p = imgui.get_cursor_screen_pos()
-            u.text(p.x, p.y + 8 * s, "Esc to cancel", DIM, BODY_SIZE)
+            inset = u.component_style("input_text").edges("padding", s, (8, 0, 8, 0))[0]
+            hint = Rect(p.x + inset, p.y, max(0, content_w - 64 * s - inset - 8 * s), 28 * s)
+            u.component_text("menu_item", hint, "Esc to cancel", DIM, size=BODY_SIZE)
+            if u.design is not None:
+                u.design.record(
+                    "color-cancel-hint",
+                    ("color_editor",),
+                    hint.tuple(),
+                    "caption",
+                    text="Esc to cancel",
+                )
             if u.button(
                 "done-color",
                 p.x + content_w - 64 * s,
@@ -215,6 +225,7 @@ def color_control(menu, entity, x, y, width):
                 28,
                 label="Done",
                 active=True,
+                solid=True,
                 enabled=not menu.color_editor.error,
             ):
                 imgui.close_current_popup()

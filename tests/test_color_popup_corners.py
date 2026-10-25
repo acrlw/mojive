@@ -1,15 +1,12 @@
 """Live color popups own their corner geometry and one inset budget."""
 
-from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 from imgui_bundle import imgui
 
-from mojive.ui.workspace.color_editor import color_popup
 from mojive.ui.workspace.menus import Menus
-from tests import test_color_settings_layout
 from tests.test_color_settings_layout import layout as layout
 
 
@@ -191,11 +188,39 @@ def test_default_production_color_popup_has_exact_native_insets_and_compact_corn
     assert done[3] == pytest.approx(28 * ui.s, abs=epsilon)
     # The standard popup stays compact at fractional scale without breaking
     # the four-channel row into a taller grid or cropping numeric values.
-    assert window.size.x / ui.s <= 282
-    assert ui.hits[state.key + "-sv"][3] / ui.s <= 160 + epsilon
+    assert window.size.x / ui.s <= 320
+    picker = ui.hits[state.key + "-picker"]
+    assert picker[0] == pytest.approx(header[0], abs=epsilon)
+    assert picker[0] + picker[2] == pytest.approx(header[0] + header[2], abs=epsilon)
     channels = [ui.hits[state.key + axis + "-frame"] for axis in "RGBA"]
     assert len({round(rect[1], 3) for rect in channels}) == 1
     assert channels[-1][0] + channels[-1][2] <= header[0] + header[2] + epsilon
+
+
+@pytest.mark.parametrize("entry", ("field", "inspector", "menu"))
+def test_color_entries_keep_numeric_typography_and_hint_text_alignment(production_color, entry):
+    state, ui = production_color, production_color.ui
+    state.open_popup(entry)
+    state.editor.mode = 0
+    state.frame(6)
+    field = next(
+        r for r in reversed(ui.design.primitives.observed) if r["key"] == state.key + "-hex"
+    )
+    assert field["fontSize"] == 16
+    if entry == "menu":
+        hint = next(r for r in state.runtime.observed if r["key"] == "color-cancel-hint")
+        assert hint["hit"][0] == pytest.approx(field["content"][0])
+        assert hint["hit"][0] + hint["hit"][2] < ui.hits[state.done][0]
+    for mode in (1, 2):
+        state.editor.mode = mode
+        state.frame(3)
+        channels = [
+            r
+            for r in ui.design.primitives.observed
+            if r["key"] in {state.key + axis for axis in "RGBA"}
+        ]
+        assert len(channels) >= 4
+        assert all(field["fontSize"] == 16 for field in channels)
 
 
 @pytest.mark.parametrize("entry", ("field", "inspector", "menu"))
@@ -242,27 +267,24 @@ def test_color_popup_shadow_follows_the_actual_native_corner(layout, monkeypatch
     spec["parts"]["color_editor"] = {"radius": 24}
     spec["parts"]["menu"] = {"radius": 3}
     state.runtime.update_spec(spec)
-    shadow_roundings = []
-    draw = SimpleNamespace(
-        push_clip_rect_full_screen=lambda: None,
-        pop_clip_rect=lambda: None,
-        add_rect=lambda *args, **kwargs: shadow_roundings.append(kwargs["rounding"]),
-    )
-    menu = SimpleNamespace(ui=ui, s=ui.s, observed={})
+    shadows = []
+    from mojive.ui.workspace import window_chrome
 
-    @contextmanager
-    def popup(ui, key):
-        with color_popup(ui, key) as opened:
-            if opened:
-                with monkeypatch.context() as context:
-                    context.setattr(imgui, "get_window_draw_list", lambda: draw)
-                    Menus.shadow_and_record(menu, key, (key,))
-            yield opened
+    original = window_chrome.draw_surface_shadow
 
-    monkeypatch.setattr(test_color_settings_layout, "color_popup", popup)
+    def shadow(draw, origin, size, radius, scale, color):
+        start = len(draw.vtx_buffer)
+        original(draw, origin, size, radius, scale, color)
+        points = [(v.pos.x, v.pos.y) for v in list(draw.vtx_buffer)[start:]]
+        shadows.append((tuple(origin), tuple(size), radius, scale, points))
+
+    monkeypatch.setattr(window_chrome, "draw_surface_shadow", shadow)
     state.frame()
     actual_radius = _window().window_rounding
     assert actual_radius == 24 * ui.s
-    assert shadow_roundings[-4:] == pytest.approx(
-        [actual_radius + outset * ui.s for outset in (7, 5, 3, 1.5)]
-    )
+    (x, y), (width, height), radius, scale, points = shadows[-1]
+    assert radius == actual_radius
+    assert (x, y + radius) in points
+    assert (x + width, y + height - radius) in points
+    assert min(px for px, _ in points) == pytest.approx(x - 32 * scale)
+    assert max(py for _, py in points) == pytest.approx(y + height + 43.2 * scale)

@@ -396,6 +396,8 @@ class _Status:
             level=getattr(self.session, "last_message_level", "info"),
             duration=duration,
             copy_text=getattr(self.session, "last_message_copy_text", None),
+            undo=getattr(self.session, "last_message_undo", None),
+            pending_undo=getattr(self.session, "last_message_pending_undo", None),
         )
 
     def _draw_viewport_status(self, overlay: ImguiDraw2D) -> None:

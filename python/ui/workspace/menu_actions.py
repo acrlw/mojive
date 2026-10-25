@@ -8,7 +8,15 @@ def dispatch(menu, action):
     st = menu.workspace
     app, session = st.app, st.app.session
     prefix, _, value = action.partition(":")
-    if prefix == "layout":
+    if action == "toggle-theme":
+        from mojive.design.themes import select_theme, theme_name
+
+        name = "dark" if theme_name(app.design.spec) == "light" else "light"
+        try:
+            select_theme(app.design, name)
+        except (OSError, ValueError) as error:
+            session.report_message(str(error), level="error")
+    elif prefix == "layout":
         st.pending = value
     elif prefix == "panel":
         st.activate(value)
@@ -57,7 +65,7 @@ def dispatch(menu, action):
     elif prefix == "space":
         st.space = value
     elif prefix == "projection":
-        app.camera.set_orthographic(value == "orthographic")
+        app.camera.set_orthographic(value == "orthographic", animate=True)
     elif prefix == "shading":
         from mojive.render.backend import DebugView
 

@@ -1276,6 +1276,11 @@ ui-native-workspace:
 ui-native-capture:
 	$(PY) -m mojive.tools.native_workspace --capture --backend $(BACKEND) --output output/ui_design/native/$(BACKEND) $(ARGS)
 
+.PHONY: ui-theme-review
+## Verify persisted themes and operation Undo through hidden production windows.
+ui-theme-review:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_workspace_themes.py $(ARGS)
+
 .PHONY: ui-control-review
 ## Verify filters, focus, side panels and About through hidden production windows.
 ui-control-review:

@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from mojive.design.specification import BASELINE, DEFAULT, component_catalog, resolve_part_value
 from mojive.design.store import SpecificationStore
+from mojive.design.themes import ROLE_TOKENS, colors, theme_name
 
 TOKEN_METRICS = {
     "body_size": "body_font_size",
@@ -57,17 +58,7 @@ PART_METRICS = {
     "file_receipt_padding": ("file_receipt", "paddingX"),
     "rail_entry_width": ("range_number", "numberWidth"),
 }
-PALETTE_TOKENS = {
-    "text": "text_color",
-    "secondary": "muted_color",
-    "disabled": "dim_color",
-    "primary": "sage_color",
-    "warning": "amber_color",
-    "background": "panel_color",
-    "floating": "floating_color",
-    "popup": "popup_color",
-    "field": "input_color",
-}
+PALETTE_TOKENS = ROLE_TOKENS
 THEME_ROLES = {
     "text": "text",
     "text_disabled": "disabled",
@@ -77,6 +68,14 @@ THEME_ROLES = {
     "bg_popup": "popup",
     "bg_frame": "field",
     "warning": "warning",
+    "primary_bright": "primary_bright",
+    "primary_dim": "primary_dim",
+    "bg_frame_hovered": "field_hovered",
+    "bg_frame_active": "field_active",
+    "bg_header": "header",
+    "danger": "danger",
+    "info": "info",
+    "accent_purple": "purple",
 }
 
 
@@ -85,6 +84,28 @@ def _palette_ink(value):
     return (
         *(int(value[index : index + 2], 16) for index in (1, 3, 5)),
         int(value[7:9], 16) if len(value) == 9 else 255,
+    )
+
+
+def _with_viewport_colors(theme):
+    """Resolve nested chrome together with its owning palette, never per frame."""
+    return replace(
+        theme,
+        viewport=replace(
+            theme.viewport,
+            surface=(*theme.bg_child[:3], 0.92),
+            outline=(*theme.text[:3], 0.25),
+            divider=(*theme.border[:3], theme.border[3] * 0.72),
+            hover_background=theme.bg_frame_active,
+            press_background=theme.bg_frame_active,
+            on_background=theme.bg_frame_active,
+            off_foreground=theme.text,
+            hover_foreground=theme.primary_bright,
+            press_foreground=theme.primary_bright,
+            on_foreground=theme.primary_bright,
+            disabled_foreground=theme.text_disabled,
+            record=theme.danger,
+        ),
     )
 
 
@@ -151,11 +172,27 @@ class DesignRuntime:
         self._reset_inks()
 
     def _reset_inks(self):
-        from mojive.ui.design_palette import rgba8
+        from mojive.ui.design_palette import PALETTE, rgba8
 
+        self.palette = {role: _palette_ink(ink) for role, ink in colors(self.spec).items()}
+        self.active_theme = theme_name(self.spec)
+        from mojive.ui.theme import THEME
+
+        self.control_theme = replace(
+            THEME,
+            border=tuple(v / 255 for v in self.palette["divider"]),
+            **{
+                field: tuple(v / 255 for v in self.palette[role])
+                for field, role in THEME_ROLES.items()
+            },
+        )
+        self.control_theme = _with_viewport_colors(
+            replace(self.control_theme, primary_bright=self.control_theme.primary)
+        )
         self._inks = {
-            rgba8(role)[:3]: _palette_ink(self.value(token))
-            for role, token in PALETTE_TOKENS.items()
+            rgba8(role)[:3]: self.palette[role]
+            for role in PALETTE
+            if role not in ("divider", "on_primary", "hover_overlay", "switch_thumb")
         }
         self._module_inks.clear()
         self._module_themes.clear()
@@ -167,6 +204,9 @@ class DesignRuntime:
         self.has_module_palette = bool(self._palette_families)
 
     def ink(self, color, family=None):
+        if tuple(color[:3]) == (255, 255, 255) and color[3] < 128:
+            divider = self.palette["divider"]
+            return (*divider[:3], min(255, round(color[3] * divider[3] / 13)))
         palette = self._inks
         if self.has_module_palette and family in self._palette_families:
             cached = self._module_inks.get(family)
@@ -177,6 +217,8 @@ class DesignRuntime:
                 aliases = {}
                 overrides = self.spec["components"][family]
                 for role, token in PALETTE_TOKENS.items():
+                    if role == "divider":
+                        continue
                     source = rgba8(role)[:3]
                     value = _palette_ink(self.value(token, family))
                     palette[source] = value
@@ -205,12 +247,17 @@ class DesignRuntime:
                 theme,
                 **{
                     field: tuple(
-                        v / 255 for v in _palette_ink(self.value(PALETTE_TOKENS[role], family))
+                        v / 255
+                        for v in (
+                            _palette_ink(self.value(PALETTE_TOKENS[role], family))
+                            if role in PALETTE_TOKENS
+                            else self.palette[role]
+                        )
                     )
                     for field, role in THEME_ROLES.items()
                 },
             )
-            cached = self._module_themes[key] = theme, themed
+            cached = self._module_themes[key] = theme, _with_viewport_colors(themed)
         return cached[1]
 
     def prepare_fonts(self, ui):
@@ -236,7 +283,6 @@ class DesignRuntime:
         """Apply the same native type, geometry and theme to a workspace or guide surface."""
         from imgui_bundle import imgui
 
-        from mojive.ui.design_palette import rgba8
         from mojive.ui.workspace.design import DEFAULT_DESIGN
 
         imgui.set_current_context(window._imgui_context)
@@ -244,12 +290,31 @@ class DesignRuntime:
         themed = replace(
             theme,
             border=tuple(channel / 255 for channel in _palette_ink(self.value("border_color"))),
+            node_colors={
+                kind: tuple(v / 255 for v in self.palette["node_" + kind.value])
+                for kind in theme.node_colors
+            },
+            accent_purple_bright=tuple(v / 255 for v in self.palette["purple_bright"]),
             **{
-                name: tuple(channel / 255 for channel in self.ink(rgba8(role)))
+                name: tuple(channel / 255 for channel in self.palette[role])
                 for name, role in THEME_ROLES.items()
             },
         )
+        themed = _with_viewport_colors(themed)
         window.apply_theme(themed)
+        from mojive.ui.interaction_paint import secondary_action_ink
+
+        # Native extension controls and custom workspace buttons share the same
+        # secondary action surface; input fields keep their separate palette.
+        for name, role in (
+            ("button", "field"),
+            ("button_hovered", "field_hovered"),
+            ("button_active", "field_active"),
+        ):
+            ink = secondary_action_ink(self.palette[role], self.palette["text"])
+            imgui.get_style().set_color_(
+                getattr(imgui.Col_, name), imgui.ImVec4(*(v / 255 for v in ink))
+            )
         dimensions = self.dimensions(DEFAULT_DESIGN)
         style = imgui.get_style()
         style.font_size_base = dimensions.body_size * scale
@@ -418,6 +483,7 @@ class DesignRuntime:
                 self.prepare_fonts(shell.ui)
                 theme_key = (
                     tuple(self.spec["tokens"].items()),
+                    tuple(self.spec.get("palette", {}).items()),
                     shell.s,
                     tuple(
                         getattr(dimensions, field)

@@ -208,3 +208,68 @@ def test_receipt_actions_remain_real_native_click_targets(appearance, monkeypatc
         event("add_mouse_button_event", 0, False)
     assert revealed == [path]
     assert copied == [str(path)]
+
+
+def test_undo_notice_uses_native_click_and_rejects_stale_edits(appearance):
+    from mojive.ui.workspace.notices import notice_can_undo
+
+    ui, runtime, _update, frame = appearance
+    runtime.observe_components = True
+    app = _app(ui)
+    submitted = []
+    app.session = SimpleNamespace(
+        document_id="scene",
+        document_revision=3,
+        can_undo=True,
+        editing=False,
+        submit=submitted.append,
+    )
+    app.model_edits = SimpleNamespace(active=False)
+    app.gizmo = SimpleNamespace(using=False)
+    app.refresh_document = lambda: None
+    message = SimpleNamespace(text="Translate transform", level="info", undo=("scene", 3))
+
+    def draw():
+        ui.design.begin_frame()
+        draw_operation_notice(app, ImguiDraw2D(), message)
+
+    for _ in range(3):
+        frame(draw)
+    notice = next(r for r in runtime.observed if r["key"] == "operation-notice")
+    action = next(r for r in ui.design.primitives.observed if r["key"] == "notice-undo")
+    assert action["icon"] == "undo" and not action["clippedLabel"]
+    x, y, width, height = ui.hits["notice-undo"]
+    nx, ny, nw, nh = notice["hit"]
+    inset = y - ny
+    assert (nx + nw - x - width, ny + nh - y - height) == pytest.approx((inset, inset))
+    assert action["fieldValues"]["radius"] * ui.s == pytest.approx(max(0, notice["radius"] - inset))
+    text_x, _text_y, text_width, _text_height = notice["fields"][1]
+    assert x - text_x - text_width == pytest.approx(16 * ui.s)
+    assert nh == pytest.approx(36 * ui.s)
+    assert notice["radius"] == pytest.approx(8 * ui.s)
+    for event, args in [
+        ("add_mouse_pos_event", (x + width / 2, y + height / 2)),
+        ("add_mouse_button_event", (0, True)),
+        ("add_mouse_button_event", (0, False)),
+    ]:
+        getattr(imgui.get_io(), event)(*args)
+        frame(draw)
+    assert len(submitted) == 1 and type(submitted[0]).__name__ == "Undo"
+    message.undo = None
+    message.text = "Undo Translate transform"
+    for _ in range(3):
+        frame(draw)
+    result = next(r for r in runtime.observed if r["key"] == "operation-notice")
+    assert (*result["hit"][:2], result["hit"][3], result["radius"]) == pytest.approx(
+        (nx, ny, nh, notice["radius"])
+    )
+    assert not any(r["key"] == "notice-undo" for r in ui.design.primitives.observed)
+    message.undo = ("scene", 3)
+    app.session.document_revision = 4
+    assert not notice_can_undo(app, message)
+    app.session.document_revision = 3
+    app.gizmo.using = True
+    assert not notice_can_undo(app, message)
+    app.gizmo.using = False
+    app.model_edits.active = True
+    assert not notice_can_undo(app, message)
