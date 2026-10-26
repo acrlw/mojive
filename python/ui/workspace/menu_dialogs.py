@@ -3,11 +3,10 @@
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import Rect
-from mojive.ui.input_bindings import InputAction
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import BODY_SIZE
 from mojive.ui.workspace.form_popup import form_corners
-from mojive.ui.workspace.widgets import DIM, MUTED, TEXT
+from mojive.ui.workspace.widgets import DIM, TEXT
 
 
 def dialogs(menu):
@@ -202,7 +201,6 @@ def dialogs(menu):
         imgui.set_cursor_screen_pos((p.x, p.y))
         imgui.push_style_color(imgui.Col_.child_bg, (0, 0, 0, 0))
         body_font = body_style.get("fontSize", style.get("fontSize", BODY_SIZE))
-        body_line = max(body_font, body_style.line_height(body_font * 1.4)) * s
         body_gap = (body_style.get("rowGap") if u.design is not None else 12) * s
         imgui.push_font(u.resolve_font(body_style), body_font * s)
         for slot, fallback in ((imgui.Col_.text, TEXT), (imgui.Col_.text_disabled, DIM)):
@@ -215,76 +213,9 @@ def dialogs(menu):
         imgui.pop_style_var()
         body_rows = []
         if menu.dialog == "Interaction guide":
-            bindings = menu.workspace.app.input_bindings
-            for title, value in [
-                ("Orbit", "Drag an empty area"),
-                ("Pan", "Middle mouse drag"),
-                ("Zoom", "Mouse wheel"),
-                (
-                    "Fly camera",
-                    " / ".join(
-                        " ".join(bindings.label(action) for action in group)
-                        for group in (
-                            (
-                                InputAction.FLY_FORWARD,
-                                InputAction.FLY_LEFT,
-                                InputAction.FLY_BACK,
-                                InputAction.FLY_RIGHT,
-                            ),
-                            (InputAction.FLY_UP, InputAction.FLY_DOWN),
-                        )
-                    ),
-                ),
-                (
-                    "Transform tools",
-                    "V / "
-                    + " / ".join(
-                        bindings.label(action)
-                        for action in (InputAction.GIZMO_TRANSLATE, InputAction.GIZMO_ROTATE)
-                    ),
-                ),
-                ("World / body frame", bindings.label(InputAction.GIZMO_SPACE)),
-                ("Snap", bindings.label(InputAction.SNAP)),
-                (
-                    "Frame all / focus",
-                    bindings.label(InputAction.FRAME_SCENE) + " / double-click",
-                ),
-                (
-                    "Settings",
-                    "F9 / " + ("Cmd" if imgui.get_io().config_mac_osx_behaviors else "Ctrl") + ",",
-                ),
-                ("Precise gizmo input", "Double-click a handle"),
-                (
-                    "Undo / redo",
-                    ("Cmd" if imgui.get_io().config_mac_osx_behaviors else "Ctrl") + "+Z / Shift+Z",
-                ),
-                ("Simulation playback", "Space"),
-                ("Timeline", "T"),
-                ("Dock panels", "Drag a panel tab"),
-            ]:
-                q = imgui.get_cursor_screen_pos()
-                column = w * 0.47
-                if (
-                    u.measure(title, body_font, style=body_style) + 12 * s > column
-                    or u.measure(value, body_font, style=body_style) > w - column
-                ):
-                    imgui.push_text_wrap_pos(0)
-                    fallback = u.ink(MUTED, body_style)
-                    tint = u.style_color(body_style, "textColor", fallback)
-                    imgui.text_colored(tuple(v / 255 for v in tint), u.translate(title))
-                    imgui.text_wrapped(u.translate(value))
-                    imgui.pop_text_wrap_pos()
-                    imgui.dummy((0, body_gap))
-                else:
-                    u.component_text("dialog_body", Rect(q.x, q.y, column, body_line), title, MUTED)
-                    u.component_text(
-                        "dialog_body",
-                        Rect(q.x + column, q.y, max(0, w - column), body_line),
-                        value,
-                        TEXT,
-                    )
-                    imgui.dummy((w, body_line))
-                body_rows.append([q.x, q.y, w, imgui.get_item_rect_max().y - q.y])
+            from mojive.ui.workspace.interaction_guide import draw_interaction_rows
+
+            body_rows = draw_interaction_rows(u, menu.workspace.app.input_bindings, w)
         else:
             from mojive.build_info import current_build
 

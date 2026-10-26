@@ -258,7 +258,8 @@ class ComponentStyles:
 
         rect = rect if isinstance(rect, Rect) else Rect(*rect)
         style = self.component_style(part)
-        font_size = style.get(font_field, DESIGN.body_size if size is None else size)
+        fallback = DESIGN.body_size if size is None else size
+        font_size = style.get(font_field, fallback) if font_field is not None else fallback
         line = min(rect.height, max(font_size, style.line_height(font_size * 1.4)) * self.s)
         horizontal = style.get("textAlign", style.get("align", align or "start"))
         vertical = style.get("alignItems", "center")

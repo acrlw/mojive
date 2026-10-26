@@ -1145,7 +1145,7 @@ def test_status_uses_muted_gray_for_chrome_and_context_hints():
     assert draw.circles[0][0][2] == THEME.primary
     assert {args[2] for args, _kwargs in draw.meshes} == {
         THEME.text_disabled,
-        (*THEME.text_disabled[:3], THEME.text_disabled[3] * 0.55),
+        (*THEME.text_disabled[:3], THEME.text_disabled[3] * 0.8),
     }
     status_x = next(position[0] for position, text in draw.text_positions if text == "Saved scene")
     vertical_dividers = [
@@ -1259,7 +1259,7 @@ def test_mouse_hints_use_the_adopted_master_with_neutral_ink(scale, button, monk
     assert size == pytest.approx(OVERLAY_GEOMETRY.hint_control_height * scale)
     assert name == "status-mouse-" + ("wheel" if button == "middle" else button)
     assert color == THEME.text
-    assert options["stroke_color"] == (*THEME.text[:3], THEME.text[3] * 0.55)
+    assert options["stroke_color"] == (*THEME.text[:3], THEME.text[3] * 0.8)
 
 
 def test_mouse_hint_colors_resolve_active_and_muted_semantics() -> None:
@@ -1268,7 +1268,7 @@ def test_mouse_hint_colors_resolve_active_and_muted_semantics() -> None:
     for muted, ink in ((False, THEME.text), (True, THEME.text_disabled)):
         shell, control, suffix = mouse_hint_colors(THEME, muted=muted)
         assert control == suffix == ink
-        assert shell == (*ink[:3], ink[3] * 0.55)
+        assert shell == (*ink[:3], ink[3] * 0.8)
 
 
 @pytest.mark.parametrize("gap_ratio", (0.5, 1.0))

@@ -31,6 +31,12 @@ Scale uses three hollow handles. Snap uses an outlined upright horseshoe with fi
 Sensors use a connected sensing module; plotted data retains its separate waveform. Its rounded
 14-unit body and 20-unit pin span balance neighboring object and camera symbols; pin reach alone
 must not substitute for a legible central body when judging visual size.
+The three `status-mouse-*` masters are a lighter input-diagram family: every shell and divider
+uses an explicit 1.0-unit stroke on the same 24-unit grid. Keep their canvas, centerlines and
+neutral ink independent of that weight. Derive left/right button fills from the shell's inward
+half-stroke offset, and use the authored width for AA fringe limits. Do not make a dark heavy
+stroke appear lighter by fading it or imposing a display-pixel stroke floor.
+
 The four-well palette, selection pointer, camera, light, perspective, record, rotation/reset,
 visibility pair, Assets, Control, Copy/Duplicate and other retained symbols keep their approved
 silhouettes. Copy/Duplicate use separated rear contours to communicate occlusion.

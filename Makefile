@@ -1281,6 +1281,16 @@ ui-native-capture:
 ui-theme-review:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_workspace_themes.py $(ARGS)
 
+.PHONY: ui-status-mouse
+## Capture muted mouse contrast without changing input geometry or status typography.
+ui-status-mouse:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_status_mouse_hints.py $(ARGS)
+
+.PHONY: ui-interaction-guide
+## Capture shared keyboard/mouse indicators and complete scrolling guide content.
+ui-interaction-guide:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_interaction_guide.py $(ARGS)
+
 .PHONY: ui-control-review
 ## Verify filters, focus, side panels and About through hidden production windows.
 ui-control-review:

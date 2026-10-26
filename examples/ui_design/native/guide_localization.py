@@ -165,7 +165,7 @@ ZH_CN = {
     "Interaction": "交互",
     "Rendering": "渲染",
     "Recording": "录制",
-    "Content visualization": "内容可视化",
+    "Content Visualization": "内容可视化",
     "Properties": "属性",
     "Physics": "物理",
     "Material": "材质",

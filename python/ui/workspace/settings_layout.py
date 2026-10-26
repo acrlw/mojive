@@ -202,7 +202,11 @@ def draw_navigation(panel, ctx, rect, narrow, *, fit_content=False):
             font_resolved=True,
             style=item,
         )
-        icon = item.get("iconSize", icon_role_canvas("inline")) * s
+        icon = item.get("iconSize", icon_role_canvas("inline"))
+        engine = getattr(getattr(u.design, "runtime", None), "paint_context", None)
+        if not item.explicit("iconSize") and engine is not None:
+            icon = engine.inherited("iconSize", icon)
+        icon *= s
         inner_gap = item.get("columnGap", item.get("gap", 6)) * s
         padding, margins = item.edges("padding", s, (8, 0, 8, 0)), item.edges("margin", s)
         natural = label + icon + inner_gap + padding[0] + padding[2]

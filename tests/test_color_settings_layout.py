@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from imgui_bundle import imgui
 
+from mojive.design.groups import group_scope
 from mojive.design.native.geometry import Rect
 from mojive.design.native.presentation import DesignPresentation
 from mojive.design.runtime import DesignRuntime
@@ -138,7 +139,8 @@ def test_color_popup_resolves_uniform_native_insets_and_preserves_independent_ga
 
 
 @pytest.mark.parametrize("narrow", (False, True))
-def test_settings_navigation_rows_are_inset_from_the_actual_container(layout, narrow):
+@pytest.mark.parametrize("icon_size", (18, 30))
+def test_settings_navigation_rows_are_inset_from_the_actual_container(layout, narrow, icon_size):
     ui, runtime = layout.ui, layout.runtime
     authored = deepcopy(runtime.spec)
     authored["parts"]["settings_nav"] = {
@@ -148,6 +150,7 @@ def test_settings_navigation_rows_are_inset_from_the_actual_container(layout, na
         "paddingBottom": 11,
         "navWidth": 128,
     }
+    authored["tokens"]["icon_toolbar_canvas"] = icon_size
     runtime.update_spec(authored)
     panel = SimpleNamespace(workspace=SimpleNamespace(ui=ui, s=ui.s), _category="General")
     for _ in range(3):
@@ -157,12 +160,13 @@ def test_settings_navigation_rows_are_inset_from_the_actual_container(layout, na
         imgui.set_next_window_pos((0, 0))
         imgui.set_next_window_size(imgui.get_io().display_size)
         imgui.begin("Settings layout", flags=imgui.WindowFlags_.no_title_bar)
-        draw_navigation(
-            panel,
-            SimpleNamespace(tr=str),
-            Rect(20 * ui.s, 20 * ui.s, 700 * ui.s, 500 * ui.s),
-            narrow,
-        )
+        with group_scope("Settings"):
+            draw_navigation(
+                panel,
+                SimpleNamespace(tr=str),
+                Rect(20 * ui.s, 20 * ui.s, 700 * ui.s, 500 * ui.s),
+                narrow,
+            )
         imgui.end()
         imgui.render()
     records = {record["key"]: record for record in runtime.observed}
@@ -179,6 +183,8 @@ def test_settings_navigation_rows_are_inset_from_the_actual_container(layout, na
     ]
     assert len(rows) == 6
     for row in rows:
+        assert not row["clippedLabel"], row["label"]
+        assert row["iconSize"] == icon_size
         rx, ry, rw, rh = row["hit"]
         assert cx <= rx < rx + rw <= cx + cw + 1
         assert cy <= ry < ry + rh <= cy + ch + 1

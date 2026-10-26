@@ -30,6 +30,7 @@ from mojive.ui.viewport_widgets.model import (
 from mojive.ui.workspace.icon_mesh import draw_packaged_icon
 
 _OVERFLOW_HINT = ToolHint("text", label="…", hint_id="scene.hints.overflow")
+_MOUSE_SHELL_ALPHA = 0.8
 
 
 def tool_hint_text(hint: ToolHint, *, labels: ViewportLabels = DEFAULT_VIEWPORT_LABELS) -> str:
@@ -115,7 +116,7 @@ def mouse_hint_colors(theme: Theme, *, muted: bool = False) -> tuple[RGBA, RGBA,
     """Resolve the shared shell, control, and suffix colors for mouse hints."""
 
     ink = theme.text_disabled if muted else theme.text
-    return (*ink[:3], ink[3] * 0.55), ink, ink
+    return (*ink[:3], ink[3] * _MOUSE_SHELL_ALPHA), ink, ink
 
 
 def draw_mouse_hint_glyph(
@@ -144,7 +145,7 @@ def draw_mouse_hint_glyph(
     shell, fill, suffix_color = mouse_hint_colors(theme, muted=muted)
     if icon_color is not None:
         fill = icon_color
-        shell = (*icon_color[:3], icon_color[3] * 0.55)
+        shell = (*icon_color[:3], icon_color[3] * _MOUSE_SHELL_ALPHA)
     name = "status-mouse-" + ("wheel" if button == "middle" else button)
     draw_packaged_icon(
         draw, (x + width / 2, center_y), logical_height * scale, name, fill, stroke_color=shell
@@ -282,17 +283,14 @@ def _tool_hint_width(
             (text_width(group.label) + input_gap if group.label else 0.0)
             + sum(
                 _key_width(draw, key, scale, text_scale, presentation=keycap)
-                + input_gap
-                + text_width(meaning)
+                + (input_gap + text_width(meaning) if meaning else 0.0)
                 for key, meaning in group.keys
             )
             + (2 * chord + text_width("/")) * (len(group.keys) - 1)
         )
     if group.kind == "key":
-        return (
-            _key_width(draw, group.control, scale, text_scale, presentation=keycap)
-            + input_gap
-            + text_width(group.label)
+        return _key_width(draw, group.control, scale, text_scale, presentation=keycap) + (
+            input_gap + text_width(group.label) if group.label else 0.0
         )
     if group.kind == "mouse":
         modifier_width = (
@@ -306,8 +304,7 @@ def _tool_hint_width(
         return (
             modifier_width
             + _mouse_width(draw, glyph_scale, group.suffix, text_scale)
-            + input_gap
-            + text_width(group.label)
+            + (input_gap + text_width(group.label) if group.label else 0.0)
         )
     return (
         _key_width(draw, group.control, scale, text_scale, presentation=keycap)
@@ -539,30 +536,30 @@ def draw_tool_hints(
 
     def key(label: str, meaning: str) -> None:
         nonlocal cursor
-        cursor += (
-            _keycap(draw, cursor, center_y, label, theme, scale, muted=muted, presentation=keycap)
-            + input_gap
+        cursor += _keycap(
+            draw, cursor, center_y, label, theme, scale, muted=muted, presentation=keycap
         )
-        text(meaning)
+        if meaning:
+            cursor += input_gap
+            text(meaning)
 
     def mouse(button: str, meaning: str, *, suffix: str = "", after: float = 0.0) -> None:
         nonlocal cursor
-        cursor += (
-            draw_mouse_hint_glyph(
-                draw,
-                cursor,
-                center_y,
-                button,
-                suffix,
-                theme,
-                glyph_scale,
-                pixel_size=pixel_size,
-                muted=muted,
-                icon_color=icon_color,
-            )
-            + input_gap
+        cursor += draw_mouse_hint_glyph(
+            draw,
+            cursor,
+            center_y,
+            button,
+            suffix,
+            theme,
+            glyph_scale,
+            pixel_size=pixel_size,
+            muted=muted,
+            icon_color=icon_color,
         )
-        text(meaning)
+        if meaning:
+            cursor += input_gap
+            text(meaning)
         cursor += after
 
     def perturb(modifier: str) -> None:

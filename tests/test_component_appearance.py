@@ -893,7 +893,7 @@ def test_status_mouse_icons_scale_uniformly_and_measure_without_resizing_the_tex
     assert shapes[0][0] == hints.OVERLAY_GEOMETRY.hint_control_height * ui.s
     assert shapes[1][0] == pytest.approx(shapes[0][0] * 2)
     assert shapes[1][1] == (1, 0, 1, 1)
-    assert shapes[1][2] == (1, 0, 1, 0.55)
+    assert shapes[1][2] == (1, 0, 1, 0.8)
     assert captions[1] == captions[0]
     assert bounds[1][2] - bounds[0][2] == pytest.approx(
         hints.OVERLAY_GEOMETRY.hint_mouse_width * ui.s + 5 * ui.s

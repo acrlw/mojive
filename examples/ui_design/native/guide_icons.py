@@ -18,7 +18,7 @@ LABELS = {
     "moon": "Dark theme",
     "geometry-default": "Default",
     "general": "General",
-    "mujoco-visuals": "Content visualization",
+    "mujoco-visuals": "Content Visualization",
     "chart": "Statistics",
     "performance": "Statistics",
     "scene": "Scene hierarchy",

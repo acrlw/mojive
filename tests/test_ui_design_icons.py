@@ -421,3 +421,41 @@ def test_default_geometry_flag_preserves_its_opening_without_internal_aa_seams()
     hole = np.asarray(next(points for points, inside in boundaries if inside))
     assert hole[:, 0].max() - hole[:, 0].min() > 10
     assert hole[:, 1].max() - hole[:, 1].min() > 7
+
+
+@pytest.mark.parametrize("button", ("left", "right", "wheel"))
+def test_status_pointer_family_preserves_canvas_with_lighter_strokes_and_derived_fills(button):
+    glyph = compile_svg(library_masters()["status-mouse-" + button])
+    assert glyph["viewBox"] == [0, 0, 24, 24]
+    assert glyph["bounds"] == [4.5, 1.5, 19.5, 22.5]
+    strokes = [contour for contour in glyph["contours"] if contour["stroke"] != "none"]
+    assert all(contour["width"] == 1.0 for contour in strokes)
+    assert all(contour["cap"] == contour["join"] == "round" for contour in strokes)
+    if button != "wheel":
+        fill = next(contour for contour in glyph["contours"] if contour["fill"] != "none")
+        points = np.asarray(fill["points"])
+        assert points[:, 1].max() == pytest.approx(11 - 1.0 / 2)
+        assert points[:, 0].min() == pytest.approx(
+            5 + 1.0 / 2 if button == "left" else 12 + 1.0 / 2
+        )
+        assert points[:, 0].max() == pytest.approx(
+            12 - 1.0 / 2 if button == "left" else 19 - 1.0 / 2
+        )
+
+
+@pytest.mark.parametrize("size", (14, 18, 22, 24, 44))
+def test_pointer_antialias_fringe_uses_its_authored_weight(size):
+    from mojive.ui.workspace.icon_mesh import prepared_icon
+
+    expected = min(1, 1.0 * size / 48)
+    left = 4.5 * size / 24
+    measured = []
+    for _background, _opacity, operations in prepared_icon("status-mouse-left", size):
+        for fringe, inner, outer in operations:
+            if not fringe:
+                continue
+            for a, b in zip(inner, outer, strict=True):
+                if abs(a.x - left) < 1e-5 and 9 * size / 24 < a.y < 14 * size / 24:
+                    measured.append(a.x - b.x)
+    assert measured
+    assert measured == pytest.approx([expected] * len(measured), abs=1e-5)

@@ -137,6 +137,15 @@ still need an understandable label. Do not repeat a fully visible caption in a h
 keep hints for hidden or clipped captions, shortcuts, unavailable-action reasons, and additional
 meaning. Tool names should stay brief. Shortcut hints use the shared 14-point monospace key
 badges; axis/channel labels retain their separate 12-point role.
+Interaction Guide reuses the status hint descriptors, key badges and canonical mouse glyphs.
+Resolve configurable gestures from the current input bindings. Keep action names and useful
+context alongside the indicators; wrap complete badges and prose instead of shrinking input
+geometry or hiding instructions. Guide indicators describe input, not executable buttons.
+Within a guide row, action captions, key legends, pointer glyphs and explanatory text share one
+cap-height center. Guide keycaps resolve their font size from the guide body independently of
+status-bar preferences. Give single-key and pointer indicators a common input slot, and align
+pointer descriptions on one column even when a double-click suffix is present. Do not mix raw
+text origins with component-aligned text or add invisible caption gaps to unlabeled hints.
 
 ## Spacing, alignment, and corners
 
@@ -161,12 +170,18 @@ About is a modal in the shared dialog shell, with localized features and the run
 revision. It must not open a legacy diagnostic dictionary panel. Left and right panel visibility
 controls name their side and restore the last active left panel.
 Settings has one rule below its window title; category headings use spacing.
+Typography contains separate Numeric and Output Messages groups, each with Font family and
+Font size rows. Use the group heading to express scope rather than repeating a role prefix in
+every field label. Retain independent preferences, collapse state and shared page columns.
 Related settings share one property table and its measured label column. Adding a theme
 selector must not create a separate full-width group: align its field with Language and
 Model updates, and keep its caption beside the control while the row has room.
 The same page shares its measured label column across independent sections, including
 Geometry display, Both appearance and Contact points. Keep section spacing and collapsing
 behavior, but align full-width fields on both sides rather than fitting each table in isolation.
+Settings navigation measures complete localized category names with the same resolved font,
+inherited icon extent and padding used by its buttons. English category names use title case.
+A hover tooltip does not replace a complete caption when the layout has room for it.
 
 Adjacent nested rounded surfaces share one resolved corner budget:
 
@@ -276,9 +291,13 @@ meanings need distinguishable symbols: Settings and General, Layers and content 
 camera objects and projection, state snapshots and image capture, isometric view and box creation.
 Mouse hints and Output severity symbols use those same packaged masters. Mouse button and
 wheel fills use neutral text ink, including the muted status-bar treatment; they do not compete
-with primary actions. The shell and dividers use 55% of that ink's alpha, keeping the indicated
-button or wheel visually dominant without changing the shared geometry. Diagnostic colors retain
-their severity meanings.
+with primary actions. The shell and dividers use 80% of that ink's alpha: muted outlines must
+remain legible beside the filled button or wheel. Keep the canonical stroke geometry and normal
+antialiasing; do not compensate for weak contrast with pixel floors, isolated stroke changes or
+hard edges. The three status-pointer masters use an explicit 1.0-unit stroke on the 24-unit
+grid, keeping their enlarged silhouettes light without fading the ink. Shells and dividers share
+the weight; button fills derive their inset from its half-width. Other workspace masters retain
+their 1.5-unit stroke. Diagnostic colors retain their severity meanings.
 
 Mouse-button fills end at the inner edges of the shell and divider, not their stroke centerlines.
 Keep the whole dark frame visible around the selected region; a brighter fill must not enlarge

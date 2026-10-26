@@ -148,7 +148,7 @@
   "authored": {
     "directory": "mojive",
     "author": "Mojive contributors",
-    "description": "Adopted rounded outline and hybrid family; 24-unit grid, 1.5-unit strokes, shared optical sizing and open apertures.",
+    "description": "Adopted rounded outline and hybrid family; 24-unit grid, 1.5-unit workspace strokes and explicit 1.0-unit status-pointer strokes, shared optical sizing and open apertures.",
     "adaptations": {
       "mojive/trash.svg": {
         "source": "lucide/trash.svg",

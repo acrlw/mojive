@@ -93,8 +93,13 @@ def test_icon_role_uses_one_scale_for_all_master_dimensions(role):
         assert canvas == spec.canvas_size
         for contour, _points, _paths, width in icon_geometry(name, canvas):
             assert width == pytest.approx(contour["width"] * canvas / ICON_GRID)
+        expected_stroke = (
+            1.0
+            if name in ("status-mouse-left", "status-mouse-right", "status-mouse-wheel")
+            else ICON_STROKE
+        )
         assert all(
-            contour["width"] == ICON_STROKE
+            contour["width"] == expected_stroke
             for contour in glyph["contours"]
             if contour["stroke"] != "none"
         )

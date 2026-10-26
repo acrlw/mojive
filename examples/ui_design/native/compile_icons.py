@@ -18,7 +18,7 @@ COMPILED_MESHES = COMPILED_ICONS.with_name("icon_meshes.json")
 
 
 def library_masters():
-    """Preserve upstream SVG geometry and normalize the whole family's stroke."""
+    """Normalize the family default while retaining explicit owned path weights."""
     directory = ROOT / "svg"
     manifest = json.loads((directory / "sources.json").read_text())
     sources = {}
@@ -259,8 +259,8 @@ def compile_svg(svg):
 def main():
     result = {}
     sources = json.loads((ROOT / "icons-source.json").read_text())
-    # One authored stroke applies to all outline masters, including local domain
-    # glyphs. Scale at submission; never impose a separate minimum pixel width.
+    # Normalize the family default while retaining explicit owned path weights.
+    # Scale at submission; never impose a separate minimum pixel width.
     manifest = json.loads((ROOT / "svg/sources.json").read_text())
     for name, svg in sources.items():
         root = ET.fromstring(svg)

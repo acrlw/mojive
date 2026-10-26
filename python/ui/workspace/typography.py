@@ -43,23 +43,29 @@ def draw_typography_settings(panel, ctx):
     """Use the same native select controls as the rest of General settings."""
     from dataclasses import replace
 
+    from imgui_bundle import imgui
+
     app, ui = panel.workspace.app, panel.workspace.ui
     panel._group_heading(ctx.tr("Typography"))
-    if not panel._begin_properties("settings_typography"):
-        return
     families = ("mono", "body")
     labels = [ui.font_sources[index][0].label for index in (2, 0)]
     sizes = (None, *range(10, 23, 2))
-    for role, title in (("numeric", "Numeric input"), ("output", "Output messages")):
+    for role, title in (("numeric", "Numeric"), ("output", "Output Messages")):
+        if not panel._collapsing_header(
+            ctx.tr(title) + "###settings_typography_" + role, imgui.TreeNodeFlags_.default_open
+        ):
+            continue
+        if not panel._begin_properties("settings_typography_" + role):
+            continue
         current = getattr(ui.typography, role)
-        panel._property(ctx.tr(title) + " · " + ctx.tr("Font"), control_part="select")
+        panel._property(ctx.tr("Font family"), control_part="select")
         changed, index = panel._combo("##font_" + role, families.index(current.family), labels)
         if changed:
             app.set_typography(
                 replace(ui.typography, **{role: replace(current, family=families[index])})
             )
             current = getattr(ui.typography, role)
-        panel._property(ctx.tr(title) + " · " + ctx.tr("Font size"), control_part="select")
+        panel._property(ctx.tr("Font size"), control_part="select")
         changed, index = panel._combo(
             "##font_size_" + role,
             sizes.index(current.size),
@@ -69,4 +75,4 @@ def draw_typography_settings(panel, ctx):
             app.set_typography(
                 replace(ui.typography, **{role: replace(current, size=sizes[index])})
             )
-    panel._end_properties()
+        panel._end_properties()

@@ -69,7 +69,11 @@ def prepared_icon(name, size):
         layers = compile_icon_layers(GLYPHS[name]["contours"])
     scale = size / ICON_GRID
     recorder = _MeshRecorder(scale)
-    painter = ImguiIconDraw(ImguiDraw2D(recorder), min(1.0 / scale, ICON_STROKE / 2))
+    stroke = min(
+        (contour["width"] for contour in GLYPHS[name]["contours"] if contour["stroke"] != "none"),
+        default=ICON_STROKE,
+    )
+    painter = ImguiIconDraw(ImguiDraw2D(recorder), min(1.0 / scale, stroke / 2))
     groups = []
     for layer in layers:
         recorder.operations = []

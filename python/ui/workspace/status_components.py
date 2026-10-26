@@ -98,9 +98,11 @@ def metric_tooltip_options(ui):
 
 
 class StatusBadge:
-    def __init__(self, ui, *, keycap=False):
+    def __init__(self, ui, *, keycap=False, font_size=None, minimum_size=(0, 0)):
         self.ui = ui
         self.keycap = keycap
+        self.font_size = font_size
+        self.minimum_size = minimum_size
         self._instances = {}
 
     def size(self, label):
@@ -109,7 +111,7 @@ class StatusBadge:
 
     def _size(self, label):
         style, scale = self.ui.component_style("badge"), self.ui.s
-        font = style.get("fontSize", 14)
+        font = self.font_size if self.font_size is not None else style.get("fontSize", 14)
         padding = style.edges("padding", scale, (6, 2, 6, 2))
         margins = style.edges("margin", scale)
         width = (
@@ -120,7 +122,10 @@ class StatusBadge:
             + padding[2]
         )
         height = max(font, style.line_height(font * 1.4)) * scale + padding[1] + padding[3]
-        return width + margins[0] + margins[2], height + margins[1] + margins[3]
+        return (
+            max(width + margins[0] + margins[2], self.minimum_size[0] * scale),
+            max(height + margins[1] + margins[3], self.minimum_size[1] * scale),
+        )
 
     def draw(self, x, center_y, label, theme, *, muted=False, width=None, height=None):
         with part_scope("status_hints") if self.keycap else nullcontext():
@@ -156,6 +161,8 @@ class StatusBadge:
             translate=False,
             mono=self.keycap,
             align="center" if self.keycap else None,
+            size=self.font_size if self.font_size is not None else style.get("fontSize", 14),
+            font_field=None,
         )
         return width
 

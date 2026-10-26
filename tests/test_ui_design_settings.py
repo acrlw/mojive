@@ -430,7 +430,7 @@ def test_navigation_width_moves_the_page_without_changing_other_groups(settings,
         return {row["key"]: row for row in runtime.observed}
 
     initial = geometry()
-    for width in (160, 260, 0):
+    for width in (180, 260, 0):
         spec = deepcopy(runtime.spec)
         spec["parts"]["settings_nav"] = {"navWidth": width}
         runtime.update_spec(spec)

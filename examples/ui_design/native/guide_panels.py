@@ -31,7 +31,7 @@ SAMPLES = {
         ("Interaction", "mouse"),
         ("Rendering", "shading"),
         ("Recording", "video"),
-        ("Content visualization", "mujoco-visuals"),
+        ("Content Visualization", "mujoco-visuals"),
     ),
     "Scene tree": (
         ("world", "world"),

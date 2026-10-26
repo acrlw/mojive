@@ -148,3 +148,32 @@ def test_keycap_group_padding_does_not_resize_generic_badges_or_telemetry(status
     assert after[0][0] - before[0][0] == pytest.approx(18 * ui.s)
     assert after[0][1] - before[0][1] == pytest.approx(8 * ui.s)
     assert after[1:] == before[1:]
+
+
+def test_caller_sized_keycaps_measure_and_paint_the_same_font_without_changing_status(
+    status_frame, monkeypatch
+):
+    ui, runtime, frame = status_frame
+    spec = deepcopy(runtime.spec)
+    spec["parts"]["status_hints_badge"] = {"fontFamily": "mono", "fontSize": 12}
+    runtime.update_spec(spec)
+    painted = []
+    text = ImguiDraw2D.text
+
+    def capture(draw, position, color, value, **options):
+        painted.append((value, imgui.get_font_size()))
+        return text(draw, position, color, value, **options)
+
+    monkeypatch.setattr(ImguiDraw2D, "text", capture)
+
+    def paint():
+        regular = StatusBadge(ui, keycap=True)
+        guide = StatusBadge(ui, keycap=True, font_size=16, minimum_size=(28, 28))
+        assert guide.size("W") == pytest.approx((28 * ui.s, 28 * ui.s))
+        assert guide.size("I") == guide.size("W")
+        regular.draw(20 * ui.s, 60 * ui.s, "Esc", THEME)
+        guide.draw(90 * ui.s, 60 * ui.s, "W", THEME)
+
+    frame(paint)
+    assert painted == [("Esc", 12 * ui.s), ("W", 16 * ui.s)]
+    assert runtime.spec == spec

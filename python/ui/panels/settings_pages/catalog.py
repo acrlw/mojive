@@ -55,7 +55,7 @@ _CATEGORY_SEARCH_TERMS = {
 
 def settings_category_label(category: str) -> str:
     """Keep persisted group identities stable while exposing backend-neutral labels."""
-    return "Content visualization" if category == "MuJoCo Visuals" else category
+    return "Content Visualization" if category == "MuJoCo Visuals" else category
 
 
 def settings_category_matches(category: str, query: str) -> bool:

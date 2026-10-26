@@ -934,3 +934,186 @@ def test_theme_pose_slider_states(backend_name, monkeypatch, tmp_path, scale):
                 ).save(target / (state + "-detail.png"))
                 report[state] = {"thumb": [cx, cy, radius], "rgb": expected, **flags}
             (target / "report.json").write_text(json.dumps(report, indent=2))
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.25))
+def test_settings_navigation_preserves_complete_localized_names(
+    backend_name, monkeypatch, tmp_path, scale
+):
+    from mojive.ui.panels.settings_pages.catalog import settings_category_label
+    from mojive.ui.workspace.settings_panel import CATEGORIES
+
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_DESIGN_SPEC", str(tmp_path / "design.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    target = OUTPUT.parents[1] / "settings-navigation-fix" / f"{backend_name}-{scale:g}"
+    target.mkdir(parents=True, exist_ok=True)
+    with (
+        build_workspace(
+            resolve("joint_gizmo"),
+            renderer=backend_name,
+            show_window=False,
+            width=1600,
+            height=1100,
+            vsync=False,
+            config=ViewerConfig(
+                layout=LayoutConfig(persistence=False), debug_server=False, threaded_physics=False
+            ),
+        ) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        app = viewer.app
+        spec = deepcopy(app.design.spec)
+        spec["tokens"]["icon_toolbar_canvas"] = 18
+        app.design.update_spec(spec)
+        app.design.observe_components = True
+        inputs.sync(8)
+        app.workspace.activate("Settings")
+        report = {}
+        with _floating_panel(inputs, "Settings") as width:
+            for theme in ("light", "dark"):
+                select_theme(app.design, theme, persist=False)
+                for language, panel_width in (("en", 820), ("en", 420), ("zh_CN", 820)):
+                    app.set_language(language)
+                    width[0] = panel_width
+                    inputs.sync(8)
+                    inputs.click("settings-MuJoCo Visuals")
+                    inputs.move((0, 0))
+                    rows = {row["key"]: row for row in _records(viewer)}
+                    for category in CATEGORIES:
+                        row = rows["settings-" + category]
+                        assert row["label"] == app.localizer.text(settings_category_label(category))
+                        assert not row["clippedLabel"], row
+                        assert row["iconSize"] == 18
+                    assert app.workspace.settings._category == "MuJoCo Visuals"
+                    title = "Content Visualization" if language == "en" else "内容可视化"
+                    assert any(item["text"] == title for item in inputs.emitted)
+                    name = f"{theme}-{language}-{panel_width}"
+                    image_path = target / f"{name}.png"
+                    capture(viewer, image_path)
+                    window = imgui.internal.find_window_by_name("Settings")
+                    with Image.open(image_path) as image:
+                        density = image.width / imgui.get_io().display_size.x
+                        bounds = (
+                            *window.pos,
+                            window.pos.x + window.size.x,
+                            window.pos.y + window.size.y,
+                        )
+                        image.crop(tuple(round(value * density) for value in bounds)).save(
+                            image_path
+                        )
+                    report[name] = [rows["settings-" + category] for category in CATEGORIES]
+        (target / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.25))
+def test_typography_settings_groups_and_independent_persistence(
+    backend_name, monkeypatch, tmp_path, scale
+):
+    from mojive.tools.native_ui_review import _content_window
+    from mojive.ui.preferences import Preferences
+    from mojive.ui.workspace.typography import TextRole, Typography
+
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MOJIVE_DESIGN_SPEC", str(tmp_path / "design.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", str(scale))
+    target = OUTPUT.parents[1] / "typography-settings-fix" / f"{backend_name}-{scale:g}"
+    target.mkdir(parents=True, exist_ok=True)
+    options = {
+        "renderer": backend_name,
+        "show_window": False,
+        "width": 1600,
+        "height": 1100,
+        "vsync": False,
+        "config": ViewerConfig(
+            layout=LayoutConfig(persistence=False), debug_server=False, threaded_physics=False
+        ),
+    }
+    with (
+        build_workspace(resolve("joint_gizmo"), **options) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        app, ui = viewer.app, viewer.app.workspace.ui
+        app.set_language("en")
+        app.design.observe_components = True
+        inputs.sync(8)
+        app.workspace.activate("Settings")
+        report = {}
+        with _floating_panel(inputs, "Settings") as width:
+            width[0] = 820
+            inputs.sync(8)
+
+            def choose(key, index):
+                _reveal(inputs, key, "Reference settings content")
+                inputs.click(key)
+                inputs.click(f"{key}/choice/{index}")
+
+            output = ui.typography.output
+            choose("##font_numeric", 1)
+            choose("##font_size_numeric", 5)
+            assert ui.typography.numeric == TextRole("body", 18)
+            assert ui.typography.output == output
+            numeric = ui.typography.numeric
+            choose("##font_output", 1)
+            choose("##font_size_output", 6)
+            assert ui.typography.numeric == numeric
+            assert ui.typography.output == TextRole("body", 20)
+            choose("##font_numeric", 0)
+            expected = Typography(TextRole("mono", 18), TextRole("body", 20))
+            assert ui.typography == expected
+            assert Typography.resolve(Preferences.load(settings_path).get("typography")) == expected
+
+            _reveal(inputs, "section-Numeric", "Reference settings content")
+            inputs.click("section-Numeric")
+            app.set_language("zh_CN")
+            inputs.sync(8)
+            keys = {row["key"] for row in _records(viewer)}
+            assert "##font_numeric" not in keys
+            assert "##font_output" in keys
+            assert ui.typography == expected
+            _reveal(inputs, "section-数值", "Reference settings content")
+            inputs.click("section-数值")
+
+            for theme in ("light", "dark"):
+                select_theme(app.design, theme, persist=False)
+                for language in ("en", "zh_CN"):
+                    app.set_language(language)
+                    inputs.sync(8)
+                    imgui.internal.set_scroll_y(_content_window("Reference settings content"), 0)
+                    inputs.move((0, 0))
+                    records = {row["key"]: row for row in _records(viewer)}
+                    rows = [
+                        records["settings_typography_" + role + "/row/" + app.localizer.text(label)]
+                        for role in ("numeric", "output")
+                        for label in ("Font family", "Font size")
+                    ]
+                    assert [row["fields"][1][0] for row in rows] == pytest.approx(
+                        [rows[0]["fields"][1][0]] * 4
+                    )
+                    for role in ("numeric", "output"):
+                        assert "##font_" + role in records
+                        assert "##font_size_" + role in records
+                    for title in ("Numeric", "Output Messages"):
+                        assert any(
+                            item["text"] == app.localizer.text(title) for item in inputs.emitted
+                        )
+                    assert not any(" · Font" in item["text"] for item in inputs.emitted)
+                    name = f"{theme}-{language}"
+                    image_path = target / f"{name}.png"
+                    capture(viewer, image_path)
+                    window = imgui.internal.find_window_by_name("Settings")
+                    with Image.open(image_path) as image:
+                        density = image.width / imgui.get_io().display_size.x
+                        bounds = (
+                            *window.pos,
+                            window.pos.x + window.size.x,
+                            window.pos.y + window.size.y,
+                        )
+                        image.crop(tuple(round(value * density) for value in bounds)).save(
+                            image_path
+                        )
+                    report[name] = rows
+            (target / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    with build_workspace(resolve("joint_gizmo"), **options) as restored:
+        assert restored.app.workspace.ui.typography == expected

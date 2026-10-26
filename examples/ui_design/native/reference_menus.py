@@ -9,13 +9,12 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.ui.imgui_draw import ImguiDraw2D
-from mojive.ui.input_bindings import InputAction
 from mojive.ui.workspace import menu_color
 from mojive.ui.workspace.color_editor import ColorEditor
 from mojive.ui.workspace.menu_catalog import TOP_MENUS
 from mojive.ui.workspace.menu_item import Item
 from mojive.ui.workspace.menus import Menus as WorkspaceMenus
-from mojive.ui.workspace.widgets import DIM, MUTED, TEXT
+from mojive.ui.workspace.widgets import DIM, TEXT
 from mojive.ui.workspace.window_chrome import surface_ink
 
 DISABLED = (126, 136, 149, 255)
@@ -598,61 +597,9 @@ class Menus:
             imgui.push_style_var(imgui.StyleVar_.item_spacing, (8 * s, 0))
             imgui.begin_child("Guide content", (w, max(24 * s, height - 138 * s)))
             if self.dialog == "Interaction guide":
-                bindings = self.study.preview.input_bindings
-                for title, value in [
-                    ("Orbit", "Drag an empty area"),
-                    ("Pan", "Middle mouse drag"),
-                    ("Zoom", "Mouse wheel"),
-                    (
-                        "Fly camera",
-                        " / ".join(
-                            " ".join(bindings.label(action) for action in group)
-                            for group in (
-                                (
-                                    InputAction.FLY_FORWARD,
-                                    InputAction.FLY_LEFT,
-                                    InputAction.FLY_BACK,
-                                    InputAction.FLY_RIGHT,
-                                ),
-                                (InputAction.FLY_UP, InputAction.FLY_DOWN),
-                            )
-                        ),
-                    ),
-                    (
-                        "Transform tools",
-                        "V / "
-                        + " / ".join(
-                            bindings.label(action)
-                            for action in (InputAction.GIZMO_TRANSLATE, InputAction.GIZMO_ROTATE)
-                        ),
-                    ),
-                    ("World / body frame", bindings.label(InputAction.GIZMO_SPACE)),
-                    ("Snap", bindings.label(InputAction.SNAP)),
-                    (
-                        "Frame all / focus",
-                        bindings.label(InputAction.FRAME_SCENE) + " / double-click",
-                    ),
-                    ("Settings", "F9 / ⌘,"),
-                    ("Precise gizmo input", "Double-click a handle"),
-                    ("Undo / redo", "⌘Z / ⇧⌘Z"),
-                    ("Simulation playback", "Space"),
-                    ("Timeline", "T"),
-                    ("Dock panels", "Drag a panel tab"),
-                ]:
-                    q = imgui.get_cursor_screen_pos()
-                    column = w * 0.47
-                    if u.measure(title, 13) + 12 * s > column or u.measure(value, 13) > w - column:
-                        imgui.push_font(u.body, 13 * s)
-                        imgui.push_text_wrap_pos(0)
-                        imgui.text_colored(tuple(v / 255 for v in MUTED), u.translate(title))
-                        imgui.text_wrapped(u.translate(value))
-                        imgui.pop_text_wrap_pos()
-                        imgui.pop_font()
-                        imgui.dummy((0, 8 * s))
-                    else:
-                        u.text(q.x, q.y + 6 * s, title, MUTED, 13)
-                        u.text(q.x + column, q.y + 6 * s, value, TEXT, 13)
-                        imgui.dummy((w, 28 * s))
+                from mojive.ui.workspace.interaction_guide import draw_interaction_rows
+
+                draw_interaction_rows(u, self.study.preview.input_bindings, w)
             else:
                 imgui.text_wrapped("Instrument is Mojive's native UI design reference.")
                 imgui.spacing()
