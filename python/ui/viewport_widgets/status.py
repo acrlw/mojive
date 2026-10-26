@@ -18,6 +18,7 @@ from mojive.ui.viewport_widgets.hints import (
 from mojive.ui.viewport_widgets.model import (
     DEFAULT_VIEWPORT_LABELS,
     OVERLAY_GEOMETRY,
+    STATUS_MOUSE_CANVAS,
     StatusLayout,
     StatusMetric,
     ToolHint,
@@ -257,12 +258,12 @@ def draw_status(
     context_theme = presentation.theme_for("status_context", theme) if presentation else theme
     hints_theme = presentation.theme_for("status_hints", theme) if presentation else theme
     dot_size = 7.0 * scale if icon_size is None else max(0, icon_size)
-    mouse_scale = scale
+    mouse_scale = scale * STATUS_MOUSE_CANVAS / OVERLAY_GEOMETRY.hint_control_height
     hint_ink = None
     if presentation is not None:
         dot_size = presentation.icon_size("status_context", dot_size)
         mouse_scale = (
-            presentation.icon_size("status_hints", OVERLAY_GEOMETRY.hint_control_height * scale)
+            presentation.icon_size("status_hints", STATUS_MOUSE_CANVAS * scale)
             / OVERLAY_GEOMETRY.hint_control_height
         )
         hint_ink = presentation.icon_color("status_hints")

@@ -8,7 +8,7 @@ from math import ceil
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import Box, Rect, part_scope
-from mojive.ui.viewport_widgets.model import OVERLAY_GEOMETRY
+from mojive.ui.viewport_widgets.model import STATUS_MOUSE_CANVAS
 from mojive.ui.viewport_widgets.status_metrics import (
     METRIC_GROUP_GAP,
     METRIC_LABEL_GAP,
@@ -381,7 +381,7 @@ class StatusGroups:
             font = style.get("fontSize", 14)
             icon = self.icon_size(
                 part,
-                (OVERLAY_GEOMETRY.hint_control_height if part == "status_hints" else 7) * self.ui.s,
+                (STATUS_MOUSE_CANVAS if part == "status_hints" else 7) * self.ui.s,
             )
             return max(height, icon, max(font, style.line_height(font * 1.4)) * self.ui.s)
 

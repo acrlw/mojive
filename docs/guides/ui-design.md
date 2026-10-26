@@ -289,7 +289,8 @@ workspace family uses a 24-unit canvas and 1.5-unit round stroke, with pinned Lu
 Mojive-owned SVG masters. Context aliases for the same action use the same master. Different
 meanings need distinguishable symbols: Settings and General, Layers and content visualization,
 camera objects and projection, state snapshots and image capture, isometric view and box creation.
-Mouse hints and Output severity symbols use those same packaged masters. Mouse button and
+Mouse hints and Output severity symbols use those same packaged masters. Status pointers use a
+22-point canvas without increasing the 28-point bar or changing key/text sizes. Mouse button and
 wheel fills use neutral text ink, including the muted status-bar treatment; they do not compete
 with primary actions. The shell and dividers use 80% of that ink's alpha: muted outlines must
 remain legible beside the filled button or wheel. Keep the canonical stroke geometry and normal

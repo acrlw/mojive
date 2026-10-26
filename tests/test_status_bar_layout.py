@@ -236,3 +236,17 @@ def test_status_divider_uses_outer_surface_and_keycaps_center_in_the_visible_row
     assert production_badges
     for badge in production_badges:
         assert badge.y - frame.y == pytest.approx(frame.bottom - badge.bottom)
+
+
+def test_saved_status_profile_without_pointer_override_uses_the_reviewed_canvas(status_surface):
+    from mojive.ui.workspace.status_components import StatusGroups
+
+    state, scale = status_surface, status_surface.ui.s
+    spec = deepcopy(state.runtime.spec)
+    spec["parts"].pop("status_hints", None)
+    state.runtime.update_spec(spec)
+    row = state.frame()
+    groups = StatusGroups(state.ui)
+    assert groups.icon_size("status_hints", 22 * scale) == 22 * scale
+    assert state.runtime.resolved_part("status_hints", "iconSize") == 22
+    assert row.native_height == ceil(28 * scale)

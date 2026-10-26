@@ -18432,6 +18432,15 @@
       ".status-hints"
     ],
     "fields": {
+      "iconSize": {
+        "label": "图标大小",
+        "type": "number",
+        "min": 6,
+        "max": 64,
+        "step": 1,
+        "default": 22,
+        "description": "此组内图标的统一画布尺寸，线条、点与空隙一同缩放；不改变其他组。"
+      },
       "gap": {
         "label": "统一内容间距",
         "type": "number",

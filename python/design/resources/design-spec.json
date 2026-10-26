@@ -147,6 +147,9 @@
       "height": 28,
       "iconSize": 8
     },
+    "status_hints": {
+      "iconSize": 22
+    },
     "form_label": {
       "fontSize": 14
     },

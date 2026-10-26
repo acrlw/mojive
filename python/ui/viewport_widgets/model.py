@@ -19,6 +19,7 @@ from ..overlay_geometry import OverlayGeometry as OverlayGeometry
 
 # Source glyphs keep their authored coordinates before fitting into a control slot.
 GLYPH_REFERENCE_RADIUS = 10.0
+STATUS_MOUSE_CANVAS = 22.0
 
 
 @dataclass(frozen=True)
