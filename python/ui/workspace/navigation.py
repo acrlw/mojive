@@ -262,17 +262,25 @@ class Navigation:
                 self._scene_filter_token = token
                 imgui.set_scroll_y(0)
             if self._scroll_scene_node is not None:
-                index = next(
-                    (
-                        i
-                        for i, (node, _, _) in enumerate(rows)
-                        if node.node_id == self._scroll_scene_node
-                    ),
-                    None,
-                )
-                if index is not None:
-                    imgui.set_scroll_y(max(0, index * stride - imgui.get_window_height() * 0.5))
-                self._scroll_scene_node = None
+                window_height = imgui.get_window_height()
+                if window_height >= stride:
+                    index = next(
+                        (
+                            i
+                            for i, (node, _, _) in enumerate(rows)
+                            if node.node_id == self._scroll_scene_node
+                        ),
+                        None,
+                    )
+                    if index is not None:
+                        row_top = index * stride
+                        row_bottom = row_top + stride
+                        scroll_y = imgui.get_scroll_y()
+                        if row_top < scroll_y or row_bottom > scroll_y + window_height:
+                            max_scroll = max(0.0, len(rows) * stride - window_height)
+                            target = min(max(0.0, row_top - window_height * 0.5), max_scroll)
+                            imgui.set_scroll_y((target // stride) * stride)
+                    self._scroll_scene_node = None
             width = imgui.get_content_region_avail().x
             clipper = imgui.ListClipper()
             clipper.begin(len(rows), stride)

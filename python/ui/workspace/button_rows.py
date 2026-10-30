@@ -108,6 +108,7 @@ def draw_button_row(ui, key, labels, enabled=None, *, available=None):
                 height,
                 width_limit=width * ui.s,
                 label=label,
+                filled=True,
                 enabled=rectangle.width > 0 and (enabled is None or enabled[index]),
                 translate=False,
             )

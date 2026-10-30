@@ -74,7 +74,9 @@ Apply application UI scale once; framebuffer density is a separate conversion.
 Native workspace presenters submit font sizes in resolved layout coordinates, so live scale
 changes must not also apply an atlas-relative `FontScaleDpi` multiplier. Classic UI fonts use
 that multiplier for their fixed atlas sizes. Verify actual painted text after scale changes,
-including fractional scales below 1 on high-density displays.
+including fractional scales below 1 on high-density displays. Component text clip rectangles
+expand outward to integer pixel bounds (`floor` for minimum, `ceil` for maximum) so backend
+scissor truncation never shaves trailing glyphs on right-aligned or fractional-coordinate text.
 
 The following table illustrates the adopted factory tokens. The specification and component
 resolver remain the source for actual values; local group overrides can differ. Update these
@@ -163,6 +165,9 @@ Section heading text and ordinary body labels share one leading content edge. Th
 hover background keeps its own padding. Manual rows, tables, checkbox grids, and raw text use
 that same column, including at fractional scales. Restore the enclosing bounds after a group.
 Joint rows with leading icons align the body to the content icon and retain the name's icon gap.
+Scrollable tree and inventory children size to whole row strides and defer initial selection
+auto-scroll until the child window has resolved at least one row stride of height, keeping
+boundary rows unclipped.
 Use separators to distinguish groups, without adding a leading rule to every section.
 A panel header already separates its first group; that group's heading must not add a second rule.
 Read-only identity rows use the shared property grid and baseline, just like editable rows.

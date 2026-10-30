@@ -24,7 +24,8 @@ LANGUAGE_LABELS: dict[Language, str] = {
 }
 
 
-_CAMERA_ZH_CN = {"Frame all": "显示全部", "fov_y_deg": "视场角"}
+_CAMERA_ZH_CN = {"Frame all": "显示全部", "fov_y_deg": "视场角", "field of view": "视场角"}
+_EN = {"Record simulation state": "Record"}
 
 
 def camera_caption(value: str, language: Language | str, translate: Callable[[str], str]) -> str:
@@ -892,7 +893,9 @@ _ZH_CN = {
     "roughness override": "覆盖粗糙度",
     "roughness": "粗糙度",
     "texture repeat": "纹理重复",
+    "texuniform": "统一纹理",
     "uniform texture scale": "统一纹理缩放",
+    "field of view": "视场角",
     "none": "无",
     "Open in Assets": "在资源面板中打开",
     "New material": "新建材质",
@@ -1833,7 +1836,7 @@ class Localizer:
                 if value.startswith(prefix):
                     return caption + self.text(value[len(prefix) :])
             return _ZH_CN.get(value, value)
-        return value
+        return _EN.get(value, value)
 
     def set_language(self, value: Language | str, *, persist: bool = True) -> None:
         language = parse_language(value)

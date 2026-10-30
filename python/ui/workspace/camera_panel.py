@@ -82,7 +82,7 @@ def camera_panel(workspace, x, y, width):
     ui, scale, ctx = workspace.ui, workspace.s, workspace._panel_context
     panel = workspace.app.panels.get("camera")
     if panel.presentation is None:
-        panel.presentation = NativePropertyPresentation(ui, prefix="camera")
+        panel.presentation = NativePropertyPresentation(ui, prefix="camera", fit_labels=True)
     with property_controls(ui):
         imgui.set_cursor_screen_pos((x, y))
         panel._source(ctx)

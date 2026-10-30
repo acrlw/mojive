@@ -446,8 +446,13 @@ class CameraPanel(Panel):
                 editor_distance = attr == "distance" and camera is ctx.camera
                 if editor_distance:
                     lo, hi = camera.navigation.min_distance, camera.navigation.max_distance
+                caption = (
+                    "field of view"
+                    if attr == "fov_y_deg" and self.presentation is not None
+                    else attr
+                )
                 self._property_label(
-                    camera_caption(attr, ctx.language, ctx.tr),
+                    camera_caption(caption, ctx.language, ctx.tr),
                     rail=True,
                     tooltip=ctx.tr("Vertical field of view") if attr == "fov_y_deg" else "",
                 )

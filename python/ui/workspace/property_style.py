@@ -675,6 +675,7 @@ class NativePropertyPresentation:
             height,
             label=label,
             width_limit=limit,
+            filled=True,
         )
 
     def numeric(self, item_id, value, speed, low, high, fmt, *, integer=False):

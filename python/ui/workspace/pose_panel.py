@@ -434,7 +434,7 @@ class NativePoseEditor:
         context_width, context_gap = 0, 0
         if show_type:
             kind = ctx.tr(_JOINT_LABELS.get(joint.type, joint.type))
-            type_width = min(heading_width * 0.45, u.measure(kind, translate=False) + 4 * u.s)
+            type_width = min(heading_width * 0.55, u.measure(kind, translate=False) + 4 * u.s)
         elif context:
             context_width, context_gap = self._context_width(
                 key, label, context, heading_width, height

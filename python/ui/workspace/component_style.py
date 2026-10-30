@@ -1,6 +1,7 @@
 """Explicit component boxes, typography and sibling placement for native panels."""
 
 from contextlib import contextmanager, nullcontext
+from math import ceil, floor
 
 from imgui_bundle import imgui
 
@@ -289,7 +290,9 @@ class ComponentStyles:
         x = rect.x + max(0, rect.width - text_width) * factor_x
         y = rect.y + max(0, rect.height - line) * factor_y + max(0, line - font_size * self.s) / 2
         target = draw or self.draw
-        target.push_clip_rect((rect.x, rect.y), (rect.right, rect.bottom), True)
+        target.push_clip_rect(
+            (floor(rect.x), floor(rect.y)), (ceil(rect.right), ceil(rect.bottom)), True
+        )
         try:
             self.text(
                 x,

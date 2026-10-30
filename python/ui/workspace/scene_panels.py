@@ -354,7 +354,7 @@ def assets_panel(workspace, x, y, w):
         imgui.set_next_item_open(True, imgui.Cond_.always)
     workspace._focused_asset = panel._selected
     if panel.presentation is None:
-        panel.presentation = NativePropertyPresentation(u, prefix="assets")
+        panel.presentation = NativePropertyPresentation(u, prefix="assets", fit_labels=True)
     if property_section(u, ctx.tr("Model assets"), 0):
         panel.draw(ctx)
 

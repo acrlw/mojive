@@ -226,7 +226,7 @@ class AssetsPanel(Panel):
             self._asset_type = types[slot]
 
         visible = filter_assets(self._assets, self._asset_type, self._filter)
-        list_height = min(230.0, max(92.0, 25.0 * max(2, min(len(visible), 8))))
+        list_height = min(230.0, max(96.0, 26.0 * (max(2, min(len(visible), 7)) + 1) + 12.0))
         if imgui.begin_child(
             "asset-list",
             imgui.ImVec2(0.0, list_height * ctx.style_scale),
@@ -269,7 +269,7 @@ class AssetsPanel(Panel):
                         imgui.table_next_column()
                         imgui.align_text_to_frame_padding()
                         imgui.text_disabled(str(len(item.references)))
-                self._end_properties()
+                imgui.end_table()
             imgui.pop_style_var()
         imgui.end_child()
         if not visible:
@@ -415,7 +415,7 @@ class AssetsPanel(Panel):
                         f"{len(field.value.split())} {ctx.tr('inline samples')}",
                     )
                 elif field.value:
-                    display(field.name, field.value)
+                    display(ctx.tr(field.name), field.value)
             self._end_properties()
         for reference in item.references:
             imgui.bullet_text(reference)
@@ -638,7 +638,7 @@ class AssetsPanel(Panel):
                 ("metallic", metallic, 0.0),
                 ("roughness", roughness, 0.5),
             ):
-                self._property(ctx.tr(label))
+                self._property(ctx.tr(f"{label} override"), control_part="checkbox")
                 enabled = value >= 0.0
                 item_changed, enabled = self._checkbox(f"##asset-material-{label}-enabled", enabled)
                 if item_changed:
@@ -647,16 +647,17 @@ class AssetsPanel(Panel):
                 self._tooltip(
                     ctx.tr("Toggle the MuJoCo PBR override; disabled uses classic material shading")
                 )
-                imgui.same_line()
+                self._property(ctx.tr(label))
                 if not enabled:
                     imgui.begin_disabled()
                 imgui.set_next_item_width(-1.0)
-                item_changed, value = self._numeric(
-                    f"##asset-material-{label}", value, 0.01, 0.0, 1.0, "%.2f"
+                item_changed, edited = self._numeric(
+                    f"##asset-material-{label}", max(0.0, value), 0.01, 0.0, 1.0, "%.2f"
                 )
                 changed |= item_changed
                 if not enabled:
                     imgui.end_disabled()
+                value = float(edited) if enabled else value
                 if label == "metallic":
                     metallic = float(value)
                 else:
@@ -683,7 +684,7 @@ class AssetsPanel(Panel):
             )
             changed |= item_changed
 
-            self._property(ctx.tr("uniform scale"))
+            self._property(ctx.tr("uniform scale"), control_part="checkbox")
             item_changed, tex_uniform = self._checkbox("##asset-material-uniform", tex_uniform)
             changed |= item_changed
             self._end_properties()
@@ -712,19 +713,27 @@ class AssetsPanel(Panel):
 
     @staticmethod
     def _assignment_control(ctx: PanelContext, item: ModelAssetInfo) -> None:
+        def disabled_note(message: str) -> None:
+            has_context = imgui.get_current_context() is not None
+            if has_context:
+                imgui.push_text_wrap_pos(0.0)
+            try:
+                imgui.text_disabled(message)
+            finally:
+                if has_context:
+                    imgui.pop_text_wrap_pos()
+
         node = ctx.session.selected_node
         allowed = (NodeType.GEOM, NodeType.SITE) if item.type == "material" else (NodeType.GEOM,)
         if node is None or node.type not in allowed:
-            imgui.text_disabled(ctx.tr("Select a geometry to assign this asset"))
+            disabled_note(ctx.tr("Select a geometry to assign this asset"))
             return
         if item.type == "material":
             if node.model_id != item.model_id:
-                imgui.text_disabled(ctx.tr("The selected geometry belongs to a different model"))
+                disabled_note(ctx.tr("The selected geometry belongs to a different model"))
                 return
             if not node.source_editable or item.runtime_index < 0:
-                imgui.text_disabled(
-                    ctx.tr("The selected geometry has no editable material binding")
-                )
+                disabled_note(ctx.tr("The selected geometry has no editable material binding"))
                 return
             if imgui.button(ctx.tr("Assign to Selected Geometry")):
                 ctx.submit(cmd.SetGeometryMaterial(node.node_id, item.runtime_index))
@@ -738,7 +747,7 @@ class AssetsPanel(Panel):
             else ()
         )
         if item.name not in choices:
-            imgui.text_disabled(ctx.tr("The selected geometry belongs to a different model"))
+            disabled_note(ctx.tr("The selected geometry belongs to a different model"))
             return
         if imgui.button(ctx.tr("Assign to Selected Geometry")):
             ctx.submit(cmd.SetGeometryShape(node.node_id, item.type, item.name))

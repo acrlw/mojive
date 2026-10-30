@@ -38,7 +38,7 @@ def prepare_window(panel, *, opening=False):
     limit = max(scale, viewport.work_size.x - 32 * scale)
     automatic = min(820 * scale, limit)
     width = min(requested, limit) if requested else automatic
-    height = min(620 * scale, max(scale, viewport.work_size.y - 64 * scale))
+    height = min(686 * scale, max(scale, viewport.work_size.y - 64 * scale))
     if opening:
         imgui.set_next_window_pos(
             (
