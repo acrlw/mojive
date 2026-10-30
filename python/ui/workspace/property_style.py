@@ -204,10 +204,12 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
     """Draw a complete switch row with shared label bounds and row spacing."""
     pos = imgui.get_cursor_screen_pos()
     width = imgui.get_content_region_avail().x if width is None else width
+    shown = ui.translate(label)
+    if tooltip and (tooltip in (label, shown) or ui.translate(tooltip) == shown):
+        tooltip = ""
     layout = switch_form_layout(ui, width, label, label_width=label_width)
     control_x = pos.x + layout.fields[0][0]
     if layout.label_above:
-        shown = ui.translate(label)
         property_label(
             ui,
             key + "-label-text",
@@ -289,14 +291,16 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
         )
         return result.value
     shown = ui.translate(label)
+    hint = ui.translate(tooltip) if tooltip else ""
+    if label and hint == shown:
+        hint = ""
     clicked = ui.button(
         key + "-label",
         pos.x,
         pos.y,
         max(1, layout.label_width / ui.s),
         DESIGN.control_height,
-        tooltip=tooltip
-        or (shown if ui.measure(shown, translate=False) > layout.label_width else ""),
+        tooltip=hint or (shown if ui.measure(shown, translate=False) > layout.label_width else ""),
     )
     property_label(
         ui,
@@ -663,9 +667,21 @@ class NativePropertyPresentation:
 
     def button(self, label, size=None):
         pos = imgui.get_cursor_screen_pos()
-        width = self._field_width() if size is None else size[0]
+        style = self.ui.component_style("button")
+        if size is not None:
+            width = size[0]
+        elif self._control_width is not None:
+            width = self._control_width
+        else:
+            width = max(
+                72 * self.ui.s,
+                self.ui.measure(
+                    label, style.get("fontSize", BODY_SIZE), font_resolved=True, style=style
+                )
+                + 24 * self.ui.s,
+            )
         height = DESIGN.control_height if size is None or not size[1] else size[1] / self.ui.s
-        margin = self.ui.component_style("button").edges("margin", self.ui.s)
+        margin = style.edges("margin", self.ui.s)
         limit = max(0, imgui.get_content_region_avail().x - margin[0] - margin[2])
         return self.ui.button(
             "property-button/" + label,
@@ -928,6 +944,9 @@ class NativePropertyPresentation:
 
     def checkbox(self, key, value, theme=None):
         pos = imgui.get_cursor_screen_pos()
-        return self.ui.checkbox(
-            key, pos.x, pos.y, value, label=key.split("#", 1)[0], width=self._field_width()
+        width = (
+            imgui.get_content_region_avail().x
+            if self._control_width is None
+            else self._control_width
         )
+        return self.ui.checkbox(key, pos.x, pos.y, value, label=key.split("#", 1)[0], width=width)

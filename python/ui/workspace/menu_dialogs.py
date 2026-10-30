@@ -6,7 +6,7 @@ from mojive.design.native.geometry import Rect
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import BODY_SIZE
 from mojive.ui.workspace.form_popup import form_corners
-from mojive.ui.workspace.widgets import DIM, TEXT
+from mojive.ui.workspace.widgets import ACCENT, DIM, LINE, PANEL, TEXT
 
 
 def dialogs(menu):
@@ -31,7 +31,8 @@ def dialogs(menu):
             style.get("maxWidth", 900) * scale,
             vp.size.x - 32 * scale - margin[0] - margin[2],
         )
-        height = min(430 * scale, vp.size.y - 32 * scale - margin[1] - margin[3])
+        default_height = 444 if menu.dialog == "Interaction guide" else 284
+        height = min(default_height * scale, vp.size.y - 32 * scale - margin[1] - margin[3])
         imgui.set_next_window_size((width, height))
         imgui.set_next_window_pos(
             (
@@ -220,17 +221,45 @@ def dialogs(menu):
             from mojive.build_info import current_build
 
             version, commit = current_build()
+            imgui.text_wrapped(
+                u.translate("Backend-neutral 3D scene editing and simulation tools.")
+            )
+            bullet_size = 5 * s
+            indent_x = 14 * s
             for text in (
-                "Backend-neutral 3D scene editing and simulation tools.",
                 "Scene authoring, materials, cameras and lights.",
                 "Joint posing, transform gizmos and simulation playback.",
                 "OpenGL and bgfx rendering; Python APIs and remote scene sources.",
             ):
+                row_pos = imgui.get_cursor_screen_pos()
+                dot_y = row_pos.y + max(0, (imgui.get_text_line_height() - bullet_size) * 0.5)
+                u.rect(row_pos.x + 2 * s, dot_y, bullet_size, bullet_size, ACCENT, bullet_size / 2)
+                imgui.set_cursor_screen_pos((row_pos.x + indent_x, row_pos.y))
                 imgui.text_wrapped(u.translate(text))
-            imgui.spacing()
-            imgui.text(u.translate("Version") + ": " + version)
-            imgui.text(u.translate("Commit") + ": " + (commit or u.translate("Unavailable")))
-            imgui.text_disabled(u.translate("Dear ImGui") + " " + imgui.get_version())
+            meta_pos = imgui.get_cursor_screen_pos()
+            meta_y = meta_pos.y + 4 * s
+            line_h = imgui.get_text_line_height()
+            pad_x, pad_y = 12 * s, 8 * s
+            meta_h = line_h + pad_y * 2
+            u.rect(p.x, meta_y, w, meta_h, PANEL, 6)
+            col_offsets = (0.0, w * 0.28, w * 0.67)
+            items = (
+                (imgui.text, u.translate("Version") + ": " + version),
+                (imgui.text, u.translate("Commit") + ": " + (commit or u.translate("Unavailable"))),
+                (imgui.text_disabled, u.translate("Dear ImGui") + " " + imgui.get_version()),
+            )
+            for idx, (draw_fn, label_text) in enumerate(items):
+                col_x = p.x + col_offsets[idx]
+                if idx > 0:
+                    u.rect(
+                        col_x,
+                        meta_y + 6 * s,
+                        max(1, s),
+                        meta_h - 12 * s,
+                        LINE,
+                    )
+                imgui.set_cursor_screen_pos((col_x + pad_x, meta_y + pad_y))
+                draw_fn(label_text)
         u.record_component_box("dialog_body", body, key="guide-dialog-body", fields=body_rows)
         imgui.end_child()
         imgui.pop_style_var()

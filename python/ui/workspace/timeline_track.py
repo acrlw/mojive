@@ -124,7 +124,12 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
         key_style = ui.component_style("timeline_key")
         marker = key_style.get("size", 12) * scale / 2
         key_margin = key_style.edges("margin", scale)
-        lane = max(lane, 2 * marker + key_margin[1] + key_margin[3])
+        minimum_lane = max(
+            28 * scale,
+            lane_line + lane_margin[1] + lane_margin[3],
+            2 * marker + key_margin[1] + key_margin[3],
+        )
+        lane = max(lane, minimum_lane)
         left_inset = max(lane_margin[0], ruler_margin[0])
         if key_style.explicit("top"):
             marker_offset = (
@@ -133,6 +138,18 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
         right = sheet.get("rightInset", 10) * scale + max(lane_margin[2], ruler_margin[2])
         sheet_margin = sheet.edges("margin", scale)
         natural_height = ruler + 3 * lane + 2 * gap
+        custom_height = ui.design is not None and (
+            ui.design.runtime.edited("timeline_lane", "height")
+            or ui.design.runtime.edited("timeline_sheet", "height")
+        )
+        if (
+            not custom_height
+            and available.y > 0
+            and natural_height + sheet_margin[1] + sheet_margin[3] > available.y
+        ):
+            fit_lane = (available.y - sheet_margin[1] - sheet_margin[3] - ruler - 2 * gap) / 3
+            lane = max(minimum_lane, min(lane, fit_lane))
+            natural_height = ruler + 3 * lane + 2 * gap
         requested_height = sheet.get("height", natural_height / scale) * scale
         track_height = max(natural_height, requested_height)
         lane += max(0, track_height - natural_height) / 3

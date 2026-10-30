@@ -24,6 +24,7 @@ from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.interaction_paint import (
     FieldLayer,
     ItemPaint,
+    _mix_ink,
     draw_switch,
     primary_action_ink,
     secondary_action_ink,
@@ -1205,11 +1206,12 @@ class NativePrimitives:
         shown = ui.translate(label) if label else ""
         font = label_style.get("fontSize", 14) if label else 14
         label_margin = label_style.edges("margin", s) if label else (0, 0, 0, 0)
-        label_width = (
+        full_label_width = (
             ui.measure(shown, font, translate=False, font_resolved=True, style=label_style)
             if label
             else 0
         )
+        label_width = full_label_width
         label_offset = extent + 6 * s + label_margin[0]
         if width is not None:
             label_offset = min(max(0, width), label_offset)
@@ -1245,11 +1247,33 @@ class NativePrimitives:
         )
         out = not value if hit else value
         paint = ItemPaint.capture(g)
-        tint = paint.color("primary", "primary_bright", "primary_dim") if out else paint.color()
-        ui.rect(*box.frame.tuple(), tint, r=style.get("radius", 3.0))
+        tint = (
+            paint.color("primary", "primary_bright", "primary_dim")
+            if out
+            else _mix_ink(
+                ui.ink(paint.color()),
+                ui.ink(rgba8("text")),
+                0.03
+                if paint.disabled
+                else 0.18
+                if paint.active
+                else 0.12
+                if paint.hovered
+                else 0.08,
+            )
+        )
+        ui.rect(
+            *box.frame.tuple(),
+            tint,
+            r=style.get("radius", 3.0),
+            color_resolved=not out,
+        )
         if out:
             ui.icon("check", box.frame.x, box.frame.y, extent / s, ui.palette("on_primary"))
         result = self._result(out, bool(hit), box)
+        hovered = g.is_item_hovered(
+            g.HoveredFlags_.delay_normal | g.HoveredFlags_.allow_when_disabled
+        )
         g.end_disabled()
         self.focus_frame(style, box.frame)
         label_rect = None
@@ -1261,6 +1285,8 @@ class NativePrimitives:
                 row_height - label_margin[1] - label_margin[3],
             )
             self.aligned_text(label_style, label_rect, shown, color=rgba8("text"))
+            if hovered and full_label_width > label_width + 1e-3:
+                ui.tooltip(shown, translate=False)
         self.ui.hits[key] = box.frame.tuple()
         if self.runtime.observes(style.part_ids):
             self.record(
@@ -1332,10 +1358,17 @@ class NativePrimitives:
             )
             label_content = label_rect.inset(*label_style.edges("margin", s))
             self.aligned_text(label_style, label_content, shown)
+        hint = (
+            ""
+            if not tooltip
+            else ""
+            if label and (tooltip in (label, shown) or ui.translate(tooltip) == shown)
+            else tooltip
+        )
         if g.is_item_hovered(
             g.HoveredFlags_.delay_normal | g.HoveredFlags_.allow_when_disabled
-        ) and (tooltip or (label and label_width > label_content.width)):
-            ui.tooltip(tooltip or shown, translate=False)
+        ) and (hint or (label and label_width > label_content.width)):
+            ui.tooltip(hint or shown, translate=False)
         ui.draw.pop_clip_rect()
         result = self._result(out, bool(hit), box)
         g.end_disabled()

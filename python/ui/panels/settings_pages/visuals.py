@@ -39,12 +39,27 @@ def draw(panel, ctx: PanelContext) -> None:
 
 def contact_style(panel, ctx: PanelContext) -> None:
     t = ctx.tr
-    if not panel._collapsing_header(
-        f"{t('Contact points')}###contact_style", imgui.TreeNodeFlags_.default_open
-    ):
-        return
     style = ctx.backend.get_contact_style()
     committed = False
+
+    def reset_style():
+        nonlocal style, committed
+        style = ContactStyle()
+        committed = True
+
+    opened = panel._collapsing_header(
+        f"{t('Contact points')}###contact_style",
+        imgui.TreeNodeFlags_.default_open,
+        reset_label=t("Reset contact style"),
+        on_reset=reset_style,
+    )
+    if not opened:
+        if committed:
+            if ctx.set_contact_style is not None:
+                ctx.apply_setting(ctx.set_contact_style, style, persist=True)
+            else:
+                ctx.backend.set_contact_style(style)
+        return
     if panel._begin_properties("contact_style_properties"):
         panel._property(t("Show contact points"), control_part="checkbox")
         changed, enabled = panel._checkbox(
@@ -88,9 +103,6 @@ def contact_style(panel, ctx: PanelContext) -> None:
             except ValueError as error:
                 ctx.report(str(error))
         panel._end_properties()
-    if panel._button(t("Reset contact style")):
-        style = ContactStyle()
-        committed = True
     if committed or style != ctx.backend.get_contact_style():
         if ctx.set_contact_style is not None:
             ctx.apply_setting(ctx.set_contact_style, style, persist=committed)

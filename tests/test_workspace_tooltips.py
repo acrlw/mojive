@@ -552,3 +552,43 @@ def test_replay_sync_hint_uses_its_workspace_callback(tooltip_frame, monkeypatch
     assert state.rows[0][0] == "Manual sync; playback stays local\nSource sample: 17  |  2.0 KiB"
     assert state.rows[0][1] == ui.body.font_id
     assert state.rows[0][2] == floor(12 * ui.s + 0.5)
+
+
+def test_switch_and_checkbox_rows_suppress_repeated_captions_and_show_clipped_labels(
+    tooltip_frame, monkeypatch
+):
+    from mojive.ui.workspace.property_style import property_toggle
+
+    state, ui = tooltip_frame, tooltip_frame.ui
+    monkeypatch.setattr(imgui, "is_item_hovered", lambda *_args, **_kwargs: True)
+
+    state.frame(
+        lambda: property_toggle(
+            ui,
+            "layer-viewport_ui",
+            "Viewport controls",
+            True,
+            width=260 * ui.s,
+            tooltip="Viewport controls",
+        )
+    )
+    assert state.rows == []
+
+    state.frame(
+        lambda: property_toggle(
+            ui, "layer-gizmos", "Transform", True, width=260 * ui.s, tooltip="Transform gizmos"
+        )
+    )
+    assert [row[0] for row in state.rows] == ["Transform gizmos"]
+
+    state.frame(
+        lambda: ui.checkbox(
+            "interaction_clear",
+            20 * ui.s,
+            20 * ui.s,
+            True,
+            label="Clear selection on empty click",
+            width=80 * ui.s,
+        )
+    )
+    assert [row[0] for row in state.rows] == ["TRANSLATED Clear selection on empty click"]

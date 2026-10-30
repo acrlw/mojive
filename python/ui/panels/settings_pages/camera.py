@@ -65,7 +65,16 @@ def draw(panel, ctx: PanelContext) -> None:
             config = replace(config, **{name: values[selected]})
             ctx.apply_setting(ctx.set_camera_navigation, config)
 
-    panel._group_heading(t("Focus"))
+    def reset_navigation():
+        nonlocal config
+        config = defaults
+        ctx.apply_setting(ctx.set_camera_navigation, defaults)
+
+    panel._group_heading(
+        t("Focus"),
+        reset_label=t("Reset camera navigation"),
+        on_reset=reset_navigation,
+    )
     if panel._begin_properties("settings_camera_focus"):
         number(
             "focus_margin",
@@ -123,5 +132,3 @@ def draw(panel, ctx: PanelContext) -> None:
             "World units; orthographic zoom uses the equivalent perspective distance.",
         )
         panel._end_properties()
-    if panel._button(t("Reset camera navigation")):
-        ctx.apply_setting(ctx.set_camera_navigation, defaults)

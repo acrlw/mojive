@@ -126,24 +126,96 @@ class WorkspaceSettings(SettingsPanel):
         # the sole rule, keeping every settings category's hierarchy consistent.
         return False
 
-    def _group_heading(self, title):
+    def _header_action_width(self, label):
+        ui, s = self.workspace.ui, self.workspace.s
+        style = ui.component_style("button")
+        font_size = style.get("fontSize", DESIGN.body_size)
+        icon_size = style.get("iconSize", 14)
+        gap = style.get("columnGap", style.get("gap", 6)) * s
+        pads = style.edges("padding", s, (8, 0, 10, 0))
+        return max(
+            72 * s,
+            ui.measure(label, font_size, translate=False, font_resolved=True, style=style)
+            + icon_size * s
+            + gap
+            + pads[0]
+            + pads[2],
+        )
+
+    def _header_action(self, x, y, width, label):
+        ui, s = self.workspace.ui, self.workspace.s
+        btn_w = self._header_action_width(label)
+        btn_h = 26 * s
+        bx = x + max(0, width - btn_w)
+        by = y + 6 * s
+        key = "property-button/" + label
+        pressed = ui.button(
+            key,
+            bx,
+            by,
+            btn_w / s,
+            btn_h / s,
+            label=label,
+            icon="reset",
+            filled=True,
+            width_limit=btn_w,
+        )
+        if key in ui.hits:
+            ui.hits[label] = ui.hits[key]
+        return pressed
+
+    def _group_heading(self, title, *, reset_label=None, on_reset=None):
         self._control_padding()
         ui = self.workspace.ui
         p = imgui.get_cursor_screen_pos()
-        ui.section(
-            title, p.x, p.y, imgui.get_content_region_avail().x, divider=self._section_divider()
-        )
+        avail_w = imgui.get_content_region_avail().x
+        ui.section(title, p.x, p.y, avail_w, divider=self._section_divider())
+        if (
+            reset_label
+            and on_reset is not None
+            and self._header_action(p.x, p.y, avail_w, reset_label)
+        ):
+            on_reset()
         advance(ui, p.x, p.y + ui.section_offset(38) * ui.s)
 
-    def _collapsing_header(self, label, flags=0):
+    def _collapsing_header(self, label, flags=0, *, reset_label=None, on_reset=None):
         # The section painter owns its geometry. Preserve the following fields' padding.
-        return property_section(
-            self.workspace.ui,
-            label.split("##", 1)[0],
-            flags,
-            item_id=label,
+        if not (reset_label and on_reset is not None):
+            return property_section(
+                self.workspace.ui,
+                label.split("##", 1)[0],
+                flags,
+                item_id=label,
+                divider=self._section_divider(),
+            )
+        ui, s = self.workspace.ui, self.workspace.s
+        pos = imgui.get_cursor_screen_pos()
+        avail_w = imgui.get_content_region_avail().x
+        btn_w = self._header_action_width(reset_label)
+        shown = label.split("##", 1)[0]
+        storage = imgui.get_state_storage()
+        key = imgui.get_id(label)
+        opened = bool(storage.get_int(key, int(bool(flags & imgui.TreeNodeFlags_.default_open))))
+        next_item = imgui.get_current_context().next_item_data
+        if next_item.has_flags & imgui.internal.NextItemDataFlags_.has_open and (
+            next_item.open_cond == imgui.Cond_.always or storage.get_int(key, -1) == -1
+        ):
+            opened = next_item.open_val
+            storage.set_int(key, int(opened))
+        if ui.section(
+            shown,
+            pos.x,
+            pos.y,
+            max(s, avail_w - btn_w - 8 * s),
+            opened,
             divider=self._section_divider(),
-        )
+        ):
+            opened = not opened
+            storage.set_int(key, int(opened))
+        if self._header_action(pos.x, pos.y, avail_w, reset_label):
+            on_reset()
+        advance(ui, pos.x, pos.y + ui.section_offset(38 if opened else 34) * s)
+        return opened
 
     def _drag_float(self, key, value, speed, low, high, fmt="%.3f", flags=0, *, integer=False):
         changed, result = self.fields.numeric(key, value, speed, low, high, fmt, integer=integer)

@@ -312,10 +312,13 @@ class SettingsPanel(Panel):
         imgui.table_setup_column("value", imgui.TableColumnFlags_.width_stretch.value, 0.64)
         return True
 
-    @staticmethod
-    def _group_heading(title: str) -> None:
+    def _group_heading(self, title: str, *, reset_label: str | None = None, on_reset=None) -> None:
         imgui.spacing()
         imgui.text_disabled(title)
+        if reset_label and on_reset is not None:
+            imgui.same_line()
+            if self._button(reset_label):
+                on_reset()
         imgui.separator()
 
     def _readonly_value(self, label: str, value: str, *, muted=True) -> None:
@@ -410,9 +413,11 @@ class SettingsPanel(Panel):
     def _segmented(*args, **kwargs):
         return segmented_control(*args, **kwargs)
 
-    @staticmethod
-    def _collapsing_header(*args, **kwargs):
-        return imgui.collapsing_header(*args, **kwargs)
+    def _collapsing_header(self, label, flags=0, *, reset_label: str | None = None, on_reset=None):
+        opened = imgui.collapsing_header(label, flags)
+        if reset_label and on_reset is not None and self._button(reset_label):
+            on_reset()
+        return opened
 
     @staticmethod
     def _drag_float(*args, **kwargs):

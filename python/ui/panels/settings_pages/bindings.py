@@ -18,7 +18,15 @@ def draw(panel, ctx: PanelContext) -> None:
     choices = key_choices()
     labels = tuple(t(choice.label) for choice in choices)
     identifiers = tuple(choice.identifier for choice in choices)
-    panel._group_heading(t("Shortcuts"))
+    panel._group_heading(
+        t("Shortcuts"),
+        reset_label=t("Reset shortcuts"),
+        on_reset=(
+            (lambda: ctx.apply_setting(ctx.reset_input_bindings))
+            if ctx.reset_input_bindings is not None
+            else None
+        ),
+    )
     if not panel._begin_properties("settings_interaction_shortcuts"):
         return
     actions = tuple(
@@ -43,11 +51,6 @@ def draw(panel, ctx: PanelContext) -> None:
                 panel._pointer_error = ""
             except ValueError as error:
                 panel._pointer_error = str(error)
-    panel._property("", control_part="button")
-    if panel._button(t("Reset shortcuts")) and ctx.reset_input_bindings is not None:
-        ctx.apply_setting(
-            ctx.reset_input_bindings,
-        )
     panel._end_properties()
     mouse_shortcuts(panel, ctx)
 

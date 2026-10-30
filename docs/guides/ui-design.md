@@ -137,8 +137,9 @@ that bypass translation.
 Frequent, recognizable actions can use icons with a short delayed tooltip. Unfamiliar actions
 still need an understandable label. Do not repeat a fully visible caption in a hover hint;
 keep hints for hidden or clipped captions, shortcuts, unavailable-action reasons, and additional
-meaning. Tool names should stay brief. Shortcut hints use the shared 14-point monospace key
-badges; axis/channel labels retain their separate 12-point role.
+meaning. This applies equally to buttons, switches, and checkboxes. Tool names should stay brief.
+Shortcut hints use the shared 14-point monospace key badges; axis/channel labels retain their
+separate 12-point role.
 Interaction Guide reuses the status hint descriptors, key badges and canonical mouse glyphs.
 Resolve configurable gestures from the current input bindings. Keep action names and useful
 context alongside the indicators; wrap complete badges and prose instead of shrinking input
@@ -171,10 +172,16 @@ boundary rows unclipped.
 Use separators to distinguish groups, without adding a leading rule to every section.
 A panel header already separates its first group; that group's heading must not add a second rule.
 Read-only identity rows use the shared property grid and baseline, just like editable rows.
-About is a modal in the shared dialog shell, with localized features and the running version/source
-revision. It must not open a legacy diagnostic dictionary panel. Left and right panel visibility
+About is a modal in the shared dialog shell, with a lead overview, bulleted feature highlights,
+and a structured horizontal build-metadata bar (version, source revision, and UI runtime).
+It must not open a legacy diagnostic dictionary panel. Size About to its content without
+an empty void above the footer, and size Interaction Guide so its initial viewport fits whole
+guide rows without slicing a row across the scroll boundary. Left and right panel visibility
 controls name their side and restore the last active left panel.
-Settings has one rule below its window title; category headings use spacing.
+Settings has one rule below its window title; category headings use spacing. Section-level
+reset actions (`Reset camera navigation`, `Reset contact style`, `Reset shortcuts`) belong
+right-aligned on their owning section heading row with a reset icon rather than occupying an
+isolated standalone button row at the bottom of the property table.
 Typography contains separate Numeric and Output Messages groups, each with Font family and
 Font size rows. Use the group heading to express scope rather than repeating a role prefix in
 every field label. Retain independent preferences, collapse state and shared page columns.
