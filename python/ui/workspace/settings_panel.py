@@ -127,19 +127,30 @@ class WorkspaceSettings(SettingsPanel):
         return False
 
     def _header_action_width(self, label):
+        from math import ceil
+
+        from mojive.ui.workspace.widget_icons import icon_role_canvas
+
         ui, s = self.workspace.ui, self.workspace.s
-        style = ui.component_style("button")
+        parts = (
+            ui.design.button_parts("property-button/" + label, label)
+            if ui.design is not None
+            else ("button",)
+        )
+        style = ui.component_style(parts)
         font_size = style.get("fontSize", DESIGN.body_size)
-        icon_size = style.get("iconSize", 14)
+        icon_size = style.get("iconSize", icon_role_canvas("inline"))
+        engine = getattr(getattr(ui.design, "runtime", None), "paint_context", None)
+        if not style.explicit("iconSize") and engine is not None:
+            icon_size = engine.inherited("iconSize", icon_size)
         gap = style.get("columnGap", style.get("gap", 6)) * s
-        pads = style.edges("padding", s, (8, 0, 10, 0))
+        pads = style.edges("padding", s, (8, 0, 8, 0))
+        text_width = ceil(
+            ui.measure(label, font_size, translate=False, font_resolved=True, style=style)
+        )
         return max(
             72 * s,
-            ui.measure(label, font_size, translate=False, font_resolved=True, style=style)
-            + icon_size * s
-            + gap
-            + pads[0]
-            + pads[2],
+            ceil(text_width + icon_size * s + gap + pads[0] + pads[2] + 2 * s),
         )
 
     def _header_action(self, x, y, width, label):
