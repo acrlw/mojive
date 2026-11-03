@@ -13,6 +13,7 @@ from ...dependencies import camera_key, flags_key, lifecycle_key, lights_key
 from ...environment import reflection_plane
 from ..registry import register_pass
 from .base import PassContext, state_opaque, state_transparent
+from .comparison import ComparisonLayer
 from .opaque import OpaquePass, draw_buckets
 
 log = get_logger("reflect")
@@ -34,6 +35,7 @@ class ReflectPass(OpaquePass):
 
     def __init__(self) -> None:
         super().__init__()
+        self._comparison = ComparisonLayer()
         self.colors: list[moderngl.Texture] = []
         self.depth: moderngl.Texture | None = None
         self.fbos: list[moderngl.Framebuffer] = []
@@ -234,7 +236,14 @@ class ReflectPass(OpaquePass):
             gl.front_face = "cw"
             gl.enable_direct(GL_CLIP_DISTANCE0)
             try:
-                draw_buckets(ctx, tuple(b for b in ctx.scene.opaque_buckets if b not in excluded))
+                draw_buckets(
+                    ctx,
+                    tuple(
+                        b
+                        for b in ctx.scene.opaque_buckets
+                        if b not in excluded and b not in ctx.scene.comparison_buckets
+                    ),
+                )
                 if ctx.scene.transparent_buckets and ctx.flag(RenderFlag.TRANSPARENT):
                     state_transparent(gl, additive=ctx.flag(RenderFlag.ADDITIVE, False))
                     gl.front_face = "cw"
@@ -248,6 +257,18 @@ class ReflectPass(OpaquePass):
                             if b not in excluded
                         ),
                     )
+                self._comparison.draw(
+                    ctx,
+                    tuple(b for b in ctx.scene.comparison_buckets if b not in excluded),
+                    fbo,
+                    self.program,
+                    reflected=True,
+                    occluders=tuple(
+                        b
+                        for b in ctx.scene.opaque_buckets
+                        if b not in excluded and b not in ctx.scene.comparison_buckets
+                    ),
+                )
             finally:
                 fbo.depth_mask = True
                 gl.disable_direct(GL_CLIP_DISTANCE0)
@@ -259,6 +280,7 @@ class ReflectPass(OpaquePass):
         self.cache_status = "rendered"
 
     def release(self) -> None:
+        self._comparison.release()
         super().release()
         for obj in (*self.fbos, *self.colors, self.depth):
             try:

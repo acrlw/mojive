@@ -78,6 +78,17 @@ including fractional scales below 1 on high-density displays. Component text cli
 expand outward to integer pixel bounds (`floor` for minimum, `ceil` for maximum) so backend
 scissor truncation never shaves trailing glyphs on right-aligned or fractional-coordinate text.
 
+Diagnostic geometry comparisons use continuous transparency, not periodic pixel rejection.
+Fine screen-door patterns can shimmer during camera or model motion and on display scaling.
+Keep visual and collision roles legible, preserve opaque scene occlusion, and make picking
+stable across adjacent pixels. Verify slow motion as well as still captures, with MSAA both
+on and off. The native Both view keeps only the nearest visual surface and nearest collision
+surface in separate premultiplied layers, then composites their opacity weights once. Internal
+parts, back walls and farther objects of the same role must not build up color or opacity.
+Diagnostic collision shells do not cast secondary shadows onto the visual surface.
+Depth-tested layers retain instanced batches without transparent sorting. Opacity zero contributes
+neither color, identity nor a selected outline.
+
 The following table illustrates the adopted factory tokens. The specification and component
 resolver remain the source for actual values; local group overrides can differ. Update these
 examples when changing the corresponding factory defaults.

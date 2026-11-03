@@ -19,7 +19,7 @@ from mojive.types import CameraView
 from mojive.ui.scene_capture import SceneCapture
 
 
-def capture(output: Path, backend: str) -> dict:
+def capture(output: Path, backend: str, *, motion: bool = False) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     adapter = MuJoCoAdapter(resolve("geometry_views"))
     camera = CameraView(
@@ -41,6 +41,27 @@ def capture(output: Path, backend: str) -> dict:
             view.set_geometry_view(GeometryView.DEFAULT)
             np.testing.assert_array_equal(view.render(), images["default"])
             view.set_geometry_view(GeometryView.BOTH)
+            if motion:
+                frames = []
+                frame = adapter.frame(FrameNeeds())
+                for angle in 0.08 * np.sin(np.linspace(0, 2 * np.pi, 32, endpoint=False)):
+                    c, s = np.cos(angle), np.sin(angle)
+                    offset = camera.eye - camera.target
+                    eye = camera.target + np.array(
+                        (c * offset[0] - s * offset[1], s * offset[0] + c * offset[1], offset[2]),
+                        np.float32,
+                    )
+                    view.update(frame, camera=CameraView(eye=eye, target=camera.target))
+                    frames.append(Image.fromarray(view.render().copy()))
+                frames[0].save(
+                    output / "both-orbit.webp",
+                    save_all=True,
+                    append_images=frames[1:],
+                    duration=42,
+                    loop=0,
+                    lossless=True,
+                )
+                view.update(frame, camera=camera)
             view.set_geometry_style(GeometryStyle((0.25, 0.5, 0.7), 0.9, 0.2))
             Image.fromarray(view.render()).save(output / "both-custom.png")
             view.set_flag(RenderFlag.INERTIA, True)
@@ -79,8 +100,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("output/geometry-views"))
     parser.add_argument("--renderer", choices=("opengl", "bgfx"), default="opengl")
+    parser.add_argument("--motion", action="store_true", help="Capture a slow Both-view orbit")
     args = parser.parse_args()
-    print(json.dumps(capture(args.output, args.renderer), indent=2))
+    print(json.dumps(capture(args.output, args.renderer, motion=args.motion), indent=2))
     return 0
 
 

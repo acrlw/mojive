@@ -62,6 +62,8 @@ class OpenGLRenderPlan:
 def compile_render_plan(
     request: RenderRequest | None,
     debug_view: DebugView = DebugView.SHADED,
+    *,
+    comparison: bool = False,
 ) -> OpenGLRenderPlan:
     """Compile requested products into the minimal ordered OpenGL pass set."""
 
@@ -74,9 +76,16 @@ def compile_render_plan(
         object_id = True
 
     if color:
+        order = PASS_ORDER
+        if comparison:
+            # Comparison color reads opaque depth. Picking then writes the closest
+            # diagnostic surface without occluding the continuous color composite.
+            order = tuple(name for name in order if name not in {"id", "export"})
+            index = order.index("transparent") + 1
+            order = (*order[:index], "id", "export", *order[index:])
         passes = tuple(
             name
-            for name in PASS_ORDER
+            for name in order
             if (name != "id" or object_id) and (name != "export" or depth or segmentation)
         )
     else:
@@ -398,7 +407,9 @@ class OpenGLBackend:
             return None
         self._frame_serial += 1
 
-        plan = compile_render_plan(request, self._debug_view)
+        plan = compile_render_plan(
+            request, self._debug_view, comparison=bool(scene.comparison_buckets)
+        )
 
         t0 = time.perf_counter()
         with self.guard:

@@ -21,8 +21,8 @@ class RenderScene:
     count: int = 0
 
     transforms: np.ndarray = field(default_factory=lambda: np.zeros((0, 4, 4), np.float32))
-    # Negative alpha encodes ordered coverage: -(1 + opacity) for visual surfaces,
-    # -(3 + opacity) for complementary collision surfaces. Both remain instanced.
+    # Negative alpha encodes diagnostic opacity: -(1 + opacity) for visual surfaces,
+    # -(3 + opacity) for collision surfaces. Both remain instanced.
     colors: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
 
     material: np.ndarray = field(default_factory=lambda: np.zeros((0, 4), np.float32))
@@ -61,6 +61,7 @@ class RenderScene:
     visual_revision: int = 0
     identity_revision: int = 0
     segmentation: np.ndarray = field(default_factory=lambda: np.full((0, 2), -1, np.int32))
+    comparison_buckets: tuple[int, ...] = ()
 
     def bucket_count(self) -> int:
         return len(self.bucket_keys)
@@ -264,6 +265,8 @@ class SceneBuilder:
             invalid = int(material_ids[np.flatnonzero(~valid)[0]])
             raise ValueError(f"material id {invalid} exceeds table size {len(self._materials)}")
         keys = mesh_slots * max(1, len(bindings)) + material_bindings[material_ids]
+        # Comparison layers share bindings but have a separate color render pass.
+        keys = keys * 3 + np.where(scene.colors[:, 3] < -2.5, 2, scene.colors[:, 3] < 0)
         transparent = (scene.colors[:, 3] >= 0) & (scene.colors[:, 3] < 1)
         opaque_rows = np.flatnonzero(~transparent)
         transparent_rows = np.flatnonzero(transparent)
@@ -294,6 +297,9 @@ class SceneBuilder:
         scene.bucket_ranges = tuple(zip(bounds[:-1].tolist(), bounds[1:].tolist(), strict=True))
         scene.bucket_keys = tuple((meshes[i], int(material_ids[i])) for i in representatives)
         scene.opaque_buckets = tuple(range(len(first)))
+        scene.comparison_buckets = tuple(
+            b for b in scene.opaque_buckets if scene.colors[scene.bucket_ranges[b][0], 3] < 0
+        )
         scene.transparent_buckets = tuple(range(len(first), len(representatives)))
         scene.materials = tuple(self._materials)
         scene.validate()

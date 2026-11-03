@@ -69,7 +69,7 @@ if(MOJIVE_BUILD_BGFX)
     endif()
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
     set(shader_outputs)
-    foreach(shader IN ITEMS cs_readback vs_scene fs_color fs_data fs_id fs_segmentation fs_depth vs_ui fs_ui vs_lit fs_lit vs_litWire fs_litWire vs_shadow fs_shadow fs_distance vs_sky vs_skyClassic fs_sky vs_haze fs_haze vs_fullscreen fs_mask fs_outline fs_identityColor vs_gizmo fs_gizmo vs_debugLine fs_debugLine vs_debugArrow fs_debugArrow vs_debugPoint fs_debugPoint vs_debugStroke fs_debugStroke vs_debugSolid fs_debugSolid vs_debugSector fs_debugSector vs_debugDragLink fs_debugDragLink vs_debugScreen fs_debugScreen vs_debugTriangle fs_debugTriangle vs_debugLitTriangle fs_debugLitTriangle vs_debugText fs_debugText)
+    foreach(shader IN ITEMS cs_readback vs_scene fs_color fs_data fs_id fs_segmentation fs_depth vs_ui fs_ui vs_lit fs_lit vs_litWire fs_litWire vs_shadow fs_shadow fs_distance vs_sky vs_skyClassic fs_sky vs_haze fs_haze vs_fullscreen fs_mask fs_outline fs_comparison fs_identityColor vs_gizmo fs_gizmo vs_debugLine fs_debugLine vs_debugArrow fs_debugArrow vs_debugPoint fs_debugPoint vs_debugStroke fs_debugStroke vs_debugSolid fs_debugSolid vs_debugSector fs_debugSector vs_debugDragLink fs_debugDragLink vs_debugScreen fs_debugScreen vs_debugTriangle fs_debugTriangle vs_debugLitTriangle fs_debugLitTriangle vs_debugText fs_debugText)
         if(shader MATCHES "^vs_")
             set(shader_type vertex)
         elseif(shader MATCHES "^cs_")
@@ -83,7 +83,7 @@ if(MOJIVE_BUILD_BGFX)
                 -o "${output}" --type ${shader_type} --platform ${shader_platform}
                 -p ${shader_profile} --varyingdef "${CMAKE_CURRENT_SOURCE_DIR}/shaders/varying.def.sc"
                 -i "${BGFX_DIR}/src" -O 3
-            DEPENDS mojive_shaderc "shaders/${shader}.sc" shaders/varying.def.sc shaders/lighting.sh shaders/shadows.sh shaders/color.sh shaders/reflections.sh shaders/litVertex.sh shaders/litFragment.sh shaders/dataEncoding.sh shaders/coverage.sh VERBATIM)
+            DEPENDS mojive_shaderc "shaders/${shader}.sc" shaders/varying.def.sc shaders/lighting.sh shaders/shadows.sh shaders/color.sh shaders/reflections.sh shaders/litVertex.sh shaders/litFragment.sh shaders/dataEncoding.sh shaders/coverage.sh shaders/comparison.sh VERBATIM)
         list(APPEND shader_outputs "${output}")
     endforeach()
     add_custom_target(mojive_probe_shaders ALL DEPENDS ${shader_outputs})

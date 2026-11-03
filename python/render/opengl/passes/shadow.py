@@ -81,6 +81,7 @@ class ShadowPass(BasePass):
         self.atlas: moderngl.Texture | None = None
         self._atlas_fallback: moderngl.Texture | None = None
         self._fbo: moderngl.Framebuffer | None = None
+        self._buckets: tuple[int, ...] = ()
         self._geom = ShadowGeometry()
         self._distance_geom = DistanceGeometry()
         self._local_tex: moderngl.TextureArray | None = None
@@ -187,7 +188,14 @@ class ShadowPass(BasePass):
         s.local_tex = self._local_fallback
         if not ctx.flag(RenderFlag.SHADOW):
             return False
-        if not ctx.scene.opaque_buckets:
+        # Diagnostic collision shells must not stripe the authored appearance with
+        # a second, nearly coplanar shadow. Collision-only geometry remains opaque.
+        self._buckets = tuple(
+            b
+            for b in ctx.scene.opaque_buckets
+            if ctx.scene.colors[ctx.scene.bucket_ranges[b][0], 3] >= -2.5
+        )
+        if not self._buckets:
             return False
         schedule = schedule_lights(ctx.scene.lights)
         key = self._dependency_key(ctx, schedule)
@@ -412,7 +420,7 @@ class ShadowPass(BasePass):
         for i in range(c.count):
             gl.viewport = slot_pixels(c.slots[i])
             self._geom.set_matrix(c.matrices[i], self._scratch)
-            ctx.draw_calls += self._geom.draw(ctx, ctx.scene.opaque_buckets)
+            ctx.draw_calls += self._geom.draw(ctx, self._buckets)
 
     def _draw_locals(self, ctx: PassContext) -> None:
         gl, fbo = ctx.ctx, self._local_fbo
@@ -446,7 +454,7 @@ class ShadowPass(BasePass):
         G.native().attach_array_layer(self._local_tex.glo, layer)
         self._local_fbo.clear(65504.0, 0.0, 0.0, 1.0)
         self._distance_geom.set_matrix(matrix, self._scratch)
-        ctx.draw_calls += self._distance_geom.draw(ctx, ctx.scene.opaque_buckets)
+        ctx.draw_calls += self._distance_geom.draw(ctx, self._buckets)
 
     def release(self) -> None:
         self._geom.release()

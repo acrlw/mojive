@@ -6,6 +6,7 @@
 
 #include "common.glsl"
 #include "coverage.glsl"
+#include "comparison.glsl"
 #include "lighting.glsl"
 
 in VertexData {
@@ -73,6 +74,7 @@ vec4 sampleAlbedo(vec2 uv) {
 
 void main() {
     float opacity = coverageAlpha(v.color.a, gl_FragCoord.xy);
+    if (u_comparison.x > 1.5) { o_color = vec4(0.0); return; }
     vec4 texel = v.cube_on > 0.5
         ? texture(u_cube_texture, v.cube)
         : sampleAlbedo(v.uv);
@@ -142,4 +144,5 @@ void main() {
             : finish_color(lit, u_exposure, u_tonemap != 0));
     o_color = vec4(rgb, alpha);
 #endif
+    o_color = comparisonColor(o_color);
 }

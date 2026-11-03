@@ -80,12 +80,16 @@ workflow. Space pauses/resumes the caller's simulation; the example closes after
 See the [migration guide](../tutorials/mujoco-viewer.md) for supported signatures and limitations.
 The minimal comparison programs are `make viewer-managed` and `make viewer-passive`.
 
-`make geometry-views ARGS='--renderer opengl'` (or `bgfx`) captures the four geometry
+`make geometry-views ARGS='--renderer opengl --motion'` (or `bgfx`) captures the four geometry
 views using `assets/geometry_views.xml`. Inspect the hidden transparent capsule proxy and the
 shared concave mesh/hull comparison. `tests/test_geometry_views.py` checks classification and
 state preservation; `tests/gpu/test_geometry_views.py` verifies real colors, depth, IDs, resource
 reuse, the MuJoCo-compatible renderer's segmentation, and scene screenshot/video frames in
 each view. The repeated-instance regression ensures Both keeps diagnostic overlays batched.
+Inspect `both-orbit.webp` for stable surfaces during slow camera motion. The GPU tests also
+check nested visual parts and overlapping collision proxies, uniform surfaces during subpixel
+panning, reversed submission order, MSAA on/off, independent opacity endpoints and
+nearest-surface picking.
 With `MOJIVE_RENDERER=bgfx`, the geometry-view tests also count native mesh/texture uploads
 across repeated view switches and verify that replacing the source clears retained mesh slots.
 For dense switching and replay measurements, run

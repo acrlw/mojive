@@ -271,9 +271,9 @@ class SceneSourceBuilder:
                 src.instance_island_body[source_instances[rows]] >= 0
             )
             colors[island, 3] = 1.0
-        coverage = both & (colors[:, 3] < 1)
-        colors[coverage, 3] = -(
-            np.where(collision[coverage], 3.0, 1.0) + np.clip(colors[coverage, 3], 0.0, 1.0)
+        diagnostic = both & (colors[:, 3] < 1)
+        colors[diagnostic, 3] = -(
+            np.where(collision[diagnostic], 3.0, 1.0) + np.clip(colors[diagnostic, 3], 0.0, 1.0)
         )
 
         # Material and geometry recipes are columns. Large replicated scenes

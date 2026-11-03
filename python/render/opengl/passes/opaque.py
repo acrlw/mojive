@@ -203,6 +203,7 @@ class OpaquePass(BasePass):
 
         self._set_direct(prog, "u_camera_pos", tuple(float(x) for x in eye))
         self._set_direct(prog, "u_camera_dir", tuple(float(v) for v in cam.forward()))
+        u.set("u_comparison", (0.0, 0.0, 0.0, 0.0))
         u.set("u_selected_id", int(ctx.selected_id))
         u.set("u_highlight_color", HIGHLIGHT_COLOR)
         u.set("u_highlight", (HIGHLIGHT_MIX, HIGHLIGHT_EMISSION))
@@ -374,11 +375,21 @@ class OpaquePass(BasePass):
 
         gl.multisample = bool(ctx.flag(RenderFlag.MSAA))
 
-        draw_buckets(ctx, ctx.scene.opaque_buckets)
+        draw_buckets(
+            ctx,
+            ctx.scene.opaque_buckets
+            if overdraw
+            else tuple(
+                b for b in ctx.scene.opaque_buckets if b not in ctx.scene.comparison_buckets
+            ),
+        )
         # Wireframe leaves face interiors untouched. Rebuild solid ID depth so
         # picking still covers the complete surface rather than only its edges.
+        # Comparison color leaves diagnostic depth unwritten until after compositing.
         ctx.opaque_depth_ready = not (
-            overdraw or self._wireframe_on(ctx.debug_view, ctx.flag(RenderFlag.WIREFRAME, False))
+            ctx.scene.comparison_buckets
+            or overdraw
+            or self._wireframe_on(ctx.debug_view, ctx.flag(RenderFlag.WIREFRAME, False))
         )
 
         if target.id_layout is IdLayout.SHARED:

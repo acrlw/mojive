@@ -114,7 +114,7 @@ def test_outline_alpha_tracks_render_dependencies(rig, change):
         scene.transforms[0, 0, 3] += 0.2
         scene.pose_revision += 1
     elif change == "visual":
-        scene.colors[0, 3] = -1.35  # Ordered coverage participates in the selected mask.
+        scene.colors[0, 3] = -1.35  # Diagnostic opacity participates in the selected mask.
         scene.visual_revision += 1
     elif change == "identity":
         scene.object_id[:] = scene.object_id[::-1]

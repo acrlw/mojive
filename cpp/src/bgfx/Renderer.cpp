@@ -143,6 +143,25 @@ struct GpuTarget {
     Scene scene;
     bgfx::FrameBufferHandle selectionFrame = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle selectionMask = BGFX_INVALID_HANDLE;
+    struct ComparisonTarget {
+        std::array<bgfx::TextureHandle, 2> colors = {{BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
+        std::array<bgfx::FrameBufferHandle, 2> frames = {{BGFX_INVALID_HANDLE, BGFX_INVALID_HANDLE}};
+        bgfx::TextureHandle depth = BGFX_INVALID_HANDLE;
+        void release() {
+            for (auto frame : frames)
+                if (bgfx::isValid(frame))
+                    bgfx::destroy(frame);
+            for (auto color : colors)
+                if (bgfx::isValid(color))
+                    bgfx::destroy(color);
+            if (bgfx::isValid(depth))
+                bgfx::destroy(depth);
+            frames.fill(bgfx::FrameBufferHandle{bgfx::kInvalidHandle});
+            colors.fill(bgfx::TextureHandle{bgfx::kInvalidHandle});
+            depth = BGFX_INVALID_HANDLE;
+        }
+    };
+    std::array<ComparisonTarget, 2> comparison;
     ReflectionMaps reflections;
     std::optional<ReflectionKey> reflectionKey, colorKey;
     std::optional<DataKey> dataKey;
@@ -275,6 +294,8 @@ class BgfxRenderer final : public Renderer {
                         mDebugParams = BGFX_INVALID_HANDLE, mDebugDepth = BGFX_INVALID_HANDLE,
                         mDebugAtlas = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle mMaskProgram = BGFX_INVALID_HANDLE, mOutlineProgram = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle mComparisonProgram = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle mComparison = BGFX_INVALID_HANDLE, mComparisonImage = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle mIdentityProgram = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle mReadbackProgram = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle mReadbackImage = BGFX_INVALID_HANDLE, mReadbackRegion = BGFX_INVALID_HANDLE,
@@ -395,7 +416,8 @@ class BgfxRenderer final : public Renderer {
             mShadowCasters.resize(scene.instances.size(), 0);
             bool subset = cached;
             for (size_t i = 0; i < scene.instances.size(); ++i) {
-                if (scene.instances[i][19] >= 0 && scene.instances[i][19] < 1)
+                float alpha = scene.instances[i][19];
+                if ((alpha >= 0 && alpha < 1) || alpha < -2.5f)
                     continue;
                 auto bounds = scene.worldBounds[i];
                 bounds.extent += glm::vec3(padding);
@@ -446,7 +468,9 @@ class BgfxRenderer final : public Renderer {
             for (const auto &batch : scene.batches) {
                 mDrawIndices.clear();
                 for (auto index : batch.instances) {
-                    if (scene.instances[index][19] >= 0 && scene.instances[index][19] < 1)
+                    float alpha = scene.instances[index][19];
+                    // Comparison proxies do not cast a second shadow onto visual shells.
+                    if ((alpha >= 0 && alpha < 1) || alpha < -2.5f)
                         continue;
                     if ((light || !filtered || mShadowCasters[index]) &&
                         frustum.intersects(scene.worldBounds[index])) {
@@ -602,10 +626,12 @@ class BgfxRenderer final : public Renderer {
         bgfx::touch(maskView);
         for (const auto &batch : scene.batches) {
             mDrawIndices.clear();
-            for (auto index : batch.instances)
-                if (scene.source.instances[index].objectId == style.selectedId &&
-                    scene.instances[index][19] != 0)
+            for (auto index : batch.instances) {
+                float alpha = scene.instances[index][19];
+                float opacity = alpha < 0 ? -alpha - (alpha < -2.5f ? 3.f : 1.f) : alpha;
+                if (scene.source.instances[index].objectId == style.selectedId && opacity > 0)
                     mDrawIndices.push_back(index);
+            }
             uint32_t count = mDrawIndices.size();
             if (!count)
                 continue;
@@ -904,6 +930,7 @@ class BgfxRenderer final : public Renderer {
             stage(mGizmoProgram, "vs_gizmo", "fs_gizmo");
             stage(mMaskProgram, "vs_shadow", "fs_mask");
             stage(mOutlineProgram, "vs_fullscreen", "fs_outline");
+            stage(mComparisonProgram, "vs_fullscreen", "fs_comparison");
             stage(mIdentityProgram, "vs_fullscreen", "fs_identityColor");
             stage(mSkyProgram, "vs_sky", "fs_sky");
             stage(mClassicSkyProgram, "vs_skyClassic", "fs_sky");
@@ -936,6 +963,8 @@ class BgfxRenderer final : public Renderer {
         t.colorKey.reset();
         t.dataKey.reset();
         t.cachedData = 0;
+        for (auto &layer : t.comparison)
+            layer.release();
         t.reflections.release();
         if (bgfx::isValid(t.selectionFrame))
             bgfx::destroy(t.selectionFrame);
@@ -1155,6 +1184,8 @@ class BgfxRenderer final : public Renderer {
                                                    0xffffffff, 0xffffffff, 0xffffffff};
         mWhiteCube = bgfx::createTextureCube(1, false, 1, bgfx::TextureFormat::RGBA8, 0,
                                              bgfx::copy(cubeWhite.data(), sizeof(cubeWhite)));
+        mComparison = bgfx::createUniform("u_comparison", bgfx::UniformType::Vec4);
+        mComparisonImage = bgfx::createUniform("s_comparison", bgfx::UniformType::Sampler);
         mImageSampler = bgfx::createUniform("s_image", bgfx::UniformType::Sampler);
         mMaterial = bgfx::createUniform("u_material", bgfx::UniformType::Vec4);
         const uint32_t white = 0xffffffff;
@@ -1179,7 +1210,8 @@ class BgfxRenderer final : public Renderer {
             releaseSlot(r);
         for (auto &[id, t] : mTextures)
             bgfx::destroy(t);
-        for (auto h : {mMaskProgram, mOutlineProgram, mIdentityProgram, mReadbackProgram})
+        for (auto h : {mMaskProgram, mOutlineProgram, mComparisonProgram, mIdentityProgram,
+                       mReadbackProgram})
             if (bgfx::isValid(h))
                 bgfx::destroy(h);
         for (auto h : {mMaskSampler, mOutlineSize, mOutlineColor})
@@ -1239,6 +1271,10 @@ class BgfxRenderer final : public Renderer {
                 bgfx::destroy(program);
         if (bgfx::isValid(mUiProgram))
             bgfx::destroy(mUiProgram);
+        if (bgfx::isValid(mComparisonImage))
+            bgfx::destroy(mComparisonImage);
+        if (bgfx::isValid(mComparison))
+            bgfx::destroy(mComparison);
         if (bgfx::isValid(mImageSampler))
             bgfx::destroy(mImageSampler);
         if (bgfx::isValid(mMaterial))
@@ -1906,6 +1942,9 @@ class BgfxRenderer final : public Renderer {
         validateCamera(camera);
         auto &t = target(id);
         auto &current = scene(t.scene);
+        const bool hasComparison = request.color && std::any_of(
+            current.instances.begin(), current.instances.end(),
+            [](const auto &instance) { return instance[19] < 0; });
         // Reap completed CPU work without waiting for an active simplifier on
         // the UI thread. No worker exists until LOD is explicitly requested.
         if (mLodWorker && mLodWorker->idle())
@@ -1941,7 +1980,7 @@ class BgfxRenderer final : public Renderer {
             releaseTarget(t);
             t = std::move(replacement);
         }
-        if (mNextSceneView + 59 >= 250)
+        if (mNextSceneView + (hasComparison ? 74 : 59) >= 250)
             flush();
         beginTarget(t);
         mTimingTarget = id;
@@ -2018,6 +2057,7 @@ class BgfxRenderer final : public Renderer {
         };
         int reflectionLayer = -1;
         auto colorView = t.view;
+        bool comparisonActive = false, comparisonDepth = false;
         auto drawLevel = [&](uint32_t meshIndex, uint32_t materialIndex,
                              std::span<const uint32_t> indices, uint16_t pass, bool transparent,
                              size_t level) {
@@ -2144,6 +2184,15 @@ class BgfxRenderer final : public Renderer {
                     state = (state & (BGFX_STATE_CULL_MASK | BGFX_STATE_MSAA)) |
                             BGFX_STATE_WRITE_RGB | BGFX_STATE_BLEND_ADD;
             }
+            if (comparisonActive) {
+                state &= ~BGFX_STATE_BLEND_MASK;
+                state |= BGFX_STATE_WRITE_Z;
+                if (comparisonDepth)
+                    state &= ~(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            }
+            const float comparisonOptions[] = {
+                comparisonDepth ? 2.f : comparisonActive ? 1.f : 0.f, 0, 0, 0};
+            bgfx::setUniform(mComparison, comparisonOptions);
             bgfx::setState(state);
             bgfx::submit(pass ? t.view + pass : colorView, pass ? mDataPrograms[dataIndex]
                                                                 : (wire  ? mWireProgram
@@ -2199,6 +2248,91 @@ class BgfxRenderer final : public Renderer {
                 }
             }
         };
+        auto drawComparison = [&](bgfx::FrameBufferHandle destination, bool reflected) {
+            if (current.style.debugView == 4 && !current.style.wireframe)
+                return;
+            if (!hasComparison)
+                return;
+            auto &layer = t.comparison[reflected ? 1 : 0];
+            if (!bgfx::isValid(layer.depth)) {
+                uint32_t samples = reflected ? 1 : t.allocatedSamples;
+                uint64_t msaa = samples == 2 ? BGFX_TEXTURE_RT_MSAA_X2
+                              : samples == 4 ? BGFX_TEXTURE_RT_MSAA_X4
+                              : samples == 8 ? BGFX_TEXTURE_RT_MSAA_X8
+                              : samples == 16 ? BGFX_TEXTURE_RT_MSAA_X16 : BGFX_TEXTURE_RT;
+                try {
+                    layer.depth = bgfx::createTexture2D(t.size.width, t.size.height, false, 1,
+                        bgfx::TextureFormat::D32F, sampler | msaa | BGFX_TEXTURE_RT_WRITE_ONLY);
+                    if (!bgfx::isValid(layer.depth))
+                        throw std::runtime_error("Cannot allocate comparison depth");
+                    for (size_t role = 0; role < 2; ++role) {
+                        layer.colors[role] = bgfx::createTexture2D(t.size.width, t.size.height, false, 1,
+                            reflected ? bgfx::TextureFormat::RGBA16F : bgfx::TextureFormat::RGBA8,
+                            sampler | msaa);
+                        if (!bgfx::isValid(layer.colors[role]))
+                            throw std::runtime_error("Cannot allocate comparison surface");
+                        bgfx::TextureHandle attachments[] = {layer.colors[role], layer.depth};
+                        layer.frames[role] = bgfx::createFrameBuffer(2, attachments, false);
+                        if (!bgfx::isValid(layer.frames[role]))
+                            throw std::runtime_error("Cannot allocate comparison framebuffer");
+                    }
+                } catch (...) {
+                    layer.release();
+                    throw;
+                }
+            }
+            auto savedView = colorView;
+            auto matrix = columnMajor(drawCamera.view);
+            comparisonActive = true;
+            for (size_t role = 0; role < 2; ++role) {
+                colorView = mNextSceneView++;
+                timePass(colorView, reflected ? RenderPass::Reflection : RenderPass::Color);
+                orderPass(colorView);
+                bgfx::setViewRect(colorView, 0, 0, t.size.width, t.size.height);
+                bgfx::setViewFrameBuffer(colorView, layer.frames[role]);
+                bgfx::setViewTransform(colorView, matrix.data(), projection.data());
+                bgfx::setViewClear(colorView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, uint32_t{0}, 1.f);
+                bgfx::setViewMode(colorView, bgfx::ViewMode::Sequential);
+                bgfx::touch(colorView);
+                // Opaque scene depth first; then keep only the closest surface of this role.
+                // Both draws use the same vertex transform, with no transparent sorting.
+                for (int phase = 0; phase < 2; ++phase) {
+                    comparisonDepth = phase == 0;
+                    for (const auto &batch : current.batches) {
+                        if (reflected && t.reflections.excluded.contains(
+                                ReflectionMaps::bucket(batch.mesh, batch.material)))
+                            continue;
+                        mDrawIndices.clear();
+                        for (auto index : batch.instances) {
+                            float alpha = current.instances[index][19];
+                            bool included = comparisonDepth ? alpha >= 1
+                                : alpha < 0 && (alpha < -2.5f) == bool(role);
+                            if (included && visible(index))
+                                mDrawIndices.push_back(index);
+                        }
+                        draw(batch.mesh, batch.material, mDrawIndices, 0, false);
+                    }
+                }
+            }
+            comparisonActive = comparisonDepth = false;
+            auto composite = mNextSceneView++;
+            timePass(composite, reflected ? RenderPass::Reflection : RenderPass::Color);
+            orderPass(composite);
+            bgfx::setViewRect(composite, 0, 0, t.size.width, t.size.height);
+            bgfx::setViewFrameBuffer(composite, destination);
+            bgfx::setViewClear(composite, BGFX_CLEAR_NONE);
+            const float options[] = {0, float(t.size.width), float(t.size.height), 0};
+            bgfx::setUniform(mComparison, options);
+            bgfx::setTexture(0, mImageSampler, layer.colors[0]);
+            bgfx::setTexture(1, mComparisonImage, layer.colors[1]);
+            mEnvironment.bindSky(false);
+            bgfx::setState(BGFX_STATE_WRITE_RGB |
+                          BGFX_STATE_BLEND_FUNC_SEPARATE(BGFX_STATE_BLEND_SRC_ALPHA,
+                              BGFX_STATE_BLEND_INV_SRC_ALPHA, BGFX_STATE_BLEND_ZERO, BGFX_STATE_BLEND_ONE));
+            bgfx::submit(composite, mComparisonProgram);
+            ++mStats.drawCalls;
+            colorView = savedView;
+        };
         for (size_t layer = 0; request.color && !identityColor && reflectionDirty &&
                                layer < t.reflections.groups.size();
              ++layer) {
@@ -2222,12 +2356,13 @@ class BgfxRenderer final : public Renderer {
                     continue;
                 mDrawIndices.clear();
                 for (auto index : batch.instances)
-                    if ((current.instances[index][19] >= 1 || current.instances[index][19] < 0) &&
+                    if ((current.instances[index][19] >= 1) &&
                         visible(index))
                         mDrawIndices.push_back(index);
                 draw(batch.mesh, batch.material, mDrawIndices, 0, false);
             }
             drawTransparent();
+            drawComparison(t.reflections.frames[layer], true);
         }
         reflectionLayer = -1;
         drawCamera = camera;
@@ -2242,7 +2377,9 @@ class BgfxRenderer final : public Renderer {
                 mDrawIndices.clear();
                 for (auto index : batch.instances) {
                     float alpha = current.instances[index][19];
-                    if ((alpha >= 1 || alpha < 0 ||
+                    bool diagnostic = alpha < 0 &&
+                        (pass || (current.style.debugView == 4 && !current.style.wireframe));
+                    if ((alpha >= 1 || diagnostic ||
                          (pass && current.style.transparentIds && current.style.transparent)) &&
                         visible(index))
                         mDrawIndices.push_back(index);
@@ -2257,6 +2394,7 @@ class BgfxRenderer final : public Renderer {
                 renderEnvironment(current, t, camera);
                 renderSurfaces(current, t, camera);
                 drawTransparent();
+                drawComparison(t.colorFb, false);
                 renderOutline(current, t, view, projection);
                 renderDebug(current, t, camera, view, projection);
                 renderGizmos(current, t, view, projection);

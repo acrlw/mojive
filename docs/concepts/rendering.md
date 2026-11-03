@@ -71,8 +71,14 @@ consume scene contracts, without depending on UI panels or a physics implementat
 
 Opaque instances are grouped by shared mesh and texture bindings. Color and shading values stay
 in per-instance data; different logical materials need not create separate draws. Transparent
-instances retain camera-dependent ordering. Pose, visual and identity revisions allow independent
-buffer updates, and unchanged shadow/reflection products are reused. Custom sources with revision
+instances retain camera-dependent ordering. Both-view diagnostic instances render into separate
+visual and collision layers. Each layer first draws opaque occluder depth, then retains its nearest
+surface with depth writes; internal geometry cannot accumulate. Premultiplied color and opacity
+are resolved with MSAA before the two layers are composited. Display layers use RGBA8; reflection
+layers retain floating-point radiance. Picking uses the nearest nonzero surface.
+OpenGL defers identity and export passes until after comparison composition so their depth
+does not occlude the diagnostic color layers. Pose, visual and identity revisions allow
+independent buffer updates, and unchanged shadow/reflection products are reused. Custom sources with revision
 zero use conservative change detection. Do not bypass invalidation to improve a benchmark.
 
 OpenGL selection outlines bound their screen-space filtering to the selected mesh projections,

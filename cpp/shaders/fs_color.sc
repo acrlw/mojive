@@ -1,11 +1,13 @@
 $input v_color0, v_meta0, v_meta1, v_normal, v_depth, v_texcoord0, v_world
 #include <bgfx_shader.sh>
 #include "coverage.sh"
+#include "comparison.sh"
 SAMPLER2D(s_image, 0);
 uniform vec4 u_material;
 void main()
 {
     float opacity = coverageAlpha(v_color0.a, gl_FragCoord.xy);
+    if (u_comparison.x > 1.5) { gl_FragColor = vec4(0.0); return; }
     vec3 normal = normalize(v_normal);
     float diffuse = abs(dot(normal, normalize(vec3(0.4, -0.5, 0.8))));
     vec4 texel = texture2D(s_image, v_texcoord0);
@@ -17,5 +19,5 @@ void main()
     vec3 shaded = color * (light + u_material.x) + vec3_splat(specular);
     if (u_material.w > 0.5)
         shaded = pow(max(shaded, vec3_splat(0.0)), vec3_splat(1.0 / 2.2));
-    gl_FragColor = vec4(shaded, opacity * texel.a);
+    gl_FragColor = comparisonColor(vec4(shaded, opacity * texel.a));
 }

@@ -167,7 +167,7 @@ def test_scene_screenshots_and_video_frames_follow_geometry_mode(backend):
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_comparison_coverage_matches_color_depth_and_picking(backend):
+def test_comparison_blends_continuously_and_picks_the_nearest_surface(backend):
     model = mujoco.MjModel.from_xml_string("""
       <mujoco><worldbody>
         <body pos="0 -.5 0"><geom type="box" size="1 .05 1"
@@ -191,11 +191,11 @@ def test_comparison_coverage_matches_color_depth_and_picking(backend):
             rgb = view.render()[60:100, 60:100]
             ids = view.render(product=RenderProduct.OBJECT_ID)[60:100, 60:100]
             depth = view.render(product=RenderProduct.METRIC_DEPTH)[60:100, 60:100]
-            red = rgb[..., 0] > rgb[..., 1]
-            assert 0.55 < red.mean() < 0.75
-            assert set(np.unique(ids)) == {1, 2}
-            np.testing.assert_array_equal(red, ids == 1)
-            np.testing.assert_array_equal(red, depth < 5)
+            assert np.all(rgb[..., 0] > rgb[..., 1])
+            # Neighboring pixels belong to one surface, never complementary holes.
+            assert np.abs(np.diff(rgb.astype(float), axis=1)).max() <= 2
+            assert np.all(ids == 1)
+            assert np.all(depth < 5)
     finally:
         adapter.release()
 
@@ -284,8 +284,9 @@ def test_capture_retains_mujoco_visuals_and_custom_comparison_style(backend):
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_independent_opacity_keeps_inner_collision_visible_and_pickable(backend):
+def test_independent_opacity_keeps_inner_collision_visible_with_stable_picking(backend):
     from mojive import GeometryRole
+    from mojive.render.backend import DebugView
 
     scene = Scene()
     scene.box(name="shell", position=(0, -0.5, 0), size=(2, 0.1, 2), color=(1, 0, 0, 1))
@@ -296,16 +297,249 @@ def test_independent_opacity_keeps_inner_collision_visible_and_pickable(backend)
     with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
         view.update(scene.frame)
         view.set_geometry_view(GeometryView.BOTH)
+        view.set_debug_view(DebugView.ALBEDO)
         for visual, collision in ((0.75, 0.25), (1, 0), (0, 0.25), (0, 0)):
             view.set_geometry_style(GeometryStyle((0, 1, 1), visual, collision))
             rgb = view.render()[60:100, 60:100]
             ids = view.render(product=RenderProduct.OBJECT_ID)[60:100, 60:100]
             depth = view.render(product=RenderProduct.METRIC_DEPTH)[60:100, 60:100]
-            red = rgb[..., 0] > rgb[..., 1]
-            cyan = rgb[..., 1] > rgb[..., 0]
-            assert red.mean() == pytest.approx(visual, abs=0.01)
-            assert cyan.mean() == pytest.approx(collision, abs=0.01)
-            np.testing.assert_array_equal(ids == source.geom_object_id[0], red)
-            np.testing.assert_array_equal(ids == source.geom_object_id[1], cyan)
-            if red.any() and cyan.any():
-                assert depth[red].max() < depth[cyan].min()
+            if visual == 1:
+                expected = (255, 0, 0)
+            elif visual + collision:
+                weights = np.array((visual, collision))
+                opacity = min(visual + collision, 1)
+                expected = (
+                    255 * opacity * np.array((weights[0], weights[1], weights[1])) / weights.sum()
+                )
+            else:
+                expected = (0, 0, 0)
+            np.testing.assert_allclose(rgb, np.broadcast_to(expected, rgb.shape), atol=1.5)
+            nearest = source.geom_object_id[0 if visual else 1] if visual or collision else 0
+            assert np.all(ids == nearest)
+            if visual:
+                assert np.all(depth < 5)
+            elif collision:
+                assert np.all(depth > 5)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("msaa", [False, True])
+def test_comparison_has_no_screen_pattern_or_sorting_jump_during_pan(backend, msaa):
+    from mojive import GeometryRole
+    from mojive.render.backend import DebugView
+
+    frames = []
+    for reverse in (False, True):
+        scene = Scene()
+        roles = (GeometryRole.VISUAL, GeometryRole.COLLISION)
+        for role in reversed(roles) if reverse else roles:
+            scene.box(
+                position=(0, -0.5 if role == GeometryRole.VISUAL else 0.5, 0),
+                size=(2, 0.1, 2),
+                color=(1, 0, 0, 1),
+            )
+        source = scene.source
+        source.geom_role = np.array(tuple(reversed(roles)) if reverse else roles, np.uint8)
+        camera = CameraView(eye=np.array((0, -5, 0), np.float32), target=np.zeros(3, np.float32))
+        with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
+            view.update(scene.frame)
+            view.set_geometry_view("both")
+            view.set_geometry_style(GeometryStyle((0, 1, 1), 0.65, 0.35))
+            view.set_debug_view(DebugView.ALBEDO)
+            view.set_flag(RenderFlag.MSAA, msaa)
+            # Diagnostic layers remain visible when ordinary authored alpha is hidden.
+            view.set_flag(RenderFlag.TRANSPARENT, False)
+            for offset in np.linspace(-0.03, 0.03, 13):
+                camera.eye[0] = camera.target[0] = offset
+                view.update(scene.frame, camera=camera)
+                pixels = view.render()[60:100, 60:100].copy()
+                assert pixels[..., 0].min() > 100
+                assert pixels[..., 1].min() > 30
+                # Flat overlapping surfaces must not alternate at one-pixel frequency.
+                assert np.ptp(pixels.astype(float), axis=(0, 1)).max() <= 1
+                frames.append(pixels)
+    assert np.ptp(np.array(frames).astype(float), axis=0).max() <= 1
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_comparison_respects_opaque_occlusion_and_combined_viewport_identity(backend):
+    from mojive import GeometryRole
+    from mojive.render.backend import DebugView
+
+    scene = Scene()
+    scene.box(position=(0, 0, 0), size=(2, 0.1, 2), color=(1, 0, 0, 1))
+    scene.box(position=(0, -0.5, 0), size=(0.3, 0.1, 2), color=(0, 0, 1, 1))
+    source = scene.source
+    source.geom_role = np.array((GeometryRole.VISUAL, GeometryRole.BOTH), np.uint8)
+    camera = CameraView(eye=np.array((0, -5, 0), np.float32), target=np.zeros(3, np.float32))
+    with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
+        view.update(scene.frame)
+        view.set_geometry_view("both")
+        view.set_debug_view(DebugView.ALBEDO)
+        expected = view.render().copy()
+        with view._current():
+            view._backend.render()
+            combined = view._backend.target.read_rgb(flip=True)
+            ids = view._backend.target.read_ids(flip=True)
+        np.testing.assert_array_equal(combined, expected)
+        assert np.all(combined[60:100, 76:84] == (0, 0, 255))
+        assert np.all(ids[60:100, 76:84] == source.geom_object_id[1])
+        assert np.all(ids[60:100, 45:55] == source.geom_object_id[0])
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_comparison_remains_visible_in_debug_and_wire_views(backend):
+    from mojive import GeometryRole
+    from mojive.render.backend import DebugView
+
+    scene = Scene()
+    scene.box(color=(1, 0.2, 0.1, 1))
+    source = scene.source
+    source.geom_role = np.array((GeometryRole.VISUAL,), np.uint8)
+    camera = CameraView(eye=np.array((2, -3, 2), np.float32), target=np.zeros(3, np.float32))
+    with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
+        view.update(scene.frame)
+        view.set_geometry_view("both")
+        for debug in (
+            DebugView.ALBEDO,
+            DebugView.NORMAL,
+            DebugView.DEPTH,
+            DebugView.OVERDRAW,
+            DebugView.WIREFRAME,
+            DebugView.SHADED,
+        ):
+            view.set_debug_view(debug)
+            assert np.count_nonzero(np.any(view.render() > 5, axis=2)) > 80, debug
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_zero_opacity_comparison_does_not_leave_a_selection_outline(backend):
+    from mojive import GeometryRole
+
+    scene = Scene()
+    scene.box(color=(1, 0, 0, 1))
+    source = scene.source
+    source.geom_role = np.array((GeometryRole.VISUAL,), np.uint8)
+    camera = CameraView(eye=np.array((2, -3, 2), np.float32), target=np.zeros(3, np.float32))
+    with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
+        view.update(scene.frame)
+        view.set_geometry_view("both")
+        view.set_geometry_style(GeometryStyle(visual_opacity=0, collision_opacity=0))
+        hidden = view.render().copy()
+        view._backend.highlight(int(source.geom_object_id[0]), xray=True)
+        np.testing.assert_array_equal(view.render(), hidden)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_comparison_uses_only_the_outer_visual_and_nearest_collision_surface(backend, reverse):
+    from mojive import GeometryRole
+    from mojive.render.backend import DebugView
+
+    # Nested visual parts and overlapping proxies must not add extra opacity or color.
+    parts = [
+        ((0, 0, 0), (2, 2, 2), (1, 0, 0, 1), GeometryRole.VISUAL),
+        ((0, -0.2, 0), (1.5, 0.2, 1.5), (0, 1, 0, 1), GeometryRole.VISUAL),
+        ((0, 0.2, 0), (1.5, 0.2, 1.5), (0, 1, 0, 1), GeometryRole.VISUAL),
+        ((0, -0.4, 0), (1.5, 0.2, 1.5), (1, 1, 1, 1), GeometryRole.COLLISION),
+        ((0, 0.4, 0), (1.5, 0.2, 1.5), (1, 1, 1, 1), GeometryRole.COLLISION),
+    ]
+    if reverse:
+        parts.reverse()
+    scene = Scene()
+    for position, size, color, _ in parts:
+        scene.box(position=position, size=size, color=color)
+    source = scene.source
+    source.geom_role = np.array([part[3] for part in parts], np.uint8)
+    camera = CameraView(eye=np.array((0, -5, 0), np.float32), target=np.zeros(3, np.float32))
+    with SceneRenderer(source, width=160, height=160, renderer=backend, camera=camera) as view:
+        view.set_geometry_view("both")
+        view.set_geometry_style(GeometryStyle((0, 0, 1), 0.65, 0.35))
+        view.set_debug_view(DebugView.ALBEDO)
+        for offset in (-0.02, 0, 0.02):
+            camera.eye[0] = camera.target[0] = offset
+            view.update(scene.frame, camera=camera)
+            pixels = view.render()[60:100, 60:100]
+            expected = np.broadcast_to((0.65 * 255, 0, 0.35 * 255), pixels.shape)
+            np.testing.assert_allclose(pixels, expected, atol=1.5)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_moving_internal_visual_parts_do_not_pollute_the_outer_surface(backend):
+    from mojive.render.backend import DebugView
+
+    model = mujoco.MjModel.from_xml_string("""
+    <mujoco><worldbody>
+      <geom type="box" size="1 1 1" rgba="1 0 0 1" contype="0" conaffinity="0"/>
+      <body><freejoint/>
+        <geom type="box" size=".4 .4 .4" rgba="0 1 0 1" contype="0" conaffinity="0"/>
+      </body>
+    </worldbody></mujoco>""")
+    adapter = MuJoCoAdapter()
+    adapter.load_model(model)
+    camera = CameraView(eye=np.array((0, -5, 0), np.float32), target=np.zeros(3, np.float32))
+    try:
+        with SceneRenderer(
+            adapter.scene_source(), width=160, height=160, renderer=backend, camera=camera
+        ) as view:
+            view.set_geometry_view("both")
+            view.set_debug_view(DebugView.ALBEDO)
+            for y, channel in ((0, 0), (-0.2, 0), (-1.4, 1), (0, 0)):
+                adapter.data.qpos[1] = y
+                mujoco.mj_forward(model, adapter.data)
+                view.update(adapter.frame(FrameNeeds()))
+                pixels = view.render()[70:90, 70:90]
+                assert np.all(pixels[..., channel] > 150)
+                assert np.all(pixels[..., 1 - channel] == 0)
+    finally:
+        adapter.release()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_comparison_surfaces_recover_after_resize_and_msaa_changes(backend):
+    adapter = MuJoCoAdapter(ASSET)
+    camera = CameraView(
+        eye=np.array((0, -5, 3), np.float32), target=np.array((0, 0, 0.5), np.float32)
+    )
+    try:
+        with SceneRenderer(
+            adapter.scene_source(), width=240, height=160, renderer=backend, camera=camera
+        ) as view:
+            view.update(adapter.frame(FrameNeeds()))
+            view.set_geometry_view("both")
+            before = view.render().copy()
+            view.resize(300, 200)
+            assert view.render().shape == (200, 300, 3)
+            view.set_flag(RenderFlag.MSAA, False)
+            assert view.render().any()
+            view.set_flag(RenderFlag.MSAA, True)
+            view.resize(240, 160)
+            np.testing.assert_array_equal(view.render(), before)
+    finally:
+        adapter.release()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_hidden_comparison_proxies_do_not_cast_shadows_on_visual_surfaces(backend):
+    adapter = MuJoCoAdapter(ASSET)
+    camera = CameraView(
+        eye=np.array((2.8, -4.8, 3.5), np.float32),
+        target=np.array((0, 0, 0.4), np.float32),
+        near=0.02,
+        far=40,
+    )
+    try:
+        with SceneRenderer(
+            adapter.scene_source(), width=480, height=320, renderer=backend, camera=camera
+        ) as view:
+            view.update(adapter.frame(FrameNeeds()))
+            view.set_geometry_view("visual")
+            visual = view.render().astype(float)
+            view.set_geometry_style(GeometryStyle(visual_opacity=1, collision_opacity=0))
+            view.set_geometry_view("both")
+            both = view.render().astype(float)
+            # Removing diagnostic opacity must recover the original appearance,
+            # including the lit face beside a slightly expanded convex proxy.
+            assert np.abs(visual - both).mean() < 0.1
+    finally:
+        adapter.release()

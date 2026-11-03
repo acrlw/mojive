@@ -116,11 +116,16 @@ without changing those group choices:
 - **Collision** shows collision geometry in opaque amber, including transparent or group-hidden
   proxies. Ordinary collision meshes use their compiled convex hulls; SDFs use their display
   surface. This view does not disable or enable physical collisions.
-- **Both** compares the two: separate appearances use stippled coverage around their proxies;
-  shared meshes display a stippled hull over the original mesh. This diagnostic transparency
-  preserves instanced drawing instead of sorting one draw per translucent object. Identical
-  shared primitives are drawn once; transparent shared primitives use opaque collision color.
-  Shared hull overlays expand by 0.5% to avoid coplanar
+- **Both** compares appearance geometry and collision proxies with continuous transparency.
+  Only the nearest surface of each role contributes, so internal parts, back walls and
+  overlapping shells do not accumulate. The two surfaces mix without screen-door patterns
+  or camera-dependent draw sorting, preserving instanced drawing. This diagnostic display
+  compares outer shapes; it does not show every transparent layer. Diagnostic collision proxies
+  do not cast secondary shadows onto the appearance. Opaque scene
+  surfaces still occlude the comparison. Picking and depth select the nearest surface with
+  nonzero opacity; selecting an enclosed proxy is available through the scene tree or
+  Collision view. Identical shared primitives are drawn once; transparent shared primitives
+  use the collision treatment. Shared hull overlays expand by 0.5% to avoid coplanar
   flicker; Collision mode uses the exact unexpanded geometry. Visual and Default retain
   ordinary material transparency.
 

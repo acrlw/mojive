@@ -27,7 +27,9 @@ class GeometryStyle:
 
     Colors are sRGB values in [0, 1]. In Both, ``visual_opacity`` multiplies
     authored appearance alpha and ``collision_opacity`` controls collision
-    coverage. Shared primitives are drawn once with their authored material.
+    opacity. Both blends only the nearest visual and collision surfaces; picking
+    and depth select the nearest nonzero-opacity surface. Shared primitives are
+    drawn once with their authored material.
     Collision-only view stays opaque. ``quiet_ground`` gives infinite planes a
     neutral, untextured display surface. Scene and physics materials remain unchanged.
     """
