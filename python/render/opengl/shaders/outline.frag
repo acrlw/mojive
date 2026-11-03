@@ -24,7 +24,7 @@ float coverage_at(ivec2 c) {
 }
 
 bool selected_at(ivec2 c) {
-    return coverage_at(c) >= 0.5;
+    return coverage_at(c) > 0.0;
 }
 
 float outline_alpha(ivec2 p) {
@@ -42,11 +42,22 @@ float outline_alpha(ivec2 p) {
 
 bool runs_to_border(ivec2 p, ivec2 step, int to_border) {
     if (to_border >= OUTLINE_RADIUS) return false;
-    for (int i = 1; i <= OUTLINE_RADIUS; ++i) {
-        if (i > to_border) break;
-        if (!selected_at(p + step * i)) return false;
+    // At a slanted intersection, the connected path can run diagonally to the
+    // border. Restricting it to one column leaves a notch in the closing band.
+    ivec2 tangent = ivec2(-step.y, step.x);
+    for (int offset = -AA_RADIUS; offset <= AA_RADIUS; ++offset) {
+        ivec2 delta = step * to_border + tangent * offset;
+        if (dot(vec2(delta), vec2(delta)) > OUTER_R2) continue;
+        int count = max(to_border, abs(offset));
+        bool connected = true;
+        for (int i = 1; i <= AA_RADIUS; ++i) {
+            if (i > count) break;
+            ivec2 sample_offset = ivec2(floor(vec2(delta) * float(i) / float(count) + vec2(0.5)));
+            if (!selected_at(p + sample_offset)) { connected = false; break; }
+        }
+        if (connected) return true;
     }
-    return true;
+    return false;
 }
 
 bool clipped_by_border(ivec2 p) {
@@ -59,8 +70,10 @@ bool clipped_by_border(ivec2 p) {
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
     float center = coverage_at(p);
-    float alpha = max(outline_alpha(p), center * u_xray_alpha);
-    if (center > 0.0 && clipped_by_border(p)) alpha = max(alpha, center);
+    float alpha = outline_alpha(p);
+    // These are complementary subpixel areas, not overlapping layers.
+    if (center > 0.0 && clipped_by_border(p)) alpha += center;
+    alpha = max(alpha, center * u_xray_alpha);
 #ifdef OUTLINE_ALPHA
     o_alpha = alpha;
 #else

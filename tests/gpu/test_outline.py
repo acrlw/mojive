@@ -81,11 +81,15 @@ class Rig:
     def draw(self, boxes, selected: int = 0, *, xray: bool = False) -> np.ndarray:
         sb = SceneBuilder()
         matid = sb.material_id(Material())
-        for pos, scale, color, oid in boxes:
+        for pos, scale, color, oid, *rotation in boxes:
             sb.add(
                 BOX,
                 matid,
-                M.compose(np.asarray(pos, np.float32), np.eye(3), np.asarray(scale, np.float32)),
+                M.compose(
+                    np.asarray(pos, np.float32),
+                    rotation[0] if rotation else np.eye(3),
+                    np.asarray(scale, np.float32),
+                ),
                 np.asarray(color, np.float32),
                 MATERIAL,
                 object_id=oid,
@@ -298,6 +302,28 @@ def test_outline_hugs_the_viewport_edge_when_clipped(rig):
     band = out[:, :OUTLINE_RADIUS].any(axis=1)
     missing = [int(r) for r in inner if not band[r]]
     assert not missing
+
+
+@pytest.mark.parametrize("angle", [-75, -55, -35, -15, 15, 35, 55, 75])
+def test_clipped_outline_join_keeps_the_silhouette_stroke_width(rig, angle):
+    from pathlib import Path
+
+    from PIL import Image
+
+    rotation = M.axis_angle_to_mat3((0, 0, 1), np.deg2rad(angle))
+    boxes = [((0, -0.85, 0), (0.65, 0.6, 0.1), (0.2, 0.6, 0.3, 1), SEL, rotation)]
+    img = rig.draw(boxes, selected=SEL)
+    output = Path(__file__).resolve().parents[2] / "output/outline-clipped-joins"
+    output.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(img).save(output / f"{rig.backend.caps.name}-{angle}.png")
+    outline = rig.outline_mask(img)
+    assert outline[-OUTLINE_RADIUS:, W // 2].all()
+    assert not outline[-OUTLINE_RADIUS - 1, W // 2]
+    for border in rig.outline_mask(img)[-OUTLINE_RADIUS:]:
+        columns = np.flatnonzero(border)
+        assert border[columns[0] : columns[-1] + 1].all(), (
+            "The closing band must remain connected through a slanted intersection"
+        )
 
 
 def test_segment_view_colors_pixels_by_object_id(rig):

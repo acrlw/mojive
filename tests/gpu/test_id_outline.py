@@ -446,6 +446,27 @@ def test_outline_hugs_the_viewport_edge_when_clipped(rig):
     assert not missing
 
 
+@pytest.mark.parametrize("angle", [-35, 35])
+def test_clipped_outline_closes_partial_mask_coverage_without_a_seam(rig, angle):
+    scene = Scene()
+    scene.add(
+        MeshShape.BOX,
+        (0, -0.85, 0),
+        (0.65, 0.6, 0.1),
+        (0.2, 0.6, 0.3, 1),
+        SEL,
+        rot=M.axis_angle_to_mat3((0, 0, 1), np.deg2rad(angle)),
+    )
+    rig.set_scene(scene.build())
+    rig.frame(selected=SEL)
+    coverage = rig.outline_coverage()[0]
+    partial = (coverage > 0) & (coverage < 1)
+    assert partial.any(), "The clipped slanted silhouette must exercise MSAA coverage"
+    # The outer stroke and the inward closing band partition each edge pixel.
+    # Their coverage must add to one instead of leaving a translucent notch.
+    assert rig.outline_mask()[0, partial].all()
+
+
 def test_object_near_the_border_still_gets_an_outer_outline(rig):
 
     half_x = 0.5

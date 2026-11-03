@@ -123,6 +123,16 @@ axis and diagnostic meanings when applying hover, active, disabled, and selectio
 Disabled styling must not multiply alpha twice or make a control unintentionally transparent.
 Selection outlines belong below joint helpers, transform gizmos and viewport UI. Verify their
 actual overlap, including depth-tested helpers that must still disappear behind scene geometry.
+When a selected silhouette reaches the viewport boundary, continue its outline inward along
+that boundary. Require continuous selected coverage to the edge so nearby disconnected
+silhouettes do not acquire a false closing strip. Inspect all four edges and corners at normal
+and high framebuffer density. Follow connected diagonal mask paths within the stroke's
+sampling footprint; a row/column-only test leaves notches at slanted joins. At an antialiased
+silhouette/border intersection, add the
+complementary outside-stroke and inside-band coverage. Taking their maximum leaves a
+translucent notch in the closing stroke. Preserve fractional coverage at the inner border-band
+edge rather than rounding its width up to whole pixels. Check the full band at fractional
+density too.
 
 Use professional, concise English source copy and the shared localization path. The design
 guide supports Chinese and English. Translate explanatory labels while retaining source
