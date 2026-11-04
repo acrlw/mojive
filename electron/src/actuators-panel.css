@@ -1,0 +1,44 @@
+.actuator-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.actuator-summary > .button {
+  justify-content: flex-start;
+  flex: 1;
+  min-width: 0;
+  border-radius: 4px;
+}
+.actuator-summary > .button > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.actuator-reduction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 4px;
+  color: var(--muted-color);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.actuator-reduction > span:last-child {
+  font-family: var(--font-numeric, var(--font-mono));
+  font-variant-numeric: tabular-nums;
+}
+.actuator-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 8px;
+  align-items: baseline;
+  margin: 12px 4px 4px;
+  font-size: 12px;
+  color: var(--muted-color);
+}
+.actuator-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

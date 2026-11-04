@@ -1,0 +1,9 @@
+node_modules/
+dist/
+public/
+src/icons.ts
+src/viewport/entity-masters.json
+tests/fixtures/
+package-lock.json
+tests/*-reference.json
+src/design-tokens.css

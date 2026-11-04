@@ -1,0 +1,260 @@
+.settings-dialog {
+  padding: 0;
+  border: 0;
+  width: min(560px, calc(100vw / var(--settings-zoom, 1) - 32px));
+  height: min(590px, calc(100dvh / var(--settings-zoom, 1) - 48px));
+  max-width: none;
+  max-height: none;
+  color: var(--text-color);
+  background: transparent;
+  overflow: visible;
+  font-family: var(--font-ui);
+  font-size: var(--body-font-size, 14px);
+  box-shadow: none;
+  border-radius: 0;
+}
+.settings-dialog::backdrop {
+  background: var(--ui-shadow, #00000038);
+}
+.settings-surface {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--floating-color);
+  border: 0;
+  box-shadow:
+    0 16px 48px var(--ui-shadow),
+    inset 0 0 0 1px var(--ui-border);
+  container-type: inline-size;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.settings-header > .icon {
+  color: var(--sage-color);
+}
+.settings-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+.settings-header .button {
+  width: 28px;
+  height: 28px;
+}
+.settings-global-search {
+  flex: 0 0 auto;
+  padding: 12px 12px 0;
+}
+.settings-layout {
+  display: grid;
+  grid-template-columns: max(120px, 8.5em) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  padding: 12px;
+}
+.settings-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+}
+.settings-navigation .button {
+  justify-content: flex-start;
+  min-height: 32px;
+  width: 100%;
+  gap: 8px;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: inherit;
+}
+.settings-navigation .active {
+  background: var(--ui-selected);
+  color: var(--sage-color);
+}
+.settings-page {
+  min-width: 0;
+  overflow: auto;
+  /* Reserve paint space for full-row controls without moving the shared content edges. */
+  padding: 0 8px;
+  margin-inline: -8px;
+}
+.settings-search {
+  width: 100%;
+}
+.settings-page-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.settings-page-heading h2 {
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+  margin: 0;
+}
+.settings-page-heading .button {
+  height: 28px;
+  gap: 6px;
+  font-size: inherit;
+}
+.settings-group {
+  margin: 0 0 16px;
+  padding: 0;
+  min-width: 0;
+}
+.settings-group > h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.settings-font-group > h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted-color);
+  margin: 12px 0 8px;
+}
+/* Native property_style.label_column shares the longest label across one page. */
+.settings-fields {
+  display: grid;
+  grid-template-columns: fit-content(calc(100% - 140px)) minmax(128px, 1fr);
+  column-gap: 12px;
+}
+.settings-fields :is(.settings-group, .settings-font-group, .settings-row) {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.settings-fields :is(.settings-group, .settings-font-group) > h3,
+.settings-empty {
+  grid-column: 1 / -1;
+}
+.settings-row {
+  align-items: center;
+  column-gap: 12px;
+  min-height: 28px;
+  margin: 0 0 8px;
+}
+.settings-row > span:first-child,
+.settings-row > label {
+  overflow-wrap: anywhere;
+}
+.settings-row .custom-select {
+  width: 100%;
+  min-width: 0;
+}
+.settings-fields .settings-switch-row {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+}
+.settings-row .number-field {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--numeric-font-size, 14px);
+  min-height: 28px;
+}
+.settings-row .number-field input {
+  font: inherit;
+  height: 28px;
+}
+.settings-readonly {
+  color: var(--muted-color);
+}
+/* A connected equal partition has one outer frame and no inset selection pills. */
+.settings-segment {
+  container: settings-appearance / inline-size;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
+  background: var(--input-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.settings-segment .button {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  gap: 4px;
+  font-size: inherit;
+  padding: 0 6px;
+  margin: 0;
+  border-radius: 0;
+}
+.settings-segment .button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.settings-segment .button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.settings-segment .icon {
+  width: 14px !important;
+  height: 14px !important;
+}
+.settings-segment .active {
+  background: var(--ui-field-active);
+  color: var(--sage-color);
+}
+.settings-empty {
+  padding: 12px 0;
+  color: var(--muted-color);
+}
+.settings-empty > .empty {
+  min-height: 120px;
+  padding: 12px;
+}
+
+@container (max-width: 520px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: max-content minmax(0, 1fr);
+  }
+  .settings-navigation {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .settings-navigation .button {
+    flex: 1 1 calc(50% - 4px);
+    width: auto;
+  }
+}
+@container (max-width: 390px) {
+  .settings-fields,
+  .settings-fields :is(.settings-group, .settings-font-group) {
+    display: block;
+  }
+  .settings-fields .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .settings-fields .settings-row:has(.custom-switch) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .settings-header,
+  .settings-layout {
+    padding: 8px;
+  }
+  .settings-global-search {
+    padding: 8px 8px 0;
+  }
+}
+
+/* Keep complete appearance names when the resolved UI font outgrows the icon/text budget. */
+@container settings-appearance (max-width: 18em) {
+  .settings-segment .icon {
+    display: none;
+  }
+}

@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Shared control verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      import '/src/controls.css';
+      import {
+        Button,
+        Numeric,
+        VectorFields,
+        Select,
+        Switch,
+        ColorPicker,
+        useSquircleSurfaces,
+      } from '/src/components.tsx';
+      import { parseColor, colorHex } from '/src/ColorPicker.tsx';
+      import { applySettings, DEFAULT_SETTINGS } from '/src/settings.tsx';
+      applySettings({ ...DEFAULT_SETTINGS, language: 'en' });
+      window.controlsModules = { parseColor, colorHex, React, createRoot, Numeric };
+      window.controlEvents = [];
+      const event = (name) => window.controlEvents.push(name);
+      function Review() {
+        useSquircleSurfaces();
+        const [value, setValue] = useState(1.23456789),
+          [vector, setVector] = useState([0, -0.00001, 3]),
+          [option, setOption] = useState('front'),
+          [enabled, setEnabled] = useState(true),
+          [color, setColor] = useState('#9CBF8D');
+        window.controlState = { value, vector, option, enabled, color };
+        window.controlActions = { setValue };
+        return React.createElement(
+          'main',
+          { style: { padding: 24, width: 440, display: 'flex', gap: 16, flexDirection: 'column' } },
+          React.createElement(Numeric, {
+            label: 'Numeric',
+            value,
+            onChange: setValue,
+            onBegin: () => event('begin'),
+            onCommit: () => event('commit'),
+            onCancel: () => event('cancel'),
+          }),
+          React.createElement(VectorFields, {
+            label: 'Position',
+            unit: 'm',
+            values: vector,
+            onChange: (axis, value) => setVector((v) => v.map((x, i) => (i === axis ? value : x))),
+            onBegin: () => event('begin'),
+            onCommit: () => event('commit'),
+          }),
+          React.createElement(Select, {
+            label: 'Projection',
+            value: option,
+            options: [
+              { value: 'front', label: 'Front' },
+              { value: 'back', label: 'Back' },
+              { value: 'disabled', label: 'Unavailable', disabled: true },
+            ],
+            onChange: setOption,
+          }),
+          React.createElement(Switch, {
+            label: 'Show grid',
+            checked: enabled,
+            onChange: setEnabled,
+          }),
+          React.createElement(ColorPicker, {
+            label: 'Material color',
+            value: color,
+            onChange: setColor,
+            onBegin: () => event('color begin'),
+            onCommit: () => event('color commit'),
+            onCancel: () => event('color cancel'),
+          }),
+          React.createElement(Button, null, 'Finish'),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

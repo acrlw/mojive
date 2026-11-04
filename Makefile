@@ -75,6 +75,12 @@ passive-viewer:
 
 help:
 	@printf '%s\n' \
+		'Electron:' \
+		'  make electron-install   install locked Node dependencies' \
+		'  make electron           build and launch the Electron editor' \
+		'  make electron-check     build and test the Electron project' \
+		'  make electron-acceptance capture actual desktop workflows' \
+		'  make electron-package   build the macOS application bundle' \
 		'Interactive:' \
 		'  make viewer             default MuJoCo scene' \
 		'  make native-viewer      build and launch the C++/bgfx Viewer' \
@@ -1360,3 +1366,11 @@ ui-inspector-tabs:
 ## Capture floating forms and verify selection, focus, closing, dragging and edits.
 ui-floating:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_floating_surfaces.py $(ARGS)
+
+# The desktop frontend has its own dependencies; Python setup remains independent.
+.PHONY: electron electron-install electron-dev electron-check electron-acceptance electron-package electron-bundle-smoke electron-clean
+electron:
+	$(MAKE) -C electron run
+
+electron-install electron-dev electron-check electron-acceptance electron-package electron-bundle-smoke electron-clean:
+	$(MAKE) -C electron $(patsubst electron-%,%,$@)

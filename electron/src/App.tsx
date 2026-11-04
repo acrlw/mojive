@@ -1,0 +1,2628 @@
+import { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import type {
+  EntityKind,
+  Frame,
+  GeometryMode,
+  Joint,
+  ProjectFile,
+  SceneDocument,
+  SceneNode,
+  Tool,
+} from './contracts';
+import {
+  authorJointTransform,
+  createPrimitive,
+  disposeDocument,
+  loadUrdf,
+  removeNode,
+  setJoint,
+} from './scene';
+import {
+  applyPose,
+  capturePose,
+  decodeDocument,
+  encodeDocument,
+  loadWorkspace,
+  saveWorkspace,
+  type Keyframe,
+  type WorkspaceTimeline,
+  type SceneSnapshot,
+  sampleTake,
+  assertPoseCompatible,
+} from './editor';
+import { t } from './i18n';
+import { SettingsDialog, useSettings } from './settings';
+import { OutputPanel } from './OutputPanel';
+import { JointPanel } from './JointPanel';
+import { ActuatorsPanel } from './ActuatorsPanel';
+import { FileDialog, type FileDialogKind } from './FileDialog';
+import { ProjectExplorer } from './ProjectExplorer';
+import { ConfirmSceneDialog } from './ConfirmSceneDialog';
+import { AppMenu } from './AppMenu';
+import { InfoDialog } from './InfoDialog';
+import { CamerasPanel } from './CamerasPanel';
+import { CameraProperties } from './CameraProperties';
+import { CameraPreview } from './CameraPreview';
+import { OperationNotice, type OperationNoticeData } from './OperationNotice';
+import { isViewportPickable, setViewportPickable } from './scene-selection';
+import { LightProperties } from './LightProperties';
+import type { SceneCameraState } from './scene-camera';
+import { exportTakeVideo } from './export-video';
+import { LayersPopup, LayersPanel, DEFAULT_VIEWPORT_LAYERS } from './ViewportLayers';
+import type { ViewportStats } from './Viewport';
+import { JointEditor, jointIcon } from './JointEditor';
+import { Splitter } from './Splitter';
+import { filterSceneNodes, nodeCategory } from './scene-tree';
+import { SCENE_CATALOG, createCatalogScene } from './SceneCatalog';
+import {
+  Button,
+  Empty,
+  Icon,
+  Numeric,
+  Section,
+  Squircle,
+  VectorFields,
+  SwitchRow,
+  ColorPicker,
+  useSquircleSurfaces,
+} from './components';
+import { Timeline } from './Timeline';
+import { Viewport, type ViewportHandle } from './Viewport';
+
+type Snapshot = {
+  document: ReturnType<typeof encodeDocument>;
+  keys: Keyframe[];
+  duration: number;
+  timeline: WorkspaceTimeline;
+};
+type Log = { id: number; level: 'info' | 'warn' | 'err'; time: string; text: string };
+const kinds: Record<string, string> = {
+  world: 'world',
+  geom: 'geom',
+  robot: 'robot',
+  link: 'body',
+  joint: 'joint',
+  box: 'shape-box',
+  sphere: 'shape-sphere',
+  cylinder: 'shape-cylinder',
+  capsule: 'shape-capsule',
+  ground: 'shape-plane',
+  camera: 'camera',
+  light: 'lightbulb',
+};
+const menus = ['File', 'Edit', 'Add', 'View', 'Help'];
+const tools: { id: Tool; icon: string; title: string; key: string }[] = [
+  { id: 'select', icon: 'select', title: 'Select', key: 'Q' },
+  { id: 'position', icon: 'move', title: 'Position', key: 'W' },
+  { id: 'rotation', icon: 'rotate', title: 'Rotation', key: 'E' },
+  { id: 'scale', icon: 'scale', title: 'Scale', key: 'R' },
+  { id: 'joint', icon: 'joint', title: 'Joint', key: 'J' },
+];
+const additions: { kind: EntityKind; label: string }[] = [
+  { kind: 'box', label: 'Box' },
+  { kind: 'sphere', label: 'Sphere' },
+  { kind: 'cylinder', label: 'Cylinder' },
+  { kind: 'capsule', label: 'Capsule' },
+  { kind: 'ground', label: 'Ground' },
+  { kind: 'light', label: 'Light source' },
+  { kind: 'camera', label: 'Camera' },
+];
+export default function App() {
+  useSquircleSurfaces();
+  const [settings, updateSettings] = useSettings();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [layers, setLayers] = useState({ ...DEFAULT_VIEWPORT_LAYERS });
+  const resolvedLayers = {
+    ...layers,
+    grid: settings.showGrid,
+    viewCube: settings.showViewCube,
+    helpers: settings.showEntityIcons,
+    influence: settings.showEntityInfluence ?? true,
+  };
+  function changeLayers(next: typeof resolvedLayers) {
+    setLayers(next);
+    updateSettings({
+      showGrid: next.grid,
+      showViewCube: next.viewCube,
+      showEntityIcons: next.helpers,
+      showEntityInfluence: next.influence,
+    });
+  }
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [sceneCamera, setSceneCamera] = useState<SceneCameraState>({ id: null, pilot: false });
+  const [videoProgress, setVideoProgress] = useState<number | null>(null);
+  const videoAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => videoAbort.current?.abort(), []);
+  const [stats, setStats] = useState<ViewportStats | null>(null);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(false);
+  const [sceneId, setSceneId] = useState('joint_gizmo');
+  const [activeJoint, setActiveJoint] = useState<string | null>(null);
+  const [layout, setLayout] = useState(() => {
+    try {
+      return {
+        left: 272,
+        right: 340,
+        bottom: 300,
+        ...JSON.parse(localStorage.getItem('mojive.layout') || '{}'),
+      };
+    } catch {
+      return { left: 272, right: 340, bottom: 300 };
+    }
+  });
+  const [windowSize, setWindowSize] = useState({ width: innerWidth, height: innerHeight });
+  useEffect(() => {
+    const resize = () => setWindowSize({ width: innerWidth, height: innerHeight });
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem('mojive.layout', JSON.stringify(layout));
+  }, [layout]);
+  const nativeMenu = window.mojive?.hasNativeMenu ?? false;
+  const [replacePrompt, setReplacePrompt] = useState(false);
+  const [replaceReason, setReplaceReason] = useState<'open' | 'close'>('open');
+  const [about, setAbout] = useState(false);
+  const [fileDialog, setFileDialog] = useState<{
+    kind: FileDialogKind;
+    initialPath?: string;
+    extension?: '.mojive.json' | '.png' | '.webm';
+    caption?: string;
+    suggestedName?: string;
+    onChoose: (path: string, overwrite: boolean) => Promise<void>;
+    onCancel: () => void;
+  } | null>(null);
+  function chooseFile(
+    kind: FileDialogKind,
+    action: (path: string, overwrite: boolean) => Promise<void>,
+    options: {
+      initialPath?: string;
+      extension?: '.mojive.json' | '.png' | '.webm';
+      caption?: string;
+      suggestedName?: string;
+    } = {},
+  ) {
+    if (fileDialog) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) =>
+      setFileDialog({
+        kind,
+        ...options,
+        onChoose: async (path, overwrite) => {
+          await action(path, overwrite);
+          setFileDialog(null);
+          resolve(true);
+        },
+        onCancel: () => {
+          setFileDialog(null);
+          resolve(false);
+        },
+      }),
+    );
+  }
+  async function requestClose() {
+    stopRecording();
+    if (fileDialog || replacePrompt || videoAbort.current) return;
+    if (dirtyRef.current) {
+      setReplaceReason('close');
+      setPlaying(false);
+      const allowed = await new Promise<boolean>((resolve) => {
+        replaceAnswer.current = resolve;
+        setReplacePrompt(true);
+      });
+      if (!allowed) return;
+    }
+    await window.mojive?.confirmClose();
+  }
+  const replaceAnswer = useRef<((answer: boolean) => void) | null>(null);
+  const dirtyRef = useRef(false);
+  const [sceneEpoch, setSceneEpoch] = useState(0);
+  const [doc, setDoc] = useState<SceneDocument | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [cameraPreviewEnabled, setCameraPreviewEnabled] = useState(false);
+  const [tool, setTool] = useState<Tool>('select');
+  const [frame, setFrame] = useState<Frame>('world');
+  const [geometry, setGeometry] = useState<GeometryMode>('default');
+  const [projection, setProjection] = useState<'perspective' | 'orthographic'>('perspective');
+  const [left, setLeft] = useState('scene');
+  const [bottom, setBottom] = useState('timeline');
+  const [menu, setMenu] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showInspector, setShowInspector] = useState(true);
+  const [showLeft, setShowLeft] = useState(true);
+  const [showBottom, setShowBottom] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState('Properties');
+  const [help, setHelp] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNoticeState] = useState<OperationNoticeData | null>(null);
+  const noticeId = useRef(0);
+  const noticeActionEpoch = useRef(0);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const [keys, setKeys] = useState<Keyframe[]>([]);
+  const [timelineData, setTimelineData] = useState<WorkspaceTimeline>({
+    snapshots: [],
+    takes: [],
+    activeTakeId: null,
+  });
+  const [recording, setRecording] = useState(false);
+  const [takeViews, setTakeViews] = useState<
+    Record<string, { cursor: number; range: [number, number] | null }>
+  >({});
+  const [playbackSource, setPlaybackSource] = useState<'keyframes' | 'take'>('keyframes');
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(10);
+  const [playing, setPlaying] = useState(false);
+  const [loop, setLoop] = useState(true);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [dirty, setDirty] = useState(false);
+  const [project, setProject] = useState<{
+    path: string;
+    name: string;
+    files: ProjectFile[];
+  } | null>(null);
+  const projectFiles = project?.files ?? [];
+  const [logs, setLogs] = useState<Log[]>([]);
+  const [historyTick, setHistoryTick] = useState(0);
+  const viewport = useRef<ViewportHandle>(null);
+  const undo = useRef<Snapshot[]>([]);
+  const redo = useRef<Snapshot[]>([]);
+  const pending = useRef<Snapshot | null>(null);
+  const logId = useRef(0);
+  const recordClock = useRef<{
+    start: number;
+    time: number;
+    id: string;
+  } | null>(null);
+  const state = useRef({
+    doc,
+    keys,
+    duration,
+    time,
+    playing,
+    loop,
+    timelineData,
+    recording,
+    playbackSource,
+    takeViews,
+    playbackSpeed,
+  });
+  state.current = {
+    doc,
+    keys,
+    duration,
+    time,
+    playing,
+    loop,
+    timelineData,
+    recording,
+    playbackSource,
+    takeViews,
+    playbackSpeed,
+  };
+  dirtyRef.current = dirty;
+  function log(text: string, level: Log['level'] = 'info') {
+    setLogs((l) => [
+      ...l.slice(-499),
+      {
+        id: ++logId.current,
+        level,
+        time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+        text,
+      },
+    ]);
+  }
+  function invalidateNoticeAction() {
+    noticeActionEpoch.current++;
+    setNoticeState((current) => (current?.action ? { ...current, action: undefined } : current));
+  }
+  function setNotice(message: string, level: OperationNoticeData['level'] = 'info') {
+    const id = ++noticeId.current;
+    setNoticeState(message ? { id, message, level } : null);
+  }
+  function historyNotice(message: string, direction: 'undo' | 'redo', expected: Snapshot) {
+    const id = ++noticeId.current,
+      epoch = noticeActionEpoch.current;
+    setNoticeState({
+      id,
+      message,
+      action: {
+        label: direction === 'undo' ? 'Undo' : 'Redo',
+        onClick: () => {
+          const stack = direction === 'undo' ? undo : redo;
+          if (
+            noticeId.current !== id ||
+            noticeActionEpoch.current !== epoch ||
+            pending.current ||
+            state.current.recording ||
+            state.current.playing ||
+            busyRef.current ||
+            stack.current.at(-1) !== expected
+          )
+            return;
+          history(direction);
+        },
+      },
+    });
+  }
+  function changed() {
+    invalidateNoticeAction();
+    setRevision((r) => r + 1);
+    setDirty(true);
+  }
+  function transformChanged() {
+    if (doc && node && doc.joints.some((j) => j.id === node.id)) authorJointTransform(doc, node.id);
+    changed();
+  }
+  function snapshot(): Snapshot | null {
+    const s = state.current;
+    return s.doc
+      ? {
+          document: encodeDocument(s.doc),
+          keys: structuredClone(s.keys),
+          duration: s.duration,
+          timeline: structuredClone(s.timelineData),
+        }
+      : null;
+  }
+  function begin() {
+    invalidateNoticeAction();
+    setPlaying(false);
+    if (!pending.current) pending.current = snapshot();
+  }
+  function cancel() {
+    const backup = pending.current;
+    pending.current = null;
+    if (backup) restore(backup);
+  }
+  function commit(): Snapshot | null {
+    if (state.current.recording) return null;
+    if (pending.current) {
+      if (JSON.stringify(pending.current) === JSON.stringify(snapshot())) {
+        pending.current = null;
+        return null;
+      }
+      const committed = pending.current;
+      undo.current.push(committed);
+      if (undo.current.length > 50) undo.current.shift();
+      pending.current = null;
+      redo.current = [];
+      setHistoryTick((t) => t + 1);
+      setDirty(true);
+      invalidateNoticeAction();
+      return committed;
+    }
+    return null;
+  }
+  function transaction(label: string, fn: () => void) {
+    begin();
+    try {
+      fn();
+      changed();
+      const committed = commit();
+      if (committed) historyNotice(label, 'undo', committed);
+      else setNotice(label);
+    } catch (error) {
+      const backup = pending.current;
+      pending.current = null;
+      if (backup) restore(backup);
+      report(error);
+    }
+  }
+  function restore(s: Snapshot) {
+    const old = state.current.doc;
+    const next = decodeDocument(s.document);
+    setDoc(next);
+    state.current.doc = next;
+    setKeys(s.keys);
+    state.current.keys = s.keys;
+    changeTimeline(s.timeline);
+    setRecording(false);
+    state.current.recording = false;
+    recordClock.current = null;
+    // Undo restores authored content, while the retained cursor and view still need their extent.
+    const extent = Math.max(s.duration, state.current.duration, state.current.time);
+    setDuration(extent);
+    state.current.duration = extent;
+    setPlaying(false);
+    setSelected((id) => (next.nodes.some((n) => n.id === id) ? id : null));
+    setPinnedId((id) => (next.nodes.some((n) => n.id === id) ? id : null));
+    changed();
+    if (old) disposeDocument(old);
+  }
+  function history(direction: 'undo' | 'redo') {
+    stopRecording();
+    const from = direction === 'undo' ? undo : redo,
+      to = direction === 'undo' ? redo : undo;
+    const s = from.current.at(-1);
+    if (!s) return;
+    try {
+      const current = snapshot();
+      if (!current) return;
+      restore(s);
+      from.current.pop();
+      to.current.push(current);
+      setHistoryTick((t) => t + 1);
+      historyNotice(
+        direction === 'undo' ? 'Edit undone' : 'Edit restored',
+        direction === 'undo' ? 'redo' : 'undo',
+        current,
+      );
+    } catch (error) {
+      report(error);
+    }
+  }
+
+  function report(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(message, 'err');
+    setNotice(message, 'error');
+    setBottom('output');
+    setShowBottom(true);
+  }
+  function installDocument(next: SceneDocument) {
+    invalidateNoticeAction();
+    setNotice('');
+    setSceneEpoch((v) => v + 1);
+    const old = state.current.doc;
+    setDoc(next);
+    state.current.doc = next;
+    setSelected(null);
+    setPinnedId(null);
+    setActiveJoint(null);
+    setTypeFilter('all');
+    setSearch('');
+    setExpanded(
+      new Set(
+        next.nodes
+          .filter(
+            (n) =>
+              n.kind === 'world' ||
+              n.kind === 'robot' ||
+              (n.kind === 'link' &&
+                !next.joints.some((j) => j.child === n.id || j.bodyId === n.id)),
+          )
+          .map((n) => n.id),
+      ),
+    );
+    setKeys([]);
+    state.current.keys = [];
+    changeTimeline({ snapshots: [], takes: [], activeTakeId: null });
+    setTakeViews({});
+    state.current.takeViews = {};
+    state.current.time = 0;
+    setRecording(false);
+    state.current.recording = false;
+    setPlaybackSource('keyframes');
+    state.current.playbackSource = 'keyframes';
+    setTime(0);
+    setPlaying(false);
+    setDirty(false);
+    undo.current = [];
+    redo.current = [];
+    pending.current = null;
+    setHistoryTick((t) => t + 1);
+    setRevision((r) => r + 1);
+    for (const w of next.warnings) log(w, 'warn');
+    log(`Loaded ${next.name} · ${next.nodes.length} objects · ${next.joints.length} joints`);
+    if (old) disposeDocument(old);
+  }
+  function answerReplacement(answer: boolean) {
+    const resolve = replaceAnswer.current;
+    replaceAnswer.current = null;
+    setReplacePrompt(false);
+    resolve?.(answer);
+  }
+  async function replaceDocument(
+    next: SceneDocument,
+    nextKeys: Keyframe[] = [],
+    nextDuration = 10,
+    nextTimeline: WorkspaceTimeline = { snapshots: [], takes: [], activeTakeId: null },
+  ) {
+    stopRecording();
+    if (dirtyRef.current) {
+      setReplaceReason('open');
+      setPlaying(false);
+      const allowed = await new Promise<boolean>((resolve) => {
+        replaceAnswer.current?.(false);
+        replaceAnswer.current = resolve;
+        setReplacePrompt(true);
+      });
+      if (!allowed) {
+        disposeDocument(next);
+        return false;
+      }
+    }
+    installDocument(next);
+    setKeys(nextKeys);
+    state.current.keys = nextKeys;
+    setDuration(nextDuration);
+    state.current.duration = nextDuration;
+    changeTimeline(nextTimeline);
+    return true;
+  }
+  async function openUrdf() {
+    setMenu(null);
+    if (!window.mojive) {
+      setNotice('Drag a URDF file into the viewport.');
+      return;
+    }
+    await chooseFile('urdf', async (path) => {
+      const r = await window.mojive!.openUrdfPath(path);
+      const next = await loadUrdf(r.content, r.resourceBase, r.files);
+      setFileDialog(null);
+      await replaceDocument(next);
+    });
+  }
+  async function openProject() {
+    setMenu(null);
+    if (!window.mojive) {
+      setNotice('Open project folders in the desktop app.');
+      return;
+    }
+    await chooseFile(
+      'project',
+      async (path) => {
+        const next = await window.mojive!.openProjectPath(path);
+        setProject(next);
+        setSearch('');
+        setSearchVisible(false);
+        setLeft('project');
+        setShowLeft(true);
+        log(`Opened project folder ${next.name}`);
+      },
+      { initialPath: project?.path },
+    );
+  }
+  function closeProject() {
+    setMenu(null);
+    if (!project) return;
+    setProject(null);
+    setSearch('');
+    setSearchVisible(false);
+    log('Closed project folder');
+  }
+  async function loadCatalog(id: string) {
+    setMenu(null);
+    setBusy(true);
+    try {
+      const next = await createCatalogScene(id);
+      if (await replaceDocument(next)) setSceneId(id);
+    } catch (e) {
+      report(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function openSaved() {
+    setMenu(null);
+    if (!window.mojive) {
+      setNotice('Drag a scene file into the viewport.');
+      return;
+    }
+    await chooseFile('scene', async (path) => {
+      const r = await window.mojive!.openScenePath(path),
+        loaded = loadWorkspace(r.content);
+      setFileDialog(null);
+      if (await replaceDocument(loaded.doc, loaded.keys, loaded.duration, loaded.timeline))
+        log(`Opened ${r.path}`);
+    });
+  }
+  async function save() {
+    stopRecording();
+    setMenu(null);
+    if (!doc) return false;
+    if (!window.mojive) {
+      setNotice('Save scenes in the desktop app.');
+      return false;
+    }
+    return chooseFile('save', async (path, overwrite) => {
+      const saved = await window.mojive!.saveScenePath(
+        path,
+        saveWorkspace(
+          state.current.doc!,
+          state.current.keys,
+          state.current.duration,
+          state.current.timelineData,
+        ),
+        overwrite,
+      );
+      log(`Saved ${saved}`);
+      setDirty(false);
+      dirtyRef.current = false;
+      setNotice('Project saved');
+    });
+  }
+  function useCamera(id: string | null, pilot = false) {
+    try {
+      viewport.current?.useSceneCamera(id, pilot);
+    } catch (error) {
+      report(error);
+    }
+  }
+  function alignCamera(id: string) {
+    transaction('Camera aligned to view', () => viewport.current?.alignCameraToView(id));
+  }
+  function createCamera() {
+    if (state.current.recording) {
+      setNotice('Stop recording before changing scene structure.');
+      return;
+    }
+    transaction('Camera created', () => {
+      const id = viewport.current?.createCameraFromView();
+      if (id) setSelected(id);
+    });
+  }
+  function deleteCamera(id: string) {
+    if (!state.current.doc || state.current.recording) return;
+    transaction('Camera deleted', () => {
+      if (sceneCamera.id === id) useCamera(null);
+      removeNode(state.current.doc!, id);
+      setSelected((selected) => (selected === id ? null : selected));
+      setPinnedId((pinned) => (pinned === id ? null : pinned));
+    });
+  }
+  async function captureCamera(id: string) {
+    if (!window.mojive) {
+      setNotice('Save images in the desktop app.');
+      return;
+    }
+    try {
+      const capture = await viewport.current?.captureCameraView(id);
+      if (!capture) return;
+      const bytes = Uint8Array.from(
+        atob(capture.dataUrl.slice(capture.dataUrl.indexOf(',') + 1)),
+        (character) => character.charCodeAt(0),
+      );
+      const name = doc?.nodes.find((node) => node.id === id)?.name ?? 'Camera';
+      await chooseFile(
+        'save',
+        async (path, overwrite) => {
+          const saved = await window.mojive!.saveBinaryFile(path, bytes, overwrite);
+          log(`Saved ${saved}`);
+        },
+        { extension: '.png', caption: t('Save camera image'), suggestedName: `${name}.png` },
+      );
+    } catch (error) {
+      report(error);
+    }
+  }
+  async function exportVideo() {
+    const current = state.current,
+      take = current.timelineData.takes.find(
+        (item) => item.id === current.timelineData.activeTakeId,
+      );
+    if (!current.doc || !take?.frames.length || current.recording || videoAbort.current) return;
+    if (!window.mojive) {
+      setNotice('Export video in the desktop app.');
+      return;
+    }
+    const view = viewport.current?.getCameraView();
+    if (!view) return;
+    current.playing = false;
+    setPlaying(false);
+    const abort = new AbortController();
+    videoAbort.current = abort;
+    setVideoProgress(0);
+    try {
+      const blob = await exportTakeVideo(current.doc, take, view, {
+        geometry,
+        grid: resolvedLayers.grid,
+        range: current.takeViews[take.id]?.range ?? null,
+        signal: abort.signal,
+        onProgress: setVideoProgress,
+      });
+      setVideoProgress(null);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      await chooseFile(
+        'save',
+        async (path, overwrite) => {
+          const saved = await window.mojive!.saveBinaryFile(path, bytes, overwrite);
+          log(`Saved ${saved}`);
+        },
+        { extension: '.webm', caption: t('Export video'), suggestedName: `${take.name}.webm` },
+      );
+    } catch (error) {
+      if (!abort.signal.aborted) report(error);
+    } finally {
+      videoAbort.current = null;
+      setVideoProgress(null);
+    }
+  }
+  async function fileOpen(file: ProjectFile) {
+    if (file.kind === 'directory') {
+      setSearch('');
+      return;
+    }
+    if (file.name.toLowerCase().endsWith('.urdf') && window.mojive) {
+      setBusy(true);
+      try {
+        const r = await window.mojive.readUrdf(file.path);
+        await replaceDocument(await loadUrdf(r.content, r.resourceBase, r.files));
+      } catch (e) {
+        report(e);
+      } finally {
+        setBusy(false);
+      }
+    } else
+      setNotice(
+        file.name.toLowerCase().endsWith('.urdf')
+          ? 'Use Open URDF to load a local file.'
+          : 'Mesh resources are loaded through their URDF model.',
+      );
+  }
+  function add(kind: EntityKind) {
+    if (state.current.recording) {
+      setNotice('Stop recording before changing scene structure.');
+      return;
+    }
+    if (!doc) return;
+    setMenu(null);
+    transaction(`Added ${kind}`, () => {
+      const n = createPrimitive(kind);
+      doc.root.add(n.object);
+      doc.nodes.push(n);
+      setSelected(n.id);
+    });
+    log(`Added ${kind}`);
+  }
+  function remove() {
+    if (state.current.recording) {
+      setNotice('Stop recording before changing scene structure.');
+      return;
+    }
+    if (!doc || !selected) return;
+    const node = doc.nodes.find((n) => n.id === selected);
+    if (!node) return;
+    transaction(`Deleted ${node.name}`, () => {
+      removeNode(doc, node.id);
+      setSelected(null);
+      setPinnedId((id) => (doc.nodes.some((n) => n.id === id) ? id : null));
+    });
+  }
+  // The saved extent sizes the timeline; it never bounds recording or authored time.
+  function extendDuration(time: number) {
+    if (!Number.isFinite(time) || time <= state.current.duration) return;
+    const extent = Math.max(time, Math.ceil(time / 10) * 10);
+    state.current.duration = extent;
+    setDuration(extent);
+  }
+  function seek(t: number, source?: 'keyframes' | 'take', mode: 'nearest' | 'floor' = 'nearest') {
+    const current = state.current;
+    if (current.recording || !Number.isFinite(t)) return false;
+    const nextSource = source ?? current.playbackSource;
+    const value = Math.max(0, t);
+    const take = current.timelineData.takes.find(
+      (item) => item.id === current.timelineData.activeTakeId,
+    );
+    try {
+      if (current.doc && nextSource === 'take' && take) sampleTake(current.doc, take, value, mode);
+    } catch (error) {
+      current.playing = false;
+      setPlaying(false);
+      report(error);
+      return false;
+    }
+    // Publish cursor and selection only after compatibility and the complete pose succeed.
+    extendDuration(value);
+    current.time = value;
+    setTime(value);
+    current.playbackSource = nextSource;
+    setPlaybackSource(nextSource);
+    if (nextSource === 'take' && take) {
+      const views = {
+        ...current.takeViews,
+        [take.id]: { cursor: value, range: current.takeViews[take.id]?.range ?? null },
+      };
+      current.takeViews = views;
+      setTakeViews(views);
+    }
+    invalidateNoticeAction();
+    setRevision((revision) => revision + 1);
+    return true;
+  }
+  function capture() {
+    const s = state.current;
+    if (!s.doc) return;
+    transaction('Keyframe captured', () => {
+      const k: Keyframe = {
+        id: crypto.randomUUID(),
+        name: `${t('Keyframe')} ${s.keys.length + 1}`,
+        time: s.time,
+        pose: capturePose(s.doc!),
+      };
+      const next = [...s.keys, k].sort((a, b) => a.time - b.time);
+      setKeys(next);
+      state.current.keys = next;
+    });
+  }
+  function changeTimeline(next: WorkspaceTimeline) {
+    state.current.timelineData = next;
+    setTimelineData(next);
+  }
+  function selectTake(id: string) {
+    const current = state.current;
+    if (current.recording || !current.doc) return;
+    const take = current.timelineData.takes.find((item) => item.id === id);
+    if (!take) return;
+    const cursor = current.takeViews[id]?.cursor ?? take.frames[0]?.time ?? 0;
+    try {
+      sampleTake(current.doc, take, cursor);
+    } catch (error) {
+      report(error);
+      return;
+    }
+    current.playing = false;
+    setPlaying(false);
+    changeTimeline({ ...current.timelineData, activeTakeId: id });
+    seek(cursor, 'take');
+  }
+  function createTake() {
+    if (state.current.recording) return;
+    transaction('Take created', () => {
+      const current = state.current,
+        take = {
+          id: crypto.randomUUID(),
+          name: `${t('Take')} ${current.timelineData.takes.length + 1}`,
+          frames: [],
+        };
+      changeTimeline({
+        ...current.timelineData,
+        takes: [...current.timelineData.takes, take],
+        activeTakeId: take.id,
+      });
+      setTime(0);
+      current.time = 0;
+    });
+  }
+  function deleteTake(id: string) {
+    if (state.current.recording) return;
+    transaction('Take deleted', () => {
+      const current = state.current,
+        takes = current.timelineData.takes.filter((item) => item.id !== id);
+      const activeTakeId =
+        current.timelineData.activeTakeId === id
+          ? (takes[0]?.id ?? null)
+          : current.timelineData.activeTakeId;
+      changeTimeline({ ...current.timelineData, takes, activeTakeId });
+      if (activeTakeId) selectTake(activeTakeId);
+    });
+  }
+  function changeTakeRange(range: [number, number] | null) {
+    const current = state.current,
+      take = current.timelineData.takes.find(
+        (item) => item.id === current.timelineData.activeTakeId,
+      );
+    if (!take || current.recording) return;
+    const last = Math.max(0, take.frames.length - 1);
+    const bounded: [number, number] | null = range
+      ? [
+          Math.max(0, Math.min(last, Math.min(...range))),
+          Math.max(0, Math.min(last, Math.max(...range))),
+        ]
+      : null;
+    const views = {
+      ...current.takeViews,
+      [take.id]: { cursor: current.takeViews[take.id]?.cursor ?? current.time, range: bounded },
+    };
+    current.takeViews = views;
+    setTakeViews(views);
+  }
+  function captureSnapshot() {
+    transaction('Snapshot captured', () => {
+      const current = state.current;
+      const item: SceneSnapshot = {
+        id: crypto.randomUUID(),
+        name: `${t('Snapshot')} ${current.timelineData.snapshots.length + 1}`,
+        time: current.time,
+        pose: capturePose(current.doc!),
+      };
+      changeTimeline({
+        ...current.timelineData,
+        snapshots: [...current.timelineData.snapshots, item].sort((a, b) => a.time - b.time),
+      });
+    });
+  }
+  function loadSnapshot(id: string) {
+    const item = state.current.timelineData.snapshots.find((item) => item.id === id);
+    if (!item || !state.current.doc || state.current.recording) return;
+    stopRecording();
+    try {
+      assertPoseCompatible(state.current.doc!, item.pose);
+    } catch (error) {
+      report(error);
+      return;
+    }
+    transaction('Snapshot loaded', () => {
+      applyPose(state.current.doc!, item.pose);
+      setTime(item.time);
+      state.current.time = item.time;
+    });
+  }
+  function stopRecording() {
+    if (!state.current.recording) return;
+    const current = state.current,
+      clock = recordClock.current;
+    const take = current.timelineData.takes.find((item) => item.id === clock?.id);
+    if (take?.frames.length && current.doc && clock) {
+      const time = clock.time + (performance.now() - clock.start) / 1000;
+      if (time > take.frames[take.frames.length - 1].time)
+        take.frames.push({ time, pose: capturePose(current.doc) });
+      setTime(time);
+      current.time = time;
+      extendDuration(time);
+      changeTimeline({ ...current.timelineData });
+    }
+    recordClock.current = null;
+    current.recording = false;
+    setRecording(false);
+    commit();
+  }
+  function toggleRecording() {
+    if (state.current.recording) {
+      stopRecording();
+      return;
+    }
+    const current = state.current;
+    if (!current.doc) return;
+    const previous = current.timelineData.takes.find(
+      (item) => item.id === current.timelineData.activeTakeId,
+    );
+    const resume = previous?.frames.reduce<(typeof previous.frames)[number] | null>(
+      (nearest, frame) =>
+        !nearest || Math.abs(frame.time - current.time) < Math.abs(nearest.time - current.time)
+          ? frame
+          : nearest,
+      null,
+    );
+    try {
+      if (resume) assertPoseCompatible(current.doc, resume.pose);
+    } catch (error) {
+      report(error);
+      return;
+    }
+    begin();
+    const start = resume?.time ?? current.time;
+    if (resume) applyPose(current.doc, resume.pose);
+    setTime(start);
+    current.time = start;
+    extendDuration(start);
+    const take = {
+      id: previous?.id ?? crypto.randomUUID(),
+      name: previous?.name ?? `${t('Take')} ${current.timelineData.takes.length + 1}`,
+      frames: [
+        ...(previous?.frames.filter((frame) => frame.time < start) ?? []),
+        { time: start, pose: capturePose(current.doc) },
+      ],
+    };
+    changeTimeline({
+      ...current.timelineData,
+      takes: previous
+        ? current.timelineData.takes.map((item) => (item.id === take.id ? take : item))
+        : [...current.timelineData.takes, take],
+      activeTakeId: take.id,
+    });
+    const views = { ...current.takeViews, [take.id]: { cursor: start, range: null } };
+    current.takeViews = views;
+    setTakeViews(views);
+    recordClock.current = {
+      start: performance.now(),
+      time: start,
+      id: take.id,
+    };
+    current.recording = true;
+    setRecording(true);
+    current.playing = false;
+    setPlaybackSource('take');
+    current.playbackSource = 'take';
+    setDirty(true);
+  }
+  function loadKey(id: string) {
+    const key = state.current.keys.find((key) => key.id === id),
+      current = state.current;
+    if (!key || !current.doc || current.recording) return;
+    try {
+      assertPoseCompatible(current.doc, key.pose);
+    } catch (error) {
+      report(error);
+      return;
+    }
+    transaction('Keyframe loaded', () => {
+      applyPose(current.doc!, key.pose);
+      setTime(key.time);
+      current.time = key.time;
+    });
+  }
+  function changeKeys(next: Keyframe[]) {
+    extendDuration(next.reduce((end, key) => Math.max(end, key.time), 0));
+    setKeys(next);
+    state.current.keys = next;
+    setDirty(true);
+  }
+  function jointChange(joint: Joint, value: number) {
+    if (!doc) return;
+    setJoint(doc, joint.id, value);
+    changed();
+  }
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  useEffect(() => {
+    let disposed = false;
+    createCatalogScene('joint_gizmo')
+      .then((next) => {
+        if (disposed) {
+          disposeDocument(next);
+          return;
+        }
+        replaceDocument(next);
+      })
+      .catch(report);
+    return () => {
+      disposed = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (playing || recording || busy) invalidateNoticeAction();
+  }, [playing, recording, busy]);
+  useEffect(() => {
+    if (!playing && !recording) return;
+    let last = performance.now(),
+      raf = 0,
+      cursorTime = state.current.time;
+    const tick = (now: number) => {
+      const current = state.current;
+      if (!current.playing && !current.recording) return;
+      const previous = last;
+      last = now;
+      if (current.recording) {
+        const clock = recordClock.current!;
+        const next = clock.time + (now - clock.start) / 1000;
+        const take = current.timelineData.takes.find(
+          (item) => item.id === current.timelineData.activeTakeId,
+        );
+        if (take && current.doc && next > take.frames[take.frames.length - 1].time) {
+          take.frames.push({ time: next, pose: capturePose(current.doc) });
+          changeTimeline({ ...current.timelineData });
+        }
+        setTime(next);
+        current.time = next;
+        extendDuration(next);
+      } else {
+        const take = current.timelineData.takes.find(
+          (item) => item.id === current.timelineData.activeTakeId,
+        );
+        if (!take || take.frames.length < 2) {
+          setPlaying(false);
+          return;
+        }
+        const frames = take.frames,
+          range = current.takeViews[take.id]?.range;
+        const firstIndex = Math.min(frames.length - 1, range?.[0] ?? 0),
+          lastIndex = Math.min(frames.length - 1, range?.[1] ?? frames.length - 1);
+        const start = frames[firstIndex].time,
+          end = frames[lastIndex].time;
+        if (lastIndex <= firstIndex) {
+          seek(start, 'take', 'floor');
+          setPlaying(false);
+          return;
+        }
+        const tail = end - frames[lastIndex - 1].time,
+          period = end - start + tail;
+        const desired = cursorTime + ((now - previous) / 1000) * current.playbackSpeed;
+        let cursor = Math.max(start, desired);
+        if (cursor >= end + tail) {
+          if (current.loop) cursor = start + ((cursor - start) % period);
+          else {
+            seek(end, 'take', 'floor');
+            setPlaying(false);
+            return;
+          }
+        }
+        cursorTime = cursor;
+        seek(cursor, 'take', 'floor');
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, recording]);
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (replacePrompt) {
+        if (e.key === 'Escape') answerReplacement(false);
+        return;
+      }
+      if (settingsOpen || fileDialog || about || help || videoProgress !== null) return;
+      const target = e.target as HTMLElement;
+      if (
+        target.closest(
+          'input,textarea,[contenteditable],[role=dialog],[role=listbox],[role=combobox]',
+        )
+      )
+        return;
+      if (target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
+      const command = e.metaKey || e.ctrlKey;
+      const k = e.key.toLowerCase();
+      if (nativeMenu && command && ['o', 's', 'z', ','].includes(k)) return;
+      if (command && k === ',') {
+        e.preventDefault();
+        setSettingsOpen(true);
+      } else if (command && k === 'o') {
+        e.preventDefault();
+        openUrdf();
+      } else if (command && k === 's') {
+        e.preventDefault();
+        save();
+      } else if (command && k === 'z') {
+        e.preventDefault();
+        history(e.shiftKey ? 'redo' : 'undo');
+      } else if (k === 'f') {
+        e.preventDefault();
+        viewport.current?.focus(selected ?? undefined);
+      } else if (k === ' ') {
+        e.preventDefault();
+        if (
+          timelineData.takes.some(
+            (take) => take.id === timelineData.activeTakeId && take.frames.length > 1,
+          ) &&
+          !recording
+        ) {
+          setPlaybackSource('take');
+          state.current.playbackSource = 'take';
+          setPlaying((p) => !p);
+        }
+      } else if (k === 'k') {
+        capture();
+      } else if (k === 'delete' || k === 'backspace') {
+        e.preventDefault();
+        remove();
+      } else if (k === 'escape') {
+        setMenu(null);
+        setHelp(false);
+        setSettingsOpen(false);
+        if (pending.current) {
+          const s = pending.current;
+          pending.current = null;
+          restore(s);
+        }
+      } else {
+        const t = tools.find((t) => t.key.toLowerCase() === k);
+        if (t) setTool(t.id);
+      }
+    };
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  });
+  useEffect(() =>
+    window.mojive?.onMenuAction((action) => {
+      if (
+        (fileDialog || replacePrompt || settingsOpen || about || help || videoProgress !== null) &&
+        action !== 'app.requestClose'
+      )
+        return;
+      if (action.startsWith('scene.')) {
+        loadCatalog(action.slice(6));
+        return;
+      }
+      if (action.startsWith('add.')) {
+        add(action.slice(4) as EntityKind);
+        return;
+      }
+      if (action.startsWith('theme.')) {
+        updateSettings({ appearance: action.slice(6) as 'dark' | 'light' });
+        return;
+      }
+      if (action.startsWith('locale.')) {
+        updateSettings({ language: action === 'locale.en' ? 'en' : 'zh' });
+        return;
+      }
+      const actions: Record<string, () => void> = {
+        'file.openUrdf': openUrdf,
+        'file.openProject': openProject,
+        'file.closeProject': closeProject,
+        'file.openScene': openSaved,
+        'file.save': save,
+        'edit.undo': () => history('undo'),
+        'edit.redo': () => history('redo'),
+        'edit.delete': remove,
+        'app.settings': () => setSettingsOpen(true),
+        'app.requestClose': requestClose,
+        'app.about': () => setAbout(true),
+        'settings.open': () => setSettingsOpen(true),
+        'help.interaction': () => setHelp(true),
+        'view.focusSelection': () => viewport.current?.focus(selected ?? undefined),
+        'view.focusAll': () => viewport.current?.focus(),
+        'view.perspective': () => {
+          setProjection('perspective');
+          viewport.current?.view('perspective');
+        },
+        'view.orthographic': () => setProjection('orthographic'),
+        'view.toggleProjection': () =>
+          setProjection((p) => (p === 'perspective' ? 'orthographic' : 'perspective')),
+        'view.toggleLeft': () => setShowLeft((v) => !v),
+        'view.toggleInspector': () => setShowInspector((v) => !v),
+        'view.toggleTimeline': () => setShowBottom((v) => !v),
+      };
+      if (actions[action]) actions[action]();
+      else if (action.startsWith('view.')) viewport.current?.view(action.slice(5));
+    }),
+  );
+  useEffect(() => {
+    const update = () =>
+      window.mojive
+        ?.updateMenuState({
+          locale: settings.language === 'zh' ? 'zh-CN' : 'en',
+          theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+          canUndo: undo.current.length > 0,
+          canRedo: redo.current.length > 0,
+          hasSelection: !!selected,
+          hasProject: !!project,
+          showLeft,
+          showInspector,
+          showTimeline: showBottom,
+          sceneId,
+          textInput: !!document.activeElement?.matches('input,textarea,[contenteditable]'),
+        })
+        .catch(report);
+    update();
+    window.addEventListener('focusin', update);
+    window.addEventListener('focusout', update);
+    return () => {
+      window.removeEventListener('focusin', update);
+      window.removeEventListener('focusout', update);
+    };
+  }, [settings, historyTick, selected, project, showLeft, showInspector, showBottom, sceneId]);
+  useEffect(() => {
+    const before = (e: BeforeUnloadEvent) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', before);
+    return () => window.removeEventListener('beforeunload', before);
+  }, [dirty]);
+  useEffect(() => {
+    if (!doc || !selected) return;
+    const parents: string[] = [];
+    let n = doc.nodes.find((n) => n.id === selected);
+    while (n?.parentId) {
+      parents.push(n.parentId);
+      n = doc.nodes.find((p) => p.id === n!.parentId);
+    }
+    setExpanded((current) => new Set([...current, ...parents]));
+  }, [selected, doc]);
+  const selectedNode = doc?.nodes.find((n) => n.id === selected);
+  const node = doc?.nodes.find((n) => n.id === (pinnedId ?? selected));
+  const rotation = node ? new THREE.Euler().setFromQuaternion(node.object.quaternion, 'ZYX') : null;
+  const joint = doc?.joints.find((j) => j.id === node?.id);
+  const movable = doc?.joints.filter((j) => j.type !== 'fixed') ?? [];
+  const rootNodes = doc?.nodes.filter((n) => !n.parentId) ?? [];
+  const filtering = !!search.trim() || typeFilter !== 'all';
+  const filteredNodes = filterSceneNodes(doc?.nodes ?? [], search, typeFilter);
+  const categoryIcons: Record<string, string> = {
+    all: 'tree',
+    robot: 'robot',
+    link: 'body',
+    geom: 'geom',
+    joint: 'joint',
+    camera: 'camera',
+    light: 'light',
+  };
+  const availableTypes = ['all', 'robot', 'link', 'geom', 'joint', 'camera', 'light']
+    .map((kind) => ({
+      kind,
+      count:
+        kind === 'all'
+          ? (doc?.nodes.length ?? 0)
+          : (doc?.nodes.filter((n) => nodeCategory(n) === kind).length ?? 0),
+    }))
+    .filter((f) => f.kind === 'all' || f.count > 0);
+  const logicalWidth = windowSize.width / settings.uiScale;
+  const logicalHeight = windowSize.height / settings.uiScale;
+  const leftMaximum = Math.min(600, logicalWidth * 0.32);
+  const rightMaximum = Math.min(650, logicalWidth * 0.36);
+  const bottomMaximum = logicalHeight * 0.55;
+  const leftWidth = Math.min(layout.left, leftMaximum);
+  const rightWidth = Math.min(layout.right, rightMaximum);
+  const bottomHeight = Math.min(layout.bottom, bottomMaximum);
+
+  function treeNode(n: SceneNode, depth = 0): React.ReactNode {
+    const children = filtering ? [] : doc!.nodes.filter((c) => c.parentId === n.id);
+    const open = expanded.has(n.id);
+    return (
+      <div key={n.id}>
+        <div
+          className={`tree-row type-${nodeCategory(n)} ${selected === n.id ? 'selected' : ''}`}
+          style={{ paddingLeft: filtering ? 8 : 8 + depth * 12 }}
+          role="treeitem"
+          aria-selected={selected === n.id}
+          aria-expanded={children.length ? open : undefined}
+          onClick={() => setSelected(n.id)}
+          onDoubleClick={() => viewport.current?.focus(n.id)}
+          title={n.name}
+        >
+          {children.length > 0 ? (
+            <button
+              className="tree-chevron"
+              aria-label={`${open ? 'Collapse' : 'Expand'} ${n.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpanded(n.id);
+              }}
+            >
+              <Icon name={open ? 'down' : 'right'} size={14} />
+            </button>
+          ) : (
+            <span className="tree-chevron" />
+          )}
+          <Icon
+            name={
+              n.kind === 'joint'
+                ? jointIcon(doc!.joints.find((j) => j.id === n.id)?.type ?? '')
+                : (kinds[n.kind] ?? 'cube')
+            }
+            size={16}
+          />
+          <span className={`tree-label ${n.visible ? '' : 'dim'}`}>{n.name}</span>
+          <button
+            className="tree-visibility"
+            title={t(n.visible ? 'Hide object' : 'Show object')}
+            aria-label={t(n.visible ? 'Hide object' : 'Show object')}
+            aria-pressed={!n.visible}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              transaction(`${n.visible ? 'Hid' : 'Showed'} ${n.name}`, () => {
+                n.visible = !n.visible;
+                n.object.visible = n.visible;
+              });
+            }}
+          >
+            <Icon name={n.visible ? 'eye' : 'eye-off'} size={16} />
+          </button>
+        </div>
+        {children.length > 0 &&
+          open &&
+          !filtering &&
+          children.map((c) => treeNode(c, depth + (n.kind === 'joint' ? 0 : 1)))}
+      </div>
+    );
+  }
+  function menuItem(
+    label: string,
+    action: () => void,
+    icon?: string,
+    shortcut?: string,
+    disabled = false,
+  ) {
+    return (
+      <button
+        role="menuitem"
+        disabled={disabled}
+        onClick={() => {
+          setMenu(null);
+          action();
+        }}
+      >
+        {icon ? <Icon name={icon} size={16} /> : <span className="menu-icon-space" />}
+        <span>{t(label)}</span>
+        {shortcut && <kbd>{shortcut}</kbd>}
+      </button>
+    );
+  }
+  const leftTitle =
+    left === 'scene'
+      ? 'Scene'
+      : left === 'joints'
+        ? 'Joints'
+        : left === 'actuators'
+          ? 'Actuators'
+          : left === 'layers'
+            ? 'Layers'
+            : left === 'cameras'
+              ? 'Cameras'
+              : 'Project';
+  return (
+    <div
+      className="app-shell"
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
+      onDrop={async (event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        if (fileDialog || replacePrompt || videoAbort.current) return;
+        const file = event.dataTransfer.files[0];
+        setBusy(true);
+        try {
+          const text = await file.text();
+          if (file.name.toLowerCase().endsWith('.json')) {
+            const scene = loadWorkspace(text);
+            await replaceDocument(scene.doc, scene.keys, scene.duration, scene.timeline);
+          } else if (file.name.toLowerCase().endsWith('.urdf'))
+            await replaceDocument(await loadUrdf(text, ''));
+          else throw Error('Unsupported scene file');
+        } catch (error) {
+          report(error);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      style={
+        {
+          zoom: settings.uiScale,
+          width: logicalWidth,
+          height: logicalHeight,
+          '--left-width': showLeft ? `${leftWidth}px` : '0px',
+          gridTemplateColumns: `48px ${showLeft ? leftWidth + 'px' : '0px'} minmax(120px,1fr) ${showInspector ? rightWidth + 'px' : '0px'}`,
+          gridTemplateRows: `36px minmax(120px,1fr) ${showBottom ? bottomHeight + 'px' : '0px'} 28px`,
+        } as React.CSSProperties
+      }
+    >
+      <header className={`titlebar ${nativeMenu ? 'native-titlebar' : ''}`}>
+        {nativeMenu && <div className="window-traffic-spacer" />}
+        {!nativeMenu && (
+          <nav aria-label={t('Application menu')}>
+            {menus.map((m) => (
+              <button
+                key={m}
+                className={menu === m ? 'active' : ''}
+                onClick={() => setMenu(menu === m ? null : m)}
+              >
+                {t(m)}
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className="document-title">
+          <Icon name="file" size={16} />
+          {doc?.name ?? t('Untitled scene')}
+          {dirty && <span className="dirty-dot" />}
+        </div>
+        <div className="title-actions">
+          <Button
+            icon={document.documentElement.dataset.theme === 'light' ? 'moon' : 'sun'}
+            title={t('Toggle theme')}
+            onClick={() =>
+              updateSettings({
+                appearance: document.documentElement.dataset.theme === 'light' ? 'dark' : 'light',
+              })
+            }
+          />
+          <Button icon="settings" title={t('Settings')} onClick={() => setSettingsOpen(true)} />
+
+          <Button
+            icon="sidebar-left"
+            title={t('Toggle left panel')}
+            active={showLeft}
+            onClick={() => setShowLeft(!showLeft)}
+          />
+          <Button
+            icon="panel-right"
+            title={t('Toggle Inspector')}
+            active={showInspector}
+            onClick={() => setShowInspector(!showInspector)}
+          />
+        </div>
+      </header>
+      <aside className="activity-rail">
+        {[
+          { id: 'scene', icon: 'scene', title: 'Scene' },
+          { id: 'project', icon: 'folder', title: 'Project files' },
+          { id: 'joints', icon: 'pose', title: 'Joints' },
+          { id: 'actuators', icon: 'control', title: 'Actuators' },
+          { id: 'cameras', icon: 'camera', title: 'Cameras' },
+          { id: 'layers', icon: 'layers', title: 'Layers' },
+        ].map((item) => (
+          <Button
+            key={item.id}
+            icon={item.icon}
+            title={item.title}
+            active={left === item.id && showLeft}
+            onClick={() => {
+              setLeft(item.id);
+              setShowLeft(true);
+              setSearch('');
+            }}
+          />
+        ))}
+        <span className="flex-spacer" />
+        <Button
+          icon="terminal"
+          title={t('Output')}
+          active={showBottom && bottom === 'output'}
+          onClick={() => {
+            setBottom('output');
+            setShowBottom(true);
+          }}
+        />
+        <Button icon="settings" title={t('Settings')} onClick={() => setSettingsOpen(true)} />
+      </aside>
+      <aside className="left-panel panel" style={{ visibility: showLeft ? 'visible' : 'hidden' }}>
+        {!['joints', 'cameras', 'actuators'].includes(left) && (
+          <div className="panel-header">
+            <strong>{t(leftTitle)}</strong>
+            <span className="flex-spacer" />
+            {left === 'layers' ? (
+              <Button
+                icon="reset"
+                title={t('Reset viewport layers')}
+                onClick={() => changeLayers({ ...DEFAULT_VIEWPORT_LAYERS })}
+              />
+            ) : left === 'project' ? (
+              <>
+                <Button icon="folder" title={t('Open project folder')} onClick={openProject} />
+                <Button
+                  icon="close"
+                  title={t('Close project folder')}
+                  disabled={!project}
+                  onClick={closeProject}
+                />
+              </>
+            ) : (
+              <>
+                <Button
+                  icon="search"
+                  title={t('Search')}
+                  active={searchVisible}
+                  onClick={() => {
+                    setSearchVisible(!searchVisible);
+                    setSearch('');
+                  }}
+                />
+                <Button
+                  icon="plus"
+                  title={t('Add object')}
+                  onClick={() => setMenu(menu === 'Add' ? null : 'Add')}
+                />
+              </>
+            )}
+          </div>
+        )}
+        {!['joints', 'cameras', 'actuators'].includes(left) &&
+          (left === 'project' ? !!project : searchVisible) && (
+            <div className="panel-search search-field">
+              <Icon name="search" size={16} />
+              <input
+                aria-label={t(`Search ${leftTitle}`)}
+                placeholder={t('Search') + '…'}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  title={t('Clear search')}
+                  aria-label={t('Clear search')}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              )}
+            </div>
+          )}
+        {left === 'scene' && (
+          <div className="scene-controls">
+            <div className="type-filters" aria-label={t('Object types')}>
+              {availableTypes.map(({ kind, count }) => (
+                <button
+                  key={kind}
+                  title={t(
+                    kind === 'light' ? 'Light source' : kind[0].toUpperCase() + kind.slice(1),
+                  )}
+                  aria-label={t(
+                    kind === 'light' ? 'Light source' : kind[0].toUpperCase() + kind.slice(1),
+                  )}
+                  aria-pressed={typeFilter === kind}
+                  className={`filter-chip type-${kind} ${typeFilter === kind ? 'active' : ''}`}
+                  onClick={() => setTypeFilter(kind)}
+                >
+                  <Icon name={categoryIcons[kind]} size={16} />
+                  <span>{count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div
+          className={`left-content ${['joints', 'cameras', 'actuators'].includes(left) ? 'joint-panel-host' : ''}`}
+        >
+          {left === 'scene' && (
+            <>
+              <div role="tree" aria-label={t('Scene hierarchy')}>
+                {(filtering ? filteredNodes : rootNodes).map((n) => treeNode(n))}
+              </div>
+              {doc && !doc.nodes.length ? (
+                <Empty
+                  title={t('Your scene is empty')}
+                  action={
+                    <Button icon="plus" onClick={() => setMenu('Add')}>
+                      {t('Add object')}
+                    </Button>
+                  }
+                />
+              ) : filtering && !filteredNodes.length ? (
+                <Empty
+                  title={t('No matching objects')}
+                  action={
+                    <Button
+                      onClick={() => {
+                        setSearch('');
+                        setTypeFilter('all');
+                      }}
+                    >
+                      {t('Clear filters')}
+                    </Button>
+                  }
+                />
+              ) : null}
+            </>
+          )}
+          {left === 'project' && (
+            <>
+              {project && (
+                <div className="group-eyebrow" title={project.path}>
+                  {project.name}
+                </div>
+              )}
+              {project ? (
+                projectFiles.length ? (
+                  <ProjectExplorer
+                    key={project.path}
+                    project={project}
+                    query={search}
+                    onOpen={fileOpen}
+                    onClearSearch={() => setSearch('')}
+                  />
+                ) : (
+                  <Empty title={t('This folder is empty')} />
+                )
+              ) : (
+                <Empty
+                  title={t('No folder open')}
+                  action={
+                    <Button icon="folder" onClick={openProject}>
+                      {t('Open folder')}
+                    </Button>
+                  }
+                />
+              )}
+            </>
+          )}
+          {left === 'joints' && doc && (
+            <JointPanel
+              doc={doc}
+              selectedId={selected}
+              activeJointId={activeJoint}
+              onSelect={setSelected}
+              onFocus={(id) => viewport.current?.focus(id)}
+              onBegin={begin}
+              onCommit={commit}
+              onChange={changed}
+            />
+          )}
+          {left === 'cameras' && (
+            <CamerasPanel
+              doc={doc}
+              selectedId={selected}
+              activeCameraId={sceneCamera.id}
+              piloting={sceneCamera.pilot}
+              onSelect={setSelected}
+              onView={useCamera}
+              onFocus={(id) => viewport.current?.focus(id)}
+              onAlign={alignCamera}
+              onCreate={createCamera}
+              onDelete={deleteCamera}
+              onCapture={captureCamera}
+              onPreset={(preset) => viewport.current?.view(preset)}
+            />
+          )}
+          {left === 'layers' && (
+            <LayersPanel value={resolvedLayers} onChange={changeLayers} translate={t} />
+          )}
+          {left === 'actuators' && (
+            <ActuatorsPanel
+              doc={doc}
+              selectedId={selected}
+              onSelect={setSelected}
+              onFocus={(id) => viewport.current?.focus(id)}
+              onOpen={openUrdf}
+            />
+          )}
+        </div>
+      </aside>
+      <main className="viewport-panel">
+        <div className="viewport-topbar">
+          <div className="viewport-navigation">
+            <Button
+              icon={projection}
+              title={t('Projection')}
+              onClick={() => {
+                setLayersOpen(false);
+                setMenu(menu === 'Projection' ? null : 'Projection');
+              }}
+            >
+              <span className="projection-caption">
+                {t(projection === 'perspective' ? 'Perspective' : 'Orthographic')}
+              </span>
+              <Icon name="down" size={14} />
+            </Button>
+            <Button icon="fit" title={t('Frame all')} onClick={() => viewport.current?.focus()} />
+            <Button
+              icon="layers"
+              title={t('Layers')}
+              active={layersOpen}
+              onClick={() => {
+                setMenu(null);
+                setLayersOpen(!layersOpen);
+              }}
+            />
+          </div>
+          <span className="flex-spacer" />
+          <div className="segmented geometry-selector" aria-label={t('Geometry display')}>
+            {(['default', 'visual', 'collision', 'both'] as const).map((mode) => (
+              <button
+                key={mode}
+                title={t(mode[0].toUpperCase() + mode.slice(1))}
+                aria-pressed={geometry === mode}
+                className={geometry === mode ? 'active' : ''}
+                onClick={() => setGeometry(mode)}
+              >
+                <Icon name={mode === 'default' ? 'geometry-default' : mode} size={16} />
+                <span>{t(mode[0].toUpperCase() + mode.slice(1))}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={`viewport-content ${sceneCamera.id ? 'has-scene-camera' : ''}`}>
+          {doc && (
+            <CameraPreview
+              doc={doc}
+              selectedId={selected}
+              enabled={cameraPreviewEnabled}
+              revision={revision}
+              geometry={geometry}
+              onClose={() => setCameraPreviewEnabled(false)}
+            />
+          )}
+          {doc && (
+            <Viewport
+              ref={viewport}
+              document={doc}
+              cameraResetKey={sceneEpoch}
+              selected={selected}
+              tool={tool}
+              frame={frame}
+              translate={t}
+              layers={resolvedLayers}
+              onStats={setStats}
+              settings={settings}
+              onSceneCameraChange={setSceneCamera}
+              geometry={geometry}
+              projection={projection}
+              snapEnabled={snapEnabled}
+              translationSnap={settings.translationSnap}
+              rotationSnap={settings.rotationSnap}
+              activeJoint={activeJoint}
+              onActiveJoint={setActiveJoint}
+              revision={revision}
+              onSelect={setSelected}
+              onProjectionChange={setProjection}
+              onBegin={begin}
+              onChange={changed}
+              onCommit={commit}
+            />
+          )}
+          <Squircle className="tool-palette" radius={8}>
+            {tools.map((item) => (
+              <Button
+                key={item.id}
+                icon={item.icon}
+                active={tool === item.id}
+                title={`${t(item.title)} (${item.key})`}
+                onClick={() => setTool(item.id)}
+              />
+            ))}
+            <div className="palette-divider" />
+            <Button
+              icon={frame === 'world' ? 'world' : 'body-frame'}
+              title={`${frame === 'world' ? 'World' : 'Body'} frame`}
+              onClick={() => setFrame(frame === 'world' ? 'body' : 'world')}
+            />
+            <Button
+              icon="snap"
+              title={t('Snapping')}
+              active={snapEnabled}
+              aria-pressed={snapEnabled}
+              onClick={() => setSnapEnabled(!snapEnabled)}
+            />
+          </Squircle>
+          {layersOpen && (
+            <div className="viewport-layers-host">
+              <LayersPopup
+                value={resolvedLayers}
+                onChange={changeLayers}
+                onClose={() => setLayersOpen(false)}
+                translate={t}
+              />
+            </div>
+          )}
+          {busy && (
+            <div className="loading-scrim">
+              <span className="spinner" />
+              {t('Loading scene…')}
+            </div>
+          )}
+          {sceneCamera.id && (
+            <div className="scene-camera-return">
+              <Button
+                icon="previous"
+                title="Return to Editor Camera"
+                onClick={() => useCamera(null)}
+              >
+                {t('Editor Camera')}
+              </Button>
+            </div>
+          )}
+          {notice && (
+            <OperationNotice
+              notice={notice}
+              onDismiss={(id) => setNoticeState((current) => (current?.id === id ? null : current))}
+            />
+          )}
+        </div>
+      </main>
+      <aside
+        className="inspector panel"
+        style={{ visibility: showInspector ? 'visible' : 'hidden' }}
+      >
+        <div className="panel-header inspector-heading" title={node?.name}>
+          <Icon name={node ? (kinds[node.kind] ?? 'cube') : 'inspect'} size={20} />
+          <strong>{node?.name ?? t('Inspector')}</strong>
+          <span className="flex-spacer" />
+          <Button
+            icon="pin"
+            title={t('Pin Inspector')}
+            active={!!pinnedId}
+            disabled={!node}
+            onClick={() => setPinnedId(pinnedId ? null : node!.id)}
+          />
+          <Button
+            icon="close"
+            title={t('Close Inspector')}
+            onClick={() => setShowInspector(false)}
+          />
+        </div>
+        {node ? (
+          <>
+            <div className="inspector-tabs">
+              {['Properties', 'Material', 'Hierarchy'].map((tab) => (
+                <button
+                  key={tab}
+                  className={inspectorTab === tab ? 'active' : ''}
+                  title={t(tab)}
+                  onClick={() => setInspectorTab(tab)}
+                >
+                  {t(tab)}
+                </button>
+              ))}
+            </div>
+            <div className="inspector-content">
+              {inspectorTab === 'Properties' && (
+                <>
+                  <Section
+                    title={t('Transform')}
+                    action={
+                      <Button
+                        icon="reset"
+                        title={t('Reset transform')}
+                        onClick={() =>
+                          transaction('Reset transform', () => {
+                            if (joint) setJoint(doc!, joint.id, 0);
+                            else {
+                              node.object.position.set(0, 0, 0);
+                              node.object.rotation.set(0, 0, 0);
+                              node.object.scale.set(1, 1, 1);
+                            }
+                          })
+                        }
+                      />
+                    }
+                  >
+                    <VectorFields
+                      label={t('Position')}
+                      values={node.object.position.toArray()}
+                      unit="m"
+                      onBegin={begin}
+                      onCommit={commit}
+                      onChange={(i, v) => {
+                        node.object.position.setComponent(i, v);
+                        transformChanged();
+                      }}
+                    />
+                    <VectorFields
+                      label={t('Rotation')}
+                      values={[rotation!.x, rotation!.y, rotation!.z].map(THREE.MathUtils.radToDeg)}
+                      unit="°"
+                      onBegin={begin}
+                      onCommit={commit}
+                      onChange={(i, v) => {
+                        const e = new THREE.Euler().setFromQuaternion(
+                          node.object.quaternion,
+                          'ZYX',
+                        );
+                        const a = [e.x, e.y, e.z];
+                        a[i] = THREE.MathUtils.degToRad(v);
+                        node.object.quaternion.setFromEuler(e.set(a[0], a[1], a[2], 'ZYX'));
+                        transformChanged();
+                      }}
+                    />
+                    <VectorFields
+                      label={t('Scale')}
+                      resetValues={[1, 1, 1]}
+                      values={node.object.scale.toArray()}
+                      onBegin={begin}
+                      onCommit={commit}
+                      onChange={(i, v) => {
+                        if (v > 0) {
+                          node.object.scale.setComponent(i, v);
+                          transformChanged();
+                        }
+                      }}
+                    />
+                  </Section>
+                  {joint && (
+                    <Section title={t('Joint')}>
+                      <Property label={t('Type')} value={joint.type} />
+                      <Property label={t('Parent')} value={joint.parent} />
+                      <Property label={t('Child')} value={joint.child} />
+                      <Property label={t('Axis')} value={joint.axis.toArray().join(', ')} />
+                      <JointEditor
+                        doc={doc!}
+                        joint={joint}
+                        onBegin={begin}
+                        onCommit={commit}
+                        onChange={changed}
+                      />
+                    </Section>
+                  )}
+                  <Section title={t('Display')}>
+                    <SwitchRow
+                      label={t('Visible')}
+                      checked={node.visible}
+                      onChange={(visible) =>
+                        transaction('Updated visibility', () => {
+                          node.visible = visible;
+                          node.object.visible = visible;
+                        })
+                      }
+                    />
+                    <SwitchRow
+                      label="Select in viewport"
+                      title={t(
+                        node.object.parent && !isViewportPickable(node.object.parent)
+                          ? 'Selection disabled by parent'
+                          : 'Disabled objects remain editable in the scene tree',
+                      )}
+                      checked={isViewportPickable(node.object)}
+                      disabled={!!node.object.parent && !isViewportPickable(node.object.parent)}
+                      onChange={(enabled) =>
+                        transaction('Updated viewport selection', () =>
+                          setViewportPickable(node.object, enabled),
+                        )
+                      }
+                    />
+                    <SwitchRow
+                      label={t('Transform handles')}
+                      checked={node.object.userData.gizmoEnabled !== false}
+                      onChange={(value) =>
+                        transaction('Updated transform handles', () => {
+                          node.object.userData.gizmoEnabled = value;
+                        })
+                      }
+                    />
+                    {node.kind === 'camera' && (
+                      <SwitchRow
+                        label="Preview"
+                        checked={cameraPreviewEnabled}
+                        onChange={setCameraPreviewEnabled}
+                      />
+                    )}
+                  </Section>
+                  <Section title={t('Identity')} initial={false}>
+                    <Property label={t('Name')} value={node.name} />
+                    <Property label={t('Type')} value={t(node.kind)} />
+                    {Object.entries(node.properties ?? {})
+                      .filter(
+                        ([key]) =>
+                          !['name', 'type'].includes(key.toLowerCase()) &&
+                          (!joint || !['axis', 'parent', 'child'].includes(key.toLowerCase())),
+                      )
+                      .map(([key, value]) => (
+                        <Property
+                          key={key}
+                          label={key.replaceAll('_', ' ')}
+                          value={String(value)}
+                        />
+                      ))}
+                  </Section>
+                  {node.kind === 'camera' && (
+                    <CameraProperties
+                      key={node.id}
+                      doc={doc!}
+                      node={node}
+                      active={sceneCamera.id === node.id}
+                      piloting={sceneCamera.pilot}
+                      onBegin={begin}
+                      onCommit={commit}
+                      onChange={changed}
+                      onView={(pilot) => useCamera(node.id, pilot)}
+                      onExit={() => useCamera(null)}
+                      onAlign={() => alignCamera(node.id)}
+                      onCapture={() => captureCamera(node.id)}
+                    />
+                  )}
+                  {node.kind === 'light' && (
+                    <LightProperties
+                      key={node.id}
+                      doc={doc!}
+                      node={node}
+                      onBegin={begin}
+                      onCommit={commit}
+                      onChange={changed}
+                    />
+                  )}
+                </>
+              )}
+              {inspectorTab === 'Material' && (
+                <MaterialPanel
+                  key={node.id}
+                  node={node}
+                  begin={begin}
+                  commit={commit}
+                  change={changed}
+                />
+              )}
+              {inspectorTab === 'Hierarchy' && (
+                <Section title={t('Relationships')}>
+                  <Property
+                    label={t('Parent')}
+                    value={
+                      doc?.nodes.find((n) => n.id === node.parentId)?.name ?? 'Scene collection'
+                    }
+                  />
+                  {doc?.nodes
+                    .filter((n) => n.parentId === node.id)
+                    .map((n) => (
+                      <button
+                        key={n.id}
+                        className="related-node"
+                        onClick={() => setSelected(n.id)}
+                        onDoubleClick={() => viewport.current?.focus(n.id)}
+                      >
+                        <Icon name={kinds[n.kind]} size={16} />
+                        {n.name}
+                        <Icon name="right" size={12} />
+                      </button>
+                    ))}
+                </Section>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="inspector-empty">
+            {t('Select an object in the viewport or scene tree.')}
+          </div>
+        )}
+      </aside>
+      <section className="bottom-panel" style={{ visibility: showBottom ? 'visible' : 'hidden' }}>
+        <div className="bottom-tabs">
+          <button
+            className={bottom === 'timeline' ? 'active' : ''}
+            onClick={() => setBottom('timeline')}
+          >
+            <Icon name="key" size={16} />
+            {t('Timeline')}
+          </button>
+          <button
+            className={bottom === 'output' ? 'active' : ''}
+            onClick={() => setBottom('output')}
+          >
+            <Icon name="terminal" size={16} />
+            {t('Output')}
+            <span className="count">{logs.length}</span>
+          </button>
+          <span className="flex-spacer" />
+          <Button
+            icon="close"
+            title={t('Hide bottom panel')}
+            onClick={() => setShowBottom(false)}
+          />
+        </div>
+        {bottom === 'timeline' && doc && (
+          <Timeline
+            doc={doc}
+            navigationResetKey={sceneEpoch}
+            keys={keys}
+            timeline={timelineData}
+            range={
+              timelineData.activeTakeId
+                ? (takeViews[timelineData.activeTakeId]?.range ?? null)
+                : null
+            }
+            onRange={changeTakeRange}
+            onSelectTake={selectTake}
+            onCreateTake={createTake}
+            onDeleteTake={deleteTake}
+            recording={recording}
+            speed={playbackSpeed}
+            onSpeed={setPlaybackSpeed}
+            onExportVideo={exportVideo}
+            videoActive={videoProgress !== null}
+            playbackSource={playbackSource}
+            onTimeline={changeTimeline}
+            onRecord={toggleRecording}
+            onSnapshot={captureSnapshot}
+            onLoadSnapshot={loadSnapshot}
+            onLoadKey={loadKey}
+            time={time}
+            duration={duration}
+            playing={playing}
+            loop={loop}
+            setLoop={setLoop}
+            setTime={seek}
+            setDuration={extendDuration}
+            setPlaying={setPlaying}
+            onCapture={capture}
+            onKeys={changeKeys}
+            onBegin={begin}
+            onCommit={commit}
+            onCancel={cancel}
+          />
+        )}
+        {bottom === 'output' && <OutputPanel entries={logs} onClear={() => setLogs([])} />}
+      </section>
+      {showLeft && (
+        <Splitter
+          axis="x"
+          label={t('Resize left panel')}
+          value={leftWidth}
+          min={220}
+          max={leftMaximum}
+          onChange={(left) => setLayout({ ...layout, left })}
+          onReset={() => setLayout({ ...layout, left: 272 })}
+          style={{ gridColumn: 2, gridRow: '2/4', justifySelf: 'end' }}
+        />
+      )}
+      {showInspector && (
+        <Splitter
+          axis="x"
+          label={t('Resize Inspector')}
+          reverse
+          value={rightWidth}
+          min={280}
+          max={rightMaximum}
+          onChange={(right) => setLayout({ ...layout, right })}
+          onReset={() => setLayout({ ...layout, right: 340 })}
+          style={{ gridColumn: 4, gridRow: '2/4', justifySelf: 'start' }}
+        />
+      )}
+      {showBottom && (
+        <Splitter
+          axis="y"
+          label={t('Resize bottom panel')}
+          reverse
+          value={bottomHeight}
+          min={140}
+          max={bottomMaximum}
+          onChange={(bottom) => setLayout({ ...layout, bottom })}
+          onReset={() => setLayout({ ...layout, bottom: 300 })}
+          style={{ gridColumn: 3, gridRow: 3, alignSelf: 'start' }}
+        />
+      )}
+      <footer className="statusbar">
+        <span className="status-state">
+          <span className="status-dot" />
+          {t(busy ? 'Loading' : playing ? 'Playing' : 'Ready')}
+        </span>
+        <span className="status-divider" />
+        <span className="status-hint">
+          <Icon name="status-mouse-left" size={20} />
+          {t('Orbit')}
+        </span>
+        <span className="status-hint">
+          <Icon name="status-mouse-right" size={20} />
+          {t('Pan')}
+        </span>
+        <span className="status-hint">
+          <Icon name="status-mouse-wheel" size={20} />
+          {t('Zoom')}
+        </span>
+        <span className="status-hint">
+          <kbd>{t('F')}</kbd>
+          {t('Focus')}
+        </span>
+        <span className="flex-spacer" />
+        <div className="render-stats" aria-label={t('Render statistics')}>
+          <span className="renderer-name" title={stats?.backend ?? 'Three.js · WebGL 2'}>
+            WebGL 2
+          </span>
+          <span className="status-divider" />
+          <span className="status-time" title={t('Time')}>
+            {time.toFixed(3)} s
+          </span>
+          <span className="status-divider" />
+          <span className="stat-duration" title={t('CPU render submission time')}>
+            Δ {stats?.frameMs.toFixed(2) ?? '0.00'} ms
+          </span>
+          <span className="stat-calls" title={t('Draw calls')}>
+            <Icon name="layers" size={12} />
+            {stats?.drawCalls ?? 0}
+          </span>
+          <span className="stat-triangles" title={t('Triangles')}>
+            <Icon name="geom" size={12} />
+            {new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(
+              stats?.triangles ?? 0,
+            )}
+          </span>
+          <span className="status-divider" />
+          <span
+            className="stat-fps"
+            title={t(stats?.idle ? 'Idle viewport' : 'Rendered frames per second')}
+          >
+            {stats?.fps.toFixed(1) ?? '0.0'} FPS
+          </span>
+        </div>
+        <Button
+          icon="key"
+          title={t('Toggle timeline')}
+          active={showBottom}
+          onClick={() => {
+            setBottom('timeline');
+            setShowBottom(!showBottom);
+          }}
+        />
+      </footer>
+      <SettingsDialog
+        open={settingsOpen}
+        settings={settings}
+        onChange={updateSettings}
+        onClose={() => setSettingsOpen(false)}
+      />
+      {menu && (
+        <>
+          <AppMenu
+            key={menu}
+            name={menu}
+            onClose={() => setMenu((current) => (current === menu ? null : current))}
+          >
+            {menu === 'Projection' && (
+              <>
+                {['perspective', 'orthographic'].map((v) => (
+                  <div key={v}>
+                    {menuItem(
+                      v === 'perspective' ? 'Perspective' : 'Orthographic',
+                      () => setProjection(v as typeof projection),
+                      v,
+                    )}
+                  </div>
+                ))}
+                <hr />
+                {['front', 'back', 'left', 'right', 'top', 'bottom'].map((v) => (
+                  <div key={v}>
+                    {menuItem(
+                      v[0].toUpperCase() + v.slice(1),
+                      () => {
+                        if (v === 'perspective' || v === 'orthographic') setProjection(v);
+                        viewport.current?.view(v);
+                      },
+                      `view-${v}`,
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+            {menu === 'File' && (
+              <>
+                {menuItem('Open URDF…', openUrdf, 'robot', '⌘ O')}
+                {menuItem('Open project folder…', openProject, 'folder')}
+                {menuItem('Close project folder', closeProject, 'close', undefined, !project)}
+                {menuItem('Open saved scene…', openSaved, 'scene')}
+                <hr />
+                {menuItem('Save scene…', save, 'save', '⌘ S')}
+                <hr />
+                {SCENE_CATALOG.map((scene) => (
+                  <div key={scene.id}>
+                    {menuItem(
+                      settings.language === 'zh' ? scene.nameZh : scene.name,
+                      () => loadCatalog(scene.id),
+                      'scene',
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+            {menu === 'Edit' && (
+              <>
+                {menuItem('Undo', () => history('undo'), 'undo', '⌘ Z', undo.current.length === 0)}
+                {menuItem(
+                  'Redo',
+                  () => history('redo'),
+                  'redo',
+                  '⇧ ⌘ Z',
+                  redo.current.length === 0,
+                )}
+                <hr />
+                {menuItem('Delete selection', remove, 'delete', '⌫', !selected)}
+                <hr />
+                {menuItem('Settings', () => setSettingsOpen(true), 'settings', '⌘ ,')}
+              </>
+            )}
+            {menu === 'Add' &&
+              additions.map((a) => (
+                <div key={a.kind}>
+                  {a.kind === 'ground' && <hr />}
+                  {menuItem(a.label, () => add(a.kind), kinds[a.kind])}
+                </div>
+              ))}
+            {menu === 'View' && (
+              <>
+                {menuItem(
+                  'Frame selection',
+                  () => viewport.current?.focus(selected ?? undefined),
+                  'target',
+                  'F',
+                )}
+                {menuItem('Frame all', () => viewport.current?.focus(), 'fit')}
+                <hr />
+                {[
+                  'front',
+                  'back',
+                  'left',
+                  'right',
+                  'top',
+                  'bottom',
+                  'perspective',
+                  'orthographic',
+                ].map((v) => (
+                  <div key={v}>
+                    {menuItem(
+                      v[0].toUpperCase() + v.slice(1),
+                      () => {
+                        if (v === 'perspective' || v === 'orthographic') setProjection(v);
+                        viewport.current?.view(v);
+                      },
+                      v === 'perspective' || v === 'orthographic' ? v : `view-${v}`,
+                    )}
+                  </div>
+                ))}
+                <hr />
+                {menuItem(
+                  'Toggle Inspector',
+                  () => setShowInspector(!showInspector),
+                  'panel-right',
+                )}
+                {menuItem('Toggle timeline', () => setShowBottom(!showBottom), 'waveform')}
+              </>
+            )}
+            {menu === 'Help' && (
+              <>
+                {menuItem('Interaction guide', () => setHelp(true), 'keyboard')}
+                {menuItem(
+                  'Show output',
+                  () => {
+                    setBottom('output');
+                    setShowBottom(true);
+                  },
+                  'terminal',
+                )}
+              </>
+            )}
+            {menu === 'Object' && (
+              <>
+                {menuItem(
+                  'Focus object',
+                  () => viewport.current?.focus(selected ?? undefined),
+                  'target',
+                  'F',
+                )}
+                {menuItem('Delete object', remove, 'delete', '⌫')}
+              </>
+            )}
+          </AppMenu>
+        </>
+      )}
+      {videoProgress !== null && (
+        <VideoProgress progress={videoProgress} onCancel={() => videoAbort.current?.abort()} />
+      )}
+      {fileDialog && (
+        <FileDialog
+          kind={fileDialog.kind}
+          initialPath={fileDialog.initialPath}
+          extension={fileDialog.extension}
+          caption={fileDialog.caption}
+          suggestedName={fileDialog.suggestedName ?? `${doc?.name ?? 'Untitled'}.mojive.json`}
+          onChoose={fileDialog.onChoose}
+          onCancel={fileDialog.onCancel}
+        />
+      )}
+      {replacePrompt && !fileDialog && (
+        <ConfirmSceneDialog
+          filename={doc?.name ?? t('Untitled scene')}
+          reason={replaceReason}
+          onCancel={() => answerReplacement(false)}
+          onDiscard={() => answerReplacement(true)}
+          onSave={async () => {
+            const saved = await save();
+            if (saved) answerReplacement(true);
+            return saved;
+          }}
+        />
+      )}
+      {about && (
+        <InfoDialog
+          label={t('About Mojive')}
+          onClose={() => setAbout(false)}
+          className="about-dialog"
+        >
+          <div className="dialog-heading">
+            <strong>Mojive</strong>
+            <span className="flex-spacer" />
+            <Button icon="close" title="Close" onClick={() => setAbout(false)} />
+          </div>
+          <p>0.1.0</p>
+        </InfoDialog>
+      )}
+      {help && (
+        <InfoDialog label={t('Interaction guide')} onClose={() => setHelp(false)}>
+          <div className="dialog-heading">
+            <Icon name="keyboard" />
+            <strong>{t('Interaction guide')}</strong>
+            <span className="flex-spacer" />
+            <Button icon="close" title={t('Close guide')} onClick={() => setHelp(false)} />
+          </div>
+          <div className="guide-grid">
+            {[
+              ['Select', 'Click an object or a scene row'],
+              ['Focus', 'Double-click a scene row, or press F'],
+              ['Orbit', 'Left mouse drag'],
+              ['Pan', 'Right or middle mouse drag'],
+              ['Zoom', 'Scroll'],
+              ['Tools', 'Q Select · W Position · E Rotation · R Scale · J Joint'],
+              ['Frame', 'Toggle World / Body at the bottom of the tool palette'],
+              ['Undo / Redo', '⌘ Z / ⇧ ⌘ Z'],
+              ['Animate', 'K captures the current pose · Space plays / pauses'],
+              ['Timeline', 'Drag the ruler to scrub; drag a diamond to move a keyframe'],
+              ['Snapping', 'Hold Shift while dragging a transform handle'],
+              ['Precise values', 'Type a number; use ↑ / ↓ to adjust; Enter to commit'],
+            ].map(([a, b]) => (
+              <div key={a}>
+                <strong>{t(a)}</strong>
+                <span>{t(b)}</span>
+              </div>
+            ))}
+          </div>
+        </InfoDialog>
+      )}
+    </div>
+  );
+}
+function Property({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="property-row">
+      <span>{t(label)}</span>
+      <span className="property-value" title={value}>
+        {value}
+      </span>
+    </div>
+  );
+}
+function MaterialPanel({
+  node,
+  begin,
+  commit,
+  change,
+}: {
+  node: SceneNode;
+  begin: () => void;
+  commit: () => void;
+  change: () => void;
+}) {
+  const materials: THREE.MeshStandardMaterial[] = [];
+  node.object.traverse((o) => {
+    if (o instanceof THREE.Mesh && o.userData.role !== 'collision') {
+      for (const m of Array.isArray(o.material) ? o.material : [o.material])
+        if (m instanceof THREE.MeshStandardMaterial && !materials.includes(m)) materials.push(m);
+    }
+  });
+  if (!materials.length)
+    return (
+      <Empty icon="palette" title={t('No surface material')}>
+        {t('Select a mesh or a link with visual geometry.')}
+      </Empty>
+    );
+  return (
+    <>
+      {materials.map((m, i) => (
+        <Section title={m.name || `Material ${i + 1}`} key={m.uuid}>
+          <div className="property-row material-property">
+            <label>{t('Base color')}</label>
+            <ColorPicker
+              label={`${t('Material')} ${i + 1} ${t('Color')}`}
+              value={`#${m.color.getHexString()}`}
+              onBegin={begin}
+              onCommit={commit}
+              onChange={(value) => {
+                m.color.set(value);
+                change();
+              }}
+            />
+          </div>
+          <div className="property-row material-property">
+            <span>{t('Roughness')}</span>
+            <Numeric
+              label={`Material ${i + 1} roughness`}
+              value={m.roughness}
+              onBegin={begin}
+              onCommit={commit}
+              onChange={(v) => {
+                m.roughness = THREE.MathUtils.clamp(v, 0, 1);
+                change();
+              }}
+            />
+          </div>
+          <div className="property-row material-property">
+            <span>{t('Metallic')}</span>
+            <Numeric
+              label={`Material ${i + 1} metallic`}
+              value={m.metalness}
+              onBegin={begin}
+              onCommit={commit}
+              onChange={(v) => {
+                m.metalness = THREE.MathUtils.clamp(v, 0, 1);
+                change();
+              }}
+            />
+          </div>
+        </Section>
+      ))}
+    </>
+  );
+}
+
+function VideoProgress({ progress, onCancel }: { progress: number; onCancel: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    dialog.current?.showModal();
+    return () => dialog.current?.close();
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="video-export-dialog"
+      aria-label={t('Export video')}
+      onCancel={(event) => {
+        event.preventDefault();
+        onCancel();
+      }}
+    >
+      <h2>{t('Export video')}</h2>
+      <progress max={1} value={progress} aria-label={t('Export progress')} />
+      <div>
+        <span className="mono">{Math.round(progress * 100)}%</span>
+        <Button onClick={onCancel}>{t('Cancel')}</Button>
+      </div>
+    </dialog>
+  );
+}

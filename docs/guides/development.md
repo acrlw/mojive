@@ -23,10 +23,17 @@ cpp/
   cmake/           Build integration
 3rdparty/          Vendored ImGui and pinned upstream submodules
 examples/          Python usage examples
+electron/          Electron desktop frontend, renderer, assets, tests and build scripts
 build/             Compiler products and downloaded build/model dependencies
 dist/              Distributable wheels
 output/            Generated captures, recordings and reports; never needed to start Mojive
 ```
+
+The Electron frontend is independently managed with npm; use `make electron-install`,
+`make electron`, and `make electron-check` from the repository root. Its `main/` directory
+owns desktop process integration, `src/` owns the React/Three.js renderer, and
+`tests/harness/` contains browser test entry points. Runtime assets are bundled in `public/`;
+`output/electron/` contains only generated verification evidence and application bundles.
 
 The root `pyproject.toml` maps `python/` to the installed `mojive` package. Editable installs
 install a lazy import shim in the environment's `site-packages`; rerun `uv pip install -e .` after changing

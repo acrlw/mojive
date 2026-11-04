@@ -1,0 +1,213 @@
+/* Pose shares the native heading/content/entity gaps: 12 / 12 / 20 points. */
+.joint-panel {
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.joint-panel-header {
+  height: 46px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.joint-panel-header h2 {
+  margin: 0;
+  font-size: var(--title-font-size);
+  font-weight: 600;
+  flex: 1;
+}
+.joint-panel-tools {
+  display: flex;
+  gap: 2px;
+}
+.joint-panel-tools .button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 4px;
+}
+.joint-panel-search {
+  margin: 0 12px 12px;
+  padding: 0 8px;
+  height: 28px;
+  border-radius: 14px;
+  background: var(--input-color);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+.joint-panel-search:focus-within {
+  outline: 1px solid var(--ui-border);
+  outline-offset: -1px;
+}
+.joint-panel-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-color);
+}
+.joint-panel-search .button {
+  min-height: 20px;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+}
+.joint-panel-list {
+  padding: 0 12px 12px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.joint-scalar-fields {
+  display: grid;
+  grid-template-columns: minmax(48px, 1fr) 106px;
+  align-items: center;
+  column-gap: 12px;
+  min-width: 0;
+}
+.joint-scalar-fields .number-field {
+  min-width: 0;
+  height: 28px;
+}
+.joint-scalar-fields.mimic {
+  opacity: 0.5;
+}
+.joint-rail {
+  height: 28px;
+  padding: 0 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  outline: none;
+  border-radius: 4px;
+}
+.joint-rail:focus-visible {
+  outline: 1px solid var(--sage-color);
+  outline-offset: 2px;
+}
+.joint-rail[aria-disabled='true'] {
+  cursor: default;
+}
+.joint-rail-track {
+  position: relative;
+  top: 12px;
+  height: 4px;
+}
+.joint-rail-track::before {
+  content: '';
+  position: absolute;
+  inset: 0 -2px;
+  background: var(--ui-field);
+  border-radius: 2px;
+}
+.joint-rail-fill {
+  position: absolute;
+  left: -2px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-primary-dim);
+}
+.joint-rail-thumb {
+  position: absolute;
+  top: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--sage-color);
+  transform: translateX(-50%);
+}
+.joint-rail:not([aria-disabled='true']):hover .joint-rail-track::before {
+  background: var(--ui-field-hovered);
+}
+.joint-rail:not([aria-disabled='true']):hover .joint-rail-fill {
+  background: var(--sage-color);
+}
+.joint-rail:not([aria-disabled='true']):hover .joint-rail-thumb,
+.joint-rail.held .joint-rail-thumb,
+.joint-rail.held .joint-rail-fill {
+  background: var(--ui-primary-bright);
+}
+.joint-rail.held .joint-rail-track::before {
+  background: var(--ui-field-active);
+}
+.joint-pose-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  container-type: inline-size;
+}
+.joint-pose-fields .vector-group {
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  gap: 4px;
+}
+.joint-pose-fields .vector-group > label,
+.joint-pose-fields .vector-group > .vector-fields {
+  grid-column: 1 / -1;
+}
+.joint-pose-fields .vector-fields {
+  gap: 4px;
+}
+.joint-pose-fields .vector-group > label {
+  font-size: 12px;
+  color: var(--muted-color);
+}
+.joint-pose-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.joint-summary-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.joint-summary-label {
+  font-size: 12px;
+  color: var(--muted-color);
+}
+.joint-summary-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+.joint-summary-values > span {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  align-items: center;
+  font-family: var(--font-numeric, var(--font-mono));
+  font-size: 14px;
+}
+.joint-summary-values i {
+  font: 12px var(--font-mono);
+  width: 18px;
+  flex: none;
+  text-align: center;
+}
+.joint-summary-values > span > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.joint-panel-status {
+  color: var(--amber-color);
+  margin: 0 12px 12px;
+  font-size: 12px;
+}
+
+.joint-panel-search input:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+.joint-scalar-fields.unbounded {
+  grid-template-columns: 1fr;
+}

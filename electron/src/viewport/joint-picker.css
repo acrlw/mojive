@@ -1,0 +1,75 @@
+.viewport-joint-picker {
+  position: absolute;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--floating-color);
+  color: var(--text-color);
+  font: var(--body-font-size, 14px) var(--font-ui);
+  width: max-content;
+  min-width: 180px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  box-sizing: border-box;
+}
+.viewport-joint-picker-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  cursor: move;
+  touch-action: none;
+}
+.viewport-joint-picker-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: inherit;
+  font-weight: 600;
+}
+.viewport-joint-picker-close,
+.viewport-joint-picker-row {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+}
+.viewport-joint-picker-close {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 4px;
+  display: grid;
+  place-items: center;
+}
+.viewport-joint-picker-close svg {
+  width: 16px;
+  height: 16px;
+}
+.viewport-joint-picker-row {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viewport-joint-picker-row:hover:not(:disabled),
+.viewport-joint-picker-close:hover {
+  background: var(--ui-field-hovered, var(--input-color));
+}
+.viewport-joint-picker .viewport-joint-picker-row.active {
+  background: var(--ui-selected, var(--input-color));
+  color: var(--sage-color);
+}
+.viewport-joint-picker-row:disabled {
+  color: var(--dim-color);
+}

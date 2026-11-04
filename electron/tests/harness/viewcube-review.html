@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="utf-8" />
+    <title>Mojive ViewCube production parity</title>
+    <style>
+      body {
+        margin: 0;
+        background: #1e2125;
+        display: flex;
+      }
+      .cell {
+        width: 180px;
+        height: 180px;
+        position: relative;
+        flex-shrink: 0;
+      }
+      canvas {
+        position: absolute;
+        left: 45px;
+        top: 45px;
+        width: 90px;
+        height: 90px;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import '/src/design-tokens.css';
+      import { PerspectiveCamera } from 'three';
+      import { ViewCubeOverlay } from '/src/viewport/viewcube.ts';
+      const views = [
+        ['oblique', [1, 1, 0.6]],
+        ['front', [0, -1, 0]],
+        ['top', [0, -0.001745, 1]],
+        ['back-fade', [-0.84, 0.542586, 0]],
+        ['neck-limit', [0.904517, 0.426471, 0]],
+      ];
+      window.events = [];
+      await document.fonts.load('14px MiSans');
+      for (const [name, eye] of views) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.view = name;
+        const canvas = document.createElement('canvas');
+        cell.append(canvas);
+        document.body.append(cell);
+        const camera = new PerspectiveCamera();
+        camera.up.set(0, 0, 1);
+        camera.position.set(...eye);
+        camera.lookAt(0, 0, 0);
+        const widget = new ViewCubeOverlay(canvas, {
+          onAxis: (axis, sign) => window.events.push(['axis', axis, sign]),
+          onProjectionToggle: () => window.events.push(['projection']),
+          onOrbit: (dx, dy) => window.events.push(['orbit', dx, dy]),
+        });
+        widget.update(camera);
+      }
+      window.ready = true;
+    </script>
+  </body>
+</html>

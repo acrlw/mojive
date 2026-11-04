@@ -1,0 +1,112 @@
+.precise-gizmo-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  cursor: default;
+  filter: drop-shadow(0 8px 14px var(--ui-shadow, #0004));
+}
+.precise-gizmo-input {
+  position: absolute;
+  width: 240px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 8px;
+  border-radius: 12px;
+  box-sizing: border-box;
+  background: var(--floating-color);
+  color: var(--text-color);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: var(--font-ui);
+  font-size: var(--body-font-size, 14px);
+}
+.precise-gizmo-input strong {
+  font-size: inherit;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Surface12 − inset8 = group4. Segments share the frame, with square inner edges. */
+.precise-gizmo-segments {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  background: var(--input-color);
+  border-radius: 4px;
+}
+.precise-gizmo-segments button {
+  height: 32px;
+  min-width: 0;
+  flex: 1;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted-color);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.precise-gizmo-segments button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.precise-gizmo-segments button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.precise-gizmo-input .precise-gizmo-segments button:hover {
+  background: var(--ui-field-hovered, var(--input-color));
+  color: var(--text-color);
+}
+.precise-gizmo-input .precise-gizmo-segments button.active {
+  color: var(--text-color);
+  background: var(--ui-field-active, var(--panel-color));
+}
+.precise-gizmo-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.precise-gizmo-number input {
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 4px;
+  background: var(--input-color);
+  color: var(--text-color);
+  font: var(--numeric-font-size, 16px) var(--font-mono);
+  outline: none;
+  box-shadow: none;
+}
+.precise-gizmo-number input:hover {
+  background: var(--ui-field-hovered, var(--input-color));
+}
+/* Native borderless_numeric_input owns no separate green focus frame. */
+.precise-gizmo-number input:focus-visible {
+  background: var(--ui-field-active, var(--input-color));
+  outline: 0;
+  box-shadow: none;
+}
+.precise-gizmo-number .units {
+  width: 82px;
+  flex-shrink: 0;
+}
+.precise-gizmo-number .units button {
+  font-size: 12px;
+  padding: 0 6px;
+}
+.precise-gizmo-number > span {
+  font-family: var(--font-mono);
+  color: var(--muted-color);
+}
+.precise-gizmo-error:empty {
+  display: none;
+}
+.precise-gizmo-error {
+  color: var(--amber-color);
+  margin: 0;
+  font-size: 12px;
+}

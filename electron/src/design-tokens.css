@@ -1,0 +1,58 @@
+/* Generated from python/design/resources/design-spec.json. */
+@font-face{font-family:MiSans;src:url('/fonts/MiSans-Regular.ttf') format('truetype');font-weight:400;font-display:swap}
+@font-face{font-family:MiSans;src:url('/fonts/MiSans-Semibold.ttf') format('truetype');font-weight:600;font-display:swap}
+@font-face{font-family:'JetBrains Mono';src:url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+:root{
+  --body-font-size: 14px;
+  --title-font-size: 16px;
+  --mono-font-size: 16px;
+  --control-height: 28px;
+  --panel-padding: 12px;
+  --panel-padding-y: 10px;
+  --row-gap: 8px;
+  --numeric-gap: 4px;
+  --frame-padding-x: 8px;
+  --frame-padding-y: 8px;
+  --item-spacing-x: 6px;
+  --item-spacing-y: 8px;
+  --label-width: 120px;
+  --label-minimum: 48px;
+  --label-gap: 12px;
+  --icon-size: 20px;
+  --control-radius: 4px;
+  --container-radius: 8px;
+  --radius-popup: 14px;
+  --radius-tab: 6px;
+  --radius-grab: 4px;
+  --radius-scrollbar: 4px;
+  --radius-child: 6px;
+  --icon-activity-canvas: 28px;
+  --icon-activity-slot: 36px;
+  --icon-title-canvas: 22px;
+  --icon-title-slot: 30px;
+  --icon-toolbar-canvas: 20px;
+  --icon-toolbar-slot: 28px;
+  --icon-subtle-canvas: 16px;
+  --icon-subtle-slot: 28px;
+  --icon-inline-canvas: 14px;
+  --icon-inline-slot: 28px;
+  --icon-status-canvas: 12px;
+  --icon-status-slot: 20px;
+  --text-color: #E6E8EB;
+  --muted-color: #A9AFB7;
+  --dim-color: #8E98A5;
+  --sage-color: #9CBF8D;
+  --amber-color: #E8B04F;
+  --panel-color: #1E2125;
+  --input-color: #2B2F34;
+  --border-color: #ffffff0d;
+  --floating-color: #252A2F;
+  --popup-color: #2D353D;
+  --application-height: 36px;
+  --sidebar-width: 48px;
+  --scene-width: 252px;
+  --inspector-width: 320px;
+  --bottom-height: 268px;
+  --font-ui:'MiSans',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+}

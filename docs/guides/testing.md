@@ -153,6 +153,7 @@ Pure prose, link, and metadata edits use their own rows instead of the CPU or GP
 | Native renderer probe or its shader | `make native-test`, `make native-probe` | `make check`, relevant `make native-gallery` or `make native-benchmark` evidence; Python rendering changes also use the rendering row above |
 | Native binding boundary | `make native-bindings-test`; `make cpp-python-test` and `make cpp-python-gpu` for the private runtime | `make check`; relevant `make native-bindings-benchmark` evidence for performance claims |
 | Registered regression invariant | its focused regression test | `make reverse` |
+| Electron frontend, desktop integration or packaging | focused tests in `electron/tests/` | `make electron-check`, `make electron-acceptance`; for packaging or source-layout changes also `make electron-package electron-bundle-smoke` and inspect generated captures |
 | Documentation or executable examples | relevant document/example checks | `make docs-check` |
 | Instruction or Skill wording, links, or metadata | scope and reference review | [Skill validation](../how-to/agent-workflows.md#skill-maintenance) when applicable |
 | Scene-control task decisions, operation behavior, or acceptance examples | relevant operation tests, such as `tests/test_operations.py` | `make agent-control`; also `make agent-viewer` when viewer attachment or presented capture is affected |

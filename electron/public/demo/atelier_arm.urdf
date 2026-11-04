@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<robot name="Atelier · A6">
+  <material name="ceramic"><color rgba="0.79 0.82 0.78 1"/></material>
+  <material name="sage"><color rgba="0.48 0.62 0.43 1"/></material>
+  <material name="graphite"><color rgba="0.19 0.22 0.24 1"/></material>
+  <material name="silver"><color rgba="0.56 0.60 0.62 1"/></material>
+  <link name="base_link">
+    <visual><origin xyz="0 0 0.07"/><geometry><cylinder radius="0.31" length="0.14"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="0 0 0.15"/><geometry><cylinder radius="0.24" length="0.035"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.085"/><geometry><cylinder radius="0.31" length="0.17"/></geometry></collision>
+  </link>
+  <link name="shoulder_link">
+    <visual><origin xyz="0 0 0.10"/><geometry><cylinder radius="0.18" length="0.20"/></geometry><material name="ceramic"/></visual>
+    <visual><origin xyz="0 0 0.23" rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.18" length="0.31"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="0 -0.166 0.23" rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.125" length="0.025"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.16"/><geometry><cylinder radius="0.19" length="0.32"/></geometry></collision>
+  </link>
+  <joint name="base_rotation" type="revolute"><parent link="base_link"/><child link="shoulder_link"/><origin xyz="0 0 0.17"/><axis xyz="0 0 1"/><limit lower="-3.14159" upper="3.14159" effort="120" velocity="2.5"/></joint>
+  <link name="upper_arm">
+    <visual><origin xyz="0 0 0.36"/><geometry><cylinder radius="0.115" length="0.72"/></geometry><material name="ceramic"/></visual>
+    <visual><origin xyz="0 -0.119 0.37"/><geometry><box size="0.065 0.012 0.40"/></geometry><material name="sage"/></visual>
+    <visual><origin xyz="0 0 0.76" rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.15" length="0.28"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="0 -0.152 0.76" rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.105" length="0.025"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.38"/><geometry><cylinder radius="0.15" length="0.80"/></geometry></collision>
+  </link>
+  <joint name="shoulder" type="revolute"><parent link="shoulder_link"/><child link="upper_arm"/><origin xyz="0 0 0.23"/><axis xyz="0 1 0"/><limit lower="-1.9" upper="1.9" effort="120" velocity="2.5"/></joint>
+  <link name="forearm">
+    <visual><origin xyz="0 0 0.29"/><geometry><cylinder radius="0.092" length="0.58"/></geometry><material name="ceramic"/></visual>
+    <visual><origin xyz="0 -0.096 0.28"/><geometry><box size="0.05 0.01 0.30"/></geometry><material name="sage"/></visual>
+    <visual><origin xyz="0 0 0.60" rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.12" length="0.22"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="0 -0.12 0.60" rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.08" length="0.022"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.30"/><geometry><cylinder radius="0.12" length="0.65"/></geometry></collision>
+  </link>
+  <joint name="elbow" type="revolute"><parent link="upper_arm"/><child link="forearm"/><origin xyz="0 0 0.76"/><axis xyz="0 1 0"/><limit lower="-2.5" upper="2.5" effort="80" velocity="3.0"/></joint>
+  <link name="wrist_link">
+    <visual><origin xyz="0 0 0.11"/><geometry><cylinder radius="0.085" length="0.22"/></geometry><material name="ceramic"/></visual>
+    <visual><origin xyz="0 0 0.23"/><geometry><cylinder radius="0.10" length="0.045"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.12"/><geometry><cylinder radius="0.10" length="0.25"/></geometry></collision>
+  </link>
+  <joint name="wrist" type="revolute"><parent link="forearm"/><child link="wrist_link"/><origin xyz="0 0 0.60"/><axis xyz="0 1 0"/><limit lower="-2.9" upper="2.9" effort="25" velocity="4.0"/></joint>
+  <link name="tool_mount">
+    <visual><origin xyz="0 0 0.04"/><geometry><cylinder radius="0.09" length="0.08"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="0 0 0.095"/><geometry><box size="0.22 0.11 0.05"/></geometry><material name="silver"/></visual>
+    <collision><origin xyz="0 0 0.06"/><geometry><box size="0.22 0.12 0.12"/></geometry></collision>
+  </link>
+  <joint name="tool_rotation" type="continuous"><parent link="wrist_link"/><child link="tool_mount"/><origin xyz="0 0 0.25"/><axis xyz="0 0 1"/></joint>
+  <link name="left_finger">
+    <visual><origin xyz="0 0 0.06"/><geometry><box size="0.025 0.085 0.12"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="-0.01 0 0.09"/><geometry><box size="0.012 0.07 0.05"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.06"/><geometry><box size="0.03 0.09 0.12"/></geometry></collision>
+  </link>
+  <joint name="gripper" type="prismatic"><parent link="tool_mount"/><child link="left_finger"/><origin xyz="0.07 0 0.12"/><axis xyz="1 0 0"/><limit lower="0" upper="0.035" effort="10" velocity="0.2"/></joint>
+  <link name="right_finger">
+    <visual><origin xyz="0 0 0.06"/><geometry><box size="0.025 0.085 0.12"/></geometry><material name="graphite"/></visual>
+    <visual><origin xyz="0.01 0 0.09"/><geometry><box size="0.012 0.07 0.05"/></geometry><material name="sage"/></visual>
+    <collision><origin xyz="0 0 0.06"/><geometry><box size="0.03 0.09 0.12"/></geometry></collision>
+  </link>
+  <joint name="gripper_mimic" type="prismatic"><parent link="tool_mount"/><child link="right_finger"/><origin xyz="-0.07 0 0.12"/><axis xyz="-1 0 0"/><limit lower="0" upper="0.035" effort="10" velocity="0.2"/><mimic joint="gripper" multiplier="1" offset="0"/></joint>
+  <transmission name="shoulder_drive"><type>transmission_interface/SimpleTransmission</type><joint name="shoulder"/><actuator name="shoulder_motor"><mechanicalReduction>120</mechanicalReduction></actuator></transmission>
+  <transmission name="elbow_drive"><type>transmission_interface/SimpleTransmission</type><joint name="elbow"/><actuator name="elbow_motor"><mechanicalReduction>100</mechanicalReduction></actuator></transmission>
+  <transmission name="wrist_drive"><type>transmission_interface/SimpleTransmission</type><joint name="wrist"/><actuator name="wrist_motor"><mechanicalReduction>60</mechanicalReduction></actuator></transmission>
+</robot>

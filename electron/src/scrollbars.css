@@ -1,0 +1,26 @@
+/* Keep the existing native gutter and hit geometry while changing only thumb paint. */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+[data-scrollbar-visible]::-webkit-scrollbar-thumb {
+  background-color: var(--ui-field-active);
+}
+[data-scrollbar-visible][data-scrollbar-hover='y']::-webkit-scrollbar-thumb:vertical,
+[data-scrollbar-visible][data-scrollbar-hover='x']::-webkit-scrollbar-thumb:horizontal {
+  background-color: var(--ui-primary-dim);
+}
+[data-scrollbar-visible][data-scrollbar-pressed='y']::-webkit-scrollbar-thumb:vertical,
+[data-scrollbar-visible][data-scrollbar-pressed='x']::-webkit-scrollbar-thumb:horizontal {
+  background-color: var(--ui-primary);
+}

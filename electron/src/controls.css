@@ -1,0 +1,398 @@
+/* Shared native control geometry: 28px frames,4px controls; popup8/inset4/child4. */
+.custom-select {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.custom-select .select-trigger {
+  height: 28px;
+  width: 100%;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--input-color);
+  border-radius: 4px;
+  justify-content: flex-start;
+  font-size: var(--body-font-size, 14px);
+}
+.select-trigger > span:not(.icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.select-trigger > .icon:last-child {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.control-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--text-color);
+  background: transparent;
+  overflow: visible;
+  font: var(--body-font-size, 14px) var(--font-ui);
+  filter: drop-shadow(0 8px 16px var(--ui-shadow, #0004));
+  z-index: 100;
+}
+.select-options {
+  padding: 4px;
+  background: var(--popup-color, var(--floating-color));
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--border-color);
+  border-radius: 8px;
+  max-height: inherit;
+  overflow: auto;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.select-options .select-option {
+  border-radius: 4px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  gap: 8px;
+  justify-content: flex-start;
+  font: inherit;
+}
+.select-option > span:not(.icon) {
+  flex: 1;
+  text-align: left;
+}
+.select-options .highlighted {
+  background: var(--ui-hover-overlay);
+}
+.select-option[aria-selected='true'] {
+  color: var(--sage-color);
+}
+/* One row owns interaction; both switch presentations share native track paint. */
+.custom-switch.button,
+.switch-row.button {
+  --switch-track: color-mix(in srgb, var(--input-color) 94%, var(--text-color));
+  --switch-thumb: var(--ui-switch-thumb, var(--text-color));
+  --switch-offset: 0px;
+  --switch-scale: 1;
+}
+.custom-switch.button,
+.switch-row > .custom-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 24px;
+  padding: 3px;
+  border-radius: 9999px;
+  background: var(--switch-track);
+}
+.custom-switch > span {
+  display: block;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--switch-thumb);
+  transform: translateX(var(--switch-offset));
+  scale: var(--switch-scale);
+  transition: transform 0.12s;
+}
+.custom-switch.button[aria-checked='true'],
+.switch-row.button[aria-checked='true'] {
+  --switch-track: color-mix(in srgb, var(--sage-color) 58%, var(--input-color));
+  --switch-offset: 30px;
+}
+.custom-switch.button:hover:not(:disabled),
+.switch-row.button:hover:not(:disabled) {
+  --switch-track: color-mix(in srgb, var(--input-color) 82%, var(--text-color));
+}
+.custom-switch.button:hover:not(:disabled),
+.custom-switch.button:active:not(:disabled) {
+  background: var(--switch-track);
+}
+.custom-switch.button[aria-checked='true']:hover:not(:disabled),
+.switch-row.button[aria-checked='true']:hover:not(:disabled) {
+  --switch-track: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--sage-color) 58%, var(--input-color)) 88%,
+    var(--text-color)
+  );
+}
+.custom-switch.button:active:not(:disabled),
+.switch-row.button:active:not(:disabled) {
+  --switch-track: color-mix(in srgb, var(--input-color) 70%, var(--text-color));
+  --switch-scale: 0.92;
+}
+.custom-switch.button[aria-checked='true']:active:not(:disabled),
+.switch-row.button[aria-checked='true']:active:not(:disabled) {
+  --switch-track: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--sage-color) 58%, var(--input-color)) 78%,
+    var(--input-color)
+  );
+}
+.custom-switch.button:disabled,
+.switch-row.button:disabled {
+  --switch-track: color-mix(in srgb, var(--input-color) 97%, var(--text-color));
+  --switch-thumb: var(--dim-color);
+  color: var(--dim-color);
+  opacity: 1;
+}
+.custom-switch.button[aria-checked='true']:disabled,
+.switch-row.button[aria-checked='true']:disabled {
+  --switch-track: color-mix(in srgb, var(--sage-color) 24%, var(--input-color));
+}
+.switch-row.button {
+  width: calc(100% + 16px);
+  margin-inline: -8px;
+  min-width: 0;
+  min-height: 28px;
+  height: auto;
+  padding: 2px 8px;
+  gap: 12px;
+  justify-content: space-between;
+  border-radius: 4px;
+  color: var(--text-color);
+  background: transparent;
+}
+.switch-row > .switch-row-label {
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+}
+.switch-row > .custom-switch {
+  margin-left: auto;
+}
+.switch-row.button:hover:not(:disabled) {
+  background: var(--ui-hover-overlay);
+}
+.switch-row.button:active:not(:disabled) {
+  background: var(--ui-field-active);
+}
+.switch-row.button:focus-visible {
+  outline: 1px solid var(--ui-border, var(--border-color));
+  outline-offset: -1px;
+}
+/* Input ownership belongs to the compound field, never to an inner rectangle. */
+div.panel-search:focus-within,
+div.settings-search:focus-within,
+div.number-field:focus-within {
+  box-shadow: none;
+}
+.panel-search input:focus-visible,
+.settings-search input:focus-visible,
+.number-field input:focus-visible {
+  outline: 0;
+}
+.panel-search:has(input:focus-visible),
+.settings-search:has(input:focus-visible) {
+  outline: 1px solid var(--ui-border, var(--border-color));
+  outline-offset: -1px;
+}
+.number-field {
+  font-family: var(--font-numeric, var(--font-mono));
+  font-size: var(--numeric-font-size, 16px);
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+div.number-field:hover:not(:has(input:disabled)) {
+  background: var(--ui-field-hovered);
+}
+div.number-field:focus {
+  outline: none;
+}
+div.number-field input {
+  cursor: ew-resize;
+  text-align: center;
+  touch-action: none;
+  padding: 0 8px;
+}
+.number-field.editing input {
+  cursor: text;
+}
+div.number-field.pressed:not(:has(input:disabled)),
+div.number-field.scrubbing:not(:has(input:disabled)),
+div.number-field.editing:not(:has(input:disabled)) {
+  background: var(--ui-field-active);
+}
+.number-field:has(input:disabled),
+.number-field input:disabled {
+  cursor: default;
+}
+.number-field:has(input:focus-visible) {
+  outline: 1px solid var(--ui-border, var(--border-color));
+  outline-offset: -1px;
+}
+.vector-group > .vector-fields > .axis-field {
+  border-radius: 4px;
+  overflow: hidden;
+}
+.vector-group > .vector-fields > .axis-field > .axis {
+  height: 28px;
+  width: 18px;
+  min-width: 18px;
+  padding: 0;
+  gap: 0;
+  border-radius: 0;
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
+  font: 12px var(--font-ui);
+  color: var(--text-color);
+  background: color-mix(in srgb, var(--axis-color) 56%, var(--input-color));
+  flex-shrink: 0;
+}
+.vector-group > .vector-fields > .axis-field > .axis:hover {
+  background: color-mix(in srgb, var(--axis-color) 72%, var(--ui-field-hovered));
+}
+.vector-group > .vector-fields > .axis-field > .axis:active {
+  background: color-mix(in srgb, var(--axis-color) 88%, var(--ui-field-active));
+}
+.axis-x {
+  --axis-color: #dc7773;
+}
+.axis-y {
+  --axis-color: #52aa5c;
+}
+.axis-z {
+  --axis-color: #6f94e5;
+}
+.vector-group > label > .vector-unit {
+  float: none;
+  display: inline;
+  margin-left: 6px;
+  color: var(--muted-color);
+}
+.axis-field > .number-field {
+  border-radius: 0;
+  border-top-right-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+
+.custom-select .select-trigger:focus-visible {
+  outline-color: var(--ui-border, var(--border-color));
+}
+
+.custom-select .select-trigger {
+  color: var(--text-color);
+}
+
+/* Current Electron typography revision uses native secondary ink at14px. */
+div.number-field input {
+  color: var(--muted-color);
+  font-size: var(--numeric-font-size, 14px);
+}
+div.vector-group {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: var(--vector-label-width, 7em) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 6px;
+}
+.vector-group > label {
+  grid-column: 1;
+  margin: 0;
+  white-space: nowrap;
+  font-size: var(--body-font-size, 14px);
+}
+.vector-group > .vector-fields {
+  grid-column: 2;
+  min-width: 0;
+  gap: 4px;
+}
+@container (max-width:359px) {
+  .vector-group > label,
+  .vector-group > .vector-fields {
+    grid-column: 1/-1;
+  }
+}
+
+/* Semantic circles must not depend on a visibility-time geometry classification. */
+[data-round-surface] {
+  corner-shape: round !important;
+}
+/* Semantic action states outrank generic hover styling across every dialog owner. */
+button.button[data-button-variant='primary'] {
+  background: var(--button-primary, var(--sage-color));
+  color: var(--button-primary-text, var(--ui-on-primary));
+}
+button.button[data-button-variant='primary']:hover:not(:disabled) {
+  background: var(--button-primary-hover, var(--ui-primary-dim));
+  color: var(--button-primary-text, var(--ui-on-primary));
+}
+button.button[data-button-variant='primary']:active:not(:disabled) {
+  background: var(--button-primary-pressed, var(--ui-primary-bright));
+  color: var(--button-primary-text, var(--ui-on-primary));
+}
+button.button[data-button-variant='primary']:disabled {
+  background: var(--button-primary, var(--sage-color));
+  color: var(--button-primary-text, var(--ui-on-primary));
+  opacity: 0.6;
+}
+button.button[data-button-variant='secondary'] {
+  background: var(--button-secondary, var(--input-color));
+  color: var(--text-color);
+}
+button.button[data-button-variant='secondary']:hover:not(:disabled) {
+  background: var(--button-secondary-hover, var(--ui-field-hovered));
+  color: var(--text-color);
+}
+button.button[data-button-variant='secondary']:active:not(:disabled) {
+  background: var(--button-secondary-pressed, var(--ui-field-active));
+  color: var(--text-color);
+}
+button.button[data-button-variant='secondary']:disabled {
+  background: var(--button-secondary, var(--input-color));
+  color: var(--text-color);
+  opacity: 0.6;
+}
+
+/* The clear action is concentric with the capsule end: r = H/2 - inset. */
+div.search-field.search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 4px 0 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--input-color);
+}
+div.search-field.search-field > .icon {
+  flex: none;
+  color: var(--muted-color);
+}
+div.search-field.search-field > input {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+}
+div.search-field.search-field > button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+}
+div.search-field.search-field > button > .icon {
+  width: 14px !important;
+  height: 14px !important;
+}

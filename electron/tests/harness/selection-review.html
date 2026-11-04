@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Viewport selection verification</title>
+  </head>
+  <body style="margin: 0">
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState, useRef } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import * as THREE from 'three';
+      import '/src/design-tokens.css';
+      import { Viewport } from '/src/Viewport.tsx';
+      import { createPrimitive } from '/src/scene.ts';
+      import { setViewportPickable } from '/src/scene-selection.ts';
+      const root = new THREE.Group(),
+        world = new THREE.Group(),
+        parent = new THREE.Group();
+      root.userData.kind = 'scene';
+      world.userData = { nodeId: 'world', kind: 'world' };
+      parent.userData = { nodeId: 'group', kind: 'link' };
+      root.add(world);
+      world.add(parent);
+      const ground = createPrimitive('ground', 'Reference surface'),
+        front = createPrimitive('box', 'Front object'),
+        back = createPrimitive('box', 'Rear object');
+      ground.object.userData.fitExcluded = true;
+      front.object.position.set(0, 0, 1);
+      back.object.position.set(0, 0, 0.25);
+      parent.add(front.object);
+      world.add(ground.object, back.object);
+      ground.parentId = back.parentId = 'world';
+      front.parentId = 'group';
+      const doc = {
+        name: 'Selection review',
+        root,
+        nodes: [
+          { id: 'world', name: 'World', kind: 'world', object: world, visible: true },
+          {
+            id: 'group',
+            name: 'Group',
+            kind: 'link',
+            object: parent,
+            parentId: 'world',
+            visible: true,
+          },
+          ground,
+          front,
+          back,
+        ],
+        joints: [],
+        files: [],
+        warnings: [],
+      };
+      const f = (window.selectionReview = {
+        THREE,
+        doc,
+        ground,
+        front,
+        back,
+        parent,
+        selected: null,
+        setViewportPickable,
+      });
+      function Review() {
+        const [selected, select] = useState(null),
+          [revision, refresh] = useState(0),
+          api = useRef(null);
+        f.api = api;
+        f.selected = selected;
+        f.select = select;
+        f.refresh = () => refresh((v) => v + 1);
+        return React.createElement(
+          'div',
+          { style: { width: '100vw', height: '100vh', position: 'relative' } },
+          React.createElement(Viewport, {
+            ref: api,
+            document: doc,
+            selected,
+            tool: 'select',
+            frame: 'world',
+            geometry: 'default',
+            revision,
+            settings: { showGrid: false, showViewCube: false },
+            onSelect: select,
+            onChange: f.refresh,
+          }),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

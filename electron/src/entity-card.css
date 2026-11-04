@@ -1,0 +1,67 @@
+.entity-card {
+  margin-bottom: 12px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--ui-child);
+  border: 0;
+  box-shadow: none;
+}
+.entity-card.selected {
+  background: var(--ui-selected);
+}
+.entity-card-heading {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-color);
+  text-align: left;
+}
+.entity-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.entity-card-heading > .icon {
+  flex: none;
+  color: var(--ui-purple);
+}
+button.entity-card-heading:hover:not(:disabled) {
+  background: var(--ui-hover-overlay);
+}
+button.entity-card-heading:active:not(:disabled) {
+  background: var(--ui-field-active);
+}
+.entity-card-heading:focus-visible {
+  outline: 1px solid var(--ui-border);
+  outline-offset: -1px;
+}
+.entity-card-context {
+  font-size: 12px;
+  color: var(--muted-color);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.entity-card-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-color);
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.entity-card-content {
+  margin-top: 12px;
+  padding: 0;
+}

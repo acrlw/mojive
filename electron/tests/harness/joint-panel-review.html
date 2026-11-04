@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Joint panel verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      import { JointPanel } from '/src/JointPanel.tsx';
+      import { createCatalogScene } from '/src/SceneCatalog.ts';
+      import { applySettings, normalizeSettings } from '/src/settings.tsx';
+      const doc = await createCatalogScene('joint_gizmo');
+      window.jointReview = { doc, begins: 0, commits: 0, copied: '', errors: [] };
+      window.mojive = {
+        writeClipboardText: async (text) => {
+          window.jointReview.copied = text;
+        },
+      };
+      applySettings(normalizeSettings({ language: 'en', appearance: 'dark' }));
+      window.reviewTheme = (appearance) =>
+        applySettings(normalizeSettings({ language: 'en', appearance }));
+      function Review() {
+        const [, refresh] = useState(0),
+          [selected, setSelected] = useState(null);
+        return React.createElement(
+          'div',
+          {
+            id: 'joint-pane',
+            style: { width: 356, height: '100vh', background: 'var(--panel-color)' },
+          },
+          React.createElement(JointPanel, {
+            doc,
+            selectedId: selected,
+            onSelect: setSelected,
+            onFocus: (id) => {
+              window.jointReview.focus = id;
+            },
+            onBegin: () => {
+              window.jointReview.begins++;
+            },
+            onCommit: () => {
+              window.jointReview.commits++;
+            },
+            onChange: () => refresh((value) => value + 1),
+          }),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

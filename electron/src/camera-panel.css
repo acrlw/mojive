@@ -1,0 +1,319 @@
+.cameras-panel {
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.camera-panel-header {
+  height: 46px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.camera-panel-header h2 {
+  margin: 0;
+  font-size: var(--title-font-size);
+  font-weight: 600;
+  flex: 1;
+}
+.camera-panel-tools {
+  display: flex;
+  gap: 2px;
+}
+.camera-panel-tools .button,
+.camera-entry-actions .button,
+.camera-entry-more .button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 4px;
+}
+.camera-panel-search {
+  margin: 0 12px 12px;
+  padding: 0 8px;
+  height: 28px;
+  border-radius: 14px;
+  background: var(--input-color);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+.camera-panel-search:focus-within {
+  outline: 1px solid var(--ui-border);
+  outline-offset: -1px;
+}
+.camera-panel-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-color);
+}
+.camera-panel-search input:focus-visible {
+  outline: 0;
+}
+.camera-panel-search .button {
+  min-height: 20px;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+}
+.camera-panel-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  padding: 0 12px 12px;
+}
+.camera-editor-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+.camera-editor-source > .button {
+  flex: 1;
+}
+.camera-editor-source > span {
+  color: var(--secondary-color);
+  font-size: 12px;
+}
+.camera-entry {
+  background: var(--ui-child);
+  border-radius: 12px;
+  padding: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  container-type: inline-size;
+}
+.camera-entry.selected {
+  background: var(--ui-selected);
+}
+.camera-entry-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+.camera-entry-name {
+  border-radius: 4px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 4px 8px;
+  background: transparent;
+  text-align: left;
+  color: var(--text-color);
+  font: inherit;
+  cursor: pointer;
+}
+.camera-entry-name:hover {
+  background: var(--ui-hover-overlay);
+}
+.camera-entry-name > .icon {
+  flex: none;
+  color: var(--ui-node-camera, var(--ui-purple));
+}
+.camera-entry-name > span:not(.icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camera-entry-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.camera-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary-color);
+  font-size: 12px;
+  min-width: 0;
+  flex: 1;
+  line-height: 16px;
+  padding: 0 8px;
+}
+.camera-entry-projection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.camera-entry-projection > .icon {
+  flex: none;
+}
+.camera-entry-projection > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camera-entry-resolution {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.camera-entry-actions {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  flex: none;
+}
+.camera-entry-actions > .button {
+  flex: none;
+  border-radius: 4px;
+}
+.camera-entry-menu {
+  position: fixed;
+  margin: 0;
+  padding: 8px;
+  min-width: 172px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--popup-color);
+  color: var(--text-color);
+  box-shadow: 0 6px 24px #0004;
+}
+.camera-entry-menu > .button {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0 8px;
+  gap: 8px;
+}
+@container (max-width: 250px) {
+  .camera-entry-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}
+.camera-action-grid,
+.camera-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.camera-action-grid > .button,
+.camera-preset-grid > .button {
+  width: 100%;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.camera-properties {
+  min-width: 0;
+}
+.camera-action-grid {
+  container-type: inline-size;
+}
+.camera-action-label {
+  min-width: 0;
+  white-space: normal;
+  line-height: 18px;
+  text-align: left;
+}
+.camera-action-grid > .button > .icon {
+  flex: none;
+}
+.camera-property-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(108px, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.camera-property-row > label {
+  color: var(--secondary-color);
+  font-size: var(--label-font-size);
+}
+.camera-property-row > label > span {
+  color: var(--dim-color);
+}
+.camera-property-row > .number-field,
+.camera-property-row > .custom-select {
+  width: 100%;
+  min-width: 0;
+}
+.camera-help {
+  color: var(--dim-color);
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 8px 0 0;
+}
+.camera-error {
+  color: var(--ui-red);
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 8px 0;
+}
+.camera-panel-scroll .section-content {
+  padding: 0;
+}
+
+.camera-projection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+  border-radius: 4px;
+  background: var(--input-color);
+  min-width: 0;
+  width: 100%;
+  container-type: inline-size;
+}
+.camera-projection > .button {
+  min-width: 0;
+  width: 100%;
+  justify-content: center;
+  border-radius: 0;
+  padding: 0 6px;
+  margin: 0;
+  gap: 4px;
+}
+.camera-projection > .button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.camera-projection > .button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.camera-projection > .button.active {
+  background: var(--ui-field-active);
+  color: var(--sage-color);
+}
+.camera-projection .projection-short {
+  display: none;
+}
+@container (max-width: 250px) {
+  .camera-projection .projection-full {
+    display: none;
+  }
+  .camera-projection .projection-short {
+    display: inline;
+  }
+}
+@container (max-width: 180px) {
+  .camera-projection > .button .icon {
+    display: none;
+  }
+}
+@container (max-width: 280px) {
+  .camera-action-grid > .button {
+    height: 44px;
+    gap: 6px;
+    padding: 4px 8px;
+  }
+}

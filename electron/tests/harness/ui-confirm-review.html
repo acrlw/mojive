@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Scene confirmation verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import { Button, useSquircleSurfaces } from '/src/components.tsx';
+      import { useSettings } from '/src/settings.tsx';
+      import { ConfirmSceneDialog } from '/src/ConfirmSceneDialog.tsx';
+      window.confirmEvents = [];
+      window.confirmSaveMode = 'ok';
+      function Review() {
+        useSquircleSurfaces();
+        const [settings, update] = useSettings(),
+          [request, setRequest] = useState(null);
+        window.confirmHarness = {
+          show: (reason = 'close', filename = 'robot arm.mojive.json') =>
+            setRequest({ reason, filename }),
+          update,
+        };
+        return React.createElement(
+          'main',
+          { style: { padding: 24 } },
+          React.createElement(
+            Button,
+            { onClick: () => setRequest({ reason: 'close', filename: 'robot arm.mojive.json' }) },
+            'Open confirmation',
+          ),
+          request &&
+            React.createElement(ConfirmSceneDialog, {
+              ...request,
+              onCancel: () => {
+                window.confirmEvents.push('cancel');
+                setRequest(null);
+              },
+              onDiscard: () => {
+                window.confirmEvents.push('discard');
+                setRequest(null);
+              },
+              onSave: async () => {
+                window.confirmEvents.push('save');
+                if (window.confirmSaveMode === 'pending')
+                  return new Promise(
+                    (resolve) =>
+                      (window.resolveConfirmSave = (value) => {
+                        if (value) setRequest(null);
+                        resolve(value);
+                      }),
+                  );
+                if (window.confirmSaveMode === 'throw') throw Error('Unable to save the scene.');
+                if (window.confirmSaveMode === 'fail') return false;
+                setRequest(null);
+                return true;
+              },
+            }),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

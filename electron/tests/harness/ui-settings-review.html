@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Settings and output verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { useState } from 'react';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import {
+        SettingsDialog,
+        useSettings,
+        normalizeSettings,
+        readSettings,
+        applySettings,
+      } from '/src/settings.tsx';
+      import { OutputPanel, filterOutput, copyOutput } from '/src/OutputPanel.tsx';
+      import { t, setLanguage } from '/src/i18n.ts';
+      import { useSquircleSurfaces } from '/src/components.tsx';
+      window.uiModules = {
+        normalizeSettings,
+        readSettings,
+        applySettings,
+        filterOutput,
+        copyOutput,
+        t,
+        setLanguage,
+      };
+      function Review() {
+        useSquircleSurfaces();
+        const [settings, update] = useSettings(),
+          [open, setOpen] = useState(false),
+          [entries, setEntries] = useState([
+            { id: 1, level: 'info', time: '10:00:00', text: 'Loaded robot arm' },
+            { id: 2, level: 'warn', time: '10:00:01', text: 'Missing wheel mesh' },
+            { id: 3, level: 'err', time: '10:00:02', text: 'Missing arm mesh' },
+          ]);
+        window.uiState = { settings, entries };
+        window.uiActions = { replaceEntries: setEntries, updateSettings: update };
+        return React.createElement(
+          'div',
+          {
+            style: {
+              height: '100vh',
+              padding: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            },
+          },
+          React.createElement('button', { onClick: () => setOpen(true) }, t('Settings')),
+          React.createElement(
+            'div',
+            { style: { height: 300 } },
+            React.createElement(OutputPanel, { entries, onClear: () => setEntries([]) }),
+          ),
+          React.createElement(SettingsDialog, {
+            open,
+            settings,
+            onChange: update,
+            onClose: () => setOpen(false),
+          }),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+      window.ready = true;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,728 @@
+{
+  "schema": 1,
+  "source": {
+    "generator": "electron/scripts/export-selection-ownership-fixtures.py",
+    "files": {
+      "python/session/core.py": "64c6f859c8beec0a5e4b12f108dbfc1c4b1b5a766a35ef266fb611926d4c1625",
+      "python/session/dispatch/transforms.py": "0a97bf504ce32d605e7e90d51eddd44eb362657911f0686addf0403e3c102833",
+      "python/adapters/mujoco/source.py": "1fc1ba1328726d6e9fa460e1f8b1f87651d78626a214b197033875adaa5090cb",
+      "python/adapters/worlds.py": "952e9e89da32240f7b712586329e596f93cbf1863d25635468ff55388c26a178",
+      "python/render/opengl/shaders/scene.vert": "507bad841447ff4c5c6a78934b9b4f8da97d5d5b382b13ac3ece9557ee11211f",
+      "assets/joint_gizmo.xml": "0925c9f9ee0e098a3cdd19d788f0eea1bc9f78b4844b63fd615e9ea9a35a06b1"
+    },
+    "authoringXML": "<mujoco model=\"ownership\">\n  <worldbody>\n    <geom name=\"finite_floor\" type=\"plane\" size=\"2 2 .05\"/>\n    <body name=\"body\" pos=\"0 0 1\">\n      <joint name=\"hinge\" axis=\"0 1 0\"/>\n      <geom name=\"cube\" type=\"box\" size=\".2 .3 .4\"/>\n      <camera name=\"camera\" pos=\"0 -2 1\"/>\n      <light name=\"light\" pos=\"0 0 2\"/>\n    </body>\n  </worldbody>\n</mujoco>",
+    "attachedModelXML": "<mujoco model=\"payload\"><worldbody>\n  <body name=\"payload\"><geom name=\"payload_geom\" type=\"sphere\" size=\".1\"/></body>\n</worldbody></mujoco>"
+  },
+  "rule": "SelectNode copies node.object_id; positive IDs select equal rendered IDs. Only zero-ID JOINT selection falls back to a same-body ancestor. Zero never highlights.",
+  "notes": [
+    "Native legacy GEOM object_id=0 selects no fill/outline; Electron geoms already have explicit identities and use their own geometry.",
+    "A native positive geometry ID replaces body ownership for its instances, including after geometry duplication.",
+    "MuJoCo MODEL containers have reserved IDs without matching meshes; backend-neutral WorldInstances MODEL nodes deliberately own matching meshes.",
+    "Electron robot nodes represent imported model containers, not MuJoCo ROBOT bodies or WorldInstances models."
+  ],
+  "scenes": [
+    {
+      "id": "joint_gizmo",
+      "instances": [
+        {
+          "index": 0,
+          "objectId": 0,
+          "bodyIndex": 0,
+          "geomIndex": 0,
+          "shape": "plane"
+        },
+        {
+          "index": 1,
+          "objectId": 1,
+          "bodyIndex": 1,
+          "geomIndex": 1,
+          "shape": "cylinder"
+        },
+        {
+          "index": 2,
+          "objectId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 2,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 3,
+          "objectId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 2,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 4,
+          "objectId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 2,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 5,
+          "objectId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 3,
+          "shape": "sphere"
+        },
+        {
+          "index": 6,
+          "objectId": 3,
+          "bodyIndex": 3,
+          "geomIndex": 4,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 7,
+          "objectId": 3,
+          "bodyIndex": 3,
+          "geomIndex": 4,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 8,
+          "objectId": 3,
+          "bodyIndex": 3,
+          "geomIndex": 4,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 9,
+          "objectId": 4,
+          "bodyIndex": 4,
+          "geomIndex": 5,
+          "shape": "box"
+        },
+        {
+          "index": 10,
+          "objectId": 5,
+          "bodyIndex": 5,
+          "geomIndex": 6,
+          "shape": "sphere"
+        },
+        {
+          "index": 11,
+          "objectId": 6,
+          "bodyIndex": 6,
+          "geomIndex": 7,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 12,
+          "objectId": 6,
+          "bodyIndex": 6,
+          "geomIndex": 7,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 13,
+          "objectId": 6,
+          "bodyIndex": 6,
+          "geomIndex": 7,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 14,
+          "objectId": 6,
+          "bodyIndex": 6,
+          "geomIndex": 8,
+          "shape": "box"
+        },
+        {
+          "index": 15,
+          "objectId": 7,
+          "bodyIndex": 7,
+          "geomIndex": 9,
+          "shape": "box"
+        },
+        {
+          "index": 16,
+          "objectId": 7,
+          "bodyIndex": 7,
+          "geomIndex": 10,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 17,
+          "objectId": 7,
+          "bodyIndex": 7,
+          "geomIndex": 10,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 18,
+          "objectId": 7,
+          "bodyIndex": 7,
+          "geomIndex": 10,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 19,
+          "objectId": 8,
+          "bodyIndex": 8,
+          "geomIndex": 11,
+          "shape": "box"
+        },
+        {
+          "index": 20,
+          "objectId": 9,
+          "bodyIndex": 9,
+          "geomIndex": 12,
+          "shape": "cylinder"
+        },
+        {
+          "index": 21,
+          "objectId": 9,
+          "bodyIndex": 9,
+          "geomIndex": 13,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 22,
+          "objectId": 9,
+          "bodyIndex": 9,
+          "geomIndex": 13,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 23,
+          "objectId": 9,
+          "bodyIndex": 9,
+          "geomIndex": 13,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 24,
+          "objectId": 10,
+          "bodyIndex": 10,
+          "geomIndex": 14,
+          "shape": "cylinder"
+        },
+        {
+          "index": 25,
+          "objectId": 11,
+          "bodyIndex": 11,
+          "geomIndex": 15,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 26,
+          "objectId": 11,
+          "bodyIndex": 11,
+          "geomIndex": 15,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 27,
+          "objectId": 11,
+          "bodyIndex": 11,
+          "geomIndex": 15,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 28,
+          "objectId": 11,
+          "bodyIndex": 11,
+          "geomIndex": 16,
+          "shape": "sphere"
+        },
+        {
+          "index": 29,
+          "objectId": 12,
+          "bodyIndex": 12,
+          "geomIndex": 17,
+          "shape": "capsule_shaft"
+        },
+        {
+          "index": 30,
+          "objectId": 12,
+          "bodyIndex": 12,
+          "geomIndex": 17,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 31,
+          "objectId": 12,
+          "bodyIndex": 12,
+          "geomIndex": 17,
+          "shape": "capsule_cap"
+        },
+        {
+          "index": 32,
+          "objectId": 13,
+          "bodyIndex": 13,
+          "geomIndex": 18,
+          "shape": "box"
+        }
+      ],
+      "selections": [
+        {
+          "name": "world",
+          "kind": "world",
+          "nodeId": 0,
+          "parentId": -1,
+          "bodyIndex": 0,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "01_revolute_anchor",
+          "kind": "robot",
+          "nodeId": 1,
+          "parentId": 0,
+          "bodyIndex": 1,
+          "geomIndex": -1,
+          "objectId": 1,
+          "selectedObjectId": 1,
+          "highlightObjectId": 1,
+          "matchingInstances": [
+            1
+          ]
+        },
+        {
+          "name": "01_revolute",
+          "kind": "link",
+          "nodeId": 2,
+          "parentId": 1,
+          "bodyIndex": 2,
+          "geomIndex": -1,
+          "objectId": 2,
+          "selectedObjectId": 2,
+          "highlightObjectId": 2,
+          "matchingInstances": [
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "geom1",
+          "kind": "geom",
+          "nodeId": 15,
+          "parentId": 1,
+          "bodyIndex": 1,
+          "geomIndex": 1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "geom2",
+          "kind": "geom",
+          "nodeId": 16,
+          "parentId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 2,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "geom3",
+          "kind": "geom",
+          "nodeId": 17,
+          "parentId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 3,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "01_revolute_y",
+          "kind": "joint",
+          "nodeId": 18,
+          "parentId": 2,
+          "bodyIndex": 2,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 2,
+          "matchingInstances": [
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "geom5",
+          "kind": "geom",
+          "nodeId": 20,
+          "parentId": 4,
+          "bodyIndex": 4,
+          "geomIndex": 5,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "02_prismatic_x",
+          "kind": "joint",
+          "nodeId": 21,
+          "parentId": 4,
+          "bodyIndex": 4,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 4,
+          "matchingInstances": [
+            9
+          ]
+        },
+        {
+          "name": "geom7",
+          "kind": "geom",
+          "nodeId": 23,
+          "parentId": 6,
+          "bodyIndex": 6,
+          "geomIndex": 7,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "geom8",
+          "kind": "geom",
+          "nodeId": 24,
+          "parentId": 6,
+          "bodyIndex": 6,
+          "geomIndex": 8,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "03_ball_xyz",
+          "kind": "joint",
+          "nodeId": 25,
+          "parentId": 6,
+          "bodyIndex": 6,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 6,
+          "matchingInstances": [
+            11,
+            12,
+            13,
+            14
+          ]
+        },
+        {
+          "name": "key",
+          "kind": "light",
+          "nodeId": 42,
+          "parentId": 0,
+          "bodyIndex": 0,
+          "geomIndex": -1,
+          "objectId": 1879048192,
+          "selectedObjectId": 1879048192,
+          "highlightObjectId": 1879048192,
+          "matchingInstances": []
+        },
+        {
+          "name": "joint_gizmos",
+          "kind": "camera",
+          "nodeId": 43,
+          "parentId": 0,
+          "bodyIndex": 0,
+          "geomIndex": -1,
+          "objectId": 1895825408,
+          "selectedObjectId": 1895825408,
+          "highlightObjectId": 1895825408,
+          "matchingInstances": []
+        }
+      ]
+    },
+    {
+      "id": "authored_geometry_and_model",
+      "instances": [
+        {
+          "index": 0,
+          "objectId": 1342177280,
+          "bodyIndex": 0,
+          "geomIndex": 0,
+          "shape": "plane"
+        },
+        {
+          "index": 1,
+          "objectId": 1,
+          "bodyIndex": 1,
+          "geomIndex": 1,
+          "shape": "box"
+        },
+        {
+          "index": 2,
+          "objectId": 1342177281,
+          "bodyIndex": 1,
+          "geomIndex": 2,
+          "shape": "box"
+        },
+        {
+          "index": 3,
+          "objectId": 2,
+          "bodyIndex": 2,
+          "geomIndex": 3,
+          "shape": "sphere"
+        }
+      ],
+      "selections": [
+        {
+          "name": "world",
+          "kind": "world",
+          "nodeId": 0,
+          "parentId": -1,
+          "bodyIndex": 0,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "payload",
+          "kind": "model",
+          "nodeId": 1,
+          "parentId": 0,
+          "bodyIndex": -1,
+          "geomIndex": -1,
+          "objectId": 1929379841,
+          "selectedObjectId": 1929379841,
+          "highlightObjectId": 1929379841,
+          "matchingInstances": []
+        },
+        {
+          "name": "body",
+          "kind": "link",
+          "nodeId": 2,
+          "parentId": 0,
+          "bodyIndex": 1,
+          "geomIndex": -1,
+          "objectId": 1,
+          "selectedObjectId": 1,
+          "highlightObjectId": 1,
+          "matchingInstances": [
+            1
+          ]
+        },
+        {
+          "name": "opengl_1_payload",
+          "kind": "link",
+          "nodeId": 3,
+          "parentId": 1,
+          "bodyIndex": 2,
+          "geomIndex": -1,
+          "objectId": 2,
+          "selectedObjectId": 2,
+          "highlightObjectId": 2,
+          "matchingInstances": [
+            3
+          ]
+        },
+        {
+          "name": "finite_floor",
+          "kind": "geom",
+          "nodeId": 4,
+          "parentId": 0,
+          "bodyIndex": 0,
+          "geomIndex": 0,
+          "objectId": 1342177280,
+          "selectedObjectId": 1342177280,
+          "highlightObjectId": 1342177280,
+          "matchingInstances": [
+            0
+          ]
+        },
+        {
+          "name": "cube",
+          "kind": "geom",
+          "nodeId": 5,
+          "parentId": 2,
+          "bodyIndex": 1,
+          "geomIndex": 1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "cube_copy",
+          "kind": "geom",
+          "nodeId": 6,
+          "parentId": 2,
+          "bodyIndex": 1,
+          "geomIndex": 2,
+          "objectId": 1342177281,
+          "selectedObjectId": 1342177281,
+          "highlightObjectId": 1342177281,
+          "matchingInstances": [
+            2
+          ]
+        },
+        {
+          "name": "hinge",
+          "kind": "joint",
+          "nodeId": 7,
+          "parentId": 2,
+          "bodyIndex": 1,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 1,
+          "matchingInstances": [
+            1
+          ]
+        },
+        {
+          "name": "opengl_1_payload_geom",
+          "kind": "geom",
+          "nodeId": 8,
+          "parentId": 3,
+          "bodyIndex": 2,
+          "geomIndex": 3,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "light",
+          "kind": "light",
+          "nodeId": 9,
+          "parentId": 2,
+          "bodyIndex": 1,
+          "geomIndex": -1,
+          "objectId": 1879048192,
+          "selectedObjectId": 1879048192,
+          "highlightObjectId": 1879048192,
+          "matchingInstances": []
+        },
+        {
+          "name": "camera",
+          "kind": "camera",
+          "nodeId": 10,
+          "parentId": 2,
+          "bodyIndex": 1,
+          "geomIndex": -1,
+          "objectId": 1895825408,
+          "selectedObjectId": 1895825408,
+          "highlightObjectId": 1895825408,
+          "matchingInstances": []
+        },
+        {
+          "name": "environment",
+          "kind": "environment",
+          "nodeId": 11,
+          "parentId": 0,
+          "bodyIndex": -1,
+          "geomIndex": -1,
+          "objectId": 1912602624,
+          "selectedObjectId": 1912602624,
+          "highlightObjectId": 1912602624,
+          "matchingInstances": []
+        }
+      ]
+    },
+    {
+      "id": "backend_neutral_world_instances",
+      "instances": [
+        {
+          "index": 0,
+          "objectId": 8,
+          "bodyIndex": 0,
+          "geomIndex": 0,
+          "shape": "box"
+        },
+        {
+          "index": 1,
+          "objectId": 8,
+          "bodyIndex": 0,
+          "geomIndex": 1,
+          "shape": "sphere"
+        },
+        {
+          "index": 2,
+          "objectId": 12,
+          "bodyIndex": 0,
+          "geomIndex": 2,
+          "shape": "box"
+        },
+        {
+          "index": 3,
+          "objectId": 12,
+          "bodyIndex": 0,
+          "geomIndex": 3,
+          "shape": "sphere"
+        }
+      ],
+      "selections": [
+        {
+          "name": "world",
+          "kind": "world",
+          "nodeId": 0,
+          "parentId": -1,
+          "bodyIndex": -1,
+          "geomIndex": -1,
+          "objectId": 0,
+          "selectedObjectId": 0,
+          "highlightObjectId": 0,
+          "matchingInstances": []
+        },
+        {
+          "name": "World 7",
+          "kind": "model",
+          "nodeId": 8,
+          "parentId": 0,
+          "bodyIndex": -1,
+          "geomIndex": -1,
+          "objectId": 8,
+          "selectedObjectId": 8,
+          "highlightObjectId": 8,
+          "matchingInstances": [
+            0,
+            1
+          ]
+        },
+        {
+          "name": "World 11",
+          "kind": "model",
+          "nodeId": 12,
+          "parentId": 0,
+          "bodyIndex": -1,
+          "geomIndex": -1,
+          "objectId": 12,
+          "selectedObjectId": 12,
+          "highlightObjectId": 12,
+          "matchingInstances": [
+            2,
+            3
+          ]
+        },
+        {
+          "name": "environment",
+          "kind": "environment",
+          "nodeId": 13,
+          "parentId": 0,
+          "bodyIndex": -1,
+          "geomIndex": -1,
+          "objectId": 1912602624,
+          "selectedObjectId": 1912602624,
+          "highlightObjectId": 1912602624,
+          "matchingInstances": []
+        }
+      ]
+    }
+  ]
+}

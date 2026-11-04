@@ -1,0 +1,232 @@
+.color-control {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.color-trigger {
+  height: 28px;
+  min-width: 0;
+  width: 100%;
+  padding: 0 8px;
+  gap: 8px;
+  background: var(--input-color);
+  border-radius: 4px;
+  font: var(--numeric-font-size, 16px) var(--font-mono);
+}
+.color-trigger > span:not(.icon):nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.color-trigger > .icon {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.color-swatch {
+  position: relative;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: repeating-conic-gradient(#aaa 0 25%, #eee 0 50%) 0/8px 8px;
+}
+.color-swatch > span {
+  position: absolute;
+  inset: 0;
+}
+.color-popover {
+  width: 280px;
+}
+.color-picker-surface {
+  padding: 8px;
+  background: var(--popup-color, var(--floating-color));
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--border-color);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: inherit;
+  overflow: auto;
+}
+.color-comparison {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.color-comparison-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0;
+  font: var(--body-font-size, 14px) var(--font-ui);
+}
+.color-comparison-item .color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+}
+.color-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.color-actions .button {
+  height: 28px;
+  width: 28px;
+  padding: 4px;
+  border-radius: 4px;
+}
+.color-picker-plane {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  padding: 1px;
+  min-height: 160px;
+}
+.color-sv {
+  position: relative;
+  aspect-ratio: 1;
+  flex: 1;
+  background-image:
+    linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent);
+  touch-action: none;
+  cursor: crosshair;
+  min-width: 0;
+}
+.color-sv > span {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #0008;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.color-bar {
+  width: 14px;
+  position: relative;
+  touch-action: none;
+  cursor: ns-resize;
+  flex-shrink: 0;
+}
+.color-hue {
+  background: linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.color-bar > span {
+  position: absolute;
+  height: 3px;
+  left: -2px;
+  right: -2px;
+  transform: translateY(-50%);
+  border: 1px solid white;
+  box-shadow: 0 0 0 1px #0008;
+  pointer-events: none;
+}
+.color-alpha {
+  background: repeating-conic-gradient(#aaa 0 25%, #eee 0 50%) 0/8px 8px;
+}
+.color-alpha > div {
+  position: absolute;
+  inset: 0;
+}
+.color-format {
+  display: flex;
+  padding: 2px;
+  gap: 2px;
+  background: var(--input-color);
+  border-radius: 6px;
+}
+.color-format .button {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: 4px;
+  font-size: var(--body-font-size, 14px);
+  padding: 0 6px;
+}
+.color-hex {
+  height: 28px;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: var(--input-color);
+  font: var(--numeric-font-size, 16px) var(--font-mono);
+  padding: 0 8px;
+  text-align: center;
+}
+.color-channel-fields {
+  display: flex;
+  gap: 4px;
+}
+.color-channel {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.color-channel > label {
+  text-align: center;
+  color: var(--muted-color);
+  font-size: 12px;
+}
+.color-channel .number-field {
+  width: 100%;
+}
+.color-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+}
+.color-footer > span {
+  color: var(--dim-color);
+  font-size: var(--body-font-size, 14px);
+  flex: 1;
+  padding-left: 8px;
+}
+.color-footer > .button {
+  border-radius: 4px;
+  height: 28px;
+  min-width: 64px;
+  font-size: var(--body-font-size, 14px);
+}
+.color-error {
+  font-size: var(--body-font-size, 14px);
+  color: var(--ui-error);
+  overflow-wrap: anywhere;
+}
+.color-sv:focus-visible,
+.color-bar:focus-visible {
+  outline: 1px solid var(--sage-color);
+  outline-offset: 2px;
+}
+
+.color-footer > .button {
+  flex: 1;
+}
+.color-format {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0;
+  gap: 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.color-format .button {
+  width: 100%;
+  height: 28px;
+  border-radius: 0;
+  margin: 0;
+}
+.color-format .button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.color-format .button:last-child {
+  border-radius: 0 4px 4px 0;
+}

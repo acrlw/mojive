@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { Button } from '/src/components.tsx';
+      import { setLanguage } from '/src/i18n.ts';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      const root = createRoot(document.getElementById('root'));
+      window.renderButtons = (language) => {
+        setLanguage(language);
+        root.render(
+          React.createElement(
+            'div',
+            { style: { display: 'flex', padding: 20, gap: 12 } },
+            React.createElement(Button, {
+              icon: 'copy',
+              'aria-label': 'Copy',
+              'data-testid': 'fallback',
+            }),
+            React.createElement(Button, {
+              icon: 'copy',
+              'aria-label': 'Copy',
+              title: 'Paste',
+              'data-testid': 'explicit',
+            }),
+            React.createElement(Button, {
+              icon: 'copy',
+              'aria-label': 'Copy',
+              title: '',
+              'data-testid': 'suppressed',
+            }),
+            React.createElement(Button, { icon: 'copy', 'data-testid': 'unnamed' }),
+            React.createElement(
+              Button,
+              { icon: 'copy', 'aria-label': 'Copy', 'data-testid': 'caption' },
+              'Copy',
+            ),
+          ),
+        );
+      };
+      window.renderButtons('en');
+    </script>
+  </body>
+</html>

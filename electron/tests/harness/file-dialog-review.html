@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>File dialog verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      import { FileDialog } from '/src/FileDialog.tsx';
+      import { applySettings, normalizeSettings } from '/src/settings.tsx';
+      applySettings(normalizeSettings({ language: 'en', appearance: 'dark' }));
+      const initialPath = new URL(location.href).searchParams.get('directory');
+      window.fileReview = { choices: [] };
+      function Review() {
+        const [kind, setKind] = useState('urdf');
+        window.showFileDialog = setKind;
+        return React.createElement(
+          'div',
+          null,
+          kind
+            ? React.createElement(FileDialog, {
+                kind,
+                initialPath,
+                suggestedName: 'existing.mojive.json',
+                onCancel: () => setKind(null),
+                onChoose: async (path, overwrite) => {
+                  let result;
+                  if (kind === 'save')
+                    result = await window.mojive.saveScenePath(path, '{"saved":true}', overwrite);
+                  else if (kind === 'urdf') result = await window.mojive.openUrdfPath(path);
+                  else if (kind === 'scene') result = await window.mojive.openScenePath(path);
+                  else result = await window.mojive.openProjectPath(path);
+                  window.fileReview.choices.push({ kind, path, overwrite, result });
+                  setKind(null);
+                },
+              })
+            : 'Closed',
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

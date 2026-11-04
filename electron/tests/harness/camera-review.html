@@ -1,0 +1,185 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Scene camera verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState, useRef } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      import { CameraPreview } from '/src/CameraPreview.tsx';
+      import { Section, Switch } from '/src/components.tsx';
+      import { LightProperties } from '/src/LightProperties.tsx';
+      import { Viewport } from '/src/Viewport.tsx';
+      import { CamerasPanel } from '/src/CamerasPanel.tsx';
+      import { CameraProperties } from '/src/CameraProperties.tsx';
+      import { createDemo, createPrimitive, removeNode } from '/src/scene.ts';
+      import { readCameraView, updateCameraView } from '/src/scene-camera.ts';
+      import { applySettings, normalizeSettings } from '/src/settings.tsx';
+      import { encodeDocument, decodeDocument } from '/src/editor.ts';
+      import { DEFAULT_VIEWPORT_LAYERS } from '/src/viewport/layers.ts';
+      const doc = await createDemo(),
+        camera = createPrimitive('camera', 'Inspection camera');
+      doc.root.add(camera.object);
+      doc.nodes.push(camera);
+      updateCameraView(doc, camera.id, { resolution: [640, 360], far: 20 });
+      const f = (window.cameraReview = {
+        doc,
+        cameraId: camera.id,
+        begins: 0,
+        commits: 0,
+        captured: null,
+        api: null,
+        state: { id: null, pilot: false },
+        projection: 'perspective',
+        projectionChanges: [],
+      });
+      applySettings(normalizeSettings({ language: 'en', appearance: 'dark' }));
+      function Review() {
+        const [revision, refresh] = useState(0),
+          [selected, select] = useState(camera.id),
+          [state, setState] = useState(f.state),
+          [preview, setPreview] = useState(false),
+          [previewVisible, setPreviewVisible] = useState(true),
+          [geometry, setGeometry] = useState('default'),
+          [tool, setTool] = useState('select'),
+          [projection, setProjection] = useState('perspective'),
+          [layers, setLayers] = useState(DEFAULT_VIEWPORT_LAYERS),
+          api = useRef(null);
+        f.refresh = () => refresh((value) => value + 1);
+        f.setLayers = setLayers;
+        f.api = api;
+        f.select = select;
+        f.setPreview = setPreview;
+        f.setPreviewVisible = setPreviewVisible;
+        f.setGeometry = setGeometry;
+        f.setTool = setTool;
+        const begin = () => {
+            f.begins++;
+            f.before = encodeDocument(f.doc);
+          },
+          commit = () => {
+            f.commits++;
+          };
+        const capture = async (id) => (f.captured = await api.current.captureCameraView(id)),
+          view = (id, pilot) => api.current.useSceneCamera(id, pilot),
+          align = (id) => api.current.alignCameraToView(id),
+          create = () => api.current.createCameraFromView(),
+          del = (id) => {
+            removeNode(f.doc, id);
+            f.refresh();
+          };
+        const node = f.doc.nodes.find((node) => node.id === selected);
+        return React.createElement(
+          'div',
+          {
+            style: {
+              display: 'grid',
+              gridTemplateColumns: '300px minmax(0,1fr) 340px',
+              height: '100vh',
+              background: 'var(--panel-color)',
+            },
+          },
+          React.createElement(CamerasPanel, {
+            doc: f.doc,
+            selectedId: selected,
+            activeCameraId: state.id,
+            piloting: state.pilot,
+            onSelect: select,
+            onView: view,
+            onFocus: (id) => api.current.focus(id),
+            onAlign: align,
+            onCreate: create,
+            onDelete: del,
+            onCapture: capture,
+            onPreset: (p) => api.current.view(p),
+          }),
+          React.createElement(
+            'div',
+            { style: { position: 'relative' } },
+            React.createElement(Viewport, {
+              ref: api,
+              document: f.doc,
+              selected,
+              tool,
+              frame: 'world',
+              geometry,
+              revision,
+              layers,
+              projection,
+              onProjectionChange: (value) => {
+                f.projection = value;
+                f.projectionChanges.push(value);
+                setProjection(value);
+              },
+              onSelect: select,
+              onChange: f.refresh,
+              onBegin: begin,
+              onCommit: commit,
+              onSceneCameraChange: (state) => {
+                f.state = state;
+                setState(state);
+              },
+            }),
+            React.createElement(CameraPreview, {
+              doc: f.doc,
+              selectedId: selected,
+              enabled: preview,
+              visible: previewVisible,
+              revision,
+              geometry,
+              onClose: () => setPreview(false),
+            }),
+          ),
+          React.createElement(
+            'div',
+            { style: { overflow: 'auto', padding: '0 12px' } },
+            React.createElement(
+              Section,
+              { title: 'Display' },
+              React.createElement(
+                'div',
+                { className: 'camera-property-row' },
+                React.createElement('label', null, 'Preview'),
+                React.createElement(Switch, {
+                  label: 'Show Camera Preview',
+                  checked: preview,
+                  onChange: setPreview,
+                }),
+              ),
+            ),
+            node?.kind === 'light'
+              ? React.createElement(LightProperties, {
+                  doc: f.doc,
+                  node,
+                  onBegin: begin,
+                  onCommit: commit,
+                  onChange: f.refresh,
+                })
+              : node?.kind === 'camera' &&
+                  React.createElement(CameraProperties, {
+                    doc: f.doc,
+                    node,
+                    active: state.id === node.id,
+                    piloting: state.pilot,
+                    onBegin: begin,
+                    onCommit: commit,
+                    onChange: f.refresh,
+                    onView: (pilot) => view(node.id, pilot),
+                    onExit: () => view(null),
+                    onAlign: () => align(node.id),
+                    onCapture: () => capture(node.id),
+                  }),
+          ),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

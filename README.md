@@ -52,6 +52,23 @@ use `--no-sync` to avoid replacing these local builds. After reinstalling the ed
 run `make native-editable` to register the extension again.
 See [installation](docs/getting-started.md) for dependency details.
 
+## Electron editor
+
+The maintained desktop frontend lives in [`electron/`](electron/README.md). It uses React,
+TypeScript, and Three.js for URDF scene editing, joint manipulation, camera previews, and
+three-track timeline recording. It does not yet connect to a MuJoCo physics backend.
+
+With Node.js 22+ and npm installed:
+
+```bash
+make electron-install
+make electron
+```
+
+Python and native renderer builds are not required to run this frontend. See its
+[verification guide](electron/docs/verification.md) for tests and macOS packaging. Generated
+captures and application bundles belong in `output/electron/`.
+
 ## Render backends
 
 Mainline maintains two renderers: OpenGL is the default for fast application and interaction
