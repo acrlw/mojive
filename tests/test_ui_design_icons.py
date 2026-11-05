@@ -424,23 +424,49 @@ def test_default_geometry_flag_preserves_its_opening_without_internal_aa_seams()
 
 
 @pytest.mark.parametrize("button", ("left", "right", "wheel"))
-def test_status_pointer_family_preserves_canvas_with_lighter_strokes_and_derived_fills(button):
+def test_status_pointer_family_preserves_canvas_and_overlaps_fills_with_the_shell(button):
     glyph = compile_svg(library_masters()["status-mouse-" + button])
     assert glyph["viewBox"] == [0, 0, 24, 24]
     assert glyph["bounds"] == [4.5, 1.5, 19.5, 22.5]
+    fills = [c for c in glyph["contours"] if c["fill"] != "none"]
+    assert fills and all(c["fill_opacity"] == 1.0 for c in fills)
     strokes = [contour for contour in glyph["contours"] if contour["stroke"] != "none"]
     assert all(contour["width"] == 1.0 for contour in strokes)
     assert all(contour["cap"] == contour["join"] == "round" for contour in strokes)
     if button != "wheel":
         fill = next(contour for contour in glyph["contours"] if contour["fill"] != "none")
         points = np.asarray(fill["points"])
-        assert points[:, 1].max() == pytest.approx(11 - 1.0 / 2)
-        assert points[:, 0].min() == pytest.approx(
-            5 + 1.0 / 2 if button == "left" else 12 + 1.0 / 2
-        )
-        assert points[:, 0].max() == pytest.approx(
-            12 - 1.0 / 2 if button == "left" else 19 - 1.0 / 2
-        )
+        # Fill reaches the stroke centerline so independently antialiased paths overlap.
+        assert points[:, 1].min() == pytest.approx(2)
+        assert points[:, 1].max() == pytest.approx(11)
+        assert points[:, 0].min() == pytest.approx(5 if button == "left" else 12)
+        assert points[:, 0].max() == pytest.approx(12 if button == "left" else 19)
+        divider = np.asarray(strokes[-1]["points"])[-2:]
+        center = 11.5 if button == "left" else 12.5
+        assert divider[:, 0] == pytest.approx([center, center])
+        # The divider's visible edge belongs to the pressed half and ends at the midline.
+        assert center + (0.5 if button == "left" else -0.5) == 12
+
+
+@pytest.mark.parametrize(
+    "name", ("mouse", "status-mouse-left", "status-mouse-right", "status-mouse-wheel")
+)
+def test_pointer_shell_keeps_complete_tangent_ramps_at_straight_edges(name):
+    glyph = compile_svg(library_masters()[name])
+    shell = next(c for c in glyph["contours"] if c["closed"] and c["stroke"] != "none")
+    points = np.asarray(shell["points"])
+    joins = 0
+    for index, a in enumerate(points):
+        b = points[(index + 1) % len(points)]
+        edge = b - a
+        if np.linalg.norm(edge) < 2:
+            continue
+        assert min(abs(edge[0]), abs(edge[1])) < 1e-6
+        for tangent in (a - points[index - 1], points[(index + 2) % len(points)] - b):
+            cosine = np.dot(edge, tangent) / (np.linalg.norm(edge) * np.linalg.norm(tangent))
+            assert math.degrees(math.acos(float(np.clip(cosine, -1, 1)))) < 0.5
+        joins += 1
+    assert joins == 4
 
 
 @pytest.mark.parametrize("size", (14, 18, 22, 24, 44))

@@ -33,9 +33,18 @@ Sensors use a connected sensing module; plotted data retains its separate wavefo
 must not substitute for a legible central body when judging visual size.
 The three `status-mouse-*` masters are a lighter input-diagram family: every shell and divider
 uses an explicit 1.0-unit stroke on the same 24-unit grid. Keep their canvas, centerlines and
-neutral ink independent of that weight. Derive left/right button fills from the shell's inward
-half-stroke offset, and use the authored width for AA fringe limits. Do not make a dark heavy
+neutral ink independent of that weight. Extend left/right button fills beneath the shell stroke
+and stop their visible state at the x=12 midline. A centered divider would extend the solid
+pressed region by half a stroke into the empty half. Place that divider entirely inside the
+pressed half: x=11.5 for left and x=12.5 for right at the 1-unit weight. The two inner button
+openings then share the same width and the states remain mirrored. Retain opaque fills;
+opacity is not a substitute for equal geometry. Use the authored width for AA fringe limits. Do not make a dark heavy
 stroke appear lighter by fading it or imposing a display-pixel stroke floor.
+The mouse family shell retains complete G3 curvature ramps at its straight-edge joins, with
+5×7-unit corner extents and smoothing 0.618. This is the project's sampled G3 geometry, not the
+Figma squircle algorithm. Never shorten a ramp and bridge its last sample to the tangent point:
+that introduces a visible direction change. Preserve the full profile in shell and button fill,
+and verify both incoming and outgoing tangents on all four straight edges.
 
 The four-well palette, selection pointer, camera, light, perspective, record, rotation/reset,
 visibility pair, Assets, Control, Copy/Duplicate and other retained symbols keep their approved
@@ -109,6 +118,10 @@ Keep attached line caps inside the outer shell; reserve at least one canonical s
 of visible clearance for marks that must remain separate. Measure the expanded strokes, not
 only their centerlines. Adjacent opaque strokes with the same paint are tessellated as one union,
 with antialiasing only on the combined boundary. Filled and translucent layers keep their order.
+A pressed mouse button fill overlaps the shell and stays under its state-owned divider.
+Insetting it to the inner shell edge leaves
+an antialias seam between independently painted paths, especially at fractional browser scale.
+Retain the same exterior bounds, stroke weight and mirrored left/right geometry.
 
 ### Construct and inspect the final silhouette
 
