@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, after } from 'node:test';
 import { createServer } from 'vite';
@@ -13,6 +14,8 @@ before(async () => {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1680, height: 1100 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem(
@@ -29,7 +32,7 @@ after(async () => {
   await server?.close();
 });
 test('actual light workspace keeps camera metadata, inset hover targets and localized actions at narrow and wide sizes', async () => {
-  await page.locator('.activity-rail').getByTitle('相机', { exact: true }).click();
+  await page.locator('.activity-rail').getByRole('button', { name: '相机', exact: true }).click();
   for (const [width, label] of [
     [220, 'narrow'],
     [410, 'wide'],
@@ -59,11 +62,15 @@ test('actual light workspace keeps camera metadata, inset hover targets and loca
         height: r.height,
         nameInset: icon.left - n.left,
         outerInset: n.left - r.left,
-        radius: getComputedStyle(element).borderRadius,
+        radius: window.paintStyle(element).borderRadius,
         texts,
+        metadataFont: window.paintStyle(element.querySelector('.camera-entry-meta')).fontSize,
         buttons: [
           ...element.querySelectorAll('.camera-entry-actions button,.camera-entry-more button'),
-        ].map((button) => ({ title: button.title, label: button.getAttribute('aria-label') })),
+        ].map((button) => ({
+          title: button.dataset.tooltip,
+          label: button.getAttribute('aria-label'),
+        })),
       };
     });
     assert.ok(metrics.height <= 83 * 1.25);
@@ -71,21 +78,28 @@ test('actual light workspace keeps camera metadata, inset hover targets and loca
     assert.ok(Math.abs(metrics.nameInset - 10) < 1);
     assert.ok(Math.abs(metrics.outerInset - 10) < 1);
     assert.equal(metrics.texts.length, 2);
+    assert.equal(metrics.metadataFont, '14px');
     assert.ok(metrics.texts.every((text) => text.overflow <= 1));
     assert.deepEqual(
       metrics.buttons.map((button) => button.title),
       ['更多相机操作', '查看相机', '操控相机'],
     );
     assert.ok(metrics.buttons.every((button) => button.title === button.label));
-    await page.screenshot({ path: `../output/electron/verification/camera-cards-light-${label}.png` });
-    await card.screenshot({ path: `../output/electron/verification/camera-card-hover-light-${label}.png` });
+    await page.screenshot({
+      path: `../output/electron/verification/camera-cards-light-${label}.png`,
+    });
+    await card.screenshot({
+      path: `../output/electron/verification/camera-card-hover-light-${label}.png`,
+    });
     await card.getByRole('button', { name: '更多相机操作', exact: true }).click();
     const menu = page.getByRole('menu', { name: /更多相机操作/ });
     await menu.waitFor();
     assert.equal(await menu.getByRole('menuitem').count(), 4);
     const m = await menu.boundingBox();
     assert.ok(m.x >= 0 && m.x + m.width <= 1680 && m.y >= 0 && m.y + m.height <= 1100);
-    await page.screenshot({ path: `../output/electron/verification/camera-card-menu-light-${label}.png` });
+    await page.screenshot({
+      path: `../output/electron/verification/camera-card-menu-light-${label}.png`,
+    });
     await page.locator('.camera-panel-header h2').click();
     await menu.waitFor({ state: 'hidden' });
     await page.waitForFunction(
@@ -104,7 +118,7 @@ test('actual light workspace keeps camera metadata, inset hover targets and loca
 });
 
 test('actual camera cards toggle View and Pilot back to the editor and stay synchronized with Inspector', async () => {
-  await page.locator('.activity-rail').getByTitle('相机', { exact: true }).click();
+  await page.locator('.activity-rail').getByRole('button', { name: '相机', exact: true }).click();
   const card = page.locator('.camera-entry').first(),
     actions = card.locator('.camera-entry-actions'),
     view = actions.getByRole('button').nth(0),
@@ -124,10 +138,19 @@ test('actual camera cards toggle View and Pilot back to the editor and stay sync
         )
       );
     }, mode);
-    assert.equal(await view.getAttribute('title'), mode === 0 ? '返回编辑器相机' : '查看相机');
-    assert.equal(await pilot.getAttribute('title'), mode === 1 ? '返回编辑器相机' : '操控相机');
+    assert.equal(
+      await view.getAttribute('data-tooltip'),
+      mode === 0 ? '返回编辑器相机' : '查看相机',
+    );
+    assert.equal(
+      await pilot.getAttribute('data-tooltip'),
+      mode === 1 ? '返回编辑器相机' : '操控相机',
+    );
     for (const button of [view, pilot])
-      assert.equal(await button.getAttribute('aria-label'), await button.getAttribute('title'));
+      assert.equal(
+        await button.getAttribute('aria-label'),
+        await button.getAttribute('data-tooltip'),
+      );
     const labels = await inspector
       .getByRole('button')
       .evaluateAll((buttons) =>
@@ -154,7 +177,9 @@ test('actual camera cards toggle View and Pilot back to the editor and stay sync
   await view.click();
   await checkMode(0);
   await view.hover();
-  await card.screenshot({ path: '../output/electron/verification/camera-card-view-toggle-light.png' });
+  await card.screenshot({
+    path: '../output/electron/verification/camera-card-view-toggle-light.png',
+  });
   await inspector.getByRole('button', { name: '返回编辑器', exact: true }).click();
   await checkMode(-1);
   await pilot.focus();

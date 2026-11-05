@@ -5,30 +5,55 @@ import { useControlPopover } from './CustomControls';
 export function AppMenu({
   name,
   onClose,
+  anchor,
+  point,
+  onNavigate,
   children,
 }: {
   name: string;
   onClose: () => void;
+  anchor?: HTMLElement | null;
+  point?: { x: number; y: number };
+  onNavigate?: (direction: number) => void;
   children: ReactNode;
 }) {
   const popup = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement | null>(
-    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    anchor ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null),
   );
-  useControlPopover(trigger, popup, true, onClose);
+  useControlPopover(trigger, popup, true, onClose, point);
   useLayoutEffect(() => {
     popup.current
       ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
       ?.focus({ preventScroll: true });
   }, []);
+  useLayoutEffect(() => {
+    if (!point) return;
+    // Electron on Linux emits contextmenu before pointerup; auto popovers would
+    // light-dismiss the new menu on that same right-button release.
+    const dismiss = (event: PointerEvent) => {
+      if (!popup.current?.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener('pointerdown', dismiss);
+    window.addEventListener('blur', onClose);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      window.removeEventListener('blur', onClose);
+    };
+  }, [point]);
   return (
     <div
       ref={popup}
-      popover="auto"
+      popover={point ? 'manual' : 'auto'}
       className={`menu menu-${name.toLowerCase()}`}
       role="menu"
       onKeyDown={(event) => {
         event.stopPropagation();
+        if (onNavigate && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+          event.preventDefault();
+          onNavigate(event.key === 'ArrowLeft' ? -1 : 1);
+          return;
+        }
         const items = [
           ...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
         ];

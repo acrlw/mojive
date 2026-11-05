@@ -1,0 +1,39 @@
+.mojive-tooltip[popover] {
+  --hint-inset: 6px;
+  --hint-key-radius: 4px;
+  --hint-line-height: max(24px, calc(var(--body-font-size, 14px) * 1.4));
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted-color);
+  background: var(--popup-color, var(--floating-color));
+  box-shadow:
+    0 4px 12px var(--ui-shadow),
+    inset 0 0 0 1px var(--popup-edge);
+  font-size: var(--body-font-size, 14px);
+  line-height: 1.4;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.mojive-tooltip[popover]:popover-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mojive-tooltip[popover].has-shortcut {
+  padding: var(--hint-inset);
+  border-radius: calc(var(--hint-key-radius) + var(--hint-inset));
+  line-height: var(--hint-line-height);
+}
+.mojive-tooltip.has-shortcut .input-chord kbd {
+  border-radius: var(--hint-key-radius);
+  height: var(--hint-line-height);
+}
+.mojive-tooltip > span:first-child {
+  max-width: 260px;
+}

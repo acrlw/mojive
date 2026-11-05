@@ -79,9 +79,8 @@ narrow-view scrolling.
 The trackball fill uses the native complete 64-segment disk. Its readout preserves
 `dragging.py`'s two signed screen-axis angles on one line; it is not an Euler XYZ
 readout. Canvas numeric surfaces and ordinary DOM popovers use the current shared
-circular UI corner policy, including readouts, precise inputs, and the joint
-chooser. UI rectangles use CSS border-radius or Path2D.roundRect, without Figma
-clip masks. Segments still divide one zero-padding, zero-gap frame and keep square
+G2 cubic UI corner policy, including readouts, precise inputs, and the joint
+chooser. Canvas surfaces use the same path generator as DOM surface paint. Segments still divide one zero-padding, zero-gap frame and keep square
 internal corners. World-space gizmo silhouettes and native G3 arrow/ring geometry
 retain their independently specified curves.
 

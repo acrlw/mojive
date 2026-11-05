@@ -17,13 +17,16 @@ export const jointIcon = (type: string) =>
         : 'joint-hinge';
 export const jointTypeLabel = (type: string) =>
   t(
-    type === 'prismatic'
-      ? 'Slide joint'
-      : type === 'ball'
-        ? 'Ball joint'
-        : type === 'free'
-          ? 'Free joint'
-          : 'Hinge joint',
+    (
+      {
+        prismatic: 'Slide joint',
+        ball: 'Ball joint',
+        free: 'Free joint',
+        fixed: 'Fixed joint',
+        continuous: 'Continuous joint',
+        revolute: 'Hinge joint',
+      } as Record<string, string>
+    )[type] ?? type,
   );
 export function jointContext(joint: Joint) {
   if (joint.type === 'ball' || joint.type === 'free')
@@ -42,7 +45,7 @@ type JointEditorProps = {
   onBegin: () => void;
   onCommit: () => void;
   onChange: () => void;
-  controlRadius?: number;
+  showScalarLabel?: boolean;
 };
 
 /** One pointer/key owner, including outside release and Escape at a limit. */
@@ -106,7 +109,7 @@ function JointRail({
       className={`joint-rail ${initial !== null ? 'held' : ''} ${bounded ? 'bounded' : 'unbounded'}`}
       role="slider"
       tabIndex={joint.mimic ? -1 : 0}
-      aria-label={`${joint.name} slider`}
+      aria-label={t('{{name}} slider', { name: joint.name })}
       aria-disabled={!!joint.mimic}
       aria-valuemin={bounded ? lo : undefined}
       aria-valuemax={bounded ? hi : undefined}
@@ -170,6 +173,7 @@ function JointRail({
       }}
     >
       <div className="joint-rail-track">
+        <span className="joint-rail-background" aria-hidden="true" />
         <span className="joint-rail-fill" style={{ width: `calc(${current * 100}% + 4px)` }} />
         <span className="joint-rail-thumb" style={{ left: `${current * 100}%` }} />
       </div>
@@ -183,7 +187,7 @@ export function JointEditor({
   onBegin,
   onCommit,
   onChange,
-  controlRadius = 4,
+  showScalarLabel = false,
 }: JointEditorProps) {
   const displayedRotation = useRef(new THREE.Vector3());
   const displayedJoint = useRef(j.id);
@@ -218,7 +222,6 @@ export function JointEditor({
       <div className="joint-pose-fields">
         {j.type === 'free' && (
           <VectorFields
-            controlRadius={controlRadius}
             label="Position"
             values={pose.position.toArray()}
             unit="m"
@@ -233,7 +236,6 @@ export function JointEditor({
           />
         )}
         <VectorFields
-          controlRadius={controlRadius}
           label="Rotation"
           values={angles}
           unit="°"
@@ -262,10 +264,10 @@ export function JointEditor({
     setJoint(doc, j.id, value);
     onChange();
   };
-  return (
+  const fields = (
     <div
       className={`joint-scalar-fields ${j.mimic ? 'mimic' : ''} ${j.type === 'continuous' ? 'unbounded' : ''}`}
-      title={j.mimic ? `${t('Mimic')}: ${j.mimic.joint}` : undefined}
+      data-tooltip={j.mimic ? `${t('Mimic')}: ${j.mimic.joint}` : undefined}
     >
       {j.type !== 'continuous' && (
         <JointRail joint={j} onBegin={onBegin} onCommit={onCommit} onChange={update} />
@@ -282,6 +284,14 @@ export function JointEditor({
         onCommit={onCommit}
         onChange={(value) => update(slide ? value : THREE.MathUtils.degToRad(value))}
       />
+    </div>
+  );
+  if (!showScalarLabel) return fields;
+  const caption = t(slide ? 'Joint position' : 'Joint angle');
+  return (
+    <div className="property-row joint-value-property" role="group" aria-label={caption}>
+      <span>{caption}</span>
+      {fields}
     </div>
   );
 }

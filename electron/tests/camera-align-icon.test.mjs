@@ -251,28 +251,39 @@ test('actual camera Inspector and camera menu use the new alignment glyph in res
       }, appearance);
       await page.goto(base);
       await page.getByRole('treeitem').first().waitFor();
-      await page.locator('.activity-rail').getByTitle('Cameras', { exact: true }).click();
+      await page
+        .locator('.activity-rail')
+        .getByRole('button', { name: 'Cameras', exact: true })
+        .click();
       const card = page.locator('.camera-entry').first();
       await card.locator('.camera-entry-name').click();
-      const align = page.locator('.camera-properties').getByTitle('Align to view', { exact: true });
+      const align = page
+        .locator('.camera-properties')
+        .getByRole('button', { name: 'Align to view', exact: true });
       await align.waitFor();
       assert.equal(await align.locator('[data-icon="camera-align"]').count(), 1);
       assert.equal(await align.locator('[data-icon="reset"]').count(), 0);
       await page
         .locator('.camera-properties .section')
         .first()
-        .screenshot({ path: `../output/electron/verification/camera-align-inspector-${appearance}-rest.png` });
+        .screenshot({
+          path: `../output/electron/verification/camera-align-inspector-${appearance}-rest.png`,
+        });
       await align.hover();
       await page
         .locator('.camera-properties .section')
         .first()
-        .screenshot({ path: `../output/electron/verification/camera-align-inspector-${appearance}-hover.png` });
+        .screenshot({
+          path: `../output/electron/verification/camera-align-inspector-${appearance}-hover.png`,
+        });
       await card.getByRole('button', { name: 'More camera actions', exact: true }).click();
       const menu = page.getByRole('menu', { name: /More camera actions/ }),
         menuAlign = menu.getByRole('menuitem', { name: 'Align to view', exact: true });
       assert.equal(await menuAlign.locator('[data-icon="camera-align"]').count(), 1);
       await menuAlign.hover();
-      await menu.screenshot({ path: `../output/electron/verification/camera-align-menu-${appearance}-hover.png` });
+      await menu.screenshot({
+        path: `../output/electron/verification/camera-align-menu-${appearance}-hover.png`,
+      });
       assert.deepEqual(errors, []);
     } finally {
       await page.close();

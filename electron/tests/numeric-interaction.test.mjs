@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import test, { before, after, beforeEach } from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -16,14 +17,16 @@ const state = () =>
     textOwner: document.activeElement instanceof HTMLInputElement,
     compoundOwner: document.activeElement?.classList.contains('number-field') ?? false,
   }));
-const paint = () =>
-  owner().evaluate((el) => ({
-    background: getComputedStyle(el).backgroundColor,
-    shadow: getComputedStyle(el).boxShadow,
-    outline: getComputedStyle(el).outlineStyle,
-    cursor: getComputedStyle(el.querySelector('input')).cursor,
+const paint = async () => {
+  await settlePaint(page);
+  return owner().evaluate((el) => ({
+    background: window.paintStyle(el).backgroundColor,
+    shadow: window.paintStyle(el).boxShadow,
+    outline: window.paintStyle(el).outlineStyle,
+    cursor: window.paintStyle(el.querySelector('input')).cursor,
     editing: el.classList.contains('editing'),
   }));
+};
 async function point() {
   const box = await field().boundingBox();
   return { x: box.x + 28, y: box.y + box.height / 2 };
@@ -48,6 +51,8 @@ before(async () => {
   base = `http://127.0.0.1:${server.httpServer.address().port}`;
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1100, height: 820 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(5000);
   page.on('pageerror', (error) => errors.push(error.message));
   await mkdir('../output/electron/verification', { recursive: true });
@@ -142,7 +147,9 @@ test('rest, hover and held paint differ immediately before any movement in both 
     await page.getByRole('button', { name: 'Finish', exact: true }).click();
     await page.mouse.move(800, 650);
     const rest = await paint();
-    await owner().screenshot({ path: `../output/electron/verification/numeric-${appearance}-rest.png` });
+    await owner().screenshot({
+      path: `../output/electron/verification/numeric-${appearance}-rest.png`,
+    });
     const p = await point();
     await page.mouse.move(p.x, p.y);
     const hover = await paint();
@@ -151,7 +158,9 @@ test('rest, hover and held paint differ immediately before any movement in both 
       rest.background,
       `${appearance}: hover visibly differs from rest`,
     );
-    await owner().screenshot({ path: `../output/electron/verification/numeric-${appearance}-hover.png` });
+    await owner().screenshot({
+      path: `../output/electron/verification/numeric-${appearance}-hover.png`,
+    });
     await page.mouse.down();
     const held = await paint();
     assert.notEqual(
@@ -167,7 +176,9 @@ test('rest, hover and held paint differ immediately before any movement in both 
     );
     assert.equal((await state()).value, authored);
     assert.deepEqual((await state()).events, [], 'Press alone starts no undo transaction');
-    await owner().screenshot({ path: `../output/electron/verification/numeric-${appearance}-held.png` });
+    await owner().screenshot({
+      path: `../output/electron/verification/numeric-${appearance}-held.png`,
+    });
     await page.mouse.up();
     const released = await paint();
     assert.equal(released.background, hover.background);
@@ -175,7 +186,10 @@ test('rest, hover and held paint differ immediately before any movement in both 
     assert.deepEqual((await state()).events, []);
     evidence.push({ appearance, rest, hover, held, released });
   }
-  await writeFile('../output/electron/verification/numeric-interaction-paint.json', JSON.stringify(evidence, null, 2));
+  await writeFile(
+    '../output/electron/verification/numeric-interaction-paint.json',
+    JSON.stringify(evidence, null, 2),
+  );
 });
 
 test('Escape during a held scrub restores one transaction and permits the next gesture', async () => {

@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Input icon verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { Icon } from '/src/components.tsx';
+      import { applySettings, DEFAULT_SETTINGS } from '/src/settings.tsx';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      const options = new URLSearchParams(location.search);
+      applySettings({ ...DEFAULT_SETTINGS, appearance: options.get('theme') || 'light' });
+      const scale = Number(options.get('scale') || 1);
+      createRoot(document.getElementById('root')).render(
+        React.createElement(
+          'main',
+          {
+            className: 'mouse-icon-gallery',
+            style: {
+              display: 'grid',
+              gridTemplateColumns: 'repeat(7, max-content)',
+              gap: 24,
+              padding: 24,
+              width: 'max-content',
+              background: 'var(--floating-color)',
+              color: 'var(--text-color)',
+              zoom: scale,
+            },
+          },
+          ...['left', 'right', 'wheel'].flatMap((button) =>
+            [14, 18, 22, 24, 28, 56, 112].map((size) =>
+              React.createElement(
+                'div',
+                {
+                  key: `${button}-${size}`,
+                  style: { display: 'flex', gap: 8, flexDirection: 'column', alignItems: 'center' },
+                },
+                React.createElement(Icon, { name: `status-mouse-${button}`, size }),
+                React.createElement('span', { style: { fontSize: 12 } }, `${size}px`),
+              ),
+            ),
+          ),
+        ),
+      );
+    </script>
+  </body>
+</html>

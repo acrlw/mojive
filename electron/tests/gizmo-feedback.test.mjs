@@ -149,10 +149,7 @@ for (const kind of ['move', 'snap', 'rotate', 'edge'])
     );
   });
 test('translation connector preserves production shader equations verbatim', async () => {
-  const original = await readFile(
-    '../python/render/opengl/shaders/debug_drag_link.frag',
-    'utf8',
-  );
+  const original = await readFile('../python/render/opengl/shaders/debug_drag_link.frag', 'utf8');
   const port = await page.evaluate(
     async () => (await import('/src/viewport/drag-link-shader.ts')).dragLinkFragment,
   );

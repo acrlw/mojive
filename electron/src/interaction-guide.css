@@ -1,0 +1,42 @@
+.guide-grid.interaction-guide {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.interaction-guide > .guide-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 36%) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 28px;
+  font-size: var(--body-font-size, 14px);
+  line-height: 1.4;
+}
+.interaction-guide .guide-inputs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.interaction-guide .guide-action,
+.interaction-guide .guide-note {
+  color: var(--muted-color);
+}
+.interaction-guide .guide-gesture {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+@container (max-width: 380px) {
+  .interaction-guide > .guide-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
+.interaction-guide .input-mouse {
+  color: var(--text-color);
+}

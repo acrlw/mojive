@@ -21,6 +21,10 @@ const wait = () => page.waitForTimeout(150);
 async function action(id) {
   await app.evaluate(({ Menu, BrowserWindow }, id) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+    if (!item && process.platform !== 'darwin') {
+      BrowserWindow.getAllWindows()[0].webContents.send('mojive:menu-action', id);
+      return;
+    }
     if (!item) throw Error('Missing menu ' + id);
     if (!item.enabled) throw Error('Disabled menu ' + id);
     item.click(item, BrowserWindow.getAllWindows()[0], {});
@@ -28,12 +32,22 @@ async function action(id) {
   await wait();
 }
 async function check(name, fn) {
-  await fn();
+  let timer;
+  try {
+    await Promise.race([
+      fn(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Desktop check timed out: ${name}`)), 60000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   passed.push(name);
   console.log('✓ ' + name);
 }
 async function capture(name) {
-  await page.screenshot({ path: path.join(out, name + '.png') });
+  await page.screenshot({ path: path.join(out, name + '.png'), timeout: 15000 });
 }
 async function typeValue(label, value) {
   const input = page.getByLabel(label, { exact: true });
@@ -41,7 +55,7 @@ async function typeValue(label, value) {
   await input.press('Enter');
 }
 async function selectNode(name) {
-  const button = page.locator('.panel-header').getByTitle('Search', { exact: true });
+  const button = page.locator('.panel-header').getByRole('button', { name: 'Search', exact: true });
   if ((await page.locator('.panel-search input').count()) === 0) await button.click();
   await page.locator('.panel-search input').fill(name);
   const row = page
@@ -70,52 +84,182 @@ try {
   await page.waitForSelector('[role=treeitem]');
   await page.evaluate(() => document.fonts.ready);
   await wait();
+  await check('Mojive G2 smoothing retains authored UI radii', async () => {
+    await page.waitForFunction(
+      () => document.querySelector('.tool-palette')?.dataset.smoothSurface,
+    );
+    const profile = await page.evaluate(() => {
+      const palette = document.querySelector('.tool-palette');
+      return {
+        radii: JSON.parse(palette.dataset.smoothRadii),
+        amount: Number(palette.dataset.smoothAmount),
+        paint: palette.style.getPropertyValue('--smooth-paint'),
+      };
+    });
+    assert.deepEqual(profile.radii, [8, 8, 8, 8]);
+    assert.equal(profile.amount, 0.6);
+    assert.ok(profile.paint.includes('svg'));
+  });
   await check(
-    'Chinese workspace, native macOS menu, embedded fonts and no application logo',
+    'Chinese workspace, platform menu, embedded fonts and no application logo',
     async () => {
       assert.equal(await page.locator('html').getAttribute('lang'), 'zh-CN');
-      assert.equal(await page.locator('.titlebar nav,.brand-mark').count(), 0);
+      assert.equal((await page.locator('.document-title').innerText()).trim(), '关节操作示例');
+      assert.equal(await page.locator('.timeline .lane-header').innerText(), '关节操作示例');
+      assert.equal(
+        await page.locator('.titlebar nav').count(),
+        process.platform === 'darwin' ? 0 : 1,
+      );
+      assert.equal(await page.locator('.brand-mark').count(), 0);
       const s = await page.evaluate(() => ({
         mi: document.fonts.check('14px MiSans'),
         mono: document.fonts.check('16px "JetBrains Mono"'),
         body: getComputedStyle(document.body).fontFamily,
         native: window.mojive.hasNativeMenu,
       }));
-      assert.ok(s.mi && s.mono && s.native);
-      const nativeAdd = await app.evaluate(({ Menu }) => {
-        const add = Menu.getApplicationMenu().items.find((item) =>
-          item.submenu?.items.some((child) => child.id === 'add.camera'),
-        );
-        return add.submenu.items.map(({ id, type, label }) => ({ id, type, label }));
-      });
-      assert.equal(nativeAdd[4].type, 'separator');
-      assert.equal(nativeAdd.find((item) => item.id === 'add.camera').label, '相机');
+      assert.ok(s.mi && s.mono);
+      assert.equal(s.native, process.platform === 'darwin');
+      if (s.native) {
+        const nativeAdd = await app.evaluate(({ Menu }) => {
+          const add = Menu.getApplicationMenu().items.find((item) =>
+            item.submenu?.items.some((child) => child.id === 'add.camera'),
+          );
+          return add.submenu.items.map(({ id, type, label }) => ({ id, type, label }));
+        });
+        assert.equal(nativeAdd[4].type, 'separator');
+        assert.equal(nativeAdd.find((item) => item.id === 'add.camera').label, '相机');
+      } else {
+        await page.locator('[data-menu=File]').click();
+        for (const name of ['Edit', 'Add', 'View', 'Help']) {
+          await page.locator(`[data-menu=${name}]`).hover();
+          await page.locator(`.menu-${name.toLowerCase()}:popover-open`).waitFor();
+        }
+        await page.locator('[data-menu=Edit]').hover();
+        assert.equal(await page.locator('.menu-edit kbd').first().innerText(), 'Ctrl+Z');
+        await capture('platform-menu');
+        await page.keyboard.press('Escape');
+        await page.locator('[data-menu=View]').hover();
+        assert.equal(await page.locator('.menu').count(), 0);
+      }
+      const row = page.locator('.tree-row').filter({ hasText: '01_revolute_y' }).first();
+      await row.click({ button: 'right' });
+      await page.locator('.menu-object:popover-open').waitFor();
+      await page.getByRole('menuitem', { name: '聚焦对象', exact: true }).waitFor();
+      await page.getByRole('menuitem', { name: '删除对象', exact: true }).waitFor();
+      await capture('scene-context');
+      const previousClipboard = await app.evaluate(({ clipboard }) => clipboard.readText());
+      await page.getByRole('menuitem', { name: '复制名称', exact: true }).click();
+      assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), '01_revolute_y');
+      await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), previousClipboard);
       assert.equal(await page.locator('.left-panel .panel-header > .icon').count(), 0);
-      assert.equal(await page.getByTitle('聚焦全部', { exact: true }).count(), 1);
+      assert.equal(await page.getByRole('button', { name: '聚焦全部', exact: true }).count(), 1);
       assert.equal(await page.locator('.viewport-topbar .geometry-selector').count(), 1);
       assert.match(s.body, /MiSans/);
       assert.equal((await page.locator('.type-all').innerText()).trim(), '45');
       assert.equal(await page.locator('.geometry-selector button').count(), 4);
     },
   );
-  await capture('workspace-revised-dark-zh');
   await check(
-    'Native Settings opens and locale/theme update without reloading the scene',
+    'Themed shortcut tooltip and graphical interaction guide use production inputs',
+    async () => {
+      const rotation = page.locator('.tool-palette button:has([data-icon=rotate])');
+      await rotation.hover();
+      await page.getByRole('tooltip').waitFor();
+      assert.equal(await page.getByRole('tooltip').locator('kbd').innerText(), 'R');
+      assert.equal(await rotation.getAttribute('title'), null);
+      await capture('desktop-tooltip-dark-zh');
+      await page.keyboard.press('Escape');
+      await action('help.interaction');
+      const guide = page.locator('.interaction-guide');
+      await guide.waitFor();
+      assert.equal(await guide.locator('.guide-row').count(), 13);
+      assert.equal(await guide.locator('[data-icon^=status-mouse-]').count(), 5);
+      if (process.platform !== 'darwin') assert.doesNotMatch(await guide.innerText(), /[⌘⌥]/);
+      await capture('desktop-input-guide-dark-zh');
+      await page.locator('.info-dialog .dialog-heading button').click();
+    },
+  );
+  await capture('workspace-revised-dark-zh');
+  await check('Settings opens and locale/theme update without reloading the scene', async () => {
+    await action('app.settings');
+    await page.locator('dialog[open]').waitFor();
+    await capture('settings-revised-zh');
+    await page.getByRole('combobox', { name: '语言', exact: true }).click();
+    await page.getByRole('option', { name: 'English', exact: true }).click();
+    await page.locator('dialog[open]').getByRole('button', { name: 'Close', exact: true }).click();
+    await action('theme.light');
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
+    assert.equal((await page.getByRole('treeitem').count()) > 0, true);
+    await capture('workspace-revised-light-en');
+    await action('theme.dark');
+  });
+  await check(
+    'Desktop binding capture records keys and mouse gestures with shared hints',
     async () => {
       await action('app.settings');
-      await page.locator('dialog[open]').waitFor();
-      await capture('settings-revised-zh');
-      await page.getByRole('combobox', { name: '语言', exact: true }).click();
-      await page.getByRole('option', { name: 'English', exact: true }).click();
-      await page
-        .locator('dialog[open]')
+      const dialog = page.locator('.settings-dialog');
+      await dialog.getByRole('button', { name: 'Interaction', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Scale tool', exact: true }).click();
+      await page.keyboard.press('b');
+      await dialog.getByRole('button', { name: 'Rotation tool', exact: true }).click();
+      await page.keyboard.press('b');
+      assert.equal(
+        await dialog.getByRole('button', { name: 'Scale tool', exact: true }).innerText(),
+        'R',
+      );
+      await dialog.screenshot({ path: path.join(out, 'desktop-input-bindings-dark.png') });
+      const orbit = dialog.getByRole('button', { name: 'Orbit 1', exact: true });
+      await orbit.click();
+      await page.keyboard.down('Alt');
+      await orbit.click({ button: 'left' });
+      await page.keyboard.up('Alt');
+      assert.equal(await orbit.locator('kbd').innerText(), 'Alt');
+      await dialog.screenshot({ path: path.join(out, 'desktop-mouse-bindings-dark.png') });
+      await dialog
+        .locator('.settings-header')
         .getByRole('button', { name: 'Close', exact: true })
         .click();
-      await action('theme.light');
-      assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
-      assert.equal((await page.getByRole('treeitem').count()) > 0, true);
-      await capture('workspace-revised-light-en');
-      await action('theme.dark');
+      await page.getByTestId('viewport-canvas').focus();
+      await page.keyboard.press('b');
+      assert.match(
+        await page.locator('.tool-palette button:has([data-icon=rotate])').getAttribute('class'),
+        /active/,
+      );
+      await action('app.settings');
+      await dialog.getByRole('button', { name: 'Interaction', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Reset shortcuts', exact: true }).click();
+      await dialog
+        .locator('.settings-header')
+        .getByRole('button', { name: 'Close', exact: true })
+        .click();
+    },
+  );
+  await check(
+    'Desktop fly keys move the camera without switching tools and stop on release',
+    async () => {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].showInactive());
+      await page.waitForFunction(() => !document.hidden);
+      const canvas = page.getByTestId('viewport-canvas');
+      await canvas.focus();
+      await page.waitForTimeout(150);
+      const tool = await page
+        .locator('.tool-palette button.active')
+        .first()
+        .getAttribute('aria-label');
+      const before = await canvas.screenshot();
+      await page.keyboard.down('w');
+      await page.waitForTimeout(160);
+      await page.keyboard.up('w');
+      await page.waitForTimeout(100);
+      const moved = await canvas.screenshot();
+      assert.notDeepEqual(moved, before);
+      assert.equal(
+        await page.locator('.tool-palette button.active').first().getAttribute('aria-label'),
+        tool,
+      );
+      await page.waitForTimeout(100);
+      assert.deepEqual(await canvas.screenshot(), moved);
+      await capture('desktop-fly-camera');
     },
   );
   await check('Three panel splitters resize, cancel and retain sizes after reload', async () => {
@@ -218,12 +362,14 @@ try {
         .locator('.geometry-selector')
         .getByRole('button', { name: 'Default', exact: true })
         .click();
-      await page.getByTitle('Snapping', { exact: true }).click();
+      await page.getByRole('button', { name: 'Snapping', exact: true }).click();
       assert.equal(
-        await page.getByTitle('Snapping', { exact: true }).getAttribute('aria-pressed'),
+        await page
+          .getByRole('button', { name: 'Snapping', exact: true })
+          .getAttribute('aria-pressed'),
         'true',
       );
-      await page.getByTitle('Projection', { exact: true }).click();
+      await page.getByRole('button', { name: 'Projection', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Orthographic', exact: true }).click();
       assert.match(await page.locator('.viewport-navigation').innerText(), /Orthographic/);
       await action('view.perspective');
@@ -233,7 +379,7 @@ try {
   await check(
     'Ball and free joints expose three/six pose coordinates and update kinematically',
     async () => {
-      await page.getByTitle('Joints', { exact: true }).click();
+      await page.getByRole('button', { name: 'Joints', exact: true }).click();
       const ball = page
         .locator('.joint-entry')
         .filter({ has: page.locator('.entity-card-heading').filter({ hasText: '03_ball_xyz' }) });
@@ -256,11 +402,11 @@ try {
       await free.getByLabel('Position Z', { exact: true }).press('Enter');
       assert.equal(Number(await free.getByLabel('Position Z', { exact: true }).inputValue()), 0.25);
       await capture('joint-panel-revised');
-      await page.getByTitle('Scene', { exact: true }).click();
+      await page.getByRole('button', { name: 'Scene', exact: true }).click();
     },
   );
   await check(
-    'Scene catalog loads distinct scenes through native menus with unsaved replacement protection',
+    'Scene catalog loads distinct scenes through menu actions with unsaved replacement protection',
     async () => {
       await action('scene.atelier_arm');
       await page.getByRole('alertdialog', { name: 'Unsaved changes' }).waitFor();
@@ -272,7 +418,7 @@ try {
         document.querySelector('.document-title')?.textContent?.includes('Atelier'),
       );
       await selectNode('elbow');
-      await page.getByTitle('Joint (J)', { exact: true }).click();
+      await page.getByRole('button', { name: 'Joint (J)', exact: true }).click();
       await capture('arm-revised');
     },
   );
@@ -325,16 +471,68 @@ try {
       }
       await page.getByRole('button', { name: 'Material 1 Color', exact: true }).click();
       assert.equal(await page.locator('input[type=color]').count(), 0);
+      const corners = await page.evaluate(() => {
+        const radius = (element) =>
+          element.dataset.smoothRadii
+            ? JSON.parse(element.dataset.smoothRadii)[0]
+            : parseFloat(getComputedStyle(element).borderTopLeftRadius);
+        const trigger = document.querySelector('.inspector .color-trigger');
+        const shell = document.querySelector('.color-picker-surface');
+        const button = shell.querySelector('.color-comparison-item');
+        return [
+          [trigger, trigger.querySelector('.color-swatch')],
+          [shell, button],
+          [button, button.querySelector('.color-swatch')],
+        ].map(([outer, inner]) => {
+          const a = outer.getBoundingClientRect(),
+            b = inner.getBoundingClientRect();
+          const scale = a.width / parseFloat(getComputedStyle(outer).width);
+          return {
+            outer: radius(outer),
+            inner: radius(inner),
+            left: (b.left - a.left) / scale,
+            top: (b.top - a.top) / scale,
+          };
+        });
+      });
+      assert.deepEqual(
+        corners.map(({ outer, inner }) => [outer, inner]),
+        [
+          [8, 4],
+          [16, 8],
+          [8, 4],
+        ],
+      );
+      for (const corner of corners) {
+        assert.ok(Math.abs(corner.left - corner.top) < 0.1);
+        assert.ok(Math.abs(corner.outer - corner.left - corner.inner) < 0.1);
+      }
       await page.getByRole('textbox', { name: 'Hex color', exact: true }).fill('#336699');
       await page.getByRole('textbox', { name: 'Hex color', exact: true }).press('Enter');
+      await page.getByRole('button', { name: 'Restore original color', exact: true }).hover();
       await capture('material-picker-revised');
+      await page.getByRole('button', { name: 'RGB 255', exact: true }).click();
+      assert.deepEqual(
+        (await page.locator('.color-channel-fields .axis').allTextContents()).map((text) =>
+          text.trim(),
+        ),
+        ['R', 'G', 'B'],
+      );
+      await typeValue('R', 128);
+      assert.equal(await page.getByRole('textbox', { name: 'R', exact: true }).inputValue(), '128');
+      await capture('material-rgb-revised');
+      await page.getByRole('button', { name: 'RGB 1', exact: true }).click();
+      await capture('material-rgb1-revised');
       await page.getByRole('button', { name: 'Cancel', exact: true }).click();
       await page
         .locator('.inspector-tabs')
         .getByRole('button', { name: 'Properties', exact: true })
         .click();
       await right.dblclick();
-      await page.locator('.viewport-navigation').getByTitle('Layers', { exact: true }).click();
+      await page
+        .locator('.viewport-navigation')
+        .getByRole('button', { name: 'Layers', exact: true })
+        .click();
       const cube = page.getByRole('switch', { name: 'View cube', exact: true });
       await cube.click();
       assert.equal(await cube.getAttribute('aria-checked'), 'false');
@@ -343,38 +541,49 @@ try {
       await cube.press('Escape');
       const metrics = await page.locator('.render-stats').innerText();
       assert.match(metrics, /FPS/);
-      assert.match(metrics, /ms/);
+      assert.doesNotMatch(metrics, /ms/);
+      assert.equal(
+        await page
+          .locator('footer .stat-calls, footer .stat-triangles, footer button:has([data-icon=key])')
+          .count(),
+        0,
+      );
+      assert.equal(await page.locator('.activity-rail button:has([data-icon=key])').count(), 1);
     },
   );
   await check(
     'Three timeline lanes preserve named keys, snapshots and complete recorded frames',
     async () => {
       await typeValue('Current time', 0);
-      await page.getByTitle('Capture scene pose at playhead (K)', { exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Capture scene pose at playhead (K)', exact: true })
+        .click();
       await typeValue('Current time', 2);
       await typeValue('Position X', 3.25);
-      await page.getByTitle('Capture scene pose at playhead (K)', { exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Capture scene pose at playhead (K)', exact: true })
+        .click();
       await typeValue('Current time', 1);
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 3.25);
       await page.locator('.keyframe').first().dblclick();
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 1.25);
       await typeValue('Position X', 2.25);
-      await page.getByTitle('Capture snapshot', { exact: true }).click();
+      await page.getByRole('button', { name: 'Capture snapshot', exact: true }).click();
       await typeValue('Position X', 4.25);
       await page.locator('.snapshot-marker').first().dblclick();
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 2.25);
-      await page.getByTitle('Record scene frames', { exact: true }).click();
+      await page.getByRole('button', { name: 'Record scene frames', exact: true }).click();
       await page.waitForTimeout(80);
       await typeValue('Position X', 3.25);
       await page.waitForTimeout(120);
-      await page.getByTitle('Stop recording', { exact: true }).click();
-      await page.getByTitle('Go to start', { exact: true }).click();
+      await page.getByRole('button', { name: 'Stop recording', exact: true }).click();
+      await page.getByRole('button', { name: 'Go to start', exact: true }).click();
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 2.25);
-      await page.getByTitle('Go to end', { exact: true }).click();
+      await page.getByRole('button', { name: 'Go to end', exact: true }).click();
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 3.25);
-      await page.getByTitle('Play (Space)', { exact: true }).click();
+      await page.getByRole('button', { name: 'Play (Space)', exact: true }).click();
       await page.waitForTimeout(120);
-      await page.getByTitle('Pause (Space)', { exact: true }).click();
+      await page.getByRole('button', { name: 'Pause (Space)', exact: true }).click();
       assert.ok(Number(await page.getByLabel('Current time', { exact: true }).inputValue()) > 0);
       assert.equal(await page.locator('[data-lane]').count(), 3);
       assert.equal(await page.locator('.keyframe').count(), 2);
@@ -421,7 +630,7 @@ try {
         .locator('.bottom-tabs')
         .getByRole('button', { name: /^Output/ })
         .click();
-      await page.getByTitle('Search output', { exact: true }).click();
+      await page.getByRole('button', { name: 'Search output', exact: true }).click();
       await page.locator('.output-search input').fill('Loaded');
       assert.ok((await page.locator('.output-message').count()) > 0);
       assert.ok(
@@ -449,9 +658,9 @@ try {
       await page.getByRole('textbox', { name: 'Location', exact: true }).fill(directory);
       await page.getByRole('button', { name: 'Select folder', exact: true }).click();
       await page.getByRole('dialog').waitFor({ state: 'hidden' });
-      await page.getByTitle('Project files', { exact: true }).click();
+      await page.getByRole('button', { name: 'Project files', exact: true }).click();
       assert.equal(
-        await page.locator('.left-content .group-eyebrow').getAttribute('title'),
+        await page.locator('.left-content .group-eyebrow').getAttribute('data-tooltip'),
         directory,
       );
       assert.ok((await page.locator('.file-row').count()) > 5);
@@ -533,10 +742,13 @@ try {
   await check(
     'Camera preview, projection choices and viewport return work in the native Electron window',
     async () => {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].showInactive());
       const inspector = page.locator('.inspector');
       await inspector.getByRole('switch', { name: 'Preview', exact: true }).click();
       await page.locator('.camera-preview-image').waitFor();
-      await page.waitForTimeout(400);
+      await page.waitForFunction(
+        () => Number(document.querySelector('.camera-preview-image')?.dataset.renderCount) > 0,
+      );
       const preview = await page.locator('.camera-preview').evaluate((panel) => {
         const image = panel.querySelector('canvas');
         return {
@@ -647,10 +859,11 @@ try {
           radius: getComputedStyle(button).borderRadius,
         };
       });
-      assert.deepEqual(clear, {
+      const { right: endGap, ...clearFrame } = clear;
+      assert.ok(Math.abs(endGap - 4.24723) < 0.03, JSON.stringify(clear));
+      assert.deepEqual(clearFrame, {
         top: 4,
         bottom: 4,
-        right: 4,
         width: 20,
         height: 20,
         radius: '50%',
@@ -689,7 +902,7 @@ try {
     JSON.stringify({ passed, errors }, null, 2),
   );
 } catch (error) {
-  if (page) await capture('workspace-revised-failure');
+  if (page) await capture('workspace-revised-failure').catch(() => {});
   await writeFile(
     path.join(out, 'workspace-acceptance.json'),
     JSON.stringify({ passed, errors, failure: String(error) }, null, 2),

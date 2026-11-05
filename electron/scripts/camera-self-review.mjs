@@ -70,8 +70,11 @@ try {
   await page.locator('.tree-row.type-camera').first().click();
   report.camera = (await page.locator('.inspector-title').count())
     ? await page.locator('.inspector-title').innerText()
-    : await page.locator('.tree-row.type-camera.selected').getAttribute('title');
-  await page.locator('.tool-palette').getByTitle('Rotation (E)', { exact: true }).click();
+    : await page.locator('.tree-row.type-camera.selected').getAttribute('data-tooltip');
+  await page
+    .locator('.tool-palette')
+    .getByRole('button', { name: 'Rotation (R)', exact: true })
+    .click();
   await action('view.focusSelection');
   await settle();
   const inspector = page.locator('.inspector'),
@@ -90,7 +93,7 @@ try {
     assert.equal(
       await page
         .locator('.tool-palette')
-        .getByTitle('Rotation (E)', { exact: true })
+        .getByRole('button', { name: 'Rotation (R)', exact: true })
         .evaluate((node) => node.classList.contains('active')),
       true,
     );
@@ -125,7 +128,7 @@ try {
           colors: colors.size,
           renderCount: Number(preview.dataset.renderCount),
         },
-        selected: document.querySelector('.tree-row.selected')?.getAttribute('title'),
+        selected: document.querySelector('.tree-row.selected')?.getAttribute('data-tooltip'),
         transform: [
           ...document.querySelectorAll('.inspector-content > .section:first-child input'),
         ].map((input) => input.value),

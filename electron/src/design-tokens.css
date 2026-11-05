@@ -1,8 +1,23 @@
 /* Generated from python/design/resources/design-spec.json. */
-@font-face{font-family:MiSans;src:url('/fonts/MiSans-Regular.ttf') format('truetype');font-weight:400;font-display:swap}
-@font-face{font-family:MiSans;src:url('/fonts/MiSans-Semibold.ttf') format('truetype');font-weight:600;font-display:swap}
-@font-face{font-family:'JetBrains Mono';src:url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
-:root{
+@font-face {
+  font-family: MiSans;
+  src: url('/fonts/MiSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: MiSans;
+  src: url('/fonts/MiSans-Semibold.ttf') format('truetype');
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+:root {
   --body-font-size: 14px;
   --title-font-size: 16px;
   --mono-font-size: 16px;
@@ -38,21 +53,21 @@
   --icon-inline-slot: 28px;
   --icon-status-canvas: 12px;
   --icon-status-slot: 20px;
-  --text-color: #E6E8EB;
-  --muted-color: #A9AFB7;
-  --dim-color: #8E98A5;
-  --sage-color: #9CBF8D;
-  --amber-color: #E8B04F;
-  --panel-color: #1E2125;
-  --input-color: #2B2F34;
+  --text-color: #e6e8eb;
+  --muted-color: #a9afb7;
+  --dim-color: #8e98a5;
+  --sage-color: #9cbf8d;
+  --amber-color: #e8b04f;
+  --panel-color: #1e2125;
+  --input-color: #2b2f34;
   --border-color: #ffffff0d;
-  --floating-color: #252A2F;
-  --popup-color: #2D353D;
+  --floating-color: #252a2f;
+  --popup-color: #2d353d;
   --application-height: 36px;
   --sidebar-width: 48px;
   --scene-width: 252px;
   --inspector-width: 320px;
   --bottom-height: 268px;
-  --font-ui:'MiSans',sans-serif;
-  --font-mono:'JetBrains Mono',monospace;
+  --font-ui: 'MiSans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 }

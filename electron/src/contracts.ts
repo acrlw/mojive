@@ -65,6 +65,8 @@ export interface OpenResource {
   files: ProjectFile[];
 }
 export interface NativeMenuState {
+  focusKey?: string | null;
+  focusAllKey?: string | null;
   locale: 'en' | 'zh-CN';
   theme: 'dark' | 'light';
   canUndo: boolean;

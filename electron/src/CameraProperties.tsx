@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { SceneDocument, SceneNode } from './contracts';
-import { Button, Numeric, Section, Select, VectorFields } from './components';
+import { Segmented, Button, Numeric, Section, Select, VectorFields } from './components';
 import { readCameraView, updateCameraView, type CameraPatch } from './scene-camera';
 import { t, useLanguage } from './i18n';
 import './camera-panel.css';
@@ -117,7 +117,11 @@ export function CameraProperties({
       <Section title="Projection">
         <div className="camera-property-row">
           <label>{t('Projection type')}</label>
-          <div className="camera-projection" role="radiogroup" aria-label={t('Camera projection')}>
+          <Segmented
+            className="camera-projection"
+            role="radiogroup"
+            aria-label={t('Camera projection')}
+          >
             {(['perspective', 'orthographic'] as const).map((projection) => (
               <Button
                 key={projection}
@@ -159,7 +163,7 @@ export function CameraProperties({
                 </span>
               </Button>
             ))}
-          </div>
+          </Segmented>
         </div>
         {view.projection === 'perspective' ? (
           <>

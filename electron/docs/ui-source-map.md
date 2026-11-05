@@ -27,9 +27,9 @@ The exact native dark/light role palettes are copied into `src/locales/themes.js
 System appearance follows `prefers-color-scheme` without changing geometry or typography.
 UI scale is applied by the owning shell; controls must not apply a second scale.
 
-Shared buttons and surfaces currently use ordinary CSS circular corners. Their resolved
-border radii preserve layout, padding, shadows, keyboard focus and native pointer ownership
-without resize observers or contour clip masks. Unknown icon names throw instead of silently using a
+Shared buttons and surfaces use the shared G2 cubic path generator through `smooth-corners.ts`.
+A shared resize observer updates SVG paint geometry while DOM owners retain layout, padding,
+keyboard focus and pointer ownership. Unknown icon names throw instead of silently using a
 cube glyph; each rendered icon exposes its semantic master in `data-icon`.
 
 The settings surface uses outer 16 / inset 12 / inner 4, 28-point controls and an independent
@@ -76,9 +76,10 @@ it requires a constrained desktop reveal API; arbitrary text is not treated as a
 
 ## Localization and verification
 
-`src/locales/zh.json` combines the complete native Chinese catalogs with explicit Electron
-captions in `electron-zh.json`. Regenerate catalog and palette copies with
-`python electron/scripts/sync-localization.py`. `t` is available to shared controls,
+`src/locales/zh.json` provides the imported Chinese catalog. The renderer merges explicit
+Electron captions from `electron-zh.json` at startup, so frontend wording changes apply directly.
+Refresh native catalog and palette copies with `python electron/scripts/sync-localization.py`.
+`t` is available to shared controls,
 and the language subscription rerenders settings and output immediately.
 
 `node --test tests/settings-output.test.mjs` runs real browser checks for sanitized persistence,
@@ -90,6 +91,12 @@ action remain within the viewport, and a wheel-driven history check verifies man
 suspends output following.
 
 ## Native shared controls
+
+`components.tsx::SearchField` owns every search frame, input, leading icon and clear button.
+Scene, Project files, Joints, Cameras, Output, Settings and file-dialog filtering share the
+same typography, focus contour, clear behavior and geometry. Their local CSS sets only
+placement or width. `settings-layout.test.mjs` compares computed styles across these consumers.
+
 
 `components.tsx` keeps the native drag-field ownership contract from
 `workspace/numeric_fields.py`: pointer capture for scrubbing, double-click/keyboard text entry,
@@ -108,21 +115,26 @@ neutral compound contour with no inner green rectangle.
 
 `ColorPicker.tsx` follows `workspace/color_editor.py`: Original/Current comparison,
 Copy/Paste, SV plane with 14-point hue/alpha bars, Hex/RGB255/RGB1 entry, original-color
-restore, and a single popup transaction with Cancel/Done or Escape. Its outer 12 / inset 8 / inner 4
+restore, and a single popup transaction with Cancel/Done or Escape. Its outer 16 / inset 8 / inner 8
 geometry is derived from actual padding. Explicit clipboard actions use the Electron
 preload bridge; the browser preview uses the browser clipboard API. The parser preserves
 the native hexadecimal, byte, normalized and CSS-style alpha grammar.
 
-The existing `Squircle` surface and `useSquircleSurfaces` names remain API-compatible, but
-the current policy uses ordinary CSS border radii and no global corner observer. Canvas
-readout backgrounds also use circular round rectangles. True circles and capsules retain
-round caps. Spatial gizmo G3 geometry remains independently owned and unchanged.
+`Squircle` retains authored radii and the shared surface API. `smooth-corners.ts` paints G2 cubic
+contours independently of content and input, including rounded native input backgrounds.
+It derives nested contours by normal offsets with shared footprint budgets from actual insets.
+Focus outlines preserve their signed CSS offset; borders and inset shadows keep separate
+centerlines on the same reference contour. True circles retain native geometry.
+Capsules share the path entry point using the native G3 end profile; circular thumbs remain
+circles. `scrollbar-paint.ts` uses fixed capsule end caps for native scrollbar thumbs; only
+the straight middle changes length. Canvas readouts share the same generator. Spatial gizmo
+geometry remains independent.
 
 `tests/shared-controls.test.mjs` verifies real pointer scrubbing, precise entry, invalid
 entry rollback, captured-drag cancellation, axis reset, keyboard choice/switch controls,
 color preview and one-transaction cancellation/commit. `tests/color-picker-desktop.test.mjs`
 verifies Copy/Paste through the real Electron preload/IPC route with an isolated clipboard
-sink, plus circular corners and uncut overflow. The settings browser test covers
+sink, plus continuous corners and uncut overflow. The settings browser test covers
 actual mouse focus and a custom choice popup inside the 200% modal. Reproduce screenshots
 with `node scripts/review-editor-panels.mjs`; inspect `shared-color-picker.png`,
 `shared-select.png`, `settings-search-mouse-focus.png` and the dark/light settings captures.
@@ -174,14 +186,14 @@ both themes, without writing a scene file; evidence is in `../output/electron/ve
 
 ## Shared interaction review
 
-| Failure pattern                                                  | Current invariant                                                                                                                 | Production evidence                                                                 |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Scrollbars remain visible or lose drag feedback.                 | One-second activity expiry, separate theme states and held protection; transparent track keeps native scrolling and hit geometry. | `tests/scrollbars.test.mjs`, `make scrollbar-review`                                |
-| Resizing a pane steals scrollbar drags.                          | Resize hit strips stay on the viewport side of the painted boundary.                                                              | Actual thumb drag and splitter/cancel checks at 100/125/200% scale                  |
-| A disclosure requires clicking a small arrow.                    | The complete joint heading is one keyboard-accessible toggle; independent edits do not collapse it.                               | `tests/joint-heading.test.mjs`                                                      |
-| Actuators diverge from joint cards or appear raised. | Joint and actuator panels share `EntityCard` geometry and state paint; embedded cards have no shadow or bottom edge. Transmission details retain full metadata without adding a fake drive control. | `make actuator-review`, `../output/electron/verification/actuator-cards-review.json` |
-| Empty text appears detached or duplicates the navigation glyph.  | Center captions and wrapped descriptions within symmetric insets; omit repeated panel illustrations.                              | `../output/electron/verification/empty-states.json`, `empty-material-zh.png`, `empty-actuators-zh.png` |
-| Opening a project loses the selected root or cannot be reversed. | Confirm the visible directory, lazy-load children and expose Close Project independently of scene state.                          | `make project-review`                                                               |
-| Recording stops at the initial ruler boundary. | Recording ends only on manual Stop; the displayed extent grows without changing pixel scale or the cursor. Undo preserves enough extent for the retained cursor and later captures. | `make timeline-review` |
-| A near-complete hinge range becomes a filled disk. | Preserve native indexed ribbon topology and its empty interior; only folded offset triangles invoke exterior repair. | `tests/gizmo-ribbon.test.mjs`, native arc-ribbon fixtures |
-| An active scene camera shows or picks its own transform handles. | View and Pilot yield both drawing and input for the selected active camera; other object handles and editor-camera restoration remain functional. | `make camera-review`, `make camera-self-review` |
+| Failure pattern                                                  | Current invariant                                                                                                                                                                                   | Production evidence                                                                                    |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Scrollbars remain visible or lose drag feedback.                 | One-second activity expiry, separate theme states and held protection; transparent track keeps native scrolling and hit geometry.                                                                   | `tests/scrollbars.test.mjs`, `make scrollbar-review`                                                   |
+| Resizing a pane steals scrollbar drags.                          | Resize hit strips stay on the viewport side of the painted boundary.                                                                                                                                | Actual thumb drag and splitter/cancel checks at 100/125/200% scale                                     |
+| A disclosure requires clicking a small arrow.                    | The complete joint heading is one keyboard-accessible toggle; independent edits do not collapse it.                                                                                                 | `tests/joint-heading.test.mjs`                                                                         |
+| Actuators diverge from joint cards or appear raised.             | Joint and actuator panels share `EntityCard` geometry and state paint; embedded cards have no shadow or bottom edge. Transmission details retain full metadata without adding a fake drive control. | `make actuator-review`, `../output/electron/verification/actuator-cards-review.json`                   |
+| Empty text appears detached or duplicates the navigation glyph.  | Center captions and wrapped descriptions within symmetric insets; omit repeated panel illustrations.                                                                                                | `../output/electron/verification/empty-states.json`, `empty-material-zh.png`, `empty-actuators-zh.png` |
+| Opening a project loses the selected root or cannot be reversed. | Confirm the visible directory, lazy-load children and expose Close Project independently of scene state.                                                                                            | `make project-review`                                                                                  |
+| Recording stops at the initial ruler boundary.                   | Recording ends only on manual Stop; the displayed extent grows without changing pixel scale or the cursor. Undo preserves enough extent for the retained cursor and later captures.                 | `make timeline-review`                                                                                 |
+| A near-complete hinge range becomes a filled disk.               | Preserve native indexed ribbon topology and its empty interior; only folded offset triangles invoke exterior repair.                                                                                | `tests/gizmo-ribbon.test.mjs`, native arc-ribbon fixtures                                              |
+| An active scene camera shows or picks its own transform handles. | View and Pilot yield both drawing and input for the selected active camera; other object handles and editor-camera restoration remain functional.                                                   | `make camera-review`, `make camera-self-review`                                                        |

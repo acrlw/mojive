@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -19,7 +20,10 @@ before(async () => {
 after(async () => {
   await browser?.close();
   await server?.close();
-  await writeFile('../output/electron/verification/inspector-spacing.json', JSON.stringify(evidence, null, 2));
+  await writeFile(
+    '../output/electron/verification/inspector-spacing.json',
+    JSON.stringify(evidence, null, 2),
+  );
 });
 
 async function resize(page, width, scale) {
@@ -67,7 +71,7 @@ async function properties(page, selector, scale) {
               vectors: [...control.querySelectorAll('.axis-field')].map((field) => {
                 const r = field.getBoundingClientRect(),
                   input = field.querySelector('input');
-                const style = getComputedStyle(input),
+                const style = window.paintStyle(input),
                   context = document.createElement('canvas').getContext('2d');
                 context.font = `${style.fontSize} ${style.fontFamily}`;
                 return {
@@ -87,6 +91,11 @@ async function properties(page, selector, scale) {
           });
           return {
             rows: metrics,
+            width: group.clientWidth,
+            labelColumn:
+              parseFloat(
+                getComputedStyle(group.closest('.inspector-content')).gridTemplateColumns,
+              ) || 0,
             layout: group.dataset.vectorLabels,
             fields: group.dataset.vectorFields,
             overflow: group.scrollWidth - group.clientWidth,
@@ -105,6 +114,8 @@ for (const scale of [1, 1.25, 2])
         const page = await browser.newPage({
           viewport: { width: Math.round(1700 * scale), height: Math.round(1050 * scale) },
         });
+        await page.addInitScript(installPaintStyle);
+        await page.evaluate(installPaintStyle);
         const errors = [];
         page.on('pageerror', (error) => errors.push(error.message));
         await page.addInitScript(
@@ -183,8 +194,21 @@ for (const scale of [1, 1.25, 2])
               );
             if (kind !== 'material') {
               const vector = groups.find((group) => group.layout);
-              assert.equal(vector.layout, width === 480 ? 'inline' : 'above');
-              assert.equal(vector.fields, width === 480 ? 'row' : 'stack');
+              const channels = vector.rows.find((row) => row.vectors.length === 3).vectors;
+              const fieldsWidth = channels.reduce(
+                (sum, field) => sum + field.budget + field.width - field.available,
+                8,
+              );
+              const labelWidth = Math.max(
+                vector.labelColumn,
+                ...groups.flatMap((group) => group.rows).map((row) => row.inkWidth),
+              );
+              assert.equal(
+                vector.layout,
+                vector.width >= labelWidth + 12 + fieldsWidth ? 'inline' : 'above',
+                JSON.stringify({ kind, width, labelWidth, fieldsWidth, vector }),
+              );
+              assert.equal(vector.fields, vector.width >= fieldsWidth ? 'row' : 'stack');
             } else assert.ok(groups.length > 0);
             evidence.push({ scale, language, appearance, width, kind, groups });
             if (scale === 1 || (scale === 2 && kind === 'camera')) {

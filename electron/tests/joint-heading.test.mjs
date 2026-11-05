@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -48,6 +49,8 @@ before(async () => {
   base = `http://127.0.0.1:${server.httpServer.address().port}`;
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 800, height: 1000 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(5000);
   await mkdir('../output/electron/verification', { recursive: true });
 });
@@ -164,7 +167,7 @@ test('whole-header hover and keyboard focus keep derived corners in dark/light a
     }, theme);
     await heading(ball).hover();
     const geometry = await heading(ball).evaluate((el) => {
-      const s = getComputedStyle(el),
+      const s = window.paintStyle(el),
         h = el.getBoundingClientRect(),
         card = el.closest('.joint-entry').getBoundingClientRect();
       return {
@@ -181,7 +184,9 @@ test('whole-header hover and keyboard focus keep derived corners in dark/light a
     assert.equal(geometry.left, 10);
     assert.equal(geometry.right, 10);
     assert.equal(geometry.height, 35);
-    await card(ball).screenshot({ path: `../output/electron/verification/joint-heading-${theme}-hover-125.png` });
+    await card(ball).screenshot({
+      path: `../output/electron/verification/joint-heading-${theme}-hover-125.png`,
+    });
     await heading(ball).focus();
     await page.keyboard.press('Space');
     await assertOpen(ball, theme === 'dark');

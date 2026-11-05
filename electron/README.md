@@ -42,8 +42,11 @@ The packaged application runs without Python, Vite, or a terminal.
 The joint example reproduces the maintained `assets/joint_gizmo.xml`: 45 entities, 19 geometries and
 9 joints, including compound and precision-limit cases. These are local kinematic edits.
 
-The left mouse button selects or orbits; right/middle drag pans; wheel zooms. `Q/W/E/R/J` select tools,
-`Shift` snaps transform drags, `Esc` cancels, `K` captures a pose, and `Space` controls playback.
+The left mouse button selects or orbits; right/middle drag pans; wheel zooms. In the focused
+viewport, `W/S` moves forward/back, `A/D` left/right and `Q/E` up/down. `V/G/R/J` selects the
+selection, position, rotation and joint tools; scale is available in the tool palette. `Shift`
+snaps transform drags, `Esc` cancels, `K` captures a pose, and `Space` controls playback.
+Settings > Interaction records keyboard and mouse bindings directly, with conflict handling.
 The orientation widget follows Mojive's native projection, axis navigation and drag behavior.
 The in-app Interaction Guide lists the bindings.
 

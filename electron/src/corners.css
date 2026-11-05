@@ -1,0 +1,33 @@
+/* One SVG paint layer owns the Mojive contour; content and popup overflow remain independent. */
+[data-smooth-surface] {
+  background-color: transparent !important;
+  background-image: none !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline-style: none !important;
+  filter: var(--smooth-shadow);
+  isolation: isolate;
+}
+[data-smooth-position='static'] {
+  position: relative;
+}
+[data-smooth-surface='after']::after,
+[data-smooth-surface='before']::before {
+  content: '';
+  position: absolute;
+  inset: var(--smooth-inset, 0);
+  z-index: -1;
+  pointer-events: none;
+  background: var(--smooth-paint) 0 0 / 100% 100% no-repeat;
+  border: 0;
+  border-radius: 0;
+}
+[data-smooth-surface='native'] {
+  background-image: var(--smooth-paint) !important;
+  background-size: 100% 100%;
+}
+[data-smooth-surface='media'] {
+  background-color: var(--smooth-media-background) !important;
+  clip-path: var(--smooth-clip);
+}

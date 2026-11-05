@@ -1,13 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Icon, Numeric, Squircle, Select, SwitchRow } from './components';
+import {
+  SearchField,
+  Button,
+  Empty,
+  Icon,
+  Numeric,
+  Segmented,
+  Select,
+  SwitchRow,
+} from './components';
 import { t, setLanguage, useLanguage, type Language } from './i18n';
 import themes from './locales/themes.json';
 import { buttonPalette } from './button-palette';
 import './settings.css';
+import { setCornerSmoothing } from './smooth-corners';
+import { applyScrollbarPaint } from './scrollbar-paint';
+import { BindingSettings } from './BindingSettings';
+import {
+  DEFAULT_INPUT_BINDINGS,
+  INPUT_ACTIONS,
+  NAVIGATION_ACTIONS,
+  normalizeInputBindings,
+  type InputBindings,
+} from './input-bindings';
 export interface EditorSettings {
+  inputBindings: InputBindings;
   language: Language;
   appearance: 'dark' | 'light' | 'system';
   uiScale: number;
+  cornerSmoothing: number;
+  capsuleSmoothing: number;
   uiFontSize: number;
   numericFont: 'mono' | 'body';
   outputFont: 'mono' | 'body';
@@ -31,9 +53,12 @@ export interface EditorSettings {
   rotationTickScale: number;
 }
 export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
+  inputBindings: DEFAULT_INPUT_BINDINGS,
   language: 'zh',
   appearance: 'dark',
   uiScale: 1,
+  cornerSmoothing: 60,
+  capsuleSmoothing: 38.2,
   uiFontSize: 14,
   numericFont: 'mono',
   outputFont: 'mono',
@@ -59,6 +84,8 @@ export const DEFAULT_SETTINGS: Readonly<EditorSettings> = Object.freeze({
 export const SETTINGS_KEY = 'mojive.electron.settings.v1';
 const limits: Partial<Record<keyof EditorSettings, [number, number]>> = {
   uiScale: [0.75, 2],
+  cornerSmoothing: [0, 100],
+  capsuleSmoothing: [0, 100],
   uiFontSize: [12, 20],
   cameraFov: [10, 120],
   orbitSpeed: [0.05, 2],
@@ -98,6 +125,7 @@ export function normalizeSettings(value: unknown): EditorSettings {
     )
       result[key] = v;
   }
+  result.inputBindings = normalizeInputBindings(source.inputBindings);
   return result;
 }
 export function readSettings(storage: Pick<Storage, 'getItem'> = localStorage) {
@@ -146,6 +174,11 @@ export function applySettings(
   root.style.setProperty('--numeric-font-size', (settings.numericFontSize ?? 14) + 'px');
   root.style.setProperty('--mono-font-size', (settings.numericFontSize ?? 14) + 'px');
   root.style.setProperty('--output-font-size', (settings.outputFontSize ?? 14) + 'px');
+  setCornerSmoothing(
+    settings.cornerSmoothing / 100,
+    (settings.capsuleSmoothing ?? DEFAULT_SETTINGS.capsuleSmoothing) / 100,
+  );
+  applyScrollbarPaint(root, (settings.capsuleSmoothing ?? DEFAULT_SETTINGS.capsuleSmoothing) / 100);
   setLanguage(settings.language);
 }
 export function useSettings(): [EditorSettings, (patch: Partial<EditorSettings>) => void] {
@@ -374,9 +407,26 @@ export function SettingsDialog({
     [category, search, settings.language],
   );
   const searching = !!search.trim();
+  const bindingMatches = (text: string) =>
+    matched(
+      text +
+        ' ' +
+        ['Interaction', 'Shortcuts', 'Key bindings', 'Mouse gestures', 'Navigation preset']
+          .map((value) => t(value, 'zh'))
+          .join(' '),
+    );
+  const bindingsVisible =
+    (searching || category === 'Interaction') &&
+    [...Object.values(INPUT_ACTIONS), ...Object.values(NAVIGATION_ACTIONS)].some((label) =>
+      bindingMatches(
+        `Interaction Shortcuts Key bindings Mouse gestures Navigation preset ${label} ${t(label, 'zh')}`,
+      ),
+    );
   const generalFields: { key: keyof EditorSettings; labels: string[] }[] = [
     { key: 'language', labels: ['Language'] },
     { key: 'appearance', labels: ['Appearance', 'Dark', 'Light', 'System'] },
+    { key: 'cornerSmoothing', labels: ['Appearance', 'Corner smoothing'] },
+    { key: 'capsuleSmoothing', labels: ['Appearance', 'Capsule smoothing'] },
     { key: 'uiFontSize', labels: ['Typography', 'UI font', 'UI font size'] },
     { key: 'numericFont', labels: ['Typography', 'Numeric', 'Font family'] },
     { key: 'numericFontSize', labels: ['Typography', 'Numeric', 'Font size'] },
@@ -397,8 +447,12 @@ export function SettingsDialog({
   const general =
     generalKeys.has('language') ||
     generalKeys.has('appearance') ||
+    generalKeys.has('cornerSmoothing') ||
+    generalKeys.has('capsuleSmoothing') ||
     fields.some((field) => field.key === 'uiScale');
-  const typography = [...generalKeys].some((key) => key !== 'language' && key !== 'appearance');
+  const typography = [...generalKeys].some(
+    (key) => !['language', 'appearance', 'cornerSmoothing', 'capsuleSmoothing'].includes(key),
+  );
   const groups = categories.flatMap((item) =>
     [
       ...new Set(
@@ -466,18 +520,16 @@ export function SettingsDialog({
           <Button icon="close" aria-label={t('Close')} title={t('Close')} onClick={onClose} />
         </header>
         <div className="settings-global-search" role="search" aria-label={t('Search all settings')}>
-          <Squircle className="settings-search search-field" radius={9999}>
-            <Icon name="search" size={16} />
-            <input
-              ref={searchInput}
-              autoFocus
-              aria-label={t('Search all settings')}
-              placeholder={t('Search all settings')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && <Button icon="close" aria-label={t('Clear search')} onClick={clearSearch} />}
-          </Squircle>
+          <SearchField
+            className="settings-search"
+            inputRef={searchInput}
+            autoFocus
+            label={t('Search all settings')}
+            placeholder={t('Search all settings')}
+            value={search}
+            onChange={setSearch}
+            onClear={clearSearch}
+          />
         </div>
         <div className="settings-layout">
           <nav className="settings-navigation" aria-label={t('Settings')}>
@@ -510,12 +562,15 @@ export function SettingsDialog({
                       (patch as Record<string, unknown>)[f.key] = DEFAULT_SETTINGS[f.key];
                     for (const key of generalKeys)
                       (patch as Record<string, unknown>)[key] = DEFAULT_SETTINGS[key];
+                    if (bindingsVisible) patch.inputBindings = DEFAULT_INPUT_BINDINGS;
                     onChange(patch);
                   } else if (category === 'General')
                     onChange({
                       language: DEFAULT_SETTINGS.language,
                       appearance: DEFAULT_SETTINGS.appearance,
                       uiScale: 1,
+                      cornerSmoothing: 60,
+                      capsuleSmoothing: 38.2,
                       uiFontSize: 14,
                       numericFont: 'mono',
                       outputFont: 'mono',
@@ -524,6 +579,7 @@ export function SettingsDialog({
                     });
                   else {
                     const patch: Partial<EditorSettings> = {};
+                    if (category === 'Interaction') patch.inputBindings = DEFAULT_INPUT_BINDINGS;
                     for (const f of SETTING_FIELDS.filter((f) => f.category === category))
                       (patch as Record<string, unknown>)[f.key] = DEFAULT_SETTINGS[f.key];
                     onChange(patch);
@@ -554,12 +610,7 @@ export function SettingsDialog({
                   {generalKeys.has('appearance') && (
                     <div className="settings-row">
                       <span>{t('Appearance')}</span>
-                      <Squircle
-                        radius={4}
-                        className="settings-segment"
-                        role="group"
-                        aria-label={t('Appearance')}
-                      >
+                      <Segmented className="settings-segment" aria-label={t('Appearance')}>
                         {(['dark', 'light', 'system'] as const).map((mode, index) => (
                           <Button
                             key={mode}
@@ -570,7 +621,37 @@ export function SettingsDialog({
                             {t(['Dark', 'Light', 'System'][index])}
                           </Button>
                         ))}
-                      </Squircle>
+                      </Segmented>
+                    </div>
+                  )}
+                  {generalKeys.has('cornerSmoothing') && (
+                    <div className="settings-row">
+                      <span>{t('Corner smoothing')}</span>
+                      <Numeric
+                        value={settings.cornerSmoothing}
+                        label={t('Corner smoothing')}
+                        onChange={(cornerSmoothing) => onChange({ cornerSmoothing })}
+                        step={1}
+                        min={0}
+                        max={100}
+                        precision={0}
+                        unit="%"
+                      />
+                    </div>
+                  )}
+                  {generalKeys.has('capsuleSmoothing') && (
+                    <div className="settings-row">
+                      <span>{t('Capsule smoothing')}</span>
+                      <Numeric
+                        value={settings.capsuleSmoothing}
+                        label={t('Capsule smoothing')}
+                        onChange={(capsuleSmoothing) => onChange({ capsuleSmoothing })}
+                        step={0.1}
+                        min={0}
+                        max={100}
+                        precision={1}
+                        unit="%"
+                      />
                     </div>
                   )}
                   {fields.some((f) => f.key === 'uiScale') && (
@@ -622,6 +703,13 @@ export function SettingsDialog({
                     )}
                 </section>
               ))}
+              {bindingsVisible && (
+                <BindingSettings
+                  bindings={settings.inputBindings}
+                  onChange={(inputBindings) => onChange({ inputBindings })}
+                  matches={bindingMatches}
+                />
+              )}
               {typography && (
                 <section className="settings-group" data-settings-category="General">
                   <h3>{searching ? `${t('General')} › ${t('Typography')}` : t('Typography')}</h3>
@@ -649,7 +737,7 @@ export function SettingsDialog({
                     fontRole('output')}
                 </section>
               )}
-              {!fields.length && !generalKeys.size && (
+              {!fields.length && !generalKeys.size && !bindingsVisible && (
                 <div className="settings-empty">
                   <Empty
                     title="No matching settings"

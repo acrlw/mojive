@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, after } from 'node:test';
 import { createServer } from 'vite';
@@ -48,6 +49,8 @@ async function metrics(page, panelClass) {
 for (const scale of [1, 1.25])
   test(`real workspace joints and cameras fill dragged panes at ${scale}x with complete responsive XYZ rows`, async () => {
     const page = await browser.newPage({ viewport: { width: 1680, height: 1100 } });
+    await page.addInitScript(installPaintStyle);
+    await page.evaluate(installPaintStyle);
     page.setDefaultTimeout(8000);
     page.on('pageerror', (e) => errors.push(e.message));
     await page.addInitScript((scale) => {
@@ -70,10 +73,10 @@ for (const scale of [1, 1.25])
     });
     assert.ok(Math.abs(shell.width - shell.windowWidth) < 1, JSON.stringify(shell));
     assert.ok(Math.abs(shell.height - shell.windowHeight) < 1, JSON.stringify(shell));
-    await page.getByTitle('Joints', { exact: true }).click();
+    await page.getByRole('button', { name: 'Joints', exact: true }).click();
     const joint = page.locator('.joint-entry').filter({ hasText: '04_free_6dof' });
     await joint.waitFor();
-    await joint.getByTitle('Expand joint pose', { exact: true }).click();
+    await joint.locator('.entity-card-heading').click();
     for (const [size, label] of [
       [220, 'narrow'],
       [410, 'wide'],
@@ -91,9 +94,9 @@ for (const scale of [1, 1.25])
         });
         const r = card.getBoundingClientRect(),
           name = card.querySelector('.entity-card-heading').getBoundingClientRect(),
-          style = getComputedStyle(card),
+          style = window.paintStyle(card),
           textWidths = [...card.querySelectorAll('.vector-fields input')].map((input) => {
-            const style = getComputedStyle(input),
+            const style = window.paintStyle(input),
               canvas = document.createElement('canvas'),
               context = canvas.getContext('2d');
             context.font = `${style.fontSize} ${style.fontFamily}`;
@@ -109,7 +112,7 @@ for (const scale of [1, 1.25])
           inset: style.padding,
           left: name.left - r.left,
           right: r.right - card.querySelector('.entity-card-heading').getBoundingClientRect().right,
-          inner: getComputedStyle(card.querySelector('.axis-field')).borderRadius,
+          inner: window.paintStyle(card.querySelector('.axis-field')).borderRadius,
           textWidths,
         };
       });
@@ -124,11 +127,13 @@ for (const scale of [1, 1.25])
       } else assert.ok(geometry.fields[1].y > geometry.fields[0].y);
       for (const metric of geometry.textWidths)
         assert.ok(metric.available + 1 >= metric.required, JSON.stringify(metric));
-      await page.screenshot({ path: `../output/electron/verification/joints-dragged-${label}-${scale}x.png` });
+      await page.screenshot({
+        path: `../output/electron/verification/joints-dragged-${label}-${scale}x.png`,
+      });
       const heading = joint.locator('.entity-card-heading');
       await heading.hover();
       const hover = await heading.evaluate((element) => {
-        const style = getComputedStyle(element),
+        const style = window.paintStyle(element),
           bounds = element.getBoundingClientRect(),
           icon = element.querySelector('.icon').getBoundingClientRect();
         return {
@@ -142,7 +147,9 @@ for (const scale of [1, 1.25])
       assert.equal(hover.padding, '4px');
       assert.ok(Math.abs(hover.iconInset - 4 * scale) < 1);
       assert.notEqual(hover.background, 'rgba(0, 0, 0, 0)');
-      await joint.screenshot({ path: `../output/electron/verification/joint-hover-${label}-${scale}x.png` });
+      await joint.screenshot({
+        path: `../output/electron/verification/joint-hover-${label}-${scale}x.png`,
+      });
     }
     const ball = page
       .locator('.joint-entry')
@@ -158,7 +165,7 @@ for (const scale of [1, 1.25])
         ) < 0.01,
       );
     }
-    await page.getByTitle('Cameras', { exact: true }).click();
+    await page.getByRole('button', { name: 'Cameras', exact: true }).click();
     await page.locator('.cameras-panel').waitFor();
     for (const [size, label] of [
       [220, 'narrow'],
@@ -174,14 +181,16 @@ for (const scale of [1, 1.25])
         const v = await card.evaluate((el) => ({
           width: el.getBoundingClientRect().width,
           parent: el.parentElement.getBoundingClientRect().width,
-          radius: getComputedStyle(el).borderRadius,
-          padding: getComputedStyle(el).padding,
+          radius: window.paintStyle(el).borderRadius,
+          padding: window.paintStyle(el).padding,
         }));
         assert.ok(Math.abs(v.width - v.parent) < 1.5);
         assert.equal(v.radius, '12px');
         assert.equal(v.padding, '8px');
       }
-      await page.screenshot({ path: `../output/electron/verification/cameras-dragged-${label}-${scale}x.png` });
+      await page.screenshot({
+        path: `../output/electron/verification/cameras-dragged-${label}-${scale}x.png`,
+      });
       await card.locator('.camera-entry-name').hover();
       const grouping = await card.evaluate((element) => {
         const outer = element.getBoundingClientRect(),
@@ -192,7 +201,7 @@ for (const scale of [1, 1.25])
           (button) => ({
             y: button.getBoundingClientRect().y,
             right: button.getBoundingClientRect().right,
-            radius: getComputedStyle(button).borderRadius,
+            radius: window.paintStyle(button).borderRadius,
           }),
         );
         return {
@@ -201,8 +210,8 @@ for (const scale of [1, 1.25])
             outer.right - element.querySelector('.camera-entry-more').getBoundingClientRect().right,
           height: outer.height,
           inset: icon.left - h.left,
-          radius: getComputedStyle(header).borderRadius,
-          background: getComputedStyle(header).backgroundColor,
+          radius: window.paintStyle(header).borderRadius,
+          background: window.paintStyle(header).backgroundColor,
           actions,
           cardRight: outer.right,
         };
@@ -221,19 +230,21 @@ for (const scale of [1, 1.25])
         ),
       );
       assert.ok(Math.abs(grouping.cardRight - grouping.actions.at(-1).right - 8 * scale) < 1);
-      await card.screenshot({ path: `../output/electron/verification/camera-card-hover-${label}-${scale}x.png` });
+      await card.screenshot({
+        path: `../output/electron/verification/camera-card-hover-${label}-${scale}x.png`,
+      });
       await card.getByRole('button', { name: 'More camera actions', exact: true }).click();
       const more = page.getByRole('menu', { name: /More camera actions/ });
       assert.equal(await more.getByRole('menuitem').count(), 4);
       for (const name of ['Focus camera', 'Align to view', 'Capture image', 'Delete camera'])
         assert.equal(await more.getByRole('menuitem', { name, exact: true }).isVisible(), true);
       await page.keyboard.press('Escape');
-      await card.getByTitle('View Camera', { exact: true }).click();
+      await card.getByRole('button', { name: 'View Camera', exact: true }).click();
       assert.equal(
         await card.locator('.camera-entry-actions button').nth(0).getAttribute('aria-pressed'),
         'true',
       );
-      await card.getByTitle('Pilot camera', { exact: true }).click();
+      await card.getByRole('button', { name: 'Pilot camera', exact: true }).click();
       assert.equal(
         await card.locator('.camera-entry-actions button').nth(1).getAttribute('aria-pressed'),
         'true',

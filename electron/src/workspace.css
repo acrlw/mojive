@@ -61,39 +61,22 @@ body {
   gap: 8px;
 }
 .geometry-selector {
-  padding: 2px;
-  gap: 2px;
-  min-height: 32px;
-  background: var(--input-color);
-  border-radius: 6px;
   flex-shrink: 0;
 }
-.geometry-selector button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 12px;
-  height: 28px;
-  font-size: var(--body-font-size);
+.segmented.geometry-selector > button {
   min-width: 84px;
-  border-radius: 4px;
+  padding: 0 12px;
 }
-.geometry-selector button .icon {
+.segmented.geometry-selector button .icon {
   display: inline-flex;
 }
 .left-panel {
   container-type: inline-size;
 }
 @container (min-width:390px) {
-  .geometry-selector button .icon {
+  .segmented.geometry-selector button .icon {
     display: inline-flex;
   }
-}
-.segmented button.active {
-  background: var(--ui-field-active);
-  color: var(--sage-color);
-  box-shadow: none;
 }
 .type-filters {
   display: flex;
@@ -106,7 +89,7 @@ body {
   justify-content: center;
   gap: 8px;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 calc(var(--capsule-end, 14px) - 8px);
   border-radius: 14px;
   background: var(--input-color);
   color: var(--entity-accent, var(--sage-color));
@@ -141,15 +124,6 @@ body {
 }
 .type-world {
   --entity-accent: var(--ui-node-world);
-}
-.panel-search {
-  margin: 0 12px 8px;
-  height: 30px;
-  min-height: 30px;
-  border-radius: 15px;
-}
-.panel-search input {
-  font-size: var(--body-font-size);
 }
 .left-content {
   padding: 0 8px 8px;
@@ -221,10 +195,6 @@ body {
   height: 32px;
   border-radius: 4px;
 }
-.tool-palette .button.active {
-  background: var(--sage-color);
-  color: var(--ui-on-primary);
-}
 .entity-heading {
   padding: 12px;
   gap: 10px;
@@ -276,14 +246,6 @@ body {
 }
 .number-field .unit {
   font-size: 12px;
-}
-.axis {
-  font: 12px var(--font-mono);
-  width: 18px;
-  min-width: 18px;
-}
-.axis-field .number-field input {
-  padding: 0 4px;
 }
 .property-value {
   font-size: var(--body-font-size);
@@ -662,9 +624,12 @@ body.resizing-y {
   flex: 1;
   min-width: 0;
   height: 28px;
-  padding: 0;
+  padding: 0 8px;
+  margin-left: -8px;
+  border-radius: 4px;
   text-align: left;
   font-weight: 600;
+  font-size: var(--body-font-size, 14px);
   background: transparent;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -689,7 +654,7 @@ body.resizing-y {
   height: 16px !important;
 }
 .section-content > .property-row {
-  min-height: 32px;
+  min-height: var(--field-height);
 }
 /* Inspector property columns continue through section boundaries and entity wrappers. */
 .inspector-content {
@@ -700,6 +665,12 @@ body.resizing-y {
 }
 .inspector-content:has(.material-property) {
   grid-template-columns: fit-content(calc(100% - 152px)) minmax(140px, 1fr);
+}
+.inspector .section-heading {
+  margin: 0;
+}
+.inspector .section-content {
+  padding: 8px 0 0;
 }
 .inspector-content > *,
 .inspector .section-heading,
@@ -757,6 +728,14 @@ body.resizing-y {
   max-width: 100%;
   text-align: left;
 }
+.inspector .section-content > .joint-value-property > .joint-scalar-fields {
+  width: 100%;
+}
+@container (max-width: 360px) {
+  .inspector .section-content > .joint-value-property > :is(span, .joint-scalar-fields) {
+    grid-column: 1 / -1;
+  }
+}
 .inspector
   .section-content[data-vector-labels='above']
   > .vector-group
@@ -767,6 +746,39 @@ body.resizing-y {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .inspector .section-content[data-vector-fields='stack'] > .vector-group > .vector-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+.inspector .joint-pose-fields {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  row-gap: 8px;
+  min-width: 0;
+}
+.inspector .joint-pose-fields > .vector-group {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  container-type: normal;
+  margin: 0;
+}
+.inspector .joint-pose-fields > .vector-group > label {
+  grid-column: 1;
+}
+.inspector .joint-pose-fields > .vector-group > .vector-fields {
+  grid-column: 2;
+}
+.inspector
+  .section-content[data-vector-labels='above']
+  .joint-pose-fields
+  > .vector-group
+  > :is(label, .vector-fields) {
+  grid-column: 1 / -1;
+}
+.inspector .section-content[data-vector-fields='row'] .joint-pose-fields .vector-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.inspector .section-content[data-vector-fields='stack'] .joint-pose-fields .vector-fields {
   grid-template-columns: minmax(0, 1fr);
 }
 .joint-panel-host {
@@ -812,38 +824,29 @@ body.resizing-y {
 .render-stats .renderer-name {
   font: 12px var(--font-ui);
 }
-.panel-search:focus-within {
-  box-shadow: none;
-}
-.panel-search input:focus-visible {
-  outline: 0;
-}
-.panel-search:has(input:focus-visible) {
-  box-shadow: inset 0 0 0 1px var(--ui-border);
-}
 @container (max-width:620px) {
   .viewport-navigation .projection-caption {
     display: none;
   }
-  .geometry-selector button {
+  .segmented.geometry-selector button {
     min-width: 72px;
     padding: 0 10px;
     gap: 6px;
   }
-  .geometry-selector button .icon {
+  .segmented.geometry-selector button .icon {
     display: none;
   }
 }
 @container (max-width:440px) {
-  .geometry-selector button > span:not(.icon) {
+  .segmented.geometry-selector button > span:not(.icon) {
     display: none;
   }
-  .geometry-selector button {
+  .segmented.geometry-selector button {
     min-width: 34px;
     width: 34px;
     padding: 0;
   }
-  .geometry-selector button .icon {
+  .segmented.geometry-selector button .icon {
     display: inline-flex;
   }
   .viewport-topbar {
@@ -878,19 +881,6 @@ body.resizing-y {
 .tree-row > .tree-chevron {
   flex: 0 0 18px;
 }
-.panel-search {
-  border-radius: 9999px;
-  padding-right: 3px;
-}
-.panel-search > button {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  padding: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-}
 .status-hint > .icon {
   width: 20px !important;
   height: 20px !important;
@@ -908,6 +898,7 @@ body.resizing-y {
   flex-shrink: 0;
 }
 .timeline .lane-header {
+  font-size: var(--body-font-size, 14px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -949,28 +940,6 @@ body.resizing-y {
   width: 100%;
 }
 
-/* Segmented choices divide one surface; only its outer silhouette is rounded. */
-.geometry-selector {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(max-content, 1fr));
-  padding: 0;
-  gap: 0;
-  min-height: 28px;
-  border-radius: 4px;
-  overflow: hidden;
-}
-.geometry-selector button {
-  border-radius: 0;
-  flex: 1;
-}
-.geometry-selector button:first-child {
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
-}
-.geometry-selector button:last-child {
-  border-top-right-radius: 4px;
-  border-bottom-right-radius: 4px;
-}
 .timeline-capture-actions {
   display: flex;
   align-items: center;
@@ -980,12 +949,12 @@ body.resizing-y {
   color: var(--ui-danger);
 }
 .timeline .lane-label {
-  width: 148px;
+  width: 100%;
   text-align: left;
   min-width: 0;
   padding: 0 10px;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--body-font-size, 14px);
 }
 .timeline .lane-label.active {
   background: var(--ui-selected);
@@ -1003,7 +972,7 @@ body.resizing-y {
   width: 100%;
   min-width: 0;
   padding: 0 4px;
-  font-size: 13px;
+  font-size: var(--body-font-size, 14px);
 }
 .timeline .take-label .select-trigger span {
   overflow: hidden;
@@ -1102,7 +1071,7 @@ body.resizing-y {
 }
 .video-export-dialog {
   width: min(360px, calc(100vw - 40px));
-  padding: 24px;
+  padding: 12px;
   border: 0;
   border-radius: 16px;
   color: var(--text-color);
@@ -1131,26 +1100,27 @@ body.resizing-y {
 
 /* Popup inset4 + row radius4 = outer radius8; CSS paints its unclipped shadow. */
 .menu[popover] {
+  --menu-radius: 8px;
+  --menu-inset: 4px;
   position: fixed;
   inset: auto;
   margin: 0;
-  padding: 4px;
+  padding: var(--menu-inset);
   width: max-content;
   min-width: 144px;
   max-width: min(320px, calc(100vw - 16px));
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--menu-radius);
   overflow: auto;
   background: var(--popup-color);
   color: var(--text-color);
   box-shadow:
-    0 8px 24px #0005,
-    0 1px 3px #0003,
-    0 0 0 1px var(--border-color);
+    var(--popup-shadow),
+    inset 0 0 0 1px var(--popup-edge);
 }
 .menu[popover] button {
   margin: 0;
-  border-radius: 4px;
+  border-radius: calc(max(0px, calc(var(--menu-radius) - var(--menu-inset))));
 }
 .menu[popover] button:focus-visible {
   outline: none;
@@ -1160,6 +1130,7 @@ body.resizing-y {
   background: transparent;
 }
 .info-dialog {
+  padding: 12px;
   width: min(620px, calc((100vw - 32px) / var(--dialog-zoom, 1)));
   max-height: calc((100vh - 32px) / var(--dialog-zoom, 1));
   border: 0;
@@ -1169,9 +1140,20 @@ body.resizing-y {
   background: var(--floating-color);
   box-shadow:
     0 16px 48px #0005,
-    0 0 0 1px var(--border-color);
+    inset 0 0 0 1px var(--border-color);
 }
 .info-dialog::backdrop {
   background: #0006;
   backdrop-filter: blur(4px);
+}
+
+.info-dialog .dialog-heading {
+  padding: 0 0 12px;
+}
+.info-dialog .guide-grid {
+  padding: 12px 0 0;
+}
+
+.panel-search {
+  margin: 0 12px 8px;
 }

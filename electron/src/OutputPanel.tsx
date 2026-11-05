@@ -1,12 +1,13 @@
+import { commandKey } from './platform';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Button, Icon } from './components';
-import { t, useLanguage, type Language } from './i18n';
+import { SearchField, Button, Icon } from './components';
+import { t, useLanguage, type Language, type LocalizedText } from './i18n';
 import './output.css';
 export interface OutputEntry {
   id: number;
   level: 'info' | 'warn' | 'err' | 'warning' | 'error' | 'debug' | 'success' | 'critical' | 'fatal';
   time: string;
-  text: string;
+  text: LocalizedText;
 }
 export type OutputLevel = 'info' | 'warning' | 'error';
 export type OutputOrder = 'oldest' | 'newest';
@@ -30,7 +31,7 @@ export function filterOutput(
     .filter((entry) => {
       const level = outputLevel(entry.level),
         searchable =
-          `${entry.time} ${entry.level} ${level} ${t(labels[level], language)} ${entry.text} ${t(entry.text, language)}`.toLocaleLowerCase();
+          `${entry.time} ${entry.level} ${level} ${t(labels[level], language)} ${t(entry.text, 'en')} ${t(entry.text, language)}`.toLocaleLowerCase();
       return levels.has(level) && tokens.every((token) => searchable.includes(token));
     })
     .sort((a, b) => (order === 'oldest' ? a.id - b.id : b.id - a.id));
@@ -38,9 +39,9 @@ export function filterOutput(
 export function copyOutput(entries: readonly OutputEntry[], selection: ReadonlySet<number>) {
   const selected = entries.filter((entry) => selection.has(entry.id));
   return selected.length
-    ? selected.map((entry) => entry.text).join('\n')
+    ? selected.map((entry) => t(entry.text, 'en')).join('\n')
     : entries
-        .map((entry) => `${entry.time} [${outputLevel(entry.level)}] ${entry.text}`)
+        .map((entry) => `${entry.time} [${outputLevel(entry.level)}] ${t(entry.text, 'en')}`)
         .join('\n');
 }
 const PREFERENCES_KEY = 'mojive.electron.output.v1';
@@ -68,7 +69,7 @@ export function OutputPanel({
 }) {
   const currentLanguage = useLanguage(),
     locale = language ?? currentLanguage,
-    tr = (value: string) => t(value, locale),
+    tr = (value: LocalizedText) => t(value, locale),
     initial = useRef(loadPreferences()),
     [autoScroll, setAutoScroll] = useState(initial.current.autoScroll),
     [order, setOrder] = useState<OutputOrder>(initial.current.order),
@@ -90,6 +91,48 @@ export function OutputPanel({
     for (const entry of entries) result[outputLevel(entry.level)]++;
     return result;
   }, [entries]);
+  useLayoutEffect(() => {
+    const element = scroll.current;
+    if (!element) return;
+    const context = document.createElement('canvas').getContext('2d')!;
+    let mounted = true;
+    const alignIcons = () => {
+      if (!mounted) return;
+      const style = getComputedStyle(element);
+      const size = parseFloat(style.fontSize) * (16 / 14);
+      context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const sample = locale === 'zh' ? 'H国' : 'H';
+      const metrics = context.measureText(sample);
+      const probe = document.createElement('span');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;pointer-events:none;display:block;width:100px;white-space:nowrap';
+      const baselineMarker = document.createElement('span');
+      baselineMarker.style.cssText =
+        'display:inline-block;width:0;height:0;vertical-align:baseline';
+      probe.append(sample, baselineMarker);
+      element.append(probe);
+      const bounds = probe.getBoundingClientRect();
+      const baseline =
+        (baselineMarker.getBoundingClientRect().top - bounds.top) / (bounds.width / 100);
+      probe.remove();
+      // Center the complete SVG canvas on first-line ink, including CJK fallback metrics.
+      // A fixed top margin drifts when the output font or its size changes.
+      const center =
+        baseline - (metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
+      element.style.setProperty('--output-icon-size', `${size}px`);
+      element.style.setProperty('--output-icon-top', `${center - size / 2}px`);
+    };
+    alignIcons();
+    const observer = new MutationObserver(alignIcons);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    document.fonts.addEventListener('loadingdone', alignIcons);
+    void document.fonts.ready.then(alignIcons);
+    return () => {
+      mounted = false;
+      observer.disconnect();
+      document.fonts.removeEventListener('loadingdone', alignIcons);
+    };
+  }, [locale]);
   useEffect(() => {
     localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ autoScroll, order }));
   }, [autoScroll, order]);
@@ -126,14 +169,12 @@ export function OutputPanel({
         b = shown.findIndex((entry) => entry.id === id);
       if (a >= 0 && b >= 0) {
         const range = shown.slice(Math.min(a, b), Math.max(a, b) + 1).map((entry) => entry.id);
-        setSelection(
-          (previous) => new Set(event.metaKey || event.ctrlKey ? [...previous, ...range] : range),
-        );
+        setSelection((previous) => new Set(commandKey(event) ? [...previous, ...range] : range));
         return;
       }
     }
     anchor.current = id;
-    if (event.metaKey || event.ctrlKey)
+    if (commandKey(event))
       setSelection((previous) => {
         const next = new Set(previous);
         if (next.has(id)) next.delete(id);
@@ -152,15 +193,15 @@ export function OutputPanel({
       aria-label={tr('Output')}
       onKeyDown={(event) => {
         if (event.target instanceof HTMLInputElement) return;
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        if (commandKey(event) && event.key.toLowerCase() === 'a') {
           event.preventDefault();
           setSelection(new Set(shown.map((entry) => entry.id)));
         }
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        if (commandKey(event) && event.key.toLowerCase() === 'c') {
           event.preventDefault();
           void copy();
         }
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        if (commandKey(event) && event.key.toLowerCase() === 'f') {
           event.preventDefault();
           setShowSearch(true);
           searchInput.current?.focus();
@@ -203,31 +244,22 @@ export function OutputPanel({
             ))}
           </div>
           {showSearch && (
-            <div className="output-search search-field">
-              <Icon name="search" size={20} />
-              <input
-                ref={searchInput}
-                aria-label={tr('Search output')}
-                placeholder={tr('Search output')}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.stopPropagation();
-                    setSearch('');
-                    setShowSearch(false);
-                  }
-                }}
-              />
-              {search && (
-                <Button
-                  icon="close"
-                  aria-label={tr('Clear search')}
-                  title={tr('Clear search')}
-                  onClick={() => setSearch('')}
-                />
-              )}
-            </div>
+            <SearchField
+              className="output-search"
+              inputRef={searchInput}
+              label={tr('Search output')}
+              placeholder={tr('Search output')}
+              value={search}
+              onChange={setSearch}
+              clearLabel={tr('Clear search')}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setSearch('');
+                  setShowSearch(false);
+                }
+              }}
+            />
           )}
           <div className="output-actions">
             <Button

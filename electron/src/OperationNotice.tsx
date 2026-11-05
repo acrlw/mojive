@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { Button, Icon } from './components';
-import { t, useLanguage } from './i18n';
+import { t, useLanguage, type LocalizedText } from './i18n';
 import './operation-notice.css';
 
 export interface OperationNoticeData {
   /** A publication identity, even when the new message repeats the previous text. */
   id: string | number;
-  message: string;
+  message: LocalizedText;
   level?: 'info' | 'warning' | 'error';
   /** The document owner must recheck the committed history identity on invocation. */
   action?: { label: string; onClick: () => void };
@@ -94,7 +94,7 @@ export function OperationNotice({
       }}
     >
       <Icon name={{ info: 'info', warning: 'warn', error: 'err' }[level]} size={18} />
-      <span className="operation-notice-message" title={message}>
+      <span className="operation-notice-message" data-tooltip={message}>
         {message}
       </span>
       {notice.action && (

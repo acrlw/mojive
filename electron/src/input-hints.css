@@ -1,0 +1,37 @@
+.input-chord,
+.input-key-part,
+.input-mouse,
+.input-gesture {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  white-space: nowrap;
+}
+.input-chord kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--input-color);
+  color: var(--text-color);
+  font: 14px var(--font-mono);
+  line-height: 1;
+}
+.input-plus,
+.input-repeat {
+  color: var(--muted-color);
+  font-size: 12px;
+}
+.input-mouse {
+  height: 24px;
+  color: var(--text-color);
+}
+
+.statusbar .input-chord kbd {
+  height: 20px;
+  min-width: 20px;
+}

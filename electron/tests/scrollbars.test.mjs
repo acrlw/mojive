@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -18,7 +19,7 @@ before(async () => {
     headless: true,
     ignoreDefaultArgs: ['--hide-scrollbars'],
   });
-  await mkdir('../output/electron/verification', { recursive: true });
+  await mkdir('../output/electron/verification/corner-coverage', { recursive: true });
 });
 after(async () => {
   await browser?.close();
@@ -28,6 +29,8 @@ async function app(theme = 'dark', scale = 1) {
   const page = await browser.newPage({
     viewport: { width: Math.round(1540 * scale), height: Math.round(980 * scale) },
   });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(6000);
   await page.addInitScript(
     (settings) => localStorage.setItem('mojive.electron.settings.v1', JSON.stringify(settings)),
@@ -84,7 +87,8 @@ async function paint(page, owner, axis, role, path) {
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      const expected = getComputedStyle(document.documentElement)
+      const expected = window
+        .paintStyle(document.documentElement)
         .getPropertyValue('--ui-' + role)
         .trim();
       ctx.fillStyle = expected;
@@ -222,6 +226,74 @@ for (const [theme, scale] of [
     await page.close();
   });
 
+test('native scrollbar end caps keep their geometry when Chromium changes thumb length', async () => {
+  for (const scale of [1, 1.25]) {
+    const page = await app('dark', scale),
+      owner = await fixture(page, scale);
+    await owner.evaluate((element) => {
+      element.style.background = '#000';
+    });
+    for (const smoothing of [0.382, 1]) {
+      const cap = await page.evaluate(async (smoothing) => {
+        const { applyScrollbarPaint } = await import('/src/scrollbar-paint.ts');
+        const root = document.documentElement;
+        root.style.setProperty('--ui-field-active', '#fff');
+        applyScrollbarPaint(root, smoothing);
+        return parseFloat(root.style.getPropertyValue('--scrollbar-cap'));
+      }, smoothing);
+      let previous;
+      for (const size of [400, 1200, 100000]) {
+        await owner.evaluate((element, size) => {
+          Object.assign(element.firstElementChild.style, {
+            width: size + 'px',
+            height: size + 'px',
+          });
+          element.dataset.scrollbarVisible = '';
+        }, size);
+        const screenshot = await owner.screenshot({
+          path: `../output/electron/verification/corner-coverage/thumb-${scale}-${smoothing}-${size}.png`,
+        });
+        const pixels = await page.evaluate(
+          async ({ data, scale, cap }) => {
+            const img = new Image();
+            img.src = 'data:image/png;base64,' + data;
+            await img.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const band = Math.ceil(7 * scale),
+              length = Math.ceil((2 + cap + 1) * scale);
+            const y = ctx.getImageData(img.width - band, 0, band, length).data;
+            const x = ctx.getImageData(0, img.height - band, length, band).data;
+            const center = ctx.getImageData(
+              Math.floor(img.width - 3.5 * scale),
+              0,
+              1,
+              img.height - band,
+            ).data;
+            let visible = 0;
+            for (let i = 0; i < center.length; i += 4) if (center[i] > 0) visible++;
+            return { x: [...x], y: [...y], visible };
+          },
+          { data: screenshot.toString('base64'), scale, cap },
+        );
+        assert.ok(
+          pixels.visible / scale >= 2 * cap,
+          'native minimum thumb accommodates both unchanged end caps',
+        );
+        if (previous) {
+          assert.deepEqual(pixels.x, previous.x, 'horizontal end cap is not stretched');
+          assert.deepEqual(pixels.y, previous.y, 'vertical end cap is not stretched');
+        }
+        previous = pixels;
+      }
+    }
+    await page.close();
+  }
+});
+
 test('late modal owners retain text/keyboard input, and cancel/blur/removal release scrollbar state', async () => {
   const page = await app(),
     owner = await fixture(page, 1, true);
@@ -335,18 +407,24 @@ test('production tree, Inspector, joints, Settings and timeline use the shared o
     'tree thumb drag reaches the native scrollbar, not the pane splitter',
   );
   assert.equal((await geometry(tree)).right, g.right);
-  await page.getByTitle('Joints', { exact: true }).click();
+  await page.getByRole('button', { name: 'Joints', exact: true }).click();
   const joints = page.locator('.joint-panel-list');
   await joints.evaluate((element) => (element.scrollTop = 20));
   await page.waitForTimeout(30);
   assert.equal((await state(joints)).visible, true);
-  await page.locator('.activity-rail').getByTitle('Settings', { exact: true }).click();
+  await page
+    .locator('.activity-rail')
+    .getByRole('button', { name: 'Settings', exact: true })
+    .click();
   await page.getByRole('textbox', { name: 'Search all settings', exact: true }).fill('a');
   const settings = page.locator('.settings-page');
   await settings.evaluate((element) => (element.scrollTop = 20));
   await page.waitForTimeout(30);
   assert.equal((await state(settings)).visible, true);
-  await page.locator('.settings-header').getByTitle('Close', { exact: true }).click();
+  await page
+    .locator('.settings-header')
+    .getByRole('button', { name: 'Close', exact: true })
+    .click();
   const timeline = page.locator('.timeline-body');
   const divider = page.getByRole('separator', { name: 'Resize bottom panel', exact: true });
   const dividerRect = await divider.boundingBox();
@@ -362,12 +440,14 @@ test('production tree, Inspector, joints, Settings and timeline use the shared o
   await timeline.evaluate((element) => (element.scrollTop = 30));
   await page.waitForTimeout(30);
   assert.ok((await state(timeline)).top > 0);
-  await timeline.screenshot({ path: '../output/electron/verification/scrollbar-timeline-two-axes.png' });
+  await timeline.screenshot({
+    path: '../output/electron/verification/scrollbar-timeline-two-axes.png',
+  });
   for (let i = 0; i < 7; i++) {
     await page.locator('.titlebar nav').getByRole('button', { name: 'Add', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Box', exact: true }).click();
   }
-  await page.locator('.activity-rail').getByTitle('Output', { exact: true }).click();
+  await page.locator('.activity-rail').getByRole('button', { name: 'Output', exact: true }).click();
   const output = page.locator('.output-messages');
   await output.hover();
   await page.mouse.wheel(0, -150);
@@ -398,7 +478,7 @@ for (const scale of [1, 1.25, 2])
         bottom: rect('.bottom-panel'),
         handles: [...document.querySelectorAll('.panel-splitter')].map((e) => {
           const r = e.getBoundingClientRect(),
-            s = getComputedStyle(e, '::after');
+            s = window.paintStyle(e, '::after');
           return {
             left: r.left,
             right: r.right,

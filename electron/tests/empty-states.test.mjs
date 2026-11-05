@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { after, afterEach, before, beforeEach, test } from 'node:test';
 import { createRequire } from 'node:module';
@@ -32,14 +33,7 @@ before(async () => {
     cacheDir: 'node_modules/.vite-empty-states-test',
     server: { host: '127.0.0.1', port: 0, hmr: false },
     optimizeDeps: {
-      include: [
-        'react',
-        'react-dom',
-        'react-dom/client',
-        'react/jsx-runtime',
-        'three',
-        'figma-squircle',
-      ],
+      include: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'three'],
     },
     logLevel: 'error',
   });
@@ -50,6 +44,8 @@ before(async () => {
     headless: true,
   });
   page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(10000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.exposeFunction('browseLocalFiles', (directory, hidden) =>
@@ -122,7 +118,7 @@ const panel = () => page.locator('.left-panel');
 const emptyAction = (label) =>
   panel().locator('.empty-actions').getByRole('button', { name: label, exact: true });
 async function openFolderFromEmpty() {
-  await page.getByTitle('Project files', { exact: true }).click();
+  await page.getByRole('button', { name: 'Project files', exact: true }).click();
   await emptyAction('Open folder').click();
   await page.getByRole('dialog', { name: 'Open project folder', exact: true }).waitFor();
   await page.locator('.file-dialog-list[aria-busy="false"]').waitFor();
@@ -138,7 +134,7 @@ async function openFolderFromEmpty() {
 
 test('scene no-results action clears the query and object type together', async () => {
   await panel().getByRole('button', { name: 'Joint', exact: true }).click();
-  await panel().getByTitle('Search', { exact: true }).click();
+  await panel().getByRole('button', { name: 'Search', exact: true }).click();
   const search = page.getByRole('textbox', { name: 'Search Scene', exact: true });
   await search.fill('no-such-object');
   await panel().getByText('No matching objects', { exact: true }).waitFor();
@@ -154,7 +150,7 @@ test('scene no-results action clears the query and object type together', async 
 });
 
 test('project empty action opens the exact current folder and remains reversible', async () => {
-  await page.getByTitle('Project files', { exact: true }).click();
+  await page.getByRole('button', { name: 'Project files', exact: true }).click();
   await panel().getByText('No folder open', { exact: true }).waitFor();
   assert.equal(await panel().locator('.group-eyebrow').count(), 0);
   assert.equal(
@@ -170,9 +166,9 @@ test('project empty action opens the exact current folder and remains reversible
     .getByRole('dialog', { name: 'Open project folder', exact: true })
     .waitFor({ state: 'hidden' });
   assert.equal(openedProjects.at(-1), project);
-  assert.equal(await panel().locator('.group-eyebrow').getAttribute('title'), project);
+  assert.equal(await panel().locator('.group-eyebrow').getAttribute('data-tooltip'), project);
   await panel().getByRole('textbox', { name: 'Search Project', exact: true }).waitFor();
-  await page.getByTitle('Close project folder', { exact: true }).click();
+  await page.getByRole('button', { name: 'Close project folder', exact: true }).click();
   await emptyAction('Open folder').waitFor();
   assert.equal(await panel().locator('.group-eyebrow').count(), 0);
   assert.equal(
@@ -191,22 +187,23 @@ test('project search recovery restores files after no results', async () => {
   await panel().getByRole('treeitem', { name: 'arm.urdf', exact: true }).waitFor();
 });
 
-test('actuator empty state opens a URDF through the custom file browser', async () => {
+test('actuator empty state describes the scene source without a format-specific action', async () => {
   // A previously expanded scene search must not leak into a panel without search behavior.
-  await panel().getByTitle('Search', { exact: true }).click();
-  await page.getByTitle('Actuators', { exact: true }).click();
+  await panel().getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByRole('button', { name: 'Actuators', exact: true }).click();
   await panel().getByText('No actuators defined', { exact: true }).waitFor();
-  await panel().getByText('Actuators are read from URDF transmissions.', { exact: true }).waitFor();
+  await panel().getByText('Actuators are provided by the scene source.', { exact: true }).waitFor();
   assert.equal(await panel().getByRole('textbox').count(), 0);
-  assert.equal(await panel().getByTitle('Add object', { exact: true }).count(), 0);
-  assert.equal(await panel().getByTitle('Search', { exact: true }).count(), 0);
+  assert.equal(await panel().getByRole('button', { name: 'Add object', exact: true }).count(), 0);
+  assert.equal(await panel().getByRole('button', { name: 'Search', exact: true }).count(), 0);
   await panel().screenshot({ path: '../output/electron/verification/empty-actuators-dark.png' });
   const dialog = page.getByRole('dialog', { name: 'Open URDF', exact: true });
-  await panel().locator('.joint-panel-header').getByTitle('Open URDF', { exact: true }).click();
-  await dialog.waitFor();
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await dialog.waitFor({ state: 'hidden' });
-  await emptyAction('Open URDF').click();
+  assert.equal(await panel().getByRole('button', { name: 'Open URDF', exact: true }).count(), 0);
+  await page.locator('[data-menu=File]').click();
+  await page
+    .locator('.menu-file')
+    .getByRole('menuitem', { name: /^Open URDF/ })
+    .click();
   await dialog.waitFor();
   await page.locator('.file-dialog-list[aria-busy="false"]').waitFor();
   await dialog.getByRole('option', { name: 'arm.urdf', exact: true }).click();
@@ -221,8 +218,8 @@ test('joint and camera no-results actions restore their lists', async () => {
     ['Joints', 'Search joints', 'No matching joints', '.joint-entry'],
     ['Cameras', 'Search cameras', 'No matching cameras', '.camera-entry'],
   ]) {
-    await page.getByTitle(tab, { exact: true }).click();
-    await panel().getByTitle(searchTitle, { exact: true }).click();
+    await page.getByRole('button', { name: tab, exact: true }).click();
+    await panel().getByRole('button', { name: searchTitle, exact: true }).click();
     const search = panel().getByRole('textbox', { name: searchTitle, exact: true });
     const originalCount = await panel().locator(card).count();
     assert.ok(originalCount > 0);
@@ -235,7 +232,7 @@ test('joint and camera no-results actions restore their lists', async () => {
 });
 
 test('material empty guidance is centered inside the actual inspector at both widths', async () => {
-  await page.getByTitle('Cameras', { exact: true }).click();
+  await page.getByRole('button', { name: 'Cameras', exact: true }).click();
   await panel()
     .locator('.camera-entry')
     .getByRole('button', { name: 'joint_gizmos', exact: true })
@@ -262,7 +259,7 @@ test('material empty guidance is centered inside the actual inspector at both wi
       return {
         center: root.x + root.width / 2,
         detailCenter: bounds.x + bounds.width / 2,
-        align: getComputedStyle(detail).textAlign,
+        align: window.paintStyle(detail).textAlign,
       };
     });
     assert.equal(geometry.align, 'center');

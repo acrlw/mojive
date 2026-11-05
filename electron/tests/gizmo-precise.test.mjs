@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -12,7 +13,18 @@ before(async () => {
     root: path.resolve('.'),
     cacheDir: 'node_modules/.vite-precise-test',
     server: { host: '127.0.0.1', port: 0, hmr: false },
-    optimizeDeps: { include: ['react', 'react-dom/client', 'react/jsx-runtime'] },
+    // The fixture imports scene catalogs after mounting. Prebundle their shared
+    // dependencies before the page loads so late discovery cannot duplicate Three.
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'three',
+        'i18next',
+        'react-i18next',
+      ],
+    },
   });
   server.middlewares.use('/__precise_test', (_, res) => {
     res.setHeader('content-type', 'text/html');
@@ -26,6 +38,8 @@ before(async () => {
     headless: true,
   });
   page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__precise_test`);
   await page.evaluate(async () => {
     const { default: React } = await import('/node_modules/.vite-precise-test/deps/react.js'),
@@ -184,6 +198,7 @@ test('rotation numeric unit switch preserves amount and accepts radians', async 
     fixture.render();
   });
   await open('blue');
+  const initial = await page.evaluate(() => fixture.node.object.quaternion.toArray());
   await page.getByLabel('Gizmo value').fill('90');
   await page.getByLabel('Gizmo value').press('u');
   assert.ok(
@@ -191,7 +206,9 @@ test('rotation numeric unit switch preserves amount and accepts radians', async 
   );
   await page.getByLabel('Gizmo value').press('Enter');
   const q = await page.evaluate(() => fixture.node.object.quaternion.toArray());
-  assert.ok(Math.abs(Math.abs(q[2]) - Math.SQRT1_2) < 1e-8);
+  const dot = q.reduce((sum, value, index) => sum + value * initial[index], 0);
+  const angle = 2 * Math.acos(Math.min(1, Math.abs(dot)));
+  assert.ok(Math.abs(angle - Math.PI / 2) < 1e-8, JSON.stringify({ q, initial, angle }));
 });
 
 test('projection commands are idempotent and controlled state applies native projection transitions', async () => {
@@ -326,7 +343,7 @@ test('live viewport telemetry reports actual pass workload and becomes idle with
 });
 
 for (const theme of ['light', 'dark'])
-  test(`precise popup uses shared ${theme} colors and nested circular corners`, async () => {
+  test(`precise popup uses shared ${theme} colors and nested continuous corners`, async () => {
     await page.evaluate(async (theme) => {
       const { applySettings, DEFAULT_SETTINGS } = await import('/src/settings.tsx');
       applySettings({ ...DEFAULT_SETTINGS, appearance: theme, language: 'en' });
@@ -344,20 +361,20 @@ for (const theme of ['light', 'dark'])
       const field = document.querySelector('.precise-gizmo-number input'),
         segment = document.querySelector('.precise-gizmo-segments button.active'),
         panel = document.querySelector('.precise-gizmo-input'),
-        root = getComputedStyle(document.documentElement);
+        root = window.paintStyle(document.documentElement);
       return {
-        field: getComputedStyle(field).backgroundColor,
-        segment: getComputedStyle(segment).backgroundColor,
-        ink: getComputedStyle(field).color,
-        outline: getComputedStyle(field).outlineWidth,
-        border: getComputedStyle(field).borderWidth,
+        field: window.paintStyle(field).backgroundColor,
+        segment: window.paintStyle(segment).backgroundColor,
+        ink: window.paintStyle(field).color,
+        outline: window.paintStyle(field).outlineWidth,
+        border: window.paintStyle(field).borderWidth,
         paths: [...panel.querySelectorAll('input,.precise-gizmo-segments,button'), panel].map(
-          (e) => getComputedStyle(e).clipPath,
+          (e) => window.paintStyle(e).clipPath,
         ),
         rect: panel.getBoundingClientRect().toJSON(),
         segments: [...panel.querySelectorAll('.precise-gizmo-segments')].map((group) => ({
-          padding: getComputedStyle(group).padding,
-          gap: getComputedStyle(group).gap,
+          padding: window.paintStyle(group).padding,
+          gap: window.paintStyle(group).gap,
           frame: group.getBoundingClientRect().toJSON(),
           buttons: [...group.children].map((button) => ({
             rect: button.getBoundingClientRect().toJSON(),
@@ -367,7 +384,7 @@ for (const theme of ['light', 'dark'])
               'borderBottomRightRadius',
               'borderBottomLeftRadius',
             ]
-              .map((key) => parseFloat(getComputedStyle(button)[key]))
+              .map((key) => parseFloat(window.paintStyle(button)[key]))
               .join(','),
           })),
         })),
@@ -467,6 +484,10 @@ test('native multi-joint picker is contextual, movable and preserves explicit ch
   const bounds = await page.locator('.viewport-stage').boundingBox();
   await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
   const clicked = await page.evaluate(() => fixture.selected);
+  if (!clicked)
+    await page.screenshot({
+      path: '../output/electron/verification/precise-scene-pick-failure.png',
+    });
   assert.ok(clicked, 'Scene click selects the focused compound body geometry');
   await page.evaluate(() => {
     fixture.tool = 'joint';
@@ -476,7 +497,9 @@ test('native multi-joint picker is contextual, movable and preserves explicit ch
   const context = await picker.boundingBox();
   assert.equal(context.x - host.x, bounds.width / 2 + 14);
   assert.equal(context.y - host.y, bounds.height / 2 + 14);
-  await page.screenshot({ path: '../output/electron/verification/contextual-joint-picker-click.png' });
+  await page.screenshot({
+    path: '../output/electron/verification/contextual-joint-picker-click.png',
+  });
 });
 
 for (const theme of ['light', 'dark'])

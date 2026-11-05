@@ -74,7 +74,7 @@ export function LayersPopup({
       }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <Squircle radius={12} className="viewport-layers-surface">
+      <Squircle radius={16} className="viewport-layers-surface">
         <header>
           <strong>{translate('Viewport layers')}</strong>
           <Button

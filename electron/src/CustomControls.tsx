@@ -8,6 +8,7 @@ export function useControlPopover(
   popup: RefObject<HTMLDivElement | null>,
   open: boolean,
   close: () => void,
+  point?: { x: number; y: number },
 ) {
   useLayoutEffect(() => {
     const node = popup.current,
@@ -23,8 +24,8 @@ export function useControlPopover(
       node.style.maxWidth = `${(innerWidth - 16) / zoom}px`;
       const width = node.offsetWidth * zoom,
         height = node.offsetHeight * zoom;
-      node.style.left = `${Math.max(8, Math.min(box.left, innerWidth - width - 8)) / zoom}px`;
-      node.style.top = `${Math.max(8, Math.min(box.bottom + 4, innerHeight - height - 8)) / zoom}px`;
+      node.style.left = `${Math.max(8, Math.min(point?.x ?? box.left, innerWidth - width - 8)) / zoom}px`;
+      node.style.top = `${Math.max(8, Math.min(point?.y ?? box.bottom + 4, innerHeight - height - 8)) / zoom}px`;
     };
     node.showPopover();
     position();
@@ -203,7 +204,7 @@ export function Switch({
       {...props}
       type="button"
       className={`custom-switch ${className}`}
-      data-round-surface=""
+      data-capsule-layout=""
       role="switch"
       aria-label={props['aria-label'] ?? (label ? t(label) : undefined)}
       aria-checked={checked}
@@ -242,12 +243,12 @@ export function SwitchRow({
       role="switch"
       aria-label={props['aria-label'] ? t(props['aria-label']) : undefined}
       aria-checked={checked}
-      title={title ? t(title) : undefined}
+      data-tooltip={title ? t(title) : undefined}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
       <span className="switch-row-label">{t(label)}</span>
-      <span className="custom-switch" data-round-surface="" aria-hidden="true">
+      <span className="custom-switch" aria-hidden="true" data-capsule-layout="">
         <span data-round-surface="" />
       </span>
     </button>

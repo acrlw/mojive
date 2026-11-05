@@ -1,4 +1,4 @@
-import { observeSurfaces } from './surfaces';
+import '../smooth-corners';
 import './precise-input.css';
 export interface PreciseGizmoTarget {
   action: string;
@@ -12,7 +12,6 @@ export interface PreciseGizmoTarget {
 export class PreciseInputPopover {
   private layer: HTMLDivElement | null = null;
   private target: PreciseGizmoTarget | null = null;
-  private releaseSurfaces: (() => void) | null = null;
   private resize: ResizeObserver | null = null;
   constructor(
     private host: HTMLElement,
@@ -27,8 +26,6 @@ export class PreciseInputPopover {
   }
   close() {
     if (!this.layer) return;
-    this.releaseSurfaces?.();
-    this.releaseSurfaces = null;
     this.resize?.disconnect();
     this.resize = null;
     this.layer.remove();
@@ -100,7 +97,7 @@ export class PreciseInputPopover {
     error.className = 'precise-gizmo-error';
     error.setAttribute('role', 'alert');
     panel.append(error);
-    input.title =
+    input.dataset.tooltip =
       target.unit === '°'
         ? this.translate('Enter to apply · Esc to cancel · U to change unit')
         : this.translate('Enter to apply · Esc to cancel');
@@ -177,11 +174,6 @@ export class PreciseInputPopover {
     layer.append(panel);
     this.host.append(layer);
     update();
-    this.releaseSurfaces = observeSurfaces(
-      [panel, modes, relative, absoluteButton, input, unit, degrees, rad].filter(
-        (element) => element.isConnected,
-      ),
-    );
     this.resize = new ResizeObserver(position);
     this.resize.observe(panel);
     this.resize.observe(this.host);

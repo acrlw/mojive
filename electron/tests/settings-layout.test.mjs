@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -27,6 +28,8 @@ after(async () => {
 });
 async function workspace(appearance, uiScale = 1, language = 'en', width = 1700, uiFontSize = 14) {
   const page = await browser.newPage({ viewport: { width, height: 1050 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(5000);
   await page.addInitScript(
     (settings) => localStorage.setItem('mojive.electron.settings.v1', JSON.stringify(settings)),
@@ -48,15 +51,18 @@ async function assertClear(field, scale) {
       right: a.right - b.right,
       width: b.width,
       height: b.height,
-      radius: getComputedStyle(button).borderRadius,
+      radius: window.paintStyle(button).borderRadius,
     };
   });
-  for (const edge of ['top', 'bottom', 'right'])
+  for (const edge of ['top', 'bottom'])
     assert.ok(Math.abs(box[edge] - 4 * scale) < 0.1, JSON.stringify(box));
+  // Native feasibility's H28/s0.382 mean-clearance center is 14.24723px.
+  assert.ok(Math.abs(box.right - 4.24723 * scale) < 0.1, JSON.stringify(box));
   assert.equal(box.width, box.height);
   assert.equal(box.radius, '50%');
   await field.locator('button').click();
   assert.equal(await field.locator('input').inputValue(), '');
+  assert.ok(await field.locator('input').evaluate((input) => document.activeElement === input));
 }
 test('production settings fill aligned content columns and keep their bounds through category/search changes', async () => {
   for (const [theme, scale, language, width] of [
@@ -90,7 +96,7 @@ test('production settings fill aligned content columns and keep their bounds thr
     assert.ok(
       layout.search.bottom < layout.navigation.top && layout.search.bottom < layout.heading.top,
     );
-    const fields = layout.rows.filter((r) => r.field.top < r.row.top + 1);
+    const fields = layout.rows.filter((r) => r.field.left > r.row.left + 1);
     assert.ok(fields.length >= 5);
     assert.ok(fields.every((r) => Math.abs(r.field.left - fields[0].field.left) < 0.1));
     // All interactive controls reach the same right edge; readonly font names retain intrinsic width.
@@ -105,19 +111,21 @@ test('production settings fill aligned content columns and keep their bounds thr
     await page.locator('.settings-search input').fill('123');
     await page.locator('.settings-search button').hover();
     assert.deepEqual(await dialog.boundingBox(), initial);
-    await dialog.screenshot({ path: `../output/electron/verification/settings-clear-${theme}-${scale}.png` });
+    await dialog.screenshot({
+      path: `../output/electron/verification/settings-clear-${theme}-${scale}.png`,
+    });
     await assertClear(page.locator('.settings-search'), scale);
     await page.keyboard.press('Escape');
-    await page.locator('.tree-row[title="05_multi_slide_x"]').click();
+    await page.locator('.tree-row[data-tooltip="05_multi_slide_x"]').click();
     const tabs = await page.locator('.inspector-tabs').evaluate((node) => ({
-      border: getComputedStyle(node).borderBottomWidth,
+      border: window.paintStyle(node).borderBottomWidth,
       overflow: node.scrollWidth - node.clientWidth,
       buttons: [...node.children].map((button) => ({
-        title: button.title,
+        title: button.dataset.tooltip,
         label: button.textContent,
-        overflow: getComputedStyle(button).overflow,
-        textOverflow: getComputedStyle(button).textOverflow,
-        border: getComputedStyle(button).borderBottomWidth,
+        overflow: window.paintStyle(button).overflow,
+        textOverflow: window.paintStyle(button).textOverflow,
+        border: window.paintStyle(button).borderBottomWidth,
       })),
     }));
     assert.equal(tabs.border, '0px');
@@ -128,18 +136,54 @@ test('production settings fill aligned content columns and keep their bounds thr
       assert.equal(tab.overflow, 'hidden');
       assert.equal(tab.textOverflow, 'ellipsis');
     }
-    await page
-      .locator('.inspector')
-      .screenshot({ path: `../output/electron/verification/inspector-tabs-${language}-${scale}.png` });
+    await page.locator('.inspector').screenshot({
+      path: `../output/electron/verification/inspector-tabs-${language}-${scale}.png`,
+    });
     await page.close();
   }
 });
-test('all production search consumers keep one concentric clear circle at fractional scale', async () => {
+test('all production search consumers share an optically centered clear circle at fractional scale', async () => {
   const scale = 1.25,
     page = await workspace('light', scale),
     project = await realpath(await mkdtemp(path.join(os.tmpdir(), 'mojive-search-layout-'))),
     files = new FileAccess([{ label: 'Home', path: project }]),
     projects = new Projects();
+  const metrics = [];
+  const checkSearch = async (field, panel) => {
+    await field.locator('input').fill('test');
+    await settlePaint(page);
+    const shape = await field.evaluate((node) => {
+      const style = window.paintStyle(node),
+        input = node.querySelector('input');
+      const text = getComputedStyle(input),
+        icon = getComputedStyle(node.querySelector(':scope > .icon'));
+      return {
+        height: style.height,
+        padding: style.padding,
+        radius: style.borderRadius,
+        font: text.font,
+        color: text.color,
+        placeholder: getComputedStyle(input, '::placeholder').color,
+        iconWidth: icon.width,
+        iconHeight: icon.height,
+        iconColor: icon.color,
+        outline: style.outlineStyle,
+        outlineOffset: style.outlineOffset,
+        kind: node.dataset.smoothKind,
+        smoothing: node.dataset.smoothAmount,
+      };
+    });
+    assert.equal(shape.iconWidth, '16px');
+    assert.equal(shape.iconHeight, '16px');
+    assert.equal(shape.height, '28px');
+    assert.equal(shape.kind, 'capsule');
+    if (metrics.length) assert.deepEqual(shape, metrics[0].shape, panel);
+    metrics.push({ panel, shape });
+    await field.screenshot({
+      path: `../output/electron/verification/search-${panel.replaceAll(' ', '-').toLowerCase()}.png`,
+    });
+    await assertClear(field, scale);
+  };
   try {
     await writeFile(
       path.join(project, 'test.urdf'),
@@ -177,28 +221,37 @@ test('all production search consumers keep one concentric clear circle at fracti
       ['Output', 'Search output', '.output-search'],
     ];
     for (const [panel, trigger, selector] of searches) {
-      await page.locator('.activity-rail').getByTitle(panel, { exact: true }).click();
+      await page
+        .locator('.activity-rail')
+        .getByRole('button', { name: panel, exact: true })
+        .click();
       if (panel === 'Project files') {
-        await page.getByTitle('Open project folder', { exact: true }).click();
+        await page.getByRole('button', { name: 'Open project folder', exact: true }).click();
         const dialog = page.getByRole('dialog', { name: 'Open project folder', exact: true });
         await dialog.waitFor();
         await dialog.locator('.file-dialog-list[aria-busy="false"]').waitFor();
+        await checkSearch(dialog.locator('.file-dialog-filter'), 'File dialog');
         await dialog.getByRole('button', { name: 'Select folder', exact: true }).click();
         await dialog.waitFor({ state: 'hidden' });
         assert.equal(
-          await page.locator('.left-content .group-eyebrow').getAttribute('title'),
+          await page.locator('.left-content .group-eyebrow').getAttribute('data-tooltip'),
           project,
         );
       }
       if (trigger)
         await page
           .locator(panel === 'Scene' ? '.left-panel' : 'body')
-          .getByTitle(trigger, { exact: true })
+          .getByRole('button', { name: trigger, exact: true })
           .click();
       const field = page.locator(selector);
-      await field.locator('input').fill('test');
-      await assertClear(field, scale);
+      await checkSearch(field, panel);
     }
+    await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+    await checkSearch(page.locator('.settings-search'), 'Settings');
+    await writeFile(
+      '../output/electron/verification/search-consumers.json',
+      JSON.stringify(metrics, null, 2),
+    );
   } finally {
     await page.close();
     await rm(project, { recursive: true, force: true });
@@ -228,7 +281,7 @@ test('settings share the measured longest label across sections with an exact ga
           const rows = [...root.querySelectorAll('.settings-row')].map((row) => {
             const label = row.firstElementChild,
               field = row.lastElementChild,
-              style = getComputedStyle(label);
+              style = window.paintStyle(label);
             const canvas = document.createElement('canvas'),
               ctx = canvas.getContext('2d');
             ctx.font = style.font;
@@ -239,7 +292,7 @@ test('settings share the measured longest label across sections with an exact ga
               caption: label.textContent,
               measured: ctx.measureText(label.textContent).width,
               toggle: field.matches('.custom-switch'),
-              stacked: getComputedStyle(row).gridTemplateColumns.split(' ').length === 1,
+              stacked: window.paintStyle(row).gridTemplateColumns.split(' ').length === 1,
             };
           });
           return {
@@ -247,7 +300,7 @@ test('settings share the measured longest label across sections with an exact ga
             navigationWidth: document.querySelector('.settings-navigation').getBoundingClientRect()
               .width,
             navigationFont: parseFloat(
-              getComputedStyle(document.querySelector('.settings-navigation')).fontSize,
+              window.paintStyle(document.querySelector('.settings-navigation')).fontSize,
             ),
             fields: rect(root),
             search: rect(document.querySelector('.settings-search')),
@@ -320,7 +373,7 @@ test('settings share the measured longest label across sections with an exact ga
       const filtered = await page.locator('.settings-row').evaluate((row) => {
         const label = row.firstElementChild,
           field = row.lastElementChild,
-          style = getComputedStyle(label);
+          style = window.paintStyle(label);
         const ctx = document.createElement('canvas').getContext('2d');
         ctx.font = style.font;
         return {

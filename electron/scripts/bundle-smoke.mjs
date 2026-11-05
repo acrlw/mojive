@@ -95,7 +95,7 @@ try {
   const timeline = page.locator('.timeline');
   const captureActions = await timeline
     .locator('.timeline-capture-actions > button')
-    .evaluateAll((buttons) => buttons.map((button) => button.title));
+    .evaluateAll((buttons) => buttons.map((button) => button.dataset.tooltip));
   assert.deepEqual(captureActions.slice(0, 2), ['录制场景帧', '导出视频']);
   assert.equal(await timeline.getByRole('textbox', { name: '时间轴终点', exact: true }).count(), 0);
   assert.equal(await timeline.locator('.timeline-details').count(), 0);

@@ -122,3 +122,43 @@ test('Close Project Folder follows project state independently from scene select
     /Invalid native project state/,
   );
 });
+
+test('native focus accelerators follow remapping, unbinding and text input ownership', () => {
+  const { controller, captures } = menuFixture();
+  const focus = () =>
+    captures
+      .at(-1)
+      .flatMap((item) => item.submenu ?? [])
+      .filter((item) => item.id?.startsWith('view.focus'));
+  controller.update({ ...chineseState, focusKey: 'G' });
+  assert.deepEqual(
+    Array.from(focus(), (item) => item.accelerator),
+    ['G', 'Shift+G'],
+  );
+  controller.update({ ...chineseState, focusKey: 'F', focusAllKey: null });
+  assert.equal(focus()[1].accelerator, undefined);
+  controller.update({ ...chineseState, focusKey: null });
+  assert.ok(focus().every((item) => item.accelerator === undefined));
+  controller.update({ ...chineseState, focusKey: 'R', textInput: true });
+  assert.ok(focus().every((item) => item.accelerator === undefined));
+  assert.throws(
+    () => controller.update({ ...chineseState, focusKey: 'Cmd+Q' }),
+    /Invalid native focus/,
+  );
+});
+
+test('native system-role labels follow the app language independently of the host language', () => {
+  const { controller, captures } = menuFixture();
+  const roles = (items) =>
+    items.flatMap((item) => [
+      ...(item.role && item.role !== 'help' ? [item] : []),
+      ...(Array.isArray(item.submenu) ? roles(item.submenu) : []),
+    ]);
+  controller.update(chineseState);
+  const zh = roles(captures.at(-1));
+  assert.ok(zh.length >= 14);
+  for (const item of zh) assert.match(item.label, /[\u3400-\u9fff]/, item.role);
+  assert.equal(zh.find((item) => item.role === 'copy').label, '复制');
+  controller.update({ ...chineseState, locale: 'en' });
+  assert.equal(roles(captures.at(-1)).find((item) => item.role === 'copy').label, 'Copy');
+});

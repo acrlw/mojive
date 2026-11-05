@@ -1,6 +1,6 @@
 import type { Joint, SceneDocument, SceneNode } from '../contracts';
 import { icons } from '../icons';
-import { observeSurfaces } from './surfaces';
+import '../smooth-corners';
 import './joint-picker.css';
 
 export function jointBody(doc: SceneDocument, selected: string | null) {
@@ -31,7 +31,6 @@ export class JointPicker {
   private body: string | null = null;
   private dismissed = false;
   private panel: HTMLDivElement | null = null;
-  private releaseSurfaces: (() => void) | null = null;
   private resize: ResizeObserver | null = null;
   private remembered = new Map<string, string>();
   private click: { selected: string | null; point: [number, number] } | null = null;
@@ -54,8 +53,6 @@ export class JointPicker {
     this.remove();
   }
   private remove() {
-    this.releaseSurfaces?.();
-    this.releaseSurfaces = null;
     this.resize?.disconnect();
     this.resize = null;
     this.panel?.remove();
@@ -189,7 +186,6 @@ export class JointPicker {
     });
     this.host.append(panel);
     this.place();
-    this.releaseSurfaces = observeSurfaces([panel, close, ...this.rows.values()]);
     this.resize = new ResizeObserver(() => this.place());
     this.resize.observe(this.host);
     this.resize.observe(panel);

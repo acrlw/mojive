@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, beforeEach, after } from 'node:test';
 import { createServer } from 'vite';
@@ -14,13 +15,17 @@ before(async () => {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1380, height: 900 }, deviceScaleFactor: 1 });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.on('pageerror', (error) => errors.push(error.message));
   await mkdir('../output/electron/verification', { recursive: true });
 });
 beforeEach(async () => {
   errors.length = 0;
   await page.setViewportSize({ width: 1380, height: 900 });
-  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/tests/harness/camera-review.html`);
+  await page.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/camera-review.html`,
+  );
   await page.waitForLoadState('networkidle');
   await page.waitForFunction(() => window.cameraReview?.api?.current);
   await page.evaluate(async () => {
@@ -197,7 +202,7 @@ test('hidden previews stop drawing and release context; switching scene or camer
   );
   assert.equal((await last()).view.projection, 'orthographic');
   assert.equal(
-    await preview().locator('.camera-preview-title').getAttribute('title'),
+    await preview().locator('.camera-preview-title').getAttribute('data-tooltip'),
     'Second camera',
   );
   await waitFrame(() =>
@@ -216,7 +221,7 @@ test('hidden previews stop drawing and release context; switching scene or camer
   );
   assert.notEqual((await last()).source, old.source);
   assert.equal(
-    await preview().locator('.camera-preview-title').getAttribute('title'),
+    await preview().locator('.camera-preview-title').getAttribute('data-tooltip'),
     'Replacement camera',
   );
   assert.equal(await page.evaluate(() => window.previewTrace.assetsDisposed), 0);
@@ -263,9 +268,9 @@ test('preview drag is bounded, Escape restores its anchor, and compact actions r
   await page.getByRole('menuitemcheckbox', { name: 'Pin', exact: true }).click();
   assert.equal(await preview().getAttribute('data-pinned'), 'true');
   const corners = await preview().evaluate((element) => ({
-    outer: getComputedStyle(element).borderRadius,
-    padding: getComputedStyle(element).padding,
-    inner: getComputedStyle(element.querySelector('canvas')).borderRadius,
+    outer: window.paintStyle(element).borderRadius,
+    padding: window.paintStyle(element).padding,
+    inner: window.paintStyle(element.querySelector('canvas')).borderRadius,
   }));
   assert.deepEqual(corners, { outer: '12px', padding: '8px', inner: '4px' });
   assert.deepEqual(errors, []);
@@ -405,7 +410,7 @@ test('production preview and direct projection controls fit dark/light workspace
     const chinese = language !== 'en';
     await page
       .locator('.activity-rail')
-      .getByTitle(chinese ? '相机' : 'Cameras', { exact: true })
+      .getByRole('button', { name: chinese ? '相机' : 'Cameras', exact: true })
       .click();
     await page.locator('.camera-entry-name').first().click();
     await page.getByRole('switch', { name: chinese ? '预览' : 'Preview', exact: true }).click();
@@ -432,7 +437,7 @@ test('production preview and direct projection controls fit dark/light workspace
           bottomInset: group.bottom - rect.bottom,
           leftInset: rect.left - group.left,
           rightInset: group.right - rect.right,
-          corners: getComputedStyle(child).borderRadius,
+          corners: window.paintStyle(child).borderRadius,
         };
       });
     });
@@ -478,7 +483,7 @@ test('production preview and direct projection controls fit dark/light workspace
         imageHeight: image.height,
         height: a.height,
         imageInset: image.left - a.left,
-        radius: getComputedStyle(element).borderRadius,
+        radius: window.paintStyle(element).borderRadius,
         overflow: element.scrollWidth - element.clientWidth,
       };
     });
@@ -513,9 +518,9 @@ test('production preview and direct projection controls fit dark/light workspace
       .getByRole('button', { name: chinese ? '返回编辑器' : 'Return to editor', exact: true })
       .waitFor();
     assert.deepEqual(await rows(), positions);
-    await page
-      .locator('.inspector')
-      .screenshot({ path: `../output/electron/verification/camera-actions-view-${appearance}-${scale}x.png` });
+    await page.locator('.inspector').screenshot({
+      path: `../output/electron/verification/camera-actions-view-${appearance}-${scale}x.png`,
+    });
     await actions
       .getByRole('button', { name: chinese ? '操控相机' : 'Pilot camera', exact: true })
       .click();
@@ -524,9 +529,9 @@ test('production preview and direct projection controls fit dark/light workspace
       chinese ? '返回编辑器' : 'Return to editor',
     );
     assert.deepEqual(await rows(), positions);
-    await page
-      .locator('.inspector')
-      .screenshot({ path: `../output/electron/verification/camera-actions-pilot-${appearance}-${scale}x.png` });
+    await page.locator('.inspector').screenshot({
+      path: `../output/electron/verification/camera-actions-pilot-${appearance}-${scale}x.png`,
+    });
     await actions
       .getByRole('button', { name: chinese ? '返回编辑器' : 'Return to editor', exact: true })
       .click();

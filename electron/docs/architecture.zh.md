@@ -70,7 +70,7 @@ Renderer 通过 `onMenuAction(callback)` 订阅命令，卸载时调用返回的
 
 ## 设计来源
 
-`node scripts/sync-design.mjs` 从现有 design-spec 和 SVG masters 生成 CSS tokens 与图标映射，并复制 MiSans 和许可证。数值字段使用 JetBrains Mono。前端普通 UI 当前统一使用 CSS circular corners；内层半径由 `max(0, outer radius − inset)` 推导，不启用 Figma clip 或全局 squircle。
+`node scripts/sync-design.mjs` 从现有 design-spec 和 SVG masters 生成 CSS tokens 与图标映射，并复制 MiSans 和许可证。数值字段使用 JetBrains Mono。前端圆角表面使用自有三阶 Bézier 路径，通过端点曲率约束保证 G2 连续，矩形默认平滑度为 60%，保留设计半径。胶囊复用原版 Mojive 的 G3 端部轮廓，默认平滑度为 38.2%。嵌套控件从同一基准轮廓进行法线偏移，并检查整条嵌套链的空间预算与曲率极值；通用设置分别保存矩形和胶囊平滑度。
 
 viewport 连续轮廓与抗锯齿采用原版几何和显式 GPU fringe。普通 UI 圆角与空间 gizmo 的既有 G3 轮廓有不同的所有者，不能通过一个全局 CSS 设置混在一起。
 

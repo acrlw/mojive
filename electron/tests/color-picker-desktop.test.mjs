@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer as createTcpServer } from 'node:net';
@@ -28,7 +29,9 @@ test('Electron picker Copy/Paste traverses the explicit preload bridge and CSS c
     server: { host: '127.0.0.1', port, strictPort: true },
     logLevel: 'error',
   });
-  const profile = await mkdtemp(path.join(root, '../output/electron/verification/controls-profile-'));
+  const profile = await mkdtemp(
+    path.join(root, '../output/electron/verification/controls-profile-'),
+  );
   let app;
   try {
     await server.listen();
@@ -37,6 +40,8 @@ test('Electron picker Copy/Paste traverses the explicit preload bridge and CSS c
       env: { ...process.env, MOJIVE_DEV_URL: `http://127.0.0.1:${port}` },
     });
     const page = await app.firstWindow();
+    await page.addInitScript(installPaintStyle);
+    await page.evaluate(installPaintStyle);
     page.setDefaultTimeout(5000);
     await page.waitForFunction(() => window.controlState && window.mojive);
     // Keep the real IPC route while isolating the test from the user's OS clipboard.
@@ -73,8 +78,8 @@ test('Electron picker Copy/Paste traverses the explicit preload bridge and CSS c
         requestAnimationFrame(() =>
           requestAnimationFrame(() =>
             resolve({
-              corner: getComputedStyle(frame).cornerShape,
-              clip: getComputedStyle(frame).clipPath,
+              corner: window.paintStyle(frame).cornerShape,
+              clip: window.paintStyle(frame).clipPath,
               hit: document.elementFromPoint(620, 114) === child,
             }),
           ),

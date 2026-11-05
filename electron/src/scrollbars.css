@@ -5,22 +5,51 @@
 }
 ::-webkit-scrollbar-thumb {
   background-color: transparent;
-  border-radius: 8px;
+  border-radius: 0;
   border: 2px solid transparent;
   background-clip: padding-box;
+  background-origin: padding-box;
+  background-repeat: no-repeat;
+}
+::-webkit-scrollbar-thumb:vertical {
+  background-position:
+    center top,
+    center center,
+    center bottom;
+  background-size:
+    100% var(--scrollbar-cap-extent),
+    100% calc(100% - 2 * var(--scrollbar-cap)),
+    100% var(--scrollbar-cap-extent);
+}
+::-webkit-scrollbar-thumb:horizontal {
+  background-position:
+    left center,
+    center center,
+    right center;
+  background-size:
+    var(--scrollbar-cap-extent) 100%,
+    calc(100% - 2 * var(--scrollbar-cap)) 100%,
+    var(--scrollbar-cap-extent) 100%;
 }
 ::-webkit-scrollbar-track,
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
-[data-scrollbar-visible]::-webkit-scrollbar-thumb {
-  background-color: var(--ui-field-active);
+[data-scrollbar-visible]::-webkit-scrollbar-thumb:vertical {
+  background-image: var(--scrollbar-field-active-y);
 }
-[data-scrollbar-visible][data-scrollbar-hover='y']::-webkit-scrollbar-thumb:vertical,
+[data-scrollbar-visible]::-webkit-scrollbar-thumb:horizontal {
+  background-image: var(--scrollbar-field-active-x);
+}
+[data-scrollbar-visible][data-scrollbar-hover='y']::-webkit-scrollbar-thumb:vertical {
+  background-image: var(--scrollbar-primary-dim-y);
+}
 [data-scrollbar-visible][data-scrollbar-hover='x']::-webkit-scrollbar-thumb:horizontal {
-  background-color: var(--ui-primary-dim);
+  background-image: var(--scrollbar-primary-dim-x);
 }
-[data-scrollbar-visible][data-scrollbar-pressed='y']::-webkit-scrollbar-thumb:vertical,
+[data-scrollbar-visible][data-scrollbar-pressed='y']::-webkit-scrollbar-thumb:vertical {
+  background-image: var(--scrollbar-primary-y);
+}
 [data-scrollbar-visible][data-scrollbar-pressed='x']::-webkit-scrollbar-thumb:horizontal {
-  background-color: var(--ui-primary);
+  background-image: var(--scrollbar-primary-x);
 }

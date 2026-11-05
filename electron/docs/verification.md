@@ -35,20 +35,22 @@ Inspect its images and JSON results under `output/electron/verification/` from t
 
 ## Focused checks
 
-| Target                       | Coverage                                                            |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `make controls-review`       | Numeric drag/type states, custom controls and palette               |
-| `make layout-review`         | Inspector, settings, empty states, switches and responsive panels   |
-| `make project-review`        | Custom file dialogs, project open/close, native menus and resources |
-| `make camera-review`         | Camera cards, transitions, focus, orbit restoration and preview     |
-| `make camera-self-review`    | Actual desktop camera/gizmo visibility                              |
-| `make viewport-review`       | Joint picking, geometry, feedback and selection ownership           |
-| `make viewcube-review`       | Native/browser geometry, raster output and interaction comparison   |
-| `make timeline-review`       | Three-lane state, recording, editing and unbounded navigation       |
-| `make timeline-wheel-review` | Native desktop wheel normalization and cursor anchoring             |
-| `make scrollbar-review`      | Hover, held, idle and two-axis scroll ownership                     |
-| `make switch-review`         | Whole-row toggles and pointer cancellation                          |
-| `make actuator-review`       | Actuator/joint cards and actual desktop captures                    |
+| Target                       | Coverage                                                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make menu-review`           | Menu hover/keyboard mode, tree context, direct key/mouse recording, shared hints, themed tooltips and nested corners                         |
+| `make corners-review`        | G2 joins, analytic nested offsets, G3 capsules and optical icon placement, shared field/segment geometry, focus outlines and Canvas readouts |
+| `make controls-review`       | Numeric drag/type states, custom controls and palette                                                                                        |
+| `make layout-review`         | Inspector, settings, empty states, switches and responsive panels                                                                            |
+| `make project-review`        | Custom file dialogs, project open/close, native menus and resources                                                                          |
+| `make camera-review`         | Camera cards, transitions, focus, orbit restoration and preview                                                                              |
+| `make camera-self-review`    | Actual desktop camera/gizmo visibility                                                                                                       |
+| `make viewport-review`       | Joint picking, geometry, feedback and selection ownership                                                                                    |
+| `make viewcube-review`       | Native/browser geometry, raster output and interaction comparison                                                                            |
+| `make timeline-review`       | Three-lane state, recording, editing and unbounded navigation                                                                                |
+| `make timeline-wheel-review` | Native desktop wheel normalization and cursor anchoring                                                                                      |
+| `make scrollbar-review`      | Hover, held, idle and two-axis scroll ownership                                                                                              |
+| `make switch-review`         | Whole-row toggles and pointer cancellation                                                                                                   |
+| `make actuator-review`       | Actuator/joint cards and actual desktop captures                                                                                             |
 
 Browser harness HTML files are maintained under `tests/harness/` and served by Vite. They
 exercise production components; the production bundle starts only from `index.html`.

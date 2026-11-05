@@ -1,9 +1,31 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { Button, Icon, Numeric, Squircle } from './components';
+import { Button, Icon, NumericChannel, Segmented, Squircle } from './components';
 import { useControlPopover } from './CustomControls';
 import { t } from './i18n';
 import './color-picker.css';
 type RGBA = [number, number, number, number];
+function ColorSwatch({ value }: { value: string }) {
+  const rgba = parseColor(value),
+    alpha = rgba[3];
+  // Flatten each checker cell before painting the single rounded surface.
+  // Independently antialiased color and checker layers expose a bright fringe.
+  const cell = (gray: number) =>
+    colorHex(
+      rgba.map((channel, index) =>
+        index === 3 ? 1 : channel * alpha + (gray / 255) * (1 - alpha),
+      ) as RGBA,
+    );
+  return (
+    <span
+      className="color-swatch"
+      style={{
+        backgroundImage:
+          alpha === 1 ? 'none' : `repeating-conic-gradient(${cell(170)} 0 25%, ${cell(238)} 0 50%)`,
+        backgroundColor: alpha === 1 ? colorHex(rgba) : 'transparent',
+      }}
+    />
+  );
+}
 export function parseColor(text: string, normalized?: boolean, previousAlpha = 1): RGBA {
   text = text.trim();
   if (text.startsWith('#') || /^[\da-f]{6}([\da-f]{2})?$/i.test(text)) {
@@ -215,9 +237,7 @@ export function ColorPicker({
         aria-expanded={open}
         onClick={() => (open ? finish() : show())}
       >
-        <span className="color-swatch">
-          <span style={{ background: value }} />
-        </span>
+        <ColorSwatch value={value} />
         <span>{value.toUpperCase()}</span>
         <Icon name="down" />
       </Button>
@@ -226,6 +246,7 @@ export function ColorPicker({
           ref={popup}
           popover="auto"
           className="control-popover color-popover"
+          data-alpha={alpha || undefined}
           role="dialog"
           aria-label={t(label)}
           onKeyDown={(event) => {
@@ -236,22 +257,18 @@ export function ColorPicker({
             }
           }}
         >
-          <Squircle radius={12} className="color-picker-surface">
+          <Squircle radius={16} className="color-picker-surface">
             <div className="color-comparison">
               <Button
                 className="color-comparison-item"
                 title="Restore original color"
                 onClick={() => apply(parseColor(transaction.current!))}
               >
-                <span className="color-swatch">
-                  <span style={{ background: transaction.current! }} />
-                </span>
+                <ColorSwatch value={transaction.current!} />
                 {t('Original')}
               </Button>
               <span className="color-comparison-item">
-                <span className="color-swatch">
-                  <span style={{ background: colorHex(color, true) }} />
-                </span>
+                <ColorSwatch value={colorHex(color, true)} />
                 {t('Current')}
               </span>
               <span className="color-actions">
@@ -361,12 +378,7 @@ export function ColorPicker({
                 </div>
               )}
             </div>
-            <Squircle
-              radius={4}
-              className="color-format"
-              role="group"
-              aria-label={t('Color format')}
-            >
+            <Segmented className="color-format" aria-label={t('Color format')}>
               {['Hex', `${alpha ? 'RGBA' : 'RGB'} 255`, `${alpha ? 'RGBA' : 'RGB'} 1`].map(
                 (name, index) => (
                   <Button
@@ -382,7 +394,7 @@ export function ColorPicker({
                   </Button>
                 ),
               )}
-            </Squircle>
+            </Segmented>
             {mode === 0 ? (
               <input
                 className="color-hex"
@@ -403,23 +415,28 @@ export function ColorPicker({
             ) : (
               <div className="color-channel-fields">
                 {color.slice(0, alpha ? 4 : 3).map((channel, index) => (
-                  <div className="color-channel" key={index}>
-                    <label>{'RGBA'[index]}</label>
-                    <Numeric
-                      label={'RGBA'[index]}
-                      value={mode === 1 ? channel * 255 : channel}
-                      precision={mode === 1 ? 0 : 3}
-                      min={0}
-                      max={mode === 1 ? 255 : 1}
-                      integer={mode === 1}
-                      step={mode === 1 ? 1 : 0.001}
-                      onChange={(number) => {
-                        const next = [...current.current] as RGBA;
-                        next[index] = number / (mode === 1 ? 255 : 1);
-                        apply(next);
-                      }}
-                    />
-                  </div>
+                  <NumericChannel
+                    key={index}
+                    badge={'RGBA'[index]}
+                    tone={(['x', 'y', 'z', 'alpha'] as const)[index]}
+                    label={'RGBA'[index]}
+                    value={mode === 1 ? channel * 255 : channel}
+                    precision={mode === 1 ? 0 : 3}
+                    min={0}
+                    max={mode === 1 ? 255 : 1}
+                    integer={mode === 1}
+                    step={mode === 1 ? 1 : 0.001}
+                    onReset={() => {
+                      const next = [...current.current] as RGBA;
+                      next[index] = parseColor(transaction.current!)[index];
+                      apply(next);
+                    }}
+                    onChange={(number) => {
+                      const next = [...current.current] as RGBA;
+                      next[index] = number / (mode === 1 ? 255 : 1);
+                      apply(next);
+                    }}
+                  />
                 ))}
               </div>
             )}

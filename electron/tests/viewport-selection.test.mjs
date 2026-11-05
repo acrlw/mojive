@@ -313,17 +313,17 @@ test('actual Inspector toggle records undo/redo while disabled floor remains tre
   );
   await page.goto(base);
   await page.getByRole('treeitem').first().waitFor();
-  const floor = page.locator('.tree-row[title="floor"]');
+  const floor = page.locator('.tree-row[data-tooltip="floor"]');
   await floor.click();
   const toggle = page.getByRole('switch', { name: 'Select in viewport', exact: true });
   await toggle.waitFor();
   assert.equal(await toggle.getAttribute('aria-checked'), 'false');
   await toggle.click();
   assert.equal(await toggle.getAttribute('aria-checked'), 'true');
-  await page.keyboard.press('Meta+z');
+  await page.keyboard.press('ControlOrMeta+z');
   await page.waitForTimeout(100);
   assert.equal(await toggle.getAttribute('aria-checked'), 'false');
-  await page.keyboard.press('Meta+Shift+z');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
   await page.waitForTimeout(100);
   assert.equal(await toggle.getAttribute('aria-checked'), 'true');
   await toggle.click();
@@ -335,7 +335,7 @@ test('actual Inspector toggle records undo/redo while disabled floor remains tre
   await position.fill('0.1');
   await position.press('Enter');
   assert.equal(Number(await position.inputValue()), 0.1);
-  await page.getByTitle('Position (W)', { exact: true }).click();
+  await page.getByRole('button', { name: 'Position (G)', exact: true }).click();
   await page.waitForTimeout(60);
   assert.ok(
     await page

@@ -1,4 +1,6 @@
-/** Ordinary UI surfaces; spatial gizmo geometry has a separate native contour owner. */
+import { derivedCorner, smoothCapsule, surfacePath } from '../smooth-geometry';
+import { cornerSmoothing, capsuleSmoothing } from '../smooth-corners';
+
 const canvasPaths = new Map<string, Path2D>();
 export function fillSurface(
   ctx: CanvasRenderingContext2D,
@@ -8,11 +10,21 @@ export function fillSurface(
   height: number,
   radius: number,
 ) {
-  const key = `${width}:${height}:${radius}`;
+  const smoothing = radius >= Math.min(width, height) / 2 ? capsuleSmoothing() : cornerSmoothing();
+  const key = `${width}:${height}:${radius}:${smoothing}`;
   let path = canvasPaths.get(key);
   if (!path) {
-    path = new Path2D();
-    path.roundRect(0, 0, width, height, Math.max(0, radius));
+    const effectiveRadius = Math.min(radius, width / 2, height / 2);
+    const corner = derivedCorner(effectiveRadius, smoothing, Math.min(width, height) / 2, 0, 0.01);
+    path = new Path2D(
+      surfacePath(
+        width,
+        height,
+        radius >= Math.min(width, height) / 2
+          ? smoothCapsule(width, height, smoothing)
+          : [corner, corner, corner, corner],
+      ),
+    );
     if (canvasPaths.size >= 64) canvasPaths.delete(canvasPaths.keys().next().value!);
     canvasPaths.set(key, path);
   }
@@ -20,13 +32,4 @@ export function fillSurface(
   ctx.translate(x, y);
   ctx.fill(path);
   ctx.restore();
-}
-
-/** Compatibility entry point: CSS owns radii without masks or size observers. */
-export function observeSurfaces(elements: readonly HTMLElement[]) {
-  for (const element of elements) {
-    element.style.removeProperty('clip-path');
-    element.style.removeProperty('corner-shape');
-  }
-  return () => {};
 }

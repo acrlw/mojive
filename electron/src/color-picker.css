@@ -3,14 +3,16 @@
   min-width: 0;
   max-width: 100%;
 }
-.color-trigger {
-  height: 28px;
+.color-control > .color-trigger {
+  --control-radius: 8px;
+  --control-inset: 4px;
+  height: var(--field-height);
   min-width: 0;
   width: 100%;
-  padding: 0 8px;
+  padding: 0 var(--control-inset);
   gap: 8px;
   background: var(--input-color);
-  border-radius: 4px;
+  border-radius: var(--control-radius);
   font: var(--numeric-font-size, 16px) var(--font-mono);
 }
 .color-trigger > span:not(.icon):nth-child(2) {
@@ -24,26 +26,35 @@
 .color-swatch {
   position: relative;
   display: inline-block;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
-  background: repeating-conic-gradient(#aaa 0 25%, #eee 0 50%) 0/8px 8px;
+  background-size: 8px 8px;
 }
-.color-swatch > span {
-  position: absolute;
-  inset: 0;
+.color-trigger .color-swatch {
+  width: calc(var(--field-height) - 2 * var(--control-inset));
+  height: calc(var(--field-height) - 2 * var(--control-inset));
+  border-radius: calc(max(0px, calc(var(--control-radius) - var(--control-inset))));
 }
 .color-popover {
-  width: 280px;
+  font: var(--numeric-font-size, 14px) var(--font-numeric, var(--font-mono));
+  --channel-width: calc(var(--field-height) - 1cap + 6ch + 8px);
+  width: max(280px, calc(3 * var(--channel-width) + 24px));
+}
+.color-popover[data-alpha] {
+  width: max(336px, calc(4 * var(--channel-width) + 28px));
 }
 .color-picker-surface {
-  padding: 8px;
+  font-family: var(--font-ui);
+  --picker-inset: 8px;
+  --picker-control-radius: max(0px, calc(var(--surface-radius) - var(--picker-inset)));
+  padding: var(--picker-inset);
   background: var(--popup-color, var(--floating-color));
   border: 0;
-  box-shadow: inset 0 0 0 1px var(--border-color);
-  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--popup-edge);
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -56,18 +67,21 @@
   gap: 6px;
   flex-wrap: wrap;
 }
-.color-comparison-item {
+.color-picker-surface .color-comparison-item {
+  --comparison-radius: var(--picker-control-radius);
+  --comparison-inset: 4px;
+  border-radius: var(--comparison-radius);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0;
+  padding: 0 var(--comparison-inset);
   font: var(--body-font-size, 14px) var(--font-ui);
 }
 .color-comparison-item .color-swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: calc(max(0px, calc(var(--comparison-radius) - var(--comparison-inset))));
 }
 .color-actions {
   display: flex;
@@ -78,7 +92,7 @@
   height: 28px;
   width: 28px;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 .color-picker-plane {
   display: flex;
@@ -103,6 +117,7 @@
   height: 10px;
   border: 1px solid white;
   border-radius: 50%;
+  corner-shape: round;
   box-shadow: 0 0 0 1px #0008;
   transform: translate(-50%, -50%);
   pointer-events: none;
@@ -134,26 +149,11 @@
   position: absolute;
   inset: 0;
 }
-.color-format {
-  display: flex;
-  padding: 2px;
-  gap: 2px;
-  background: var(--input-color);
-  border-radius: 6px;
-}
-.color-format .button {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  border-radius: 4px;
-  font-size: var(--body-font-size, 14px);
-  padding: 0 6px;
-}
 .color-hex {
-  height: 28px;
+  height: var(--field-height);
   width: 100%;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--field-radius);
   background: var(--input-color);
   font: var(--numeric-font-size, 16px) var(--font-mono);
   padding: 0 8px;
@@ -163,20 +163,9 @@
   display: flex;
   gap: 4px;
 }
-.color-channel {
+.color-channel-fields > .axis-field {
   min-width: 0;
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.color-channel > label {
-  text-align: center;
-  color: var(--muted-color);
-  font-size: 12px;
-}
-.color-channel .number-field {
-  width: 100%;
 }
 .color-footer {
   display: flex;
@@ -191,7 +180,7 @@
   padding-left: 8px;
 }
 .color-footer > .button {
-  border-radius: 4px;
+  border-radius: 8px;
   height: 28px;
   min-width: 64px;
   font-size: var(--body-font-size, 14px);
@@ -209,24 +198,4 @@
 
 .color-footer > .button {
   flex: 1;
-}
-.color-format {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 0;
-  gap: 0;
-  border-radius: 4px;
-  overflow: hidden;
-}
-.color-format .button {
-  width: 100%;
-  height: 28px;
-  border-radius: 0;
-  margin: 0;
-}
-.color-format .button:first-child {
-  border-radius: 4px 0 0 4px;
-}
-.color-format .button:last-child {
-  border-radius: 0 4px 4px 0;
 }

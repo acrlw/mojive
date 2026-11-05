@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileEntry, FileListing } from './contracts';
-import { Button, Icon, Squircle, SwitchRow } from './components';
+import { SearchField, Button, Icon, Squircle, SwitchRow } from './components';
 import { t, useLanguage } from './i18n';
 import './file-dialog.css';
 
@@ -321,16 +321,13 @@ export function FileDialog({
             ))}
           </nav>
           <div className="file-dialog-files">
-            <div className="file-dialog-filter">
-              <Icon name="search" size={16} />
-              <input
-                aria-label={tr.filter}
-                placeholder={tr.filter + '…'}
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-              />
-              {filter && <Button icon="close" title="Clear search" onClick={() => setFilter('')} />}
-            </div>
+            <SearchField
+              className="file-dialog-filter"
+              label={tr.filter}
+              placeholder={tr.filter + '…'}
+              value={filter}
+              onChange={setFilter}
+            />
             <div
               className="file-dialog-list"
               role="listbox"
@@ -396,7 +393,7 @@ export function FileDialog({
                       }
                       size={20}
                     />
-                    <span title={entry.name}>{entry.name}</span>
+                    <span data-tooltip={entry.name}>{entry.name}</span>
                     <small>
                       {entry.directory ? tr.folder : entry.name.split('.').pop()?.toUpperCase()}
                     </small>
@@ -481,7 +478,7 @@ export function FileDialog({
               if (!busy) setReplacement(null);
             }}
           >
-            <Squircle radius={12} className="file-dialog-confirm">
+            <Squircle radius={16} className="file-dialog-confirm">
               <h3>{tr.replace}</h3>
               <p>{tr.replaceDetail}</p>
               <code>{replacement}</code>

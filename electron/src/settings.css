@@ -1,7 +1,7 @@
 .settings-dialog {
   padding: 0;
   border: 0;
-  width: min(560px, calc(100vw / var(--settings-zoom, 1) - 32px));
+  width: min(max(560px, 40em), calc(100vw / var(--settings-zoom, 1) - 32px));
   height: min(590px, calc(100dvh / var(--settings-zoom, 1) - 48px));
   max-width: none;
   max-height: none;
@@ -161,51 +161,24 @@
   width: 100%;
   font-family: var(--font-mono);
   font-size: var(--numeric-font-size, 14px);
-  min-height: 28px;
 }
 .settings-row .number-field input {
   font: inherit;
-  height: 28px;
 }
 .settings-readonly {
   color: var(--muted-color);
 }
-/* A connected equal partition has one outer frame and no inset selection pills. */
 .settings-segment {
   container: settings-appearance / inline-size;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   width: 100%;
-  min-width: 0;
-  gap: 0;
-  padding: 0;
-  background: var(--input-color);
-  border-radius: 4px;
-  overflow: hidden;
 }
-.settings-segment .button {
-  min-width: 0;
-  width: 100%;
-  height: 28px;
+.settings-segment > .button {
   gap: 4px;
-  font-size: inherit;
   padding: 0 6px;
-  margin: 0;
-  border-radius: 0;
-}
-.settings-segment .button:first-child {
-  border-radius: 4px 0 0 4px;
-}
-.settings-segment .button:last-child {
-  border-radius: 0 4px 4px 0;
 }
 .settings-segment .icon {
   width: 14px !important;
   height: 14px !important;
-}
-.settings-segment .active {
-  background: var(--ui-field-active);
-  color: var(--sage-color);
 }
 .settings-empty {
   padding: 12px 0;
@@ -257,4 +230,93 @@
   .settings-segment .icon {
     display: none;
   }
+}
+
+.binding-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.binding-heading h3 {
+  margin: 0;
+  font-size: var(--body-font-size, 14px);
+  font-weight: 600;
+}
+.binding-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px;
+  border-radius: 4px;
+  background: var(--input-color);
+}
+.binding-control.recording {
+  outline: 1px solid var(--sage-color);
+}
+.binding-recorder {
+  flex: 1;
+  min-width: 0;
+  min-height: 24px;
+  border: 0;
+  border-radius: 2px;
+  padding: 2px 6px;
+  color: var(--text-color);
+  background: transparent;
+  font: var(--body-font-size, 14px) var(--font-ui);
+  text-align: left;
+}
+.binding-recorder:hover {
+  background: var(--ui-hover-overlay);
+}
+.binding-recorder .input-chord {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.binding-recorder .input-key-part {
+  gap: 2px;
+}
+.binding-recorder .input-chord kbd {
+  height: 20px;
+  min-width: 16px;
+  padding: 0 2px;
+  border-radius: 0;
+  background: transparent;
+}
+.binding-control > .binding-clear.button {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 6px;
+  border-radius: 2px;
+}
+.binding-clear .icon {
+  width: 12px !important;
+  height: 12px !important;
+}
+.binding-pointer-values {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.binding-pointer-values .binding-control {
+  flex: 0 1 auto;
+}
+.binding-add.button,
+.binding-heading > .button {
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+}
+.binding-error {
+  grid-column: 1 / -1;
+  margin: 8px 0;
+  color: var(--amber-color);
+  font-size: var(--body-font-size, 14px);
+  line-height: 1.5;
 }

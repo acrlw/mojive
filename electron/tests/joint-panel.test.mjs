@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, after } from 'node:test';
 import { createServer } from 'vite';
@@ -12,11 +13,15 @@ before(async () => {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 700, height: 940 }, deviceScaleFactor: 2 });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(6000);
   page.on('pageerror', (error) => {
     throw error;
   });
-  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/tests/harness/joint-panel-review.html`);
+  await page.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/joint-panel-review.html`,
+  );
   await page.waitForFunction(() => window.jointReview);
   await page.locator('.joint-entry').first().waitFor();
 });
@@ -25,6 +30,7 @@ after(async () => {
   await server?.close();
 });
 test('joint panel uses limit headings, localized types, collapsible 3/6 DoF pose and native toolbar', async () => {
+  await settlePaint(page);
   assert.equal(await page.locator('.joint-entry').count(), 9);
   assert.equal(await page.getByRole('slider').count(), 7);
   const geometry = await page
@@ -37,26 +43,40 @@ test('joint panel uses limit headings, localized types, collapsible 3/6 DoF pose
       return {
         thumb: (thumb.getBoundingClientRect().width / devicePixelRatio) * devicePixelRatio,
         track: track.getBoundingClientRect().height,
+        background: {
+          kind: track.querySelector('.joint-rail-background').dataset.smoothKind,
+          amount: track.querySelector('.joint-rail-background').dataset.smoothAmount,
+          width:
+            track.querySelector('.joint-rail-background').getBoundingClientRect().width -
+            track.getBoundingClientRect().width,
+          hit: getComputedStyle(track.querySelector('.joint-rail-background')).pointerEvents,
+        },
         limits: element.querySelectorAll('.joint-rail-limit').length,
-        cardRadius: getComputedStyle(card).borderRadius,
-        inset: getComputedStyle(card).padding,
-        fieldRadius: getComputedStyle(card.querySelector('.number-field')).borderRadius,
+        cardRadius: window.paintStyle(card).borderRadius,
+        inset: window.paintStyle(card).padding,
+        fieldRadius: window.paintStyle(card.querySelector('.number-field')).borderRadius,
       };
     });
   assert.equal(geometry.thumb, 12);
   assert.equal(geometry.track, 4);
+  assert.deepEqual(geometry.background, {
+    kind: 'capsule',
+    amount: '0.382',
+    width: 4,
+    hit: 'none',
+  });
   assert.equal(geometry.limits, 0);
   assert.equal(geometry.cardRadius, '12px');
   assert.equal(geometry.inset, '8px');
   assert.equal(geometry.fieldRadius, '4px');
   assert.match(await page.locator('.joint-entry').first().innerText(), /−120…120°/);
   assert.equal(await page.locator('.joint-pose-summary').count(), 2);
-  await page.getByTitle('Search joints', { exact: true }).click();
+  await page.getByRole('button', { name: 'Search joints', exact: true }).click();
   await page.getByRole('textbox', { name: 'Search joints', exact: true }).fill('Ball joint');
   assert.equal(await page.locator('.joint-entry').count(), 1);
   assert.match(await page.locator('.joint-entry').innerText(), /3 DoF/);
-  await page.getByTitle('Search joints', { exact: true }).click();
-  await page.getByTitle('Copy state', { exact: true }).click();
+  await page.getByRole('button', { name: 'Search joints', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy state', exact: true }).click();
   const copied = await page.evaluate(() => JSON.parse(window.jointReview.copied));
   assert.equal(copied.length, 18);
   assert.ok(copied.every(Number.isFinite));
@@ -98,7 +118,7 @@ test('scalar pointer release outside, Escape at a limit, and subsequent keyboard
 test('expanded ball/free fields edit real configuration and remain readable in light and fractional narrow panes', async () => {
   const ball = page.locator('.joint-entry').filter({ hasText: '03_ball_xyz' }),
     free = page.locator('.joint-entry').filter({ hasText: '04_free_6dof' });
-  await ball.getByTitle('Expand joint pose', { exact: true }).click();
+  await ball.locator('.entity-card-heading').click();
   await ball.getByRole('textbox', { name: 'Rotation X', exact: true }).fill('20');
   await ball.getByRole('textbox', { name: 'Rotation X', exact: true }).press('Enter');
   const x = await page.evaluate(
@@ -123,7 +143,7 @@ test('expanded ball/free fields edit real configuration and remain readable in l
   );
   await ball.getByRole('textbox', { name: 'Rotation Y', exact: true }).fill('0');
   await ball.getByRole('textbox', { name: 'Rotation Y', exact: true }).press('Enter');
-  await free.getByTitle('Expand joint pose', { exact: true }).click();
+  await free.locator('.entity-card-heading').click();
   assert.equal(
     Number(await free.getByRole('textbox', { name: 'Position X', exact: true }).inputValue()),
     1.65,

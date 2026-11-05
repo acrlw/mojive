@@ -1,6 +1,6 @@
-# G3 UI corners
+# Continuous UI corners
 
-The adopted workspace uses scoped component radii and **circular corners by default**.
+The native ImGui workspace uses scoped component radii and **circular corners by default**.
 Read the [project corner rules](../guides/ui-design.md#spacing-alignment-and-corners) for
 current nested surfaces and the native-window boundary. This page describes the shared
 optional G3 geometry, retained feasibility specimens, and base ImGui behavior. Its older
@@ -12,6 +12,156 @@ rounded arrowheads, small rounded Scale handles, Snap, mouse hints, and stroke c
 `python/geometry2d/drag_link.py` computes implicit hollow connectors. The
 [drawing extension guide](ui-drawing.md) describes the functions, coordinate conventions, and
 tests for new widgets and diagnostics.
+
+## Electron surfaces
+
+Electron uses Mojive's cubic Bézier construction with **60% corner smoothing** for
+rectangles and the native G3 capsule profile with **38.2% capsule smoothing** by default.
+`electron/src/smooth-geometry.ts` owns the curve and offset geometry; `smooth-corners.ts` owns
+measurement, nesting and paint invalidation. `corners.css` separates SVG paint from content
+and input. The SVG layer paints the fill and boundary once; do not combine it with a circular
+background clip on the same edge. Shadows and overflowing content retain their DOM owner.
+Canvas readouts use the same generator. True circles and native window decorations retain
+their existing geometry.
+
+The path is computed from each control's resolved logical width, height, design radii and
+smoothing. SVG is the browser drawing format for the computed straight, cubic and circular
+segments, not a pre-rendered corner asset. Resizing a control recalculates its path. Browser
+rasterization and application zoom occur after this calculation; changing a control's aspect
+ratio must not stretch its end profile. DOM elements continue to own layout, text and input.
+
+Focus outlines, borders and inset shadows derive their centerlines from the same surface.
+For outline width `w` and CSS outline offset `o`, the centerline's signed outward distance is
+`o + w / 2`. Preserve each layer independently and include outward extents in the paint bounds.
+Do not replace an external focus outline with an internal border. Decorative rail surfaces
+use DOM paint owners too. Native scrollbar thumbs use fixed-size G3 end caps and a variable
+straight middle, preserving native hit geometry and dragging.
+
+### Smoothing and curvature
+
+For a right-angle corner, `s` is the fraction of the original 90-degree circular turn replaced
+by the two Bézier transitions. The center arc has angle `(1 - s) * 90 degrees`; each transition
+turns through `s * 45 degrees`. The design radius `R` remains the center arc radius. Its center
+stays fixed as smoothing changes. The edge footprint is `p = R * (1 + s)`.
+
+| Smoothing | Center arc | Each Bézier turn | Edge footprint |
+| --- | --- | --- | --- |
+| 0% | 90 degrees | No transition | `R` |
+| 25% | 67.5 degrees | 11.25 degrees | `1.25 R` |
+| 60% | 36 degrees | 27 degrees | `1.6 R` |
+| 100% | No arc | 45 degrees | `2 R` |
+
+The incoming transition has control points `P0=(0,0)`, `P1=(a,0)`, `P2=(a+b,0)` and
+`P3=(a+b+c,d)` in its local coordinates. The first three points are collinear, giving zero
+curvature at the straight-edge join. Solve the final handle from the circular endpoint
+curvature instead of assigning a fixed ratio to `a` and `b`:
+
+```text
+phi = pi * s / 4
+q = tan(phi / 2)
+c = R * q * cos(phi)
+d = 2 * R * sin(phi / 2)^2
+b = 3 * (c^2 + d^2)^(3/2) / (2 * R * d)
+a = R * (s + q) - b
+```
+
+For numerical stability, evaluate the equivalent `b = 1.5 * R * q / (1 + cos(phi))`.
+The outgoing transition is the reflection of the incoming one. At positive smoothing, the
+straight/Bézier and Bézier/circle joins have matching position, tangent direction and signed
+curvature (G2). At 100%, the two Bézier transitions meet with matching curvature. At 0%, use
+the ordinary circular corner explicitly; its straight/circle joins are G1.
+
+G2 does not require monotonically increasing curvature along a transition. At 60%, an
+unconstrained corner reaches approximately `1.291973 / R` inside its transition before
+returning to `1 / R` at the circle. Offset safety must use the entire curve's maximum
+curvature rather than the arc radius alone. The previous third-party `a = 2b` construction
+had an endpoint curvature of approximately `1.470438 / R` at 60% and did not meet G2 there.
+
+### Capsules and circles
+
+Capsules use the native Mojive 180-degree end profile from
+`python/geometry2d/curves.py::smooth_capsule_points`. They are a separate shape in the same
+shared geometry module: `smoothCapsule` constructs the profile, `offsetCapsule` derives its
+parallel contours, and `surfacePath` dispatches both capsules and rectangular corner arrays.
+The React `Squircle` component declares the authored surface radius; the shared painter
+resolves the contour and states. Canvas consumers use the same path entry point.
+
+A capsule keeps its requested outer width and height. Each end consists of an arc-length
+curvature ramp, an optional circular interval and the reflected ramp. The normalized ramp
+is `kappa(u) = u^2 * (3 - 2u)`; its curvature slope is zero at both ends. The analytic capsule
+therefore has G3 joins. Serialize the ramps as adaptively fitted cubic Béziers, retaining
+endpoint position, tangent and curvature, and keep the circular interval as an exact SVG arc.
+Do not serialize a coarse polyline or substitute four circular quarter-corners.
+
+Smoothing describes the fraction of the 180-degree turn allocated to the two transitions.
+At the default 38.2%, the center arc turns 111.24 degrees and each transition turns
+34.38 degrees. The cap's
+curvature scale is solved from the short dimension; the capsule's half-height design radius
+is a bounding-box convention, unlike the fixed center-arc radius of a rectangular G2 corner.
+Fit the two complete caps within the long dimension by lowering effective smoothing only
+when needed. A square capsule reaches the true-circle limit. Long capsules must not lose
+smoothing merely because their corner radii equal half their height.
+
+Recognize capsule surfaces by four equal radii reaching half the shorter dimension, including
+large CSS radius values. Explicit round surfaces and percentage-radius circles retain their
+circle identity. Capsule borders and evenly inset capsule descendants are normal offsets of
+one shared reference; recomputing each inset from its own dimensions changes end clearance.
+Circular search-clear buttons and switch thumbs are independent content, not offset copies
+of the capsule. Keep them circular and inspect their end padding separately.
+
+Electron `capsuleEndPadding` solves the center using the actual fitted capsule profile. It
+matches the angular mean distance to the end contour with the straight-side distance, as in
+`python/geometry2d/curves.py::capsule_end_padding`. The continuous angular calculation agrees
+with the retained 181-ray native reference within 0.005px over the verification fixtures.
+Search icons and clear discs, switch thumbs and chip icons share this placement. CSS receives
+`--capsule-end` before descendant geometry is measured, including intrinsically sized chips.
+At 38.2% smoothing, a 28px-high shell has a 14.2453px end center; a 20px clear disc therefore has
+4px vertical and about 4.2453px trailing box clearance. These unequal box insets compensate
+for the G3 end profile. A circle inside a noncircular cap is not an exact parallel contour.
+
+### Nested surfaces
+
+Adjacent surfaces derive their actual contours from one reference curve. The circle-radius
+relation remains `inner_radius = outer_radius - inset`; independently rebuilding a smaller
+Bézier corner does not preserve the diagonal gap. For outward unit normal `n`, signed offset
+`delta`, and reference curvature `kappa`, use:
+
+```text
+Q = P + delta * n
+kappa_offset = kappa / (1 + delta * kappa)
+```
+
+A negative `delta` is an inward offset. Keep lines and circular arcs exact. Fit offset Bézier
+transitions adaptively while matching endpoint position, tangent and curvature. Validate
+serialized path coordinates with independent normal-intersection measurements. The position
+error budget is at most 0.01 CSS pixels and is tightened for small gaps. Subdivision must
+preserve continuity at newly introduced joins; a fixed number of sampled points is not an
+offset construction.
+
+Prefer the largest outer surface as the reference and derive descendants inward. All corners
+of one equal-radius shell share the same resolved profile. Use actual painted border-box
+insets after UI zoom, independently of framebuffer density. Resolve the footprint budget for
+the complete nesting chain before generating any curve. If any member cannot fit its
+transition, lower the shared effective smoothing while preserving design radii and insets.
+For example, `R16 -> R8 -> R4` with total inset 12 and a 20-by-20 inner swatch requires
+`16 * (1 + s) - 12 <= 10`, so its effective smoothing cannot exceed 37.5%.
+
+An inward offset is regular only when `1 + delta * kappa > 0` along the entire reference.
+Check curvature extrema before fitting. If the largest reference cannot produce a regular
+chain, select a smaller legal reference and derive the outer members outward; do not hide
+cusps, clip off loops or independently substitute a different profile for one child. Square
+corners and true circles retain their explicit geometric cases.
+
+Settings > General exposes independent **Corner smoothing** and **Capsule smoothing**
+preferences from 0% to 100%. Their defaults are 60% and 38.2%, respectively. Each stored
+preference updates its shape family immediately. Effective smoothing may be lower when
+available space constrains a corner or nesting chain. Component radii and insets remain owned
+by the design rules; the preference cannot change layout or break a nested radius chain.
+
+Run `make -C electron corners-review` for geometry, controls, nested surfaces and Canvas
+readouts. Inspect both themes, fractional UI scale, color/checker edges, connected channel
+fields, hover/held paint and actual Electron captures. CSS superellipse geometry does not
+implement this construction.
 
 ## Native ImGui controls
 

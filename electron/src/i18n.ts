@@ -1,81 +1,62 @@
-import { useSyncExternalStore } from 'react';
-import chinese from './locales/zh.json';
+import { createInstance } from 'i18next';
+import { initReactI18next, useTranslation } from 'react-i18next';
+import nativeChinese from './locales/zh.json';
+import electronChinese from './locales/electron-zh.json';
+
+const chinese = { ...nativeChinese, ...electronChinese };
+
 export type Language = 'zh' | 'en';
-let language: Language = 'zh';
-const listeners = new Set<() => void>();
-const catalogue: Record<string, string> = chinese;
+export type MessageValues = Record<string, string | number | LocalizedMessage>;
+export interface LocalizedMessage {
+  key: string;
+  values?: MessageValues;
+}
+export type LocalizedText = string | LocalizedMessage;
+
+export const i18n = createInstance();
+void i18n.use(initReactI18next).init({
+  initAsync: false,
+  lng: 'zh',
+  fallbackLng: 'en',
+  supportedLngs: ['zh', 'en'],
+  keySeparator: false,
+  nsSeparator: false,
+  resources: {
+    zh: { translation: chinese },
+    en: { translation: Object.fromEntries(Object.keys(chinese).map((key) => [key, key])) },
+  },
+  interpolation: { escapeValue: false, skipOnVariables: true },
+  react: { useSuspense: false },
+});
+
 export function setLanguage(value: Language) {
-  if (language === value) return;
-  language = value;
-  for (const listener of listeners) listener();
+  if (getLanguage() !== value) void i18n.changeLanguage(value);
+  document.documentElement.lang = value === 'zh' ? 'zh-CN' : 'en';
 }
-export function getLanguage() {
-  return language;
+export function getLanguage(): Language {
+  return i18n.language === 'en' ? 'en' : 'zh';
 }
-export function useLanguage() {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    getLanguage,
-    () => 'zh' as Language,
+export function useLanguage(): Language {
+  useTranslation(undefined, { i18n });
+  return getLanguage();
+}
+/** Store the key and arguments so existing output and notifications switch languages too. */
+export function message(key: string, values?: MessageValues): LocalizedMessage {
+  return { key, values };
+}
+export function t(text: LocalizedText, locale?: Language): string;
+export function t(text: string, values?: MessageValues): string;
+export function t(text: LocalizedText, options?: Language | MessageValues): string {
+  const locale = typeof options === 'string' ? options : getLanguage();
+  const key = typeof text === 'string' ? text : text.key;
+  if (!key) return '';
+  const values =
+    typeof text === 'string' ? (typeof options === 'object' ? options : {}) : text.values;
+  const resolved = Object.fromEntries(
+    Object.entries(values ?? {}).map(([name, value]) => [
+      name,
+      typeof value === 'object' ? t(value, locale) : value,
+    ]),
   );
-}
-const prefixes: [string, string][] = [
-  ['Updated keyframe ', '已更新关键帧 '],
-  ['Added keyframe ', '已添加关键帧 '],
-  ['Loaded ', '已加载 '],
-  ['Opened ', '已打开 '],
-  ['Saved ', '已保存 '],
-  ['Added ', '已添加 '],
-  ['Removed ', '已删除 '],
-  ['Deleted ', '已删除 '],
-  ['Hid ', '已隐藏 '],
-  ['Showed ', '已显示 '],
-  ['Imported ', '已导入 '],
-  ['Failed to load ', '加载失败：'],
-  ['Could not open ', '无法打开 '],
-];
-export function t(text: string, locale: Language = language): string {
-  if (locale === 'en' || !text) return text;
-  if (catalogue[text]) return catalogue[text];
-  const axisLabel = text.match(/^(.+) ([XYZ])$/);
-  if (axisLabel && catalogue[axisLabel[1]]) return catalogue[axisLabel[1]] + ' ' + axisLabel[2];
-  const loaded = text.match(/^Loaded (.+) · (\d+) objects · (\d+) joints$/);
-  if (loaded) return `已加载 ${loaded[1]} · ${loaded[2]} 个对象 · ${loaded[3]} 个关节`;
-  const folder = text.match(/^Opened project folder (.+)$/);
-  if (folder) return '已打开项目文件夹 ' + folder[1];
-  const added = text.match(/^Added (box|sphere|cylinder|capsule|ground|light|camera)$/);
-  if (added)
-    return (
-      '已添加' +
-      t(
-        added[1] === 'light' ? 'Light source' : added[1][0].toUpperCase() + added[1].slice(1),
-        locale,
-      )
-    );
-  for (const [prefix, translated] of prefixes)
-    if (text.startsWith(prefix)) return translated + text.slice(prefix.length);
-  const count = text.match(/^(\d+) (objects?|joints?|files?|keyframes?)$/);
-  if (count)
-    return (
-      count[1] +
-      ' ' +
-      (
-        {
-          object: '个对象',
-          objects: '个对象',
-          joint: '个关节',
-          joints: '个关节',
-          file: '个文件',
-          files: '个文件',
-          keyframe: '个关键帧',
-          keyframes: '个关键帧',
-        } as Record<string, string>
-      )[count[2]]
-    );
-  return text;
+  return String(i18n.t(key, { ...resolved, lng: locale, defaultValue: key }));
 }

@@ -21,7 +21,6 @@
         Select,
         Switch,
         ColorPicker,
-        useSquircleSurfaces,
       } from '/src/components.tsx';
       import { parseColor, colorHex } from '/src/ColorPicker.tsx';
       import { applySettings, DEFAULT_SETTINGS } from '/src/settings.tsx';
@@ -30,14 +29,14 @@
       window.controlEvents = [];
       const event = (name) => window.controlEvents.push(name);
       function Review() {
-        useSquircleSurfaces();
         const [value, setValue] = useState(1.23456789),
           [vector, setVector] = useState([0, -0.00001, 3]),
           [option, setOption] = useState('front'),
           [enabled, setEnabled] = useState(true),
-          [color, setColor] = useState('#9CBF8D');
+          [color, setColor] = useState('#9CBF8D'),
+          [alpha, setAlpha] = useState(false);
         window.controlState = { value, vector, option, enabled, color };
-        window.controlActions = { setValue };
+        window.controlActions = { setValue, setColor, setAlpha };
         return React.createElement(
           'main',
           { style: { padding: 24, width: 440, display: 'flex', gap: 16, flexDirection: 'column' } },
@@ -75,6 +74,7 @@
           React.createElement(ColorPicker, {
             label: 'Material color',
             value: color,
+            alpha,
             onChange: setColor,
             onBegin: () => event('color begin'),
             onCommit: () => event('color commit'),

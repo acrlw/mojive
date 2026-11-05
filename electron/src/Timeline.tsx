@@ -1,3 +1,12 @@
+import { sceneDisplayName } from './scene-labels';
+import {
+  DEFAULT_INPUT_BINDINGS,
+  actionLabel,
+  actionParts,
+  matchesKey,
+  type InputBindings,
+} from './input-bindings';
+import { commandKey, shortcut } from './platform';
 import { t } from './i18n';
 import {
   useEffect,
@@ -10,7 +19,7 @@ import {
 } from 'react';
 import type { SceneDocument } from './contracts';
 import { assertPoseCompatible, type Keyframe, type WorkspaceTimeline } from './editor';
-import { Button, Icon, Numeric, numericCaption, Select, Squircle } from './components';
+import { Segmented, Button, Icon, Numeric, numericCaption, Select, Squircle } from './components';
 import { useControlPopover } from './CustomControls';
 import './timeline-controls.css';
 import {
@@ -23,6 +32,7 @@ import {
   type TimeRange,
 } from './timelineNavigation';
 interface Props {
+  inputBindings?: InputBindings;
   doc: SceneDocument;
   /** Changes on scene replacement, not Undo document reconstruction. */
   navigationResetKey?: number;
@@ -636,9 +646,9 @@ export function Timeline(props: Props) {
     else if (event.button !== 0) return;
     if (event.shiftKey && selectedLane === 'take' && frames.length > 1) kind = 'range';
     const anchor = position(event.clientX),
-      base = event.ctrlKey || event.metaKey ? new Set(selection) : new Set<string>();
+      base = commandKey(event) ? new Set(selection) : new Set<string>();
     if (key && kind === 'key') {
-      if (event.ctrlKey || event.metaKey) {
+      if (commandKey(event)) {
         const next = new Set(selection);
         if (next.has(key.id)) next.delete(key.id);
         else next.add(key.id);
@@ -802,7 +812,7 @@ export function Timeline(props: Props) {
   };
   const keyboard = (event: ReactKeyboardEvent) => {
     if ((event.target as HTMLElement).closest('input,textarea,[role=combobox],[role=menu]')) return;
-    const command = event.ctrlKey || event.metaKey,
+    const command = commandKey(event),
       key = event.key.toLowerCase();
     let handled = true;
     if (key === 'escape') {
@@ -818,11 +828,11 @@ export function Timeline(props: Props) {
     else if (command && key === 'v') void paste();
     else if (command && key === 'd' && lane === 'keys') duplicate();
     else if (key === 'delete' || key === 'backspace') remove();
-    else if (key === ' ') {
+    else if (matchesKey(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'playback', event)) {
       play();
     } else if (key === 'home') seek(first);
     else if (key === 'end') seek(last);
-    else if (key === 'f') fit();
+    else if (matchesKey(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'focus', event)) fit();
     else if (key === 'arrowleft' || key === 'arrowright') {
       const direction = key === 'arrowleft' ? -1 : 1;
       if (lane === 'keys' && selection.size && !busy) {
@@ -979,12 +989,28 @@ export function Timeline(props: Props) {
   );
   const fitButton = <Button icon="fit" title="Fit timeline" onClick={fit} />;
   const toolbarKey = (event: ReactKeyboardEvent) => {
+    const target = event.target as HTMLElement;
+    const input = target.closest('input,textarea,[role=combobox],[role=menu]');
+    const activation = target.closest('button') && [' ', 'Enter'].includes(event.key);
+    if (
+      !input &&
+      !activation &&
+      matchesKey(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'playback', event)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      play();
+      return;
+    }
     const globalCommand =
-      (event.metaKey || event.ctrlKey) && ['z', 's', 'o', ','].includes(event.key.toLowerCase());
+      (commandKey(event) && ['z', 's', 'o', ','].includes(event.key.toLowerCase())) ||
+      (!input &&
+        !activation &&
+        matchesKey(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'capture', event));
     if (!globalCommand) event.stopPropagation();
   };
   const speedControl = onSpeed && (
-    <div className="timeline-speed-group timeline-control-group" title={t('Playback speed')}>
+    <div className="timeline-speed-group timeline-control-group" data-tooltip={t('Playback speed')}>
       <div className="timeline-speed">
         <Numeric
           value={speed}
@@ -1002,7 +1028,7 @@ export function Timeline(props: Props) {
   );
   const zoomControl = (
     <div className="timeline-view-actions timeline-control-group">
-      <div className="timeline-zoom-label" title={t('Timeline zoom')}>
+      <div className="timeline-zoom-label" data-tooltip={t('Timeline zoom')}>
         <div className="timeline-zoom">
           <Numeric
             label={t('Timeline zoom')}
@@ -1034,7 +1060,7 @@ export function Timeline(props: Props) {
       className="timeline-range-fields timeline-control-group"
       role="group"
       aria-label={t(frames.length > 1 ? 'Playback range' : 'View')}
-      title={t(frames.length > 1 ? 'Playback range' : 'View')}
+      data-tooltip={t(frames.length > 1 ? 'Playback range' : 'View')}
     >
       <span className="timeline-range-scope" aria-hidden="true">
         <span>{t(frames.length > 1 ? 'Loop' : 'View')}</span>
@@ -1095,7 +1121,13 @@ export function Timeline(props: Props) {
             <Button
               icon={playing ? 'pause' : 'play'}
               className="play-button"
-              title={playing ? 'Pause (Space)' : 'Play (Space)'}
+              title={`${t(playing ? 'Pause' : 'Play')}${actionLabel(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'playback') ? ` (${actionLabel(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'playback')})` : ''}`}
+              hintText={playing ? 'Pause' : 'Play'}
+              hintKeys={
+                props.inputBindings?.keys.playback === null
+                  ? undefined
+                  : actionParts(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'playback')
+              }
               disabled={busy || frames.length < 2}
               onClick={play}
             />
@@ -1148,7 +1180,13 @@ export function Timeline(props: Props) {
             {snapshotButton}
             <Button
               icon="diamond"
-              title="Capture scene pose at playhead (K)"
+              title={`${t('Capture scene pose at playhead')}${actionLabel(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'capture') ? ` (${actionLabel(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'capture')})` : ''}`}
+              hintText="Capture scene pose at playhead"
+              hintKeys={
+                props.inputBindings?.keys.capture === null
+                  ? undefined
+                  : actionParts(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'capture')
+              }
               disabled={busy}
               onClick={onCapture}
             />
@@ -1162,8 +1200,8 @@ export function Timeline(props: Props) {
           <div className="timeline-scrolling-range">{rangeControls}</div>
         </div>
         <div className="timeline-persistent-controls">
-          <div
-            className="segmented timeline-follow timeline-control-group"
+          <Segmented
+            className="timeline-follow timeline-control-group"
             aria-label={t('Follow playhead')}
           >
             {(['off', 'page', 'locked'] as const).map((mode) => (
@@ -1177,7 +1215,7 @@ export function Timeline(props: Props) {
                 onClick={() => setFollowMode(mode)}
               />
             ))}
-          </div>
+          </Segmented>
           <div className="timeline-pinned-range">{rangeControls}</div>
         </div>
       </div>
@@ -1199,8 +1237,8 @@ export function Timeline(props: Props) {
         }}
       >
         <div className="lane-labels">
-          <div className="lane-header" title={doc.name}>
-            {doc.name || t('Scene')}
+          <div className="lane-header" data-tooltip={t(sceneDisplayName(doc))}>
+            {doc.name ? t(sceneDisplayName(doc)) : t('Scene')}
           </div>
           <button
             className={`lane-label ${lane === 'keys' ? 'active' : ''}`}
@@ -1216,7 +1254,9 @@ export function Timeline(props: Props) {
           </button>
           <div
             className={`lane-label take-label ${lane === 'take' ? 'active' : ''}`}
-            title={activeTake ? `${activeTake.name} · ${frames.length} ${t('frames')}` : undefined}
+            data-tooltip={
+              activeTake ? `${activeTake.name} · ${frames.length} ${t('frames')}` : undefined
+            }
             onContextMenu={(event) => {
               event.preventDefault();
               setLane('take');
@@ -1325,7 +1365,7 @@ export function Timeline(props: Props) {
                       padding: 0,
                     }}
                     aria-label={`${t('Keyframe')} ${key.time.toFixed(2)} ${t('seconds')} ${t('Keyframes')}`}
-                    title={`${key.name || t('Keyframe')} · ${key.time.toFixed(3)} s`}
+                    data-tooltip={`${key.name || t('Keyframe')} · ${key.time.toFixed(3)} s`}
                     disabled={busy}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1407,7 +1447,7 @@ export function Timeline(props: Props) {
                       key={item.id}
                       className={`snapshot-marker ${snapshotId === item.id ? 'selected' : ''}`}
                       style={{ left: x(item.time) }}
-                      title={`${item.name} · ${item.time.toFixed(3)} s`}
+                      data-tooltip={`${item.name} · ${item.time.toFixed(3)} s`}
                       aria-label={item.name}
                       disabled={busy}
                       onPointerDown={(event) => event.stopPropagation()}
@@ -1520,24 +1560,30 @@ export function Timeline(props: Props) {
                 }
               }}
             >
-              {contextItem('Select all', selectAll, false, undefined, '⌘ A')}
+              {contextItem('Select all', selectAll, false, undefined, shortcut('A', ['command']))}
               {lane === 'keys' &&
                 contextItem(
                   'Copy keyframes',
                   () => void copyKeys(),
                   !selection.size,
                   'copy',
-                  '⌘ C',
+                  shortcut('C', ['command']),
                 )}
               {lane === 'keys' &&
-                contextItem('Paste keyframes', () => void paste(), busy, 'paste', '⌘ V')}
+                contextItem(
+                  'Paste keyframes',
+                  () => void paste(),
+                  busy,
+                  'paste',
+                  shortcut('V', ['command']),
+                )}
               {lane === 'keys' &&
                 contextItem(
                   'Duplicate keyframes',
                   duplicate,
                   busy || !selection.size,
                   'duplicate',
-                  '⌘ D',
+                  shortcut('D', ['command']),
                 )}
               {contextItem(
                 'Delete selection',

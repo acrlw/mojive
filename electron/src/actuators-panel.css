@@ -21,7 +21,7 @@
   gap: 8px;
   padding-right: 4px;
   color: var(--muted-color);
-  font-size: 12px;
+  font-size: var(--body-font-size, 14px);
   white-space: nowrap;
 }
 .actuator-reduction > span:last-child {
@@ -35,7 +35,7 @@
   row-gap: 8px;
   align-items: baseline;
   margin: 12px 4px 4px;
-  font-size: 12px;
+  font-size: var(--body-font-size, 14px);
   color: var(--muted-color);
 }
 .actuator-details dd {

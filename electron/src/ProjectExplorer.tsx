@@ -117,7 +117,8 @@ export function ProjectExplorer({
           <button
             className="file-row"
             role="treeitem"
-            title={file.path}
+            data-tooltip={file.path}
+            data-tooltip-overflow="span:last-child"
             aria-expanded={directory && !flat ? open : undefined}
             aria-busy={pending.has(file.path) || undefined}
             style={{ paddingLeft: 12 + (flat ? 0 : depth * 12) }}

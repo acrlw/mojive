@@ -8,8 +8,12 @@ It does not update the native specification. Upstream Lucide/Tabler strokes rece
 adopted 1.5-unit family width; Mojive masters keep their authored fills and explicit widths.
 JetBrains Mono Regular is bundled from the official v2.304 distribution with its SIL OFL.
 
-Electron controls currently use ordinary circular corners, with nested radii derived from
-their insets. The retained Figma squircle utilities do not change this default.
+Electron rectangles use Mojive's G2 cubic Bézier generator at 60% smoothing by default.
+Capsules use the native Mojive G3 end profile at 38.2% smoothing.
+The endpoint curvature constraints, smoothing parameter and exact normal-offset construction
+for nesting are defined in the [corner guide](../../docs/how-to/ui-corners.md#electron-surfaces).
+Radii remain authored design values; effective smoothing respects whole-chain footprint budgets.
+Independent rectangle and capsule smoothing preferences are stored in General Settings.
 
 ## Orientation and shared gizmo geometry
 

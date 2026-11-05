@@ -9,6 +9,16 @@ before(async () => {
   server = await createServer({
     configFile: false,
     cacheDir: 'node_modules/.vite-selection-ownership',
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'three',
+        'i18next',
+        'react-i18next',
+      ],
+    },
     server: { host: '127.0.0.1', port: 0, hmr: false },
     logLevel: 'error',
   });
@@ -193,7 +203,7 @@ test('actual workspace anchor and child highlights occupy distinct pixels; model
     ),
   );
   await page.goto(base);
-  const exact = (name) => page.locator(`[role=treeitem][title="${name}"]`);
+  const exact = (name) => page.locator(`[role=treeitem][data-tooltip="${name}"]`);
   const anchor = exact('01_revolute_anchor');
   await anchor.waitFor();
   await anchor.dblclick();
@@ -270,7 +280,10 @@ test('actual workspace anchor and child highlights occupy distinct pixels; model
   assert.ok(result.child > 10000, JSON.stringify(result));
   assert.equal(result.interiorOverlap, 0, JSON.stringify(result));
   assert.equal(result.model, 0);
-  await writeFile('../output/electron/verification/selection-scope-app.json', JSON.stringify(result, null, 2) + '\n');
+  await writeFile(
+    '../output/electron/verification/selection-scope-app.json',
+    JSON.stringify(result, null, 2) + '\n',
+  );
   assert.deepEqual(errors, []);
 });
 

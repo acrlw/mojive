@@ -11,9 +11,12 @@ bundle-smoke:
 clean:
 	rm -rf dist public/menu-icons ../output/electron
 
-.PHONY: install dev run check acceptance design viewcube-review ui-review viewport-review timeline-review controls-review layout-review camera-review camera-self-review project-review scrollbar-review switch-review actuator-review
+.PHONY: ensure-deps install dev run check acceptance design viewcube-review ui-review viewport-review timeline-review controls-review layout-review camera-review camera-self-review project-review scrollbar-review switch-review actuator-review
+ensure-deps:
+	@test -x node_modules/.bin/tsc && test -f node_modules/electron/path.txt || npm ci --no-audit --no-fund
 install:
 	npm ci --no-audit --no-fund
+package bundle-smoke dev run check design actuator-review viewcube-review ui-review viewport-review timeline-review timeline-wheel-review controls-review layout-review camera-review camera-self-review project-review scrollbar-review switch-review: ensure-deps
 dev:
 	npm run dev
 run:
@@ -74,3 +77,17 @@ switch-review:
 	npm run build
 	node --test --test-concurrency=1 tests/switch-row.test.mjs tests/switch-row-integration.test.mjs
 	node scripts/review-switch-rows.mjs
+
+.PHONY: menu-review
+menu-review: ensure-deps
+	npm run build
+	node --test --test-concurrency=1 tests/menu-interactions.test.mjs tests/nested-corners.test.mjs tests/input-hints.test.mjs tests/input-bindings.test.mjs tests/inspector-layout.test.mjs tests/confirmation-output.test.mjs
+	node scripts/workspace-acceptance.mjs
+
+.PHONY: localization-review
+localization-review: ensure-deps
+	node --test --test-concurrency=1 tests/localization.test.mjs tests/native-menu.test.mjs tests/notice-history.test.mjs
+
+.PHONY: corners-review
+corners-review: ensure-deps
+	node --test --test-concurrency=1 tests/smooth-geometry.test.mjs tests/smooth-capsule.test.mjs tests/capsule-layout.test.mjs tests/nested-corners.test.mjs tests/shared-controls.test.mjs tests/gizmo-feedback.test.mjs

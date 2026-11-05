@@ -20,9 +20,10 @@
     "bundle-smoke": "node scripts/bundle-smoke.mjs"
   },
   "dependencies": {
-    "figma-squircle": "^1.1.0",
+    "i18next": "^26.7.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-i18next": "^17.1.12",
     "three": "^0.181.0"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -11,14 +12,7 @@ before(async () => {
     cacheDir: 'node_modules/.vite-editor-revision',
     server: { host: '127.0.0.1', port: 0, hmr: false },
     optimizeDeps: {
-      include: [
-        'react',
-        'react-dom',
-        'react-dom/client',
-        'react/jsx-runtime',
-        'three',
-        'figma-squircle',
-      ],
+      include: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'three'],
     },
     logLevel: 'error',
   });
@@ -29,6 +23,8 @@ before(async () => {
     headless: true,
   });
   page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   await page.addInitScript(() =>
     localStorage.setItem(
       'mojive.electron.settings.v1',
@@ -44,23 +40,25 @@ after(async () => {
   await server?.close();
 });
 test('hidden tree state remains visible after selection and pointer leave, including flat search', async () => {
-  const row = page.locator('[role=treeitem][title="02_prismatic_anchor"]');
+  const row = page.locator('[role=treeitem][data-tooltip="02_prismatic_anchor"]');
   await row.hover();
   await row.locator('.tree-visibility').click();
-  await page.locator('[role=treeitem][title="01_revolute_anchor"]').click();
+  await page.locator('[role=treeitem][data-tooltip="01_revolute_anchor"]').click();
   await page.mouse.move(800, 40);
   assert.equal(await row.locator('.tree-visibility').getAttribute('aria-pressed'), 'true');
   assert.equal(
-    await row.locator('.tree-visibility').evaluate((e) => getComputedStyle(e).opacity),
+    await row.locator('.tree-visibility').evaluate((e) => window.paintStyle(e).opacity),
     '1',
   );
   await page.locator('.left-panel').getByRole('button', { name: 'Search', exact: true }).click();
   await page.getByRole('textbox', { name: 'Search Scene' }).fill('02_prismatic_anchor');
   assert.equal(
-    await row.locator('.tree-visibility').evaluate((e) => getComputedStyle(e).opacity),
+    await row.locator('.tree-visibility').evaluate((e) => window.paintStyle(e).opacity),
     '1',
   );
-  await page.locator('.left-panel').screenshot({ path: '../output/electron/verification/hidden-state-light.png' });
+  await page
+    .locator('.left-panel')
+    .screenshot({ path: '../output/electron/verification/hidden-state-light.png' });
   await row.locator('.tree-visibility').click();
   assert.equal(await row.locator('.tree-visibility').getAttribute('aria-pressed'), 'false');
 });
@@ -188,11 +186,14 @@ test('WebM export contains timed changing frames and leaves original scene state
 });
 
 test('projection menu has an unclipped shadow, equal insets and keyboard dismissal', async () => {
-  await page.locator('.viewport-navigation').getByTitle('Projection', { exact: true }).click();
+  await page
+    .locator('.viewport-navigation')
+    .getByRole('button', { name: 'Projection', exact: true })
+    .click();
   const menu = page.getByRole('menu');
   await menu.waitFor();
   const geometry = await menu.evaluate((e) => {
-    const s = getComputedStyle(e),
+    const s = window.paintStyle(e),
       r = e.getBoundingClientRect();
     return {
       shadow: s.boxShadow,

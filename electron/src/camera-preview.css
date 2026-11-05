@@ -6,7 +6,9 @@
   max-height: calc(100% - 24px);
   padding: 8px;
   background: var(--floating-color);
-  box-shadow: 0 6px 24px #0004;
+  box-shadow:
+    var(--popup-shadow),
+    inset 0 0 0 1px var(--popup-edge);
   z-index: 6;
   overflow: auto;
 }
@@ -63,7 +65,7 @@
 }
 .camera-preview-error {
   color: var(--ui-red);
-  font-size: 12px;
+  font-size: var(--body-font-size, 14px);
   padding-top: 8px;
 }
 
@@ -76,7 +78,9 @@
   border-radius: 12px;
   background: var(--popup-color);
   color: var(--text-color);
-  box-shadow: 0 6px 24px #0004;
+  box-shadow:
+    var(--popup-shadow),
+    inset 0 0 0 1px var(--popup-edge);
 }
 .camera-preview-menu > .button {
   display: flex;

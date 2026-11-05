@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -29,6 +30,8 @@ for (const appearance of ['dark', 'light'])
   for (const scale of [1, 1.25, 2])
     test(`rail main button edges remain equal in ${appearance} at ${scale}x, including hover`, async () => {
       const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
+      await page.addInitScript(installPaintStyle);
+      await page.evaluate(installPaintStyle);
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.addInitScript(
@@ -38,9 +41,30 @@ for (const appearance of ['dark', 'light'])
       await page.goto(base);
       await page.getByRole('treeitem').first().waitFor();
       await page.evaluate(() => document.fonts.ready);
+      await settlePaint(page);
       const rail = page.locator('.activity-rail');
+      const indicator = await rail
+        .locator('.activity-indicator')
+        .first()
+        .evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const cap = element.firstElementChild;
+          const source = cap.getBoundingClientRect();
+          return {
+            bounds: [box.width, box.height],
+            source: [source.width, source.height, source.right - box.right],
+            kind: cap.dataset.smoothKind,
+            amount: cap.dataset.smoothAmount,
+            hit: getComputedStyle(element).pointerEvents,
+          };
+        });
+      assert.deepEqual(indicator.bounds, [2 * scale, 16 * scale]);
+      assert.deepEqual(indicator.source, [4 * scale, 16 * scale, 0]);
+      assert.equal(indicator.kind, 'capsule');
+      assert.equal(indicator.amount, '0.382');
+      assert.equal(indicator.hit, 'none');
       for (const name of ['Scene', 'Settings']) {
-        const button = rail.getByTitle(name, { exact: true });
+        const button = rail.getByRole('button', { name: name, exact: true });
         await button.hover();
         const measured = await rail.evaluate((rail) => {
           const r = rail.getBoundingClientRect(),
@@ -58,14 +82,14 @@ for (const appearance of ['dark', 'light'])
               const r = b.getBoundingClientRect(),
                 i = b.querySelector('.icon').getBoundingClientRect();
               return {
-                title: b.title,
+                title: b.dataset.tooltip,
                 width: r.width,
                 height: r.height,
                 icon: [i.width, i.height],
                 insets: [i.left - r.left, r.right - i.right, i.top - r.top, r.bottom - i.bottom],
                 left: r.left,
                 right: r.right,
-                padding: getComputedStyle(b).padding,
+                padding: window.paintStyle(b).padding,
               };
             }),
           };
@@ -79,7 +103,7 @@ for (const appearance of ['dark', 'light'])
             assert.ok(Math.abs(inset - 6 * scale) < 0.02, JSON.stringify(b));
         }
         assert.notEqual(
-          await button.evaluate((b) => getComputedStyle(b).backgroundColor),
+          await button.evaluate((b) => window.paintStyle(b).backgroundColor),
           'rgba(0, 0, 0, 0)',
         );
         await rail.screenshot({
@@ -88,12 +112,15 @@ for (const appearance of ['dark', 'light'])
         measurements.push({ appearance, scale, name, ...measured });
       }
       // Exercise an actual aria-label-only icon button, rather than a synthetic title consumer.
-      await page.locator('.title-actions').getByTitle('Settings', { exact: true }).click();
+      await page
+        .locator('.title-actions')
+        .getByRole('button', { name: 'Settings', exact: true })
+        .click();
       await page.getByRole('textbox', { name: 'Search all settings', exact: true }).fill('camera');
       const clear = page
         .locator('.settings-search')
         .getByRole('button', { name: 'Clear search', exact: true });
-      assert.equal(await clear.getAttribute('title'), 'Clear search');
+      assert.equal(await clear.getAttribute('data-tooltip'), 'Clear search');
       await clear.click();
       assert.equal(
         await page.getByRole('textbox', { name: 'Search all settings', exact: true }).inputValue(),
@@ -105,13 +132,15 @@ for (const appearance of ['dark', 'light'])
 
 test('shared Button preserves explicit hints, translates semantic aria-label fallback and keeps caption insets', async () => {
   const page = await browser.newPage({ viewport: { width: 800, height: 200 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   await page.goto(`${base}/tests/harness/button-review.html`);
   await page.getByTestId('fallback').waitFor();
-  assert.equal(await page.getByTestId('fallback').getAttribute('title'), 'Copy');
-  assert.equal(await page.getByTestId('explicit').getAttribute('title'), 'Paste');
-  assert.equal(await page.getByTestId('suppressed').getAttribute('title'), null);
-  assert.equal(await page.getByTestId('unnamed').getAttribute('title'), null);
-  assert.equal(await page.getByTestId('caption').getAttribute('title'), null);
+  assert.equal(await page.getByTestId('fallback').getAttribute('data-tooltip'), 'Copy');
+  assert.equal(await page.getByTestId('explicit').getAttribute('data-tooltip'), 'Paste');
+  assert.equal(await page.getByTestId('suppressed').getAttribute('data-tooltip'), null);
+  assert.equal(await page.getByTestId('unnamed').getAttribute('data-tooltip'), null);
+  assert.equal(await page.getByTestId('caption').getAttribute('data-tooltip'), null);
   const caption = page.getByTestId('caption');
   await caption.hover();
   const spacing = await caption.evaluate((button) => {
@@ -124,16 +153,18 @@ test('shared Button preserves explicit hints, translates semantic aria-label fal
     return {
       leading: icon.left - b.left,
       trailing: b.right - range.getBoundingClientRect().right,
-      padding: getComputedStyle(button).padding,
+      padding: window.paintStyle(button).padding,
     };
   });
   assert.equal(spacing.leading, 8);
   assert.equal(spacing.trailing, 8);
   assert.equal(spacing.padding, '0px 8px');
-  await page.screenshot({ path: '../output/electron/verification/shared-button-hint-and-insets.png' });
+  await page.screenshot({
+    path: '../output/electron/verification/shared-button-hint-and-insets.png',
+  });
   await page.evaluate(() => window.renderButtons('zh'));
   await page.waitForTimeout(25);
-  assert.equal(await page.getByTestId('fallback').getAttribute('title'), '复制');
-  assert.equal(await page.getByTestId('explicit').getAttribute('title'), '粘贴');
+  assert.equal(await page.getByTestId('fallback').getAttribute('data-tooltip'), '复制');
+  assert.equal(await page.getByTestId('explicit').getAttribute('data-tooltip'), '粘贴');
   await page.close();
 });

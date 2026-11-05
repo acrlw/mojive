@@ -27,6 +27,7 @@ export function EntityCard({
   children,
   ...props
 }: Props) {
+  const { title, ...headingProps } = heading;
   const id = useId();
   const bodyId = contentId ?? `${id}-content`;
   return (
@@ -40,13 +41,19 @@ export function EntityCard({
         className="entity-card-heading"
         aria-expanded={expanded}
         aria-controls={expanded === undefined ? undefined : bodyId}
-        {...heading}
+        {...headingProps}
+        data-tooltip={title ?? name}
+        data-tooltip-overflow=".entity-card-title"
       >
         <Icon name={icon} size={20} />
         <span className="entity-card-title">{name}</span>
         {context !== undefined && <span className="entity-card-context">{context}</span>}
         {expanded !== undefined && (
-          <span className="entity-card-disclosure" aria-hidden="true" title={disclosureTitle}>
+          <span
+            className="entity-card-disclosure"
+            aria-hidden="true"
+            data-tooltip={disclosureTitle}
+          >
             <Icon name={expanded ? 'down' : 'right'} size={20} />
           </span>
         )}

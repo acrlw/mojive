@@ -60,114 +60,8 @@ function menuIcon(action) {
   return menuImages.get(name);
 }
 const labels = {
-  en: {
-    file: 'File',
-    edit: 'Edit',
-    add: 'Add',
-    view: 'View',
-    window: 'Window',
-    help: 'Help',
-    settings: 'Settings…',
-    about: 'About Mojive',
-    openUrdf: 'Open URDF…',
-    openProject: 'Open Project Folder…',
-    closeProject: 'Close Project Folder',
-    openScene: 'Open Saved Scene…',
-    save: 'Save Scene…',
-    examples: 'Example Scenes',
-    joint_gizmo: 'Joint Gizmos',
-    atelier_arm: 'Atelier Arm',
-    geometry_lab: 'Geometry Comparison',
-    primitive_gallery: 'Scene Objects',
-    undo: 'Undo',
-    redo: 'Redo',
-    delete: 'Delete Selection',
-    box: 'Box',
-    sphere: 'Sphere',
-    cylinder: 'Cylinder',
-    capsule: 'Capsule',
-    ground: 'Ground',
-    light: 'Light',
-    camera: 'Camera',
-    focusSelection: 'Frame Selection',
-    focusAll: 'Frame All',
-    front: 'Front',
-    back: 'Back',
-    left: 'Left',
-    right: 'Right',
-    top: 'Top',
-    bottom: 'Bottom',
-    perspective: 'Perspective',
-    orthographic: 'Orthographic',
-    toggleProjection: 'Toggle Projection',
-    toggleLeft: 'Show Left Panel',
-    toggleInspector: 'Show Inspector',
-    toggleTimeline: 'Show Timeline',
-    appearance: 'Appearance',
-    dark: 'Dark',
-    lightTheme: 'Light',
-    language: 'Language',
-    interaction: 'Interaction Guide',
-    keepEditing: 'Keep Editing',
-    discard: 'Discard Changes',
-    unsaved: 'Unsaved Scene',
-    discardQuestion: 'Discard unsaved changes and close Mojive?',
-    discardDetail: 'Save the scene before closing to keep your edits.',
-  },
-  'zh-CN': {
-    file: '文件',
-    edit: '编辑',
-    add: '添加',
-    view: '视图',
-    window: '窗口',
-    help: '帮助',
-    settings: '设置…',
-    about: '关于 Mojive',
-    openUrdf: '打开 URDF…',
-    openProject: '打开项目文件夹…',
-    closeProject: '关闭项目文件夹',
-    openScene: '打开已保存场景…',
-    save: '保存场景…',
-    examples: '示例场景',
-    joint_gizmo: '关节操作示例',
-    atelier_arm: 'Atelier 机械臂',
-    geometry_lab: '几何显示对比',
-    primitive_gallery: '场景对象',
-    undo: '撤销',
-    redo: '重做',
-    delete: '删除所选对象',
-    box: '立方体',
-    sphere: '球体',
-    cylinder: '圆柱体',
-    capsule: '胶囊体',
-    ground: '地面',
-    light: '灯光',
-    camera: '相机',
-    focusSelection: '聚焦所选对象',
-    focusAll: '聚焦全部',
-    front: '前视图',
-    back: '后视图',
-    left: '左视图',
-    right: '右视图',
-    top: '顶视图',
-    bottom: '底视图',
-    perspective: '透视投影',
-    orthographic: '正交投影',
-    toggleProjection: '切换投影',
-    toggleLeft: '显示左侧面板',
-    toggleInspector: '显示检查器',
-    toggleTimeline: '显示时间轴',
-    appearance: '外观',
-    dark: '深色',
-    lightTheme: '浅色',
-    language: '语言',
-    interaction: '交互指南',
-    keepEditing: '继续编辑',
-    discard: '放弃更改',
-    unsaved: '场景尚未保存',
-    discardQuestion: '放弃尚未保存的更改并关闭 Mojive？',
-    discardDetail: '关闭前保存场景即可保留编辑内容。',
-  },
+  en: require('./menu-en.json'),
+  'zh-CN': require('./menu-zh.json'),
 };
 function createMenuController(getWindow, development = false) {
   let state = {
@@ -182,6 +76,8 @@ function createMenuController(getWindow, development = false) {
     showTimeline: true,
     sceneId: 'joint_gizmo',
     textInput: false,
+    focusKey: 'F',
+    focusAllKey: 'Shift+F',
   };
   const t = (key) => labels[state.locale][key] ?? labels.en[key] ?? key;
   const send = (action) => {
@@ -219,13 +115,13 @@ function createMenuController(getWindow, development = false) {
             { type: 'separator' },
             item('app.settings', 'settings', { accelerator: 'Command+,' }),
             { type: 'separator' },
-            { role: 'services' },
+            { role: 'services', label: t('role_services') },
             { type: 'separator' },
-            { role: 'hide' },
-            { role: 'hideOthers' },
-            { role: 'unhide' },
+            { role: 'hide', label: t('role_hide') },
+            { role: 'hideOthers', label: t('role_hideOthers') },
+            { role: 'unhide', label: t('role_unhide') },
             { type: 'separator' },
-            { role: 'quit' },
+            { role: 'quit', label: t('role_quit') },
           ],
         },
         {
@@ -246,7 +142,7 @@ function createMenuController(getWindow, development = false) {
               ),
             },
             { type: 'separator' },
-            { role: 'close' },
+            { role: 'close', label: t('role_close') },
           ],
         },
         {
@@ -255,10 +151,10 @@ function createMenuController(getWindow, development = false) {
             editing('edit.undo', 'undo', 'undo', state.canUndo, 'Command+Z'),
             editing('edit.redo', 'redo', 'redo', state.canRedo, 'Command+Shift+Z'),
             { type: 'separator' },
-            { role: 'cut' },
-            { role: 'copy', icon: menuIcon('role.copy') },
-            { role: 'paste', icon: menuIcon('role.paste') },
-            { role: 'selectAll' },
+            { role: 'cut', label: t('role_cut') },
+            { role: 'copy', label: t('role_copy'), icon: menuIcon('role.copy') },
+            { role: 'paste', label: t('role_paste'), icon: menuIcon('role.paste') },
+            { role: 'selectAll', label: t('role_selectAll') },
             { type: 'separator' },
             editing('edit.delete', 'delete', 'delete', state.hasSelection, 'Backspace'),
           ],
@@ -276,10 +172,14 @@ function createMenuController(getWindow, development = false) {
           submenu: [
             item('view.focusSelection', 'focusSelection', {
               enabled: state.hasSelection,
-              accelerator: state.textInput ? undefined : 'F',
+              accelerator: state.textInput
+                ? undefined
+                : state.focusKey?.replaceAll('Meta', 'Command') || undefined,
             }),
             item('view.focusAll', 'focusAll', {
-              accelerator: state.textInput ? undefined : 'Shift+F',
+              accelerator: state.textInput
+                ? undefined
+                : state.focusAllKey?.replaceAll('Meta', 'Command') || undefined,
             }),
             { type: 'separator' },
             ...[
@@ -331,17 +231,17 @@ function createMenuController(getWindow, development = false) {
               ],
             },
             { type: 'separator' },
-            { role: 'togglefullscreen' },
-            ...(development ? [{ role: 'toggleDevTools' }] : []),
+            { role: 'togglefullscreen', label: t('role_togglefullscreen') },
+            ...(development ? [{ role: 'toggleDevTools', label: t('role_toggleDevTools') }] : []),
           ],
         },
         {
           label: t('window'),
           submenu: [
-            { role: 'minimize' },
-            { role: 'zoom' },
+            { role: 'minimize', label: t('role_minimize') },
+            { role: 'zoom', label: t('role_zoom') },
             { type: 'separator' },
-            { role: 'front' },
+            { role: 'front', label: t('role_front') },
           ],
         },
         { label: t('help'), role: 'help', submenu: [item('help.interaction', 'interaction')] },
@@ -371,7 +271,22 @@ function createMenuController(getWindow, development = false) {
         throw new Error('Invalid native project state.');
       if (next.sceneId !== undefined && typeof next.sceneId !== 'string')
         throw new Error('Invalid native scene identity.');
+      for (const key of ['focusKey', 'focusAllKey'])
+        if (
+          next[key] !== undefined &&
+          next[key] !== null &&
+          !/^(?:(?:Control|Alt|Shift|Meta)\+)*(?:[A-Z0-9]|F(?:[1-9]|1[0-2])|Space)$/.test(next[key])
+        )
+          throw new Error('Invalid native focus shortcut.');
+      const focusKey = next.focusKey === undefined ? 'F' : next.focusKey;
       const updated = {
+        focusKey,
+        focusAllKey:
+          next.focusAllKey === undefined
+            ? focusKey && !focusKey.split('+').includes('Shift')
+              ? `Shift+${focusKey}`
+              : null
+            : next.focusAllKey,
         locale: next.locale,
         theme: next.theme,
         canUndo: next.canUndo,

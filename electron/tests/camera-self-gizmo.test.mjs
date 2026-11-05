@@ -17,7 +17,9 @@ before(async () => {
   page = await browser.newPage({ viewport: { width: 1380, height: 900 } });
   page.on('pageerror', (error) => errors.push(error.stack));
   await mkdir('../output/electron/verification', { recursive: true });
-  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/tests/harness/camera-review.html`);
+  await page.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/camera-review.html`,
+  );
   await page.waitForFunction(() => window.cameraReview?.api?.current);
 });
 after(async () => {
@@ -55,7 +57,9 @@ test('View and Pilot yield the selected camera gizmo, while preview and other se
   const previewImage = await page
     .locator('.camera-preview-image')
     .evaluate((canvas) => canvas.toDataURL());
-  await page.screenshot({ path: '../output/electron/verification/camera-self-preview-initial-workspace.png' });
+  await page.screenshot({
+    path: '../output/electron/verification/camera-self-preview-initial-workspace.png',
+  });
   const previewPixels = await page.locator('.camera-preview-image').evaluate(async (canvas) => {
     const image = new Image();
     image.src = canvas.toDataURL();
@@ -109,9 +113,9 @@ test('View and Pilot yield the selected camera gizmo, while preview and other se
       withHelpers,
       'Scene cameras suppress entity helpers',
     );
-    await page
-      .getByTestId('viewport-canvas')
-      .screenshot({ path: `../output/electron/verification/camera-self-${pilot ? 'pilot' : 'view'}.png` });
+    await page.getByTestId('viewport-canvas').screenshot({
+      path: `../output/electron/verification/camera-self-${pilot ? 'pilot' : 'view'}.png`,
+    });
     await page.screenshot({
       path: `../output/electron/verification/camera-self-preview-${pilot ? 'pilot' : 'view'}-workspace.png`,
     });

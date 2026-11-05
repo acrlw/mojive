@@ -22,7 +22,6 @@
       } from '/src/settings.tsx';
       import { OutputPanel, filterOutput, copyOutput } from '/src/OutputPanel.tsx';
       import { t, setLanguage } from '/src/i18n.ts';
-      import { useSquircleSurfaces } from '/src/components.tsx';
       window.uiModules = {
         normalizeSettings,
         readSettings,
@@ -33,7 +32,6 @@
         setLanguage,
       };
       function Review() {
-        useSquircleSurfaces();
         const [settings, update] = useSettings(),
           [open, setOpen] = useState(false),
           [entries, setEntries] = useState([

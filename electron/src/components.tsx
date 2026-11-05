@@ -4,13 +4,17 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type ComponentProps,
   type CSSProperties,
   type HTMLAttributes,
+  type InputHTMLAttributes,
+  type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
 import { icons } from './icons';
-import { t } from './i18n';
+import { t, message } from './i18n';
 import './controls.css';
+import './smooth-corners';
 export { Select, Switch, SwitchRow } from './CustomControls';
 export { ColorPicker } from './ColorPicker';
 export function Icon({
@@ -34,10 +38,7 @@ export function Icon({
     />
   );
 }
-/** Compatibility hook: editor UI now uses ordinary CSS circular corners by default. */
-export function useSquircleSurfaces() {}
-
-/** Retains the existing surface API while CSS owns its radius, shadow and overflow. */
+/** Declare the authored radius; the shared SVG painter owns the continuous contour. */
 export function Squircle({
   radius = 14,
   children,
@@ -46,23 +47,43 @@ export function Squircle({
   ...props
 }: HTMLAttributes<HTMLDivElement> & { radius?: number }) {
   return (
-    <div {...props} className={className} style={{ borderRadius: radius, ...style }}>
+    <div
+      {...props}
+      className={className}
+      style={
+        {
+          '--surface-radius': `${radius}px`,
+          borderRadius: radius,
+          ...style,
+        } as CSSProperties
+      }
+    >
       {children}
     </div>
   );
+}
+/** Connected choices share one silhouette and one state palette across panels. */
+export function Segmented({ className = '', ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div role="group" {...props} className={`segmented ${className}`} />;
 }
 export function Button({
   icon,
   children,
   active = false,
+  activityIndicator = false,
   variant,
   title,
+  hintText,
+  hintKeys,
   style,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   icon?: string;
   active?: boolean;
+  activityIndicator?: boolean;
   variant?: 'primary' | 'secondary';
+  hintText?: string;
+  hintKeys?: string[];
 }) {
   const iconOnly = children == null || children === false || children === '';
   const hint = title ?? (iconOnly ? props['aria-label'] : undefined);
@@ -73,12 +94,67 @@ export function Button({
         variant ??
         (props.className?.split(/\s+/).includes('primary-button') ? 'primary' : undefined)
       }
-      title={hint ? t(hint) : undefined}
+      aria-label={props['aria-label'] ?? (hint ? t(hint) : undefined)}
+      data-tooltip={hint ? t(hint) : undefined}
+      data-tooltip-caption={hintText ? t(hintText) : undefined}
+      data-tooltip-keys={hintKeys ? JSON.stringify(hintKeys) : undefined}
       className={`button ${active ? 'active' : ''} ${!children ? 'icon-button' : ''} ${props.className ?? ''}`}
       style={style}
     >
       {icon && <Icon name={icon} />} {typeof children === 'string' ? t(children) : children}
+      {activityIndicator && (
+        <span className="activity-indicator" aria-hidden="true">
+          <span />
+        </span>
+      )}
     </button>
+  );
+}
+export function SearchField({
+  label,
+  value,
+  onChange,
+  onClear,
+  clearLabel,
+  className = '',
+  inputRef,
+  placeholder = `${t('Search')}…`,
+  ...inputProps
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'className' | 'size'> & {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onClear?: () => void;
+  clearLabel?: string;
+  className?: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
+}) {
+  const localInput = useRef<HTMLInputElement>(null);
+  const input = inputRef ?? localInput;
+  return (
+    <div className={`search-field ${className}`} data-capsule-layout="">
+      <Icon name="search" size={16} />
+      <input
+        {...inputProps}
+        ref={input}
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {value && (
+        <Button
+          type="button"
+          icon="close"
+          aria-label={clearLabel ?? t('Clear search')}
+          onClick={() => {
+            if (onClear) onClear();
+            else onChange('');
+            input.current?.focus();
+          }}
+        />
+      )}
+    </div>
   );
 }
 export function Section({
@@ -97,7 +173,9 @@ export function Section({
   useLayoutEffect(() => {
     const element = content.current;
     if (!element?.closest('.inspector')) return;
-    const rows = [...element.querySelectorAll<HTMLElement>(':scope > .vector-group')];
+    const rows = [...element.querySelectorAll<HTMLElement>('.vector-group')].filter(
+      (row) => row.closest('.section-content') === element,
+    );
     if (!rows.length) return;
     const grid = element.closest('.inspector-content')!;
     const context = document.createElement('canvas').getContext('2d')!;
@@ -395,6 +473,30 @@ export function Numeric({
     </div>
   );
 }
+export function NumericChannel({
+  badge,
+  tone,
+  onReset,
+  ...numeric
+}: ComponentProps<typeof Numeric> & {
+  badge: string;
+  tone: 'x' | 'y' | 'z' | 'alpha';
+  onReset: () => void;
+}) {
+  return (
+    <div className="axis-field">
+      <Button
+        className={`axis axis-${tone}`}
+        title="Reset"
+        aria-label={`${t('Reset')} ${t(numeric.label)}`}
+        onClick={onReset}
+      >
+        {badge}
+      </Button>
+      <Numeric {...numeric} />
+    </div>
+  );
+}
 export function VectorFields({
   label,
   values,
@@ -403,7 +505,6 @@ export function VectorFields({
   onCommit,
   unit,
   resetValues,
-  controlRadius = 4,
 }: {
   label: string;
   values: number[];
@@ -412,7 +513,6 @@ export function VectorFields({
   onCommit: () => void;
   unit?: string;
   resetValues?: readonly number[];
-  controlRadius?: number;
 }) {
   return (
     <div className="vector-group">
@@ -422,32 +522,21 @@ export function VectorFields({
       </label>
       <div className="vector-fields">
         {['X', 'Y', 'Z'].map((axis, i) => (
-          <Squircle
-            className="axis-field"
+          <NumericChannel
             key={axis}
-            radius={controlRadius}
-            style={{ borderRadius: controlRadius }}
-          >
-            <Button
-              className={`axis axis-${axis.toLowerCase()}`}
-              title="Reset"
-              aria-label={`${t('Reset')} ${t(label)} ${axis}`}
-              onClick={() => {
-                onBegin();
-                onChange(i, resetValues?.[i] ?? 0);
-                onCommit();
-              }}
-            >
-              {axis}
-            </Button>
-            <Numeric
-              label={`${label} ${axis}`}
-              value={values[i]}
-              onChange={(v) => onChange(i, v)}
-              onBegin={onBegin}
-              onCommit={onCommit}
-            />
-          </Squircle>
+            badge={axis}
+            tone={['x', 'y', 'z'][i] as 'x' | 'y' | 'z'}
+            label={t('{{label}} {{axis}}', { label: message(label), axis })}
+            value={values[i]}
+            onChange={(v) => onChange(i, v)}
+            onBegin={onBegin}
+            onCommit={onCommit}
+            onReset={() => {
+              onBegin();
+              onChange(i, resetValues?.[i] ?? 0);
+              onCommit();
+            }}
+          />
         ))}
       </div>
     </div>

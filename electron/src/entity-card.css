@@ -1,6 +1,8 @@
 .entity-card {
+  --card-inset: 8px;
+  --card-child-radius: max(0px, calc(var(--surface-radius) - var(--card-inset)));
   margin-bottom: 12px;
-  padding: 8px;
+  padding: var(--card-inset);
   border-radius: 12px;
   background: var(--ui-child);
   border: 0;
@@ -20,7 +22,7 @@
   padding: 0 4px;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--card-child-radius);
   color: var(--text-color);
   text-align: left;
 }
@@ -46,7 +48,7 @@ button.entity-card-heading:active:not(:disabled) {
   outline-offset: -1px;
 }
 .entity-card-context {
-  font-size: 12px;
+  font-size: var(--body-font-size, 14px);
   color: var(--muted-color);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

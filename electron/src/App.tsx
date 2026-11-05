@@ -1,3 +1,4 @@
+import { sceneDisplayName } from './scene-labels';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type {
@@ -31,7 +32,7 @@ import {
   sampleTake,
   assertPoseCompatible,
 } from './editor';
-import { t } from './i18n';
+import { t, message, type LocalizedText } from './i18n';
 import { SettingsDialog, useSettings } from './settings';
 import { OutputPanel } from './OutputPanel';
 import { JointPanel } from './JointPanel';
@@ -40,6 +41,20 @@ import { FileDialog, type FileDialogKind } from './FileDialog';
 import { ProjectExplorer } from './ProjectExplorer';
 import { ConfirmSceneDialog } from './ConfirmSceneDialog';
 import { AppMenu } from './AppMenu';
+import { commandKey, shortcut } from './platform';
+import {
+  actionLabel,
+  actionParts,
+  matchesKey,
+  keyboardChord,
+  focusAccelerator,
+  focusAllAccelerator,
+  keyLabel,
+  type InputAction,
+} from './input-bindings';
+import { PointerHint } from './InputHints';
+import { InteractionGuide } from './InteractionGuide';
+import { TooltipHost } from './Tooltip';
 import { InfoDialog } from './InfoDialog';
 import { CamerasPanel } from './CamerasPanel';
 import { CameraProperties } from './CameraProperties';
@@ -51,21 +66,22 @@ import type { SceneCameraState } from './scene-camera';
 import { exportTakeVideo } from './export-video';
 import { LayersPopup, LayersPanel, DEFAULT_VIEWPORT_LAYERS } from './ViewportLayers';
 import type { ViewportStats } from './Viewport';
-import { JointEditor, jointIcon } from './JointEditor';
+import { jointTypeLabel, JointEditor, jointIcon } from './JointEditor';
 import { Splitter } from './Splitter';
 import { filterSceneNodes, nodeCategory } from './scene-tree';
 import { SCENE_CATALOG, createCatalogScene } from './SceneCatalog';
 import {
+  SearchField,
   Button,
   Empty,
   Icon,
   Numeric,
   Section,
+  Segmented,
   Squircle,
   VectorFields,
   SwitchRow,
   ColorPicker,
-  useSquircleSurfaces,
 } from './components';
 import { Timeline } from './Timeline';
 import { Viewport, type ViewportHandle } from './Viewport';
@@ -76,7 +92,7 @@ type Snapshot = {
   duration: number;
   timeline: WorkspaceTimeline;
 };
-type Log = { id: number; level: 'info' | 'warn' | 'err'; time: string; text: string };
+type Log = { id: number; level: 'info' | 'warn' | 'err'; time: string; text: LocalizedText };
 const kinds: Record<string, string> = {
   world: 'world',
   geom: 'geom',
@@ -92,12 +108,12 @@ const kinds: Record<string, string> = {
   light: 'lightbulb',
 };
 const menus = ['File', 'Edit', 'Add', 'View', 'Help'];
-const tools: { id: Tool; icon: string; title: string; key: string }[] = [
-  { id: 'select', icon: 'select', title: 'Select', key: 'Q' },
-  { id: 'position', icon: 'move', title: 'Position', key: 'W' },
-  { id: 'rotation', icon: 'rotate', title: 'Rotation', key: 'E' },
-  { id: 'scale', icon: 'scale', title: 'Scale', key: 'R' },
-  { id: 'joint', icon: 'joint', title: 'Joint', key: 'J' },
+const tools: { id: Tool; icon: string; title: string }[] = [
+  { id: 'select', icon: 'select', title: 'Select' },
+  { id: 'position', icon: 'move', title: 'Position' },
+  { id: 'rotation', icon: 'rotate', title: 'Rotation' },
+  { id: 'scale', icon: 'scale', title: 'Scale' },
+  { id: 'joint', icon: 'joint', title: 'Joint' },
 ];
 const additions: { kind: EntityKind; label: string }[] = [
   { kind: 'box', label: 'Box' },
@@ -109,7 +125,6 @@ const additions: { kind: EntityKind; label: string }[] = [
   { kind: 'camera', label: 'Camera' },
 ];
 export default function App() {
-  useSquircleSurfaces();
   const [settings, updateSettings] = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [layers, setLayers] = useState({ ...DEFAULT_VIEWPORT_LAYERS });
@@ -227,9 +242,37 @@ export default function App() {
   const [frame, setFrame] = useState<Frame>('world');
   const [geometry, setGeometry] = useState<GeometryMode>('default');
   const [projection, setProjection] = useState<'perspective' | 'orthographic'>('perspective');
+  const bindingHint = (label: string, action: InputAction) => {
+    const key = actionLabel(settings.inputBindings, action);
+    return `${t(label)}${key ? ` (${key})` : ''}`;
+  };
   const [left, setLeft] = useState('scene');
   const [bottom, setBottom] = useState('timeline');
   const [menu, setMenu] = useState<string | null>(null);
+  const menuBar = useRef<HTMLElement>(null);
+  const menuTrigger = useRef<HTMLElement | null>(null);
+  const hoveredMenu = useRef<string | null>(null);
+  const [treeContext, setTreeContext] = useState<{
+    id: string;
+    x: number;
+    y: number;
+    anchor: HTMLElement;
+  } | null>(null);
+  function activateMenu(name: string, anchor: HTMLElement) {
+    menuTrigger.current = anchor;
+    hoveredMenu.current = null;
+    setMenu(name);
+  }
+  function switchMenu(direction: number) {
+    const next = menus[(menus.indexOf(menu!) + direction + menus.length) % menus.length];
+    const anchor = menuBar.current?.querySelector<HTMLButtonElement>(`[data-menu="${next}"]`);
+    if (anchor) activateMenu(next, anchor);
+  }
+  function openTreeContext(node: SceneNode, anchor: HTMLElement, x: number, y: number) {
+    setSelected(node.id);
+    setTreeContext({ id: node.id, anchor, x, y });
+    activateMenu('Object', anchor);
+  }
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showInspector, setShowInspector] = useState(true);
@@ -305,7 +348,7 @@ export default function App() {
     playbackSpeed,
   };
   dirtyRef.current = dirty;
-  function log(text: string, level: Log['level'] = 'info') {
+  function log(text: LocalizedText, level: Log['level'] = 'info') {
     setLogs((l) => [
       ...l.slice(-499),
       {
@@ -320,11 +363,11 @@ export default function App() {
     noticeActionEpoch.current++;
     setNoticeState((current) => (current?.action ? { ...current, action: undefined } : current));
   }
-  function setNotice(message: string, level: OperationNoticeData['level'] = 'info') {
+  function setNotice(message: LocalizedText, level: OperationNoticeData['level'] = 'info') {
     const id = ++noticeId.current;
     setNoticeState(message ? { id, message, level } : null);
   }
-  function historyNotice(message: string, direction: 'undo' | 'redo', expected: Snapshot) {
+  function historyNotice(message: LocalizedText, direction: 'undo' | 'redo', expected: Snapshot) {
     const id = ++noticeId.current,
       epoch = noticeActionEpoch.current;
     setNoticeState({
@@ -398,7 +441,7 @@ export default function App() {
     }
     return null;
   }
-  function transaction(label: string, fn: () => void) {
+  function transaction(label: LocalizedText, fn: () => void) {
     begin();
     try {
       fn();
@@ -508,7 +551,13 @@ export default function App() {
     setHistoryTick((t) => t + 1);
     setRevision((r) => r + 1);
     for (const w of next.warnings) log(w, 'warn');
-    log(`Loaded ${next.name} · ${next.nodes.length} objects · ${next.joints.length} joints`);
+    log(
+      message('Loaded {{name}} · {{objects}} objects · {{joints}} joints', {
+        name: sceneDisplayName(next),
+        objects: next.nodes.length,
+        joints: next.joints.length,
+      }),
+    );
     if (old) disposeDocument(old);
   }
   function answerReplacement(answer: boolean) {
@@ -573,7 +622,7 @@ export default function App() {
         setSearchVisible(false);
         setLeft('project');
         setShowLeft(true);
-        log(`Opened project folder ${next.name}`);
+        log(message('Opened project folder {{name}}', { name: next.name }));
       },
       { initialPath: project?.path },
     );
@@ -609,7 +658,7 @@ export default function App() {
         loaded = loadWorkspace(r.content);
       setFileDialog(null);
       if (await replaceDocument(loaded.doc, loaded.keys, loaded.duration, loaded.timeline))
-        log(`Opened ${r.path}`);
+        log(message('Opened {{path}}', { path: r.path }));
     });
   }
   async function save() {
@@ -631,7 +680,7 @@ export default function App() {
         ),
         overwrite,
       );
-      log(`Saved ${saved}`);
+      log(message('Saved {{path}}', { path: saved }));
       setDirty(false);
       dirtyRef.current = false;
       setNotice('Project saved');
@@ -683,7 +732,7 @@ export default function App() {
         'save',
         async (path, overwrite) => {
           const saved = await window.mojive!.saveBinaryFile(path, bytes, overwrite);
-          log(`Saved ${saved}`);
+          log(message('Saved {{path}}', { path: saved }));
         },
         { extension: '.png', caption: t('Save camera image'), suggestedName: `${name}.png` },
       );
@@ -722,7 +771,7 @@ export default function App() {
         'save',
         async (path, overwrite) => {
           const saved = await window.mojive!.saveBinaryFile(path, bytes, overwrite);
-          log(`Saved ${saved}`);
+          log(message('Saved {{path}}', { path: saved }));
         },
         { extension: '.webm', caption: t('Export video'), suggestedName: `${take.name}.webm` },
       );
@@ -762,13 +811,13 @@ export default function App() {
     }
     if (!doc) return;
     setMenu(null);
-    transaction(`Added ${kind}`, () => {
+    transaction(message('Added {{kind}}', { kind: message(kind) }), () => {
       const n = createPrimitive(kind);
       doc.root.add(n.object);
       doc.nodes.push(n);
       setSelected(n.id);
     });
-    log(`Added ${kind}`);
+    log(message('Added {{kind}}', { kind: message(kind) }));
   }
   function remove() {
     if (state.current.recording) {
@@ -778,7 +827,7 @@ export default function App() {
     if (!doc || !selected) return;
     const node = doc.nodes.find((n) => n.id === selected);
     if (!node) return;
-    transaction(`Deleted ${node.name}`, () => {
+    transaction(message('Deleted {{name}}', { name: node.name }), () => {
       removeNode(doc, node.id);
       setSelected(null);
       setPinnedId((id) => (doc.nodes.some((n) => n.id === id) ? id : null));
@@ -1147,12 +1196,12 @@ export default function App() {
       const target = e.target as HTMLElement;
       if (
         target.closest(
-          'input,textarea,[contenteditable],[role=dialog],[role=listbox],[role=combobox]',
+          'input,textarea,[contenteditable],[role=dialog],[role=listbox],[role=combobox],[role=menu]',
         )
       )
         return;
       if (target.closest('button') && (e.key === ' ' || e.key === 'Enter')) return;
-      const command = e.metaKey || e.ctrlKey;
+      const command = commandKey(e) && e.key !== 'Control';
       const k = e.key.toLowerCase();
       if (nativeMenu && command && ['o', 's', 'z', ','].includes(k)) return;
       if (command && k === ',') {
@@ -1167,10 +1216,17 @@ export default function App() {
       } else if (command && k === 'z') {
         e.preventDefault();
         history(e.shiftKey ? 'redo' : 'undo');
-      } else if (k === 'f') {
+      } else if (
+        matchesKey(settings.inputBindings, 'focus', e) ||
+        keyboardChord(e) === focusAllAccelerator(settings.inputBindings)
+      ) {
         e.preventDefault();
-        viewport.current?.focus(selected ?? undefined);
-      } else if (k === ' ') {
+        viewport.current?.focus(
+          keyboardChord(e) === focusAllAccelerator(settings.inputBindings)
+            ? undefined
+            : (selected ?? undefined),
+        );
+      } else if (matchesKey(settings.inputBindings, 'playback', e)) {
         e.preventDefault();
         if (
           timelineData.takes.some(
@@ -1182,7 +1238,7 @@ export default function App() {
           state.current.playbackSource = 'take';
           setPlaying((p) => !p);
         }
-      } else if (k === 'k') {
+      } else if (matchesKey(settings.inputBindings, 'capture', e)) {
         capture();
       } else if (k === 'delete' || k === 'backspace') {
         e.preventDefault();
@@ -1197,7 +1253,9 @@ export default function App() {
           restore(s);
         }
       } else {
-        const t = tools.find((t) => t.key.toLowerCase() === k);
+        if (matchesKey(settings.inputBindings, 'frame', e))
+          setFrame((value) => (value === 'world' ? 'body' : 'world'));
+        const t = tools.find((t) => matchesKey(settings.inputBindings, t.id, e));
         if (t) setTool(t.id);
       }
     };
@@ -1272,6 +1330,8 @@ export default function App() {
           showInspector,
           showTimeline: showBottom,
           sceneId,
+          focusKey: focusAccelerator(settings.inputBindings),
+          focusAllKey: focusAllAccelerator(settings.inputBindings),
           textInput: !!document.activeElement?.matches('input,textarea,[contenteditable]'),
         })
         .catch(report);
@@ -1349,14 +1409,30 @@ export default function App() {
           role="treeitem"
           aria-selected={selected === n.id}
           aria-expanded={children.length ? open : undefined}
+          tabIndex={selected === n.id ? 0 : -1}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openTreeContext(n, event.currentTarget, event.clientX, event.clientY);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+              event.preventDefault();
+              event.stopPropagation();
+              const box = event.currentTarget.getBoundingClientRect();
+              openTreeContext(n, event.currentTarget, box.left + 16, box.bottom);
+            }
+          }}
           onClick={() => setSelected(n.id)}
           onDoubleClick={() => viewport.current?.focus(n.id)}
-          title={n.name}
+          data-tooltip={n.name}
+          data-tooltip-overflow=".tree-label"
+          aria-label={n.name}
         >
           {children.length > 0 ? (
             <button
               className="tree-chevron"
-              aria-label={`${open ? 'Collapse' : 'Expand'} ${n.name}`}
+              aria-label={t(open ? 'Collapse {{name}}' : 'Expand {{name}}', { name: n.name })}
               onClick={(e) => {
                 e.stopPropagation();
                 toggleExpanded(n.id);
@@ -1378,16 +1454,19 @@ export default function App() {
           <span className={`tree-label ${n.visible ? '' : 'dim'}`}>{n.name}</span>
           <button
             className="tree-visibility"
-            title={t(n.visible ? 'Hide object' : 'Show object')}
+            data-tooltip={t(n.visible ? 'Hide object' : 'Show object')}
             aria-label={t(n.visible ? 'Hide object' : 'Show object')}
             aria-pressed={!n.visible}
             onDoubleClick={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              transaction(`${n.visible ? 'Hid' : 'Showed'} ${n.name}`, () => {
-                n.visible = !n.visible;
-                n.object.visible = n.visible;
-              });
+              transaction(
+                message(n.visible ? 'Hid {{name}}' : 'Showed {{name}}', { name: n.name }),
+                () => {
+                  n.visible = !n.visible;
+                  n.object.visible = n.visible;
+                },
+              );
             }}
           >
             <Icon name={n.visible ? 'eye' : 'eye-off'} size={16} />
@@ -1410,6 +1489,8 @@ export default function App() {
     return (
       <button
         role="menuitem"
+        aria-label={t(label)}
+        aria-description={shortcut}
         disabled={disabled}
         onClick={() => {
           setMenu(null);
@@ -1474,12 +1555,47 @@ export default function App() {
       <header className={`titlebar ${nativeMenu ? 'native-titlebar' : ''}`}>
         {nativeMenu && <div className="window-traffic-spacer" />}
         {!nativeMenu && (
-          <nav aria-label={t('Application menu')}>
+          <nav
+            ref={menuBar}
+            aria-label={t('Application menu')}
+            onPointerLeave={() => {
+              hoveredMenu.current = null;
+            }}
+          >
             {menus.map((m) => (
               <button
                 key={m}
                 className={menu === m ? 'active' : ''}
-                onClick={() => setMenu(menu === m ? null : m)}
+                data-menu={m}
+                aria-haspopup="menu"
+                aria-expanded={menu === m}
+                onPointerEnter={(event) => {
+                  if (menu && menus.includes(menu) && menu !== m) {
+                    activateMenu(m, event.currentTarget);
+                    hoveredMenu.current = m;
+                  }
+                }}
+                onClick={(event) => {
+                  menuTrigger.current = event.currentTarget;
+                  setMenu(menu === m && hoveredMenu.current !== m ? null : m);
+                  hoveredMenu.current = null;
+                }}
+                onKeyDown={(event) => {
+                  if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
+                    event.preventDefault();
+                    activateMenu(m, event.currentTarget);
+                  } else if (['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+                    event.preventDefault();
+                    const next =
+                      menus[
+                        (menus.indexOf(m) + (event.key === 'ArrowLeft' ? -1 : 1) + menus.length) %
+                          menus.length
+                      ];
+                    menuBar.current
+                      ?.querySelector<HTMLButtonElement>(`[data-menu="${next}"]`)
+                      ?.focus();
+                  }
+                }}
               >
                 {t(m)}
               </button>
@@ -1488,7 +1604,7 @@ export default function App() {
         )}
         <div className="document-title">
           <Icon name="file" size={16} />
-          {doc?.name ?? t('Untitled scene')}
+          {doc ? t(sceneDisplayName(doc)) : t('Untitled scene')}
           {dirty && <span className="dirty-dot" />}
         </div>
         <div className="title-actions">
@@ -1531,6 +1647,7 @@ export default function App() {
             icon={item.icon}
             title={item.title}
             active={left === item.id && showLeft}
+            activityIndicator={left === item.id && showLeft}
             onClick={() => {
               setLeft(item.id);
               setShowLeft(true);
@@ -1540,9 +1657,20 @@ export default function App() {
         ))}
         <span className="flex-spacer" />
         <Button
+          icon="key"
+          title={t('Timeline')}
+          active={showBottom && bottom === 'timeline'}
+          activityIndicator={showBottom && bottom === 'timeline'}
+          onClick={() => {
+            setBottom('timeline');
+            setShowBottom(!(showBottom && bottom === 'timeline'));
+          }}
+        />
+        <Button
           icon="terminal"
           title={t('Output')}
           active={showBottom && bottom === 'output'}
+          activityIndicator={showBottom && bottom === 'output'}
           onClick={() => {
             setBottom('output');
             setShowBottom(true);
@@ -1585,7 +1713,10 @@ export default function App() {
                 <Button
                   icon="plus"
                   title={t('Add object')}
-                  onClick={() => setMenu(menu === 'Add' ? null : 'Add')}
+                  onClick={(event) => {
+                    menuTrigger.current = event.currentTarget;
+                    setMenu(menu === 'Add' ? null : 'Add');
+                  }}
                 />
               </>
             )}
@@ -1593,24 +1724,12 @@ export default function App() {
         )}
         {!['joints', 'cameras', 'actuators'].includes(left) &&
           (left === 'project' ? !!project : searchVisible) && (
-            <div className="panel-search search-field">
-              <Icon name="search" size={16} />
-              <input
-                aria-label={t(`Search ${leftTitle}`)}
-                placeholder={t('Search') + '…'}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch('')}
-                  title={t('Clear search')}
-                  aria-label={t('Clear search')}
-                >
-                  <Icon name="close" size={12} />
-                </button>
-              )}
-            </div>
+            <SearchField
+              className="panel-search"
+              label={t(`Search ${leftTitle}`)}
+              value={search}
+              onChange={setSearch}
+            />
           )}
         {left === 'scene' && (
           <div className="scene-controls">
@@ -1618,7 +1737,7 @@ export default function App() {
               {availableTypes.map(({ kind, count }) => (
                 <button
                   key={kind}
-                  title={t(
+                  data-tooltip={t(
                     kind === 'light' ? 'Light source' : kind[0].toUpperCase() + kind.slice(1),
                   )}
                   aria-label={t(
@@ -1626,6 +1745,7 @@ export default function App() {
                   )}
                   aria-pressed={typeFilter === kind}
                   className={`filter-chip type-${kind} ${typeFilter === kind ? 'active' : ''}`}
+                  data-capsule-layout=""
                   onClick={() => setTypeFilter(kind)}
                 >
                   <Icon name={categoryIcons[kind]} size={16} />
@@ -1647,7 +1767,10 @@ export default function App() {
                 <Empty
                   title={t('Your scene is empty')}
                   action={
-                    <Button icon="plus" onClick={() => setMenu('Add')}>
+                    <Button
+                      icon="plus"
+                      onClick={(event) => activateMenu('Add', event.currentTarget)}
+                    >
                       {t('Add object')}
                     </Button>
                   }
@@ -1672,7 +1795,7 @@ export default function App() {
           {left === 'project' && (
             <>
               {project && (
-                <div className="group-eyebrow" title={project.path}>
+                <div className="group-eyebrow" data-tooltip={project.path}>
                   {project.name}
                 </div>
               )}
@@ -1737,7 +1860,6 @@ export default function App() {
               selectedId={selected}
               onSelect={setSelected}
               onFocus={(id) => viewport.current?.focus(id)}
-              onOpen={openUrdf}
             />
           )}
         </div>
@@ -1770,11 +1892,12 @@ export default function App() {
             />
           </div>
           <span className="flex-spacer" />
-          <div className="segmented geometry-selector" aria-label={t('Geometry display')}>
+          <Segmented className="geometry-selector" aria-label={t('Geometry display')}>
             {(['default', 'visual', 'collision', 'both'] as const).map((mode) => (
               <button
                 key={mode}
-                title={t(mode[0].toUpperCase() + mode.slice(1))}
+                data-tooltip={t(mode[0].toUpperCase() + mode.slice(1))}
+                aria-label={t(mode[0].toUpperCase() + mode.slice(1))}
                 aria-pressed={geometry === mode}
                 className={geometry === mode ? 'active' : ''}
                 onClick={() => setGeometry(mode)}
@@ -1783,7 +1906,7 @@ export default function App() {
                 <span>{t(mode[0].toUpperCase() + mode.slice(1))}</span>
               </button>
             ))}
-          </div>
+          </Segmented>
         </div>
         <div className={`viewport-content ${sceneCamera.id ? 'has-scene-camera' : ''}`}>
           {doc && (
@@ -1830,20 +1953,40 @@ export default function App() {
                 key={item.id}
                 icon={item.icon}
                 active={tool === item.id}
-                title={`${t(item.title)} (${item.key})`}
+                variant={tool === item.id ? 'primary' : undefined}
+                aria-pressed={tool === item.id}
+                title={bindingHint(item.title, item.id)}
+                hintText={item.title}
+                hintKeys={
+                  settings.inputBindings.keys[item.id]
+                    ? actionParts(settings.inputBindings, item.id)
+                    : undefined
+                }
                 onClick={() => setTool(item.id)}
               />
             ))}
             <div className="palette-divider" />
             <Button
               icon={frame === 'world' ? 'world' : 'body-frame'}
-              title={`${frame === 'world' ? 'World' : 'Body'} frame`}
+              title={bindingHint(`${frame === 'world' ? 'World' : 'Body'} frame`, 'frame')}
+              hintText={`${frame === 'world' ? 'World' : 'Body'} frame`}
+              hintKeys={
+                settings.inputBindings.keys.frame
+                  ? actionParts(settings.inputBindings, 'frame')
+                  : undefined
+              }
               onClick={() => setFrame(frame === 'world' ? 'body' : 'world')}
             />
             <Button
               icon="snap"
               title={t('Snapping')}
+              hintKeys={
+                settings.inputBindings.keys.snap
+                  ? actionParts(settings.inputBindings, 'snap')
+                  : undefined
+              }
               active={snapEnabled}
+              variant={snapEnabled ? 'primary' : undefined}
               aria-pressed={snapEnabled}
               onClick={() => setSnapEnabled(!snapEnabled)}
             />
@@ -1887,7 +2030,11 @@ export default function App() {
         className="inspector panel"
         style={{ visibility: showInspector ? 'visible' : 'hidden' }}
       >
-        <div className="panel-header inspector-heading" title={node?.name}>
+        <div
+          className="panel-header inspector-heading"
+          data-tooltip={node?.name}
+          data-tooltip-overflow="strong"
+        >
           <Icon name={node ? (kinds[node.kind] ?? 'cube') : 'inspect'} size={20} />
           <strong>{node?.name ?? t('Inspector')}</strong>
           <span className="flex-spacer" />
@@ -1911,7 +2058,8 @@ export default function App() {
                 <button
                   key={tab}
                   className={inspectorTab === tab ? 'active' : ''}
-                  title={t(tab)}
+                  data-tooltip={t(tab)}
+                  aria-label={t(tab)}
                   onClick={() => setInspectorTab(tab)}
                 >
                   {t(tab)}
@@ -1984,13 +2132,14 @@ export default function App() {
                   </Section>
                   {joint && (
                     <Section title={t('Joint')}>
-                      <Property label={t('Type')} value={joint.type} />
+                      <Property label={t('Type')} value={jointTypeLabel(joint.type)} />
                       <Property label={t('Parent')} value={joint.parent} />
                       <Property label={t('Child')} value={joint.child} />
                       <Property label={t('Axis')} value={joint.axis.toArray().join(', ')} />
                       <JointEditor
                         doc={doc!}
                         joint={joint}
+                        showScalarLabel
                         onBegin={begin}
                         onCommit={commit}
                         onChange={changed}
@@ -1998,16 +2147,18 @@ export default function App() {
                     </Section>
                   )}
                   <Section title={t('Display')}>
-                    <SwitchRow
-                      label={t('Visible')}
-                      checked={node.visible}
-                      onChange={(visible) =>
-                        transaction('Updated visibility', () => {
-                          node.visible = visible;
-                          node.object.visible = visible;
-                        })
-                      }
-                    />
+                    {node.kind !== 'light' && (
+                      <SwitchRow
+                        label={t('Visible')}
+                        checked={node.visible}
+                        onChange={(visible) =>
+                          transaction('Updated visibility', () => {
+                            node.visible = visible;
+                            node.object.visible = visible;
+                          })
+                        }
+                      />
+                    )}
                     <SwitchRow
                       label="Select in viewport"
                       title={t(
@@ -2053,7 +2204,11 @@ export default function App() {
                         <Property
                           key={key}
                           label={key.replaceAll('_', ' ')}
-                          value={String(value)}
+                          value={
+                            ['shape', 'role', 'projection'].includes(key.toLowerCase())
+                              ? t(String(value))
+                              : String(value)
+                          }
                         />
                       ))}
                   </Section>
@@ -2152,6 +2307,7 @@ export default function App() {
         </div>
         {bottom === 'timeline' && doc && (
           <Timeline
+            inputBindings={settings.inputBindings}
             doc={doc}
             navigationResetKey={sceneEpoch}
             keys={keys}
@@ -2238,62 +2394,52 @@ export default function App() {
         </span>
         <span className="status-divider" />
         <span className="status-hint">
-          <Icon name="status-mouse-left" size={20} />
+          <PointerHint
+            chord={settings.inputBindings.pointer.orbit[0]}
+            bindings={settings.inputBindings}
+            size={20}
+          />
           {t('Orbit')}
         </span>
         <span className="status-hint">
-          <Icon name="status-mouse-right" size={20} />
+          <PointerHint
+            chord={settings.inputBindings.pointer.pan[0]}
+            bindings={settings.inputBindings}
+            size={20}
+          />
           {t('Pan')}
         </span>
         <span className="status-hint">
-          <Icon name="status-mouse-wheel" size={20} />
+          <PointerHint
+            chord={settings.inputBindings.pointer.zoom[0]}
+            bindings={settings.inputBindings}
+            size={20}
+          />
           {t('Zoom')}
         </span>
         <span className="status-hint">
-          <kbd>{t('F')}</kbd>
+          <kbd>{actionLabel(settings.inputBindings, 'focus') || t('Unbound')}</kbd>
           {t('Focus')}
         </span>
         <span className="flex-spacer" />
         <div className="render-stats" aria-label={t('Render statistics')}>
-          <span className="renderer-name" title={stats?.backend ?? 'Three.js · WebGL 2'}>
+          <span className="renderer-name" data-tooltip={stats?.backend ?? 'Three.js · WebGL 2'}>
             WebGL 2
           </span>
           <span className="status-divider" />
-          <span className="status-time" title={t('Time')}>
+          <span className="status-time" data-tooltip={t('Time')}>
             {time.toFixed(3)} s
-          </span>
-          <span className="status-divider" />
-          <span className="stat-duration" title={t('CPU render submission time')}>
-            Δ {stats?.frameMs.toFixed(2) ?? '0.00'} ms
-          </span>
-          <span className="stat-calls" title={t('Draw calls')}>
-            <Icon name="layers" size={12} />
-            {stats?.drawCalls ?? 0}
-          </span>
-          <span className="stat-triangles" title={t('Triangles')}>
-            <Icon name="geom" size={12} />
-            {new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(
-              stats?.triangles ?? 0,
-            )}
           </span>
           <span className="status-divider" />
           <span
             className="stat-fps"
-            title={t(stats?.idle ? 'Idle viewport' : 'Rendered frames per second')}
+            data-tooltip={t(stats?.idle ? 'Idle viewport' : 'Rendered frames per second')}
           >
             {stats?.fps.toFixed(1) ?? '0.0'} FPS
           </span>
         </div>
-        <Button
-          icon="key"
-          title={t('Toggle timeline')}
-          active={showBottom}
-          onClick={() => {
-            setBottom('timeline');
-            setShowBottom(!showBottom);
-          }}
-        />
       </footer>
+      <TooltipHost />
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
@@ -2303,8 +2449,17 @@ export default function App() {
       {menu && (
         <>
           <AppMenu
-            key={menu}
+            key={`${menu}:${menu === 'Object' ? `${treeContext?.id}:${treeContext?.x}:${treeContext?.y}` : ''}`}
             name={menu}
+            anchor={
+              menu === 'Object'
+                ? treeContext?.anchor
+                : menus.includes(menu)
+                  ? menuTrigger.current
+                  : undefined
+            }
+            point={menu === 'Object' ? (treeContext ?? undefined) : undefined}
+            onNavigate={menus.includes(menu) ? switchMenu : undefined}
             onClose={() => setMenu((current) => (current === menu ? null : current))}
           >
             {menu === 'Projection' && (
@@ -2335,38 +2490,45 @@ export default function App() {
             )}
             {menu === 'File' && (
               <>
-                {menuItem('Open URDF…', openUrdf, 'robot', '⌘ O')}
+                {menuItem('Open URDF…', openUrdf, 'robot', shortcut('O', ['command']))}
                 {menuItem('Open project folder…', openProject, 'folder')}
                 {menuItem('Close project folder', closeProject, 'close', undefined, !project)}
                 {menuItem('Open saved scene…', openSaved, 'scene')}
                 <hr />
-                {menuItem('Save scene…', save, 'save', '⌘ S')}
+                {menuItem('Save scene…', save, 'save', shortcut('S', ['command']))}
                 <hr />
                 {SCENE_CATALOG.map((scene) => (
                   <div key={scene.id}>
-                    {menuItem(
-                      settings.language === 'zh' ? scene.nameZh : scene.name,
-                      () => loadCatalog(scene.id),
-                      'scene',
-                    )}
+                    {menuItem(t(scene.name), () => loadCatalog(scene.id), 'scene')}
                   </div>
                 ))}
               </>
             )}
             {menu === 'Edit' && (
               <>
-                {menuItem('Undo', () => history('undo'), 'undo', '⌘ Z', undo.current.length === 0)}
+                {menuItem(
+                  'Undo',
+                  () => history('undo'),
+                  'undo',
+                  shortcut('Z', ['command']),
+                  undo.current.length === 0,
+                )}
                 {menuItem(
                   'Redo',
                   () => history('redo'),
                   'redo',
-                  '⇧ ⌘ Z',
+                  shortcut('Z', ['shift', 'command']),
                   redo.current.length === 0,
                 )}
                 <hr />
-                {menuItem('Delete selection', remove, 'delete', '⌫', !selected)}
+                {menuItem('Delete selection', remove, 'delete', shortcut('Delete'), !selected)}
                 <hr />
-                {menuItem('Settings', () => setSettingsOpen(true), 'settings', '⌘ ,')}
+                {menuItem(
+                  'Settings',
+                  () => setSettingsOpen(true),
+                  'settings',
+                  shortcut(',', ['command']),
+                )}
               </>
             )}
             {menu === 'Add' &&
@@ -2382,9 +2544,14 @@ export default function App() {
                   'Frame selection',
                   () => viewport.current?.focus(selected ?? undefined),
                   'target',
-                  'F',
+                  actionLabel(settings.inputBindings, 'focus'),
                 )}
-                {menuItem('Frame all', () => viewport.current?.focus(), 'fit')}
+                {menuItem(
+                  'Frame all',
+                  () => viewport.current?.focus(),
+                  'fit',
+                  focusAllAccelerator(settings.inputBindings)?.split('+').map(keyLabel).join(' + '),
+                )}
                 <hr />
                 {[
                   'front',
@@ -2435,9 +2602,58 @@ export default function App() {
                   'Focus object',
                   () => viewport.current?.focus(selected ?? undefined),
                   'target',
-                  'F',
+                  actionLabel(settings.inputBindings, 'focus'),
                 )}
-                {menuItem('Delete object', remove, 'delete', '⌫')}
+                {menuItem(
+                  'Copy name',
+                  () => {
+                    if (!selectedNode) return;
+                    const write =
+                      window.mojive?.writeClipboardText(selectedNode.name) ??
+                      navigator.clipboard.writeText(selectedNode.name);
+                    void write.catch(report);
+                  },
+                  'copy',
+                )}
+                <hr />
+                {selectedNode &&
+                  menuItem(
+                    selectedNode.visible ? 'Hide object' : 'Show object',
+                    () => {
+                      transaction(
+                        message(selectedNode.visible ? 'Hid {{name}}' : 'Showed {{name}}', {
+                          name: selectedNode.name,
+                        }),
+                        () => {
+                          selectedNode.visible = !selectedNode.visible;
+                          selectedNode.object.visible = selectedNode.visible;
+                        },
+                      );
+                    },
+                    selectedNode.visible ? 'eye-off' : 'eye',
+                  )}
+                {selectedNode &&
+                  menuItem(
+                    isViewportPickable(selectedNode.object)
+                      ? 'Disable viewport picking'
+                      : 'Enable viewport picking',
+                    () => {
+                      transaction(
+                        message('Changed viewport picking for {{name}}', {
+                          name: selectedNode.name,
+                        }),
+                        () => {
+                          setViewportPickable(
+                            selectedNode.object,
+                            !isViewportPickable(selectedNode.object),
+                          );
+                        },
+                      );
+                    },
+                    'select',
+                  )}
+                <hr />
+                {menuItem('Delete object', remove, 'delete', shortcut('Delete'), recording)}
               </>
             )}
           </AppMenu>
@@ -2459,7 +2675,7 @@ export default function App() {
       )}
       {replacePrompt && !fileDialog && (
         <ConfirmSceneDialog
-          filename={doc?.name ?? t('Untitled scene')}
+          filename={doc ? t(sceneDisplayName(doc)) : t('Untitled scene')}
           reason={replaceReason}
           onCancel={() => answerReplacement(false)}
           onDiscard={() => answerReplacement(true)}
@@ -2492,27 +2708,7 @@ export default function App() {
             <span className="flex-spacer" />
             <Button icon="close" title={t('Close guide')} onClick={() => setHelp(false)} />
           </div>
-          <div className="guide-grid">
-            {[
-              ['Select', 'Click an object or a scene row'],
-              ['Focus', 'Double-click a scene row, or press F'],
-              ['Orbit', 'Left mouse drag'],
-              ['Pan', 'Right or middle mouse drag'],
-              ['Zoom', 'Scroll'],
-              ['Tools', 'Q Select · W Position · E Rotation · R Scale · J Joint'],
-              ['Frame', 'Toggle World / Body at the bottom of the tool palette'],
-              ['Undo / Redo', '⌘ Z / ⇧ ⌘ Z'],
-              ['Animate', 'K captures the current pose · Space plays / pauses'],
-              ['Timeline', 'Drag the ruler to scrub; drag a diamond to move a keyframe'],
-              ['Snapping', 'Hold Shift while dragging a transform handle'],
-              ['Precise values', 'Type a number; use ↑ / ↓ to adjust; Enter to commit'],
-            ].map(([a, b]) => (
-              <div key={a}>
-                <strong>{t(a)}</strong>
-                <span>{t(b)}</span>
-              </div>
-            ))}
-          </div>
+          <InteractionGuide bindings={settings.inputBindings} />
         </InfoDialog>
       )}
     </div>
@@ -2522,7 +2718,7 @@ function Property({ label, value }: { label: string; value: string }) {
   return (
     <div className="property-row">
       <span>{t(label)}</span>
-      <span className="property-value" title={value}>
+      <span className="property-value" data-tooltip={value}>
         {value}
       </span>
     </div>
@@ -2555,7 +2751,7 @@ function MaterialPanel({
   return (
     <>
       {materials.map((m, i) => (
-        <Section title={m.name || `Material ${i + 1}`} key={m.uuid}>
+        <Section title={m.name || t('Material {{index}}', { index: i + 1 })} key={m.uuid}>
           <div className="property-row material-property">
             <label>{t('Base color')}</label>
             <ColorPicker
@@ -2572,7 +2768,7 @@ function MaterialPanel({
           <div className="property-row material-property">
             <span>{t('Roughness')}</span>
             <Numeric
-              label={`Material ${i + 1} roughness`}
+              label={t('Material {{index}} roughness', { index: i + 1 })}
               value={m.roughness}
               onBegin={begin}
               onCommit={commit}
@@ -2585,7 +2781,7 @@ function MaterialPanel({
           <div className="property-row material-property">
             <span>{t('Metallic')}</span>
             <Numeric
-              label={`Material ${i + 1} metallic`}
+              label={t('Material {{index}} metallic', { index: i + 1 })}
               value={m.metalness}
               onBegin={begin}
               onCommit={commit}

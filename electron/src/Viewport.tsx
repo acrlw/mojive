@@ -1,3 +1,14 @@
+import {
+  DEFAULT_INPUT_BINDINGS,
+  FLY_ACTIONS,
+  matchesKey,
+  keyboardChord,
+  focusAllAccelerator,
+  matchesPointer,
+  keyHeld,
+  eventKey,
+  type InputBindings,
+} from './input-bindings';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import type { SceneDocument, Tool, Frame, GeometryMode } from './contracts';
@@ -48,6 +59,7 @@ export interface ViewportHandle {
   setProjection: (mode: 'perspective' | 'orthographic') => void;
 }
 export interface ViewportSettings {
+  inputBindings?: InputBindings;
   uiScale?: number;
   showGrid?: boolean;
   showViewCube?: boolean;
@@ -984,6 +996,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         boundsDocument = p.document;
         boundsRevision = p.revision;
       }
+      advanceFly(frameStarted);
       cameraUpdate();
       scene.updateMatrixWorld(true);
       influence.update(
@@ -1059,7 +1072,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       start: [number, number];
       last: [number, number];
       moved: boolean;
-      pan: boolean;
+      kind: 'orbit' | 'pan' | 'dolly' | null;
+      select: boolean;
     } | null = null;
     const pick = (p: [number, number]) => {
       const helper =
@@ -1103,21 +1117,98 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       }
       return null;
     };
+    const heldKeys = new Set<string>();
+    const bindings = () => latest.current.settings?.inputBindings ?? DEFAULT_INPUT_BINDINGS;
+    let flyModifiers = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
+    let flyTime: number | null = null;
+    let flyPilot = false;
+    let flyEngaged = false;
+    const flyActions = Object.keys(FLY_ACTIONS) as (keyof typeof FLY_ACTIONS)[];
+    const flyForward = new THREE.Vector3(),
+      flyRight = new THREE.Vector3();
+    function stopFly(cancel = false) {
+      flyTime = null;
+      flyEngaged = false;
+      for (const action of flyActions) {
+        const key = bindings().keys[action]?.split('+').at(-1);
+        if (key) heldKeys.delete(key);
+      }
+      if (flyPilot && (!navigation || cancel)) finishPilot(cancel);
+      flyPilot = false;
+    }
+    function advanceFly(now: number) {
+      if (!flyEngaged) return;
+      if (
+        document.activeElement !== renderer.domElement ||
+        document.hidden ||
+        precise.active ||
+        gizmo.active ||
+        (navigation && !navigation.kind) ||
+        (activeCamera && !piloting)
+      ) {
+        stopFly();
+        return;
+      }
+      const down = (action: keyof typeof FLY_ACTIONS) => {
+        const chord = bindings().keys[action];
+        const key = chord?.split('+').at(-1);
+        return Boolean(
+          key &&
+            keyHeld(chord, flyModifiers, heldKeys) &&
+            matchesKey(bindings(), action, { ...flyModifiers, key }),
+        );
+      };
+      const forward = Number(down('flyForward')) - Number(down('flyBack'));
+      const right = Number(down('flyRight')) - Number(down('flyLeft'));
+      const up = Number(down('flyUp')) - Number(down('flyDown'));
+      if (!forward && !right && !up) {
+        flyTime = null;
+        return;
+      }
+      const dt = flyTime === null ? 0 : Math.min(0.05, Math.max(0, (now - flyTime) / 1000));
+      flyTime = now;
+      leaveSceneView();
+      beginPilot();
+      flyPilot = piloting;
+      animation = null;
+      cameraUpdate();
+      camera.getWorldDirection(flyForward);
+      flyRight.setFromMatrixColumn(camera.matrixWorld, 0);
+      const speed = distance * 1.6 * dt;
+      target.addScaledVector(flyForward, forward * speed).addScaledVector(flyRight, right * speed);
+      target.z += up * speed;
+      if (piloting && speed) updatePilotedCamera();
+      invalidate();
+    }
     const down = (e: PointerEvent) => {
-      if (precise.active || e.defaultPrevented || e.ctrlKey || navigation || gizmo.active) return;
+      if (precise.active || e.defaultPrevented || navigation || gizmo.active) return;
       renderer.domElement.focus();
-      if (e.button === 0 && selectedGizmosEnabled() && gizmo.begin(point(e))) {
+      const input = bindings();
+      const kind =
+        (['pan', 'dolly', 'orbit'] as const).find((action) =>
+          matchesPointer(input, action, e, heldKeys),
+        ) ?? null;
+      const snap = keyHeld(input.keys.snap, e, heldKeys);
+      const primary =
+        e.button === 0 &&
+        (!e.ctrlKey || (input.keys.snap?.split('+').includes('Control') ?? false)) &&
+        (!e.altKey || (input.keys.snap?.split('+').includes('Alt') ?? false)) &&
+        !e.metaKey;
+      if (primary && selectedGizmosEnabled() && gizmo.begin(point(e))) {
+        gizmo.setSnapping(snap);
         renderer.domElement.setPointerCapture(e.pointerId);
         e.preventDefault();
         return;
       }
+      if (!kind && !primary) return;
       navigation = {
         id: e.pointerId,
         button: e.button,
         start: point(e),
         last: point(e),
         moved: false,
-        pan: e.button === 2 || e.button === 1 || e.shiftKey,
+        kind,
+        select: primary && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey,
       };
       renderer.domElement.focus();
       renderer.domElement.setPointerCapture(e.pointerId);
@@ -1126,7 +1217,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     const move = (e: PointerEvent) => {
       const p = point(e);
       if (gizmo.active) {
-        gizmo.move(p, false, e.shiftKey);
+        gizmo.move(p, false, keyHeld(bindings().keys.snap, e, heldKeys));
         return;
       }
       if (!navigation) {
@@ -1138,11 +1229,16 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         dy = p[1] - navigation.last[1];
       if (Math.hypot(p[0] - navigation.start[0], p[1] - navigation.start[1]) > 4)
         navigation.moved = true;
-      if (navigation.moved) {
+      if (navigation.moved && navigation.kind === 'dolly') {
+        zoomBy(dy * 0.01 * (latest.current.settings?.zoomSpeed ?? 1), false);
+        navigation.last = p;
+        return;
+      }
+      if (navigation.moved && navigation.kind) {
         leaveSceneView();
         beginPilot();
         animation = null;
-        if (navigation.pan) {
+        if (navigation.kind === 'pan') {
           const projectedTarget = new THREE.Vector4(target.x, target.y, target.z, 1)
             .applyMatrix4(camera.matrixWorldInverse)
             .applyMatrix4(camera.projectionMatrix);
@@ -1172,35 +1268,32 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         gizmo.hoverAt(point(e));
         gizmo.end();
       } else if (navigation?.id === e.pointerId) {
-        if (!navigation.moved && navigation.button === 0) {
+        if (!navigation.moved && navigation.select) {
           const id = pick(point(e));
           jointPicker.selectedAt(id, point(e));
           latest.current.onSelect(id);
         }
         navigation = null;
-        finishPilot();
+        if (!flyEngaged) finishPilot();
       }
       if (renderer.domElement.hasPointerCapture(e.pointerId))
         renderer.domElement.releasePointerCapture(e.pointerId);
     };
     const cancel = () => {
+      stopFly(true);
+      heldKeys.clear();
+      gizmo.setSnapping(false);
       finishPilot(true);
       gizmo.end(true);
       navigation = null;
     };
-    const wheel = (e: WheelEvent) => {
-      e.preventDefault();
+    const zoomBy = (delta: number, settle = true) => {
+      if (!Number.isFinite(delta)) return;
       const exactDolly =
         !activeCamera && (editorExactView || focusMotion) ? currentRenderedView() : null;
       leaveSceneView();
       animation = null;
       beginPilot();
-      if (!Number.isFinite(e.deltaY)) return;
-      const delta =
-        e.deltaY *
-        (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1) *
-        0.0012 *
-        (latest.current.settings?.zoomSpeed ?? 1);
       distance = Math.exp(
         THREE.MathUtils.clamp(Math.log(distance) + delta, Math.log(0.001), Math.log(1e6)),
       );
@@ -1250,9 +1343,19 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         });
         latest.current.onChange();
         if (pilotWheelTimer) clearTimeout(pilotWheelTimer);
-        pilotWheelTimer = window.setTimeout(() => finishPilot(), 180);
+        if (settle) pilotWheelTimer = window.setTimeout(() => finishPilot(), 180);
       }
       invalidate();
+    };
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!matchesPointer(bindings(), 'zoom', e, heldKeys, true)) return;
+      zoomBy(
+        e.deltaY *
+          (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1) *
+          0.0012 *
+          (latest.current.settings?.zoomSpeed ?? 1),
+      );
     };
     const dbl = (e: MouseEvent) => {
       const target = selectedGizmosEnabled() ? gizmo.preciseInput(point(e)) : null;
@@ -1271,8 +1374,40 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       }
     };
     const keydown = (e: KeyboardEvent) => {
-      if (e.key === 'Shift') gizmo.setSnapping(true);
+      heldKeys.add(eventKey(e));
+      flyModifiers = {
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+      };
+      if (
+        Object.keys(FLY_ACTIONS).some((action) =>
+          matchesKey(bindings(), action as keyof typeof FLY_ACTIONS, e),
+        )
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (
+          !precise.active &&
+          !gizmo.active &&
+          (!navigation || navigation.kind) &&
+          (!activeCamera || piloting)
+        ) {
+          flyEngaged = true;
+          flyTime ??= performance.now();
+          invalidate();
+        }
+        return;
+      }
+      gizmo.setSnapping(keyHeld(bindings().keys.snap, e, heldKeys));
       if (e.key === 'Escape') {
+        if (flyTime !== null || flyPilot) {
+          stopFly(true);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         if (pilotStart) {
           cancel();
           e.preventDefault();
@@ -1283,10 +1418,36 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         else latest.current.onSelect(null);
         navigation = null;
       }
-      if (e.key.toLowerCase() === 'f') {
-        focus(latest.current.selected ?? undefined);
+      if (
+        matchesKey(bindings(), 'focus', e) ||
+        keyboardChord(e) === focusAllAccelerator(bindings())
+      ) {
+        focus(
+          keyboardChord(e) === focusAllAccelerator(bindings())
+            ? undefined
+            : (latest.current.selected ?? undefined),
+        );
         e.preventDefault();
       }
+    };
+    const keyup = (e: KeyboardEvent) => {
+      heldKeys.delete(eventKey(e));
+      flyModifiers = {
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+      };
+      if (
+        flyEngaged &&
+        !flyActions.some((action) => {
+          const key = bindings().keys[action]?.split('+').at(-1);
+          return key && heldKeys.has(key);
+        })
+      )
+        stopFly();
+      if (document.activeElement === renderer.domElement) invalidate();
+      gizmo.setSnapping(keyHeld(bindings().keys.snap, e, heldKeys));
     };
     const context = (e: Event) => e.preventDefault();
     container.addEventListener('pointerdown', down);
@@ -1299,14 +1460,19 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     });
     renderer.domElement.addEventListener('pointerup', up);
     renderer.domElement.addEventListener('pointercancel', cancel);
-    renderer.domElement.addEventListener('lostpointercapture', cancel);
+    renderer.domElement.addEventListener('lostpointercapture', () => {
+      if (navigation || gizmo.active) cancel();
+    });
     window.addEventListener('blur', cancel);
     renderer.domElement.addEventListener('wheel', wheel, { passive: false });
     renderer.domElement.addEventListener('dblclick', dbl);
     renderer.domElement.addEventListener('keydown', keydown);
-    renderer.domElement.addEventListener('keyup', (e) => {
-      if (e.key === 'Shift') gizmo.setSnapping(false);
-    });
+    renderer.domElement.addEventListener('blur', cancel);
+    const visibilityChanged = () => {
+      if (document.hidden) cancel();
+    };
+    document.addEventListener('visibilitychange', visibilityChanged);
+    window.addEventListener('keyup', keyup);
     renderer.domElement.addEventListener('contextmenu', context);
     api.current = {
       useSceneCamera,
@@ -1400,6 +1566,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       window.clearInterval(statsTimer);
       if (pilotWheelTimer) clearTimeout(pilotWheelTimer);
       window.removeEventListener('blur', cancel);
+      window.removeEventListener('keyup', keyup);
+      document.removeEventListener('visibilitychange', visibilityChanged);
       container.removeEventListener('pointerdown', down);
       disposed = true;
       cancelAnimationFrame(queued);

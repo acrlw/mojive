@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -35,6 +36,8 @@ after(async () => {
 });
 beforeEach(async () => {
   page = await browser.newPage({ viewport: { width: 1000, height: 600 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(5000);
   page.on('pageerror', (error) => {
     throw error;
@@ -195,7 +198,7 @@ test('native severity, localized messages and corner placement remain legible in
         const metrics = await page.getByRole('status').evaluate((el) => {
           const r = el.getBoundingClientRect(),
             parent = el.parentElement.getBoundingClientRect(),
-            s = getComputedStyle(el);
+            s = window.paintStyle(el);
           const button = el.querySelector('.operation-notice-action').getBoundingClientRect();
           return {
             left: r.left - parent.left,

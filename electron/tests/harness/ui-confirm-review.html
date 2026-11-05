@@ -12,13 +12,12 @@
       import { createRoot } from 'react-dom/client';
       import '/src/design-tokens.css';
       import '/src/styles.css';
-      import { Button, useSquircleSurfaces } from '/src/components.tsx';
+      import { Button } from '/src/components.tsx';
       import { useSettings } from '/src/settings.tsx';
       import { ConfirmSceneDialog } from '/src/ConfirmSceneDialog.tsx';
       window.confirmEvents = [];
       window.confirmSaveMode = 'ok';
       function Review() {
-        useSquircleSurfaces();
         const [settings, update] = useSettings(),
           [request, setRequest] = useState(null);
         window.confirmHarness = {

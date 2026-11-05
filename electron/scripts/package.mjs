@@ -26,6 +26,8 @@ const runtimeFiles = [
   'preload.cjs',
   'resource-paths.cjs',
   'menu.cjs',
+  'menu-en.json',
+  'menu-zh.json',
   'file-access.cjs',
 ];
 const requiredFiles = [
@@ -103,12 +105,24 @@ try {
   await cp(path.resolve(root, '../LICENSE'), path.join(source, 'LICENSE'));
   const licenses = path.join(source, 'licenses');
   await mkdir(licenses);
-  for (const name of ['react', 'react-dom', 'three', 'figma-squircle']) {
+  for (const name of [
+    'react',
+    'react-dom',
+    'three',
+    'i18next',
+    'react-i18next',
+    'use-sync-external-store',
+    'html-parse-stringify',
+    '@babel/runtime',
+  ]) {
     const location = path.join(root, 'node_modules', name);
     const files = await readdir(location);
     const filename = files.find((value) => /^LICENSE(?:\.txt|\.md)?$/i.test(value));
     if (!filename) throw new Error(`Missing dependency license: ${name}`);
-    await cp(path.join(location, filename), path.join(licenses, `${name}-LICENSE.txt`));
+    await cp(
+      path.join(location, filename),
+      path.join(licenses, `${name.replaceAll('/', '-')}-LICENSE.txt`),
+    );
   }
   const electronRoot = path.dirname(require.resolve('electron/package.json'));
   for (const filename of ['LICENSE', 'LICENSES.chromium.html'])
@@ -118,7 +132,7 @@ try {
     );
   await writeFile(
     path.join(licenses, 'README.txt'),
-    'Runtime notices for Mojive. MiSans and JetBrains Mono licenses and font provenance are included in dist/fonts/. React, React DOM, Three.js and figma-squircle are bundled into dist/assets/. Electron and Chromium notices are preserved here and with the runtime.\n',
+    'Runtime notices for Mojive. MiSans and JetBrains Mono licenses and font provenance are included in dist/fonts/. React, React DOM, Three.js, i18next, react-i18next and their runtime helpers are bundled into dist/assets/. Electron and Chromium notices are preserved here and with the runtime.\n',
   );
 
   const { downloadArtifact } = require('@electron/get');

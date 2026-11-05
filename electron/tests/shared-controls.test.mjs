@@ -1,9 +1,11 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import { createServer as createTcpServer } from 'node:net';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
 let server, browser, page;
 before(async () => {
   const socket = createTcpServer();
@@ -18,6 +20,8 @@ before(async () => {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1100, height: 820 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(5000);
   page.on('pageerror', (error) => {
     throw error;
@@ -28,6 +32,102 @@ before(async () => {
 after(async () => {
   await browser?.close();
   await server?.close();
+});
+test('RGB and RGBA use joined horizontal badges with editable, scrubbable values and channel reset', async () => {
+  const page = await browser.newPage({ viewport: { width: 1100, height: 820 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
+  page.setDefaultTimeout(5000);
+  await page.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/ui-controls-review.html`,
+  );
+  await page.waitForFunction(() => window.controlState);
+  await mkdir('../output/electron/verification', { recursive: true });
+  for (const alpha of [false, true]) {
+    await page.evaluate(async (alpha) => {
+      const { applySettings, DEFAULT_SETTINGS } = await import('/src/settings.tsx');
+      applySettings({ ...DEFAULT_SETTINGS, language: 'en', appearance: alpha ? 'light' : 'dark' });
+      window.controlActions.setAlpha(alpha);
+      window.controlActions.setColor(alpha ? '#ED8F2E80' : '#ED8F2E');
+      window.controlEvents = [];
+    }, alpha);
+    await page.locator('.color-trigger').click();
+    for (const mode of ['RGB 255', 'RGB 1']) {
+      await page
+        .getByRole('button', { name: alpha ? mode.replace('RGB', 'RGBA') : mode, exact: true })
+        .click();
+      const fields = await page.locator('.color-channel-fields .axis-field').evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const badge = node.querySelector('.axis'),
+            field = node.querySelector('.number-field');
+          const a = badge.getBoundingClientRect(),
+            b = field.getBoundingClientRect();
+          return {
+            badge: badge.textContent.trim(),
+            top: a.top,
+            right: a.right,
+            fieldLeft: b.left,
+            fieldTop: b.top,
+            width: node.getBoundingClientRect().width,
+            badgeWidth: a.width,
+            badgeFont: getComputedStyle(badge).fontFamily,
+            badgeSize: getComputedStyle(badge).fontSize,
+            inputFont: getComputedStyle(field.querySelector('input')).fontFamily,
+            inputSize: getComputedStyle(field.querySelector('input')).fontSize,
+            inputWidth: field.querySelector('input').clientWidth,
+            textWidth: (() => {
+              const input = field.querySelector('input'),
+                style = window.paintStyle(input);
+              const ctx = document.createElement('canvas').getContext('2d');
+              ctx.font = style.font;
+              return (
+                ctx.measureText(input.value).width +
+                parseFloat(style.paddingLeft) +
+                parseFloat(style.paddingRight)
+              );
+            })(),
+            radius: window.paintStyle(field).borderTopLeftRadius,
+          };
+        }),
+      );
+      assert.equal(fields.map((f) => f.badge).join(''), alpha ? 'RGBA' : 'RGB');
+      for (const f of fields) {
+        assert.equal(f.top, fields[0].top);
+        assert.equal(f.top, f.fieldTop);
+        assert.ok(Math.abs(f.right - f.fieldLeft) < 0.05);
+        assert.ok(f.badgeWidth >= 26 && f.badgeWidth < 27);
+        assert.equal(f.badgeFont, f.inputFont);
+        assert.equal(f.badgeSize, f.inputSize);
+        assert.ok(f.inputWidth >= f.textWidth, JSON.stringify(f));
+        assert.ok(Math.abs(f.width - fields[0].width) < 0.05);
+        assert.equal(f.radius, '0px');
+      }
+      const red = page.getByRole('textbox', { name: 'R', exact: true });
+      await red.fill(mode === 'RGB 255' ? '128' : '0.500');
+      await red.press('Enter');
+      assert.match(await page.evaluate(() => window.controlState.color), /^#80/);
+      const box = await red.boundingBox();
+      await page.mouse.move(box.x + 16, box.y + 14);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 26, box.y + 14, { steps: 4 });
+      await page.mouse.up();
+      assert.ok(
+        parseInt((await page.evaluate(() => window.controlState.color)).slice(1, 3), 16) > 128,
+      );
+      await page.getByRole('button', { name: 'Reset R', exact: true }).click();
+      assert.match(await page.evaluate(() => window.controlState.color), /^#ED/);
+      await page.locator('.color-picker-surface').screenshot({
+        path: `../output/electron/verification/color-${alpha ? 'rgba-light' : 'rgb-dark'}-${mode === 'RGB 255' ? '255' : '1'}.png`,
+      });
+    }
+    await page.locator('.color-format button').first().click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => window.controlEvents), [
+      'color begin',
+      'color cancel',
+    ]);
+  }
+  await page.close();
 });
 test('numeric inactive captions keep authored precision; pointer scrubbing owns one transaction', async () => {
   const field = page.getByRole('textbox', { name: 'Numeric', exact: true });
@@ -215,29 +315,30 @@ test('scrubbing transfers focus from search text to the compound numeric owner',
   await page.evaluate(() => document.getElementById('search-focus-test').remove());
 });
 
-test('ordinary UI corners keep semantic circles and derive connected control corners from their frame', async () => {
+test('continuous UI corners keep semantic circles and derive connected control corners from their frame', async () => {
   const frames = await page.locator('button,.number-field,.axis-field').evaluateAll((nodes) =>
     nodes.map((node) => ({
-      clip: getComputedStyle(node).clipPath,
-      shape: getComputedStyle(node).cornerShape,
+      clip: window.paintStyle(node).clipPath,
+      shape: window.paintStyle(node).cornerShape,
     })),
   );
   assert.ok(
     frames.every(({ clip, shape }) => clip === 'none' && /^(round|superellipse\(1\))$/.test(shape)),
   );
   const field = page.locator('.axis-field').first();
-  const corners = await field.evaluate((node) => {
+  const corners = await field.evaluate(async (node) => {
     const radii = (child) =>
       [
         'borderTopLeftRadius',
         'borderTopRightRadius',
         'borderBottomRightRadius',
         'borderBottomLeftRadius',
-      ].map((key) => parseFloat(getComputedStyle(child)[key]));
+      ].map((key) => parseFloat(window.paintStyle(child)[key]));
     const sample = () => [...node.children].map(radii);
     const normal = sample();
     const previous = node.style.borderRadius;
     node.style.borderRadius = '0px';
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const square = sample();
     node.style.borderRadius = previous;
     return { normal, square };
@@ -251,18 +352,54 @@ test('ordinary UI corners keep semantic circles and derive connected control cor
     [0, 0, 0, 0],
   ]);
   const toggle = page.getByRole('switch', { name: 'Show grid' });
+  assert.match(
+    await toggle.locator('span').evaluate((node) => window.paintStyle(node).cornerShape),
+    /^(round|superellipse\(1\))$/,
+  );
   assert.equal(
-    await toggle.locator('span').evaluate((node) => getComputedStyle(node).borderRadius),
+    await toggle.locator('span').evaluate((node) => window.paintStyle(node).borderRadius),
     '50%',
   );
   await page.getByRole('combobox', { name: 'Projection' }).click();
   const nested = await page.locator('.select-options').evaluate((node) => ({
-    outer: parseFloat(getComputedStyle(node).borderRadius),
-    inset: parseFloat(getComputedStyle(node).padding),
-    inner: parseFloat(getComputedStyle(node.firstElementChild).borderRadius),
-    clip: getComputedStyle(node).clipPath,
+    outer: parseFloat(window.paintStyle(node).borderRadius),
+    inset: parseFloat(window.paintStyle(node).padding),
+    inner: parseFloat(window.paintStyle(node.firstElementChild).borderRadius),
+    clip: window.paintStyle(node).clipPath,
   }));
-  assert.equal(nested.inner, Math.max(0, nested.outer - nested.inset));
+  assert.ok(Math.abs(nested.inner - Math.max(0, nested.outer - nested.inset)) < 0.001);
   assert.equal(nested.clip, 'none');
   await page.keyboard.press('Escape');
+});
+
+test('compact channel badges retain their hue through hover and press in both themes', async () => {
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(async (theme) => {
+      const { applySettings, DEFAULT_SETTINGS } = await import('/src/settings.tsx');
+      applySettings({ ...DEFAULT_SETTINGS, language: 'en', appearance: theme });
+    }, theme);
+    const badge = page.locator('.axis-field > .axis-x').first();
+    const colors = [];
+    for (const state of ['idle', 'hover', 'press']) {
+      if (state === 'idle') await page.mouse.move(1000, 700);
+      if (state === 'hover') await badge.hover();
+      if (state === 'press') await page.mouse.down();
+      await page.waitForTimeout(50);
+      colors.push(
+        await badge.evaluate((element) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext('2d');
+          context.fillStyle = window.paintStyle(element).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+        }),
+      );
+    }
+    await page.mouse.up();
+    for (const [red, green, blue] of colors)
+      assert.ok(red > green + 12 && red > blue + 12, JSON.stringify(colors));
+    assert.equal(new Set(colors.map(String)).size, 3);
+    assert.equal(await badge.evaluate((element) => element.getBoundingClientRect().height), 28);
+  }
 });

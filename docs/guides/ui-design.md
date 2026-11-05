@@ -159,6 +159,11 @@ Frequent, recognizable actions can use icons with a short delayed tooltip. Unfam
 still need an understandable label. Do not repeat a fully visible caption in a hover hint;
 keep hints for hidden or clipped captions, shortcuts, unavailable-action reasons, and additional
 meaning. This applies equally to buttons, switches, and checkboxes. Tool names should stay brief.
+Close and search glyphs do not need repeated action-name tooltips. Entity names in trees,
+card headings and Inspector titles reveal their full value only when the visible label is
+actually clipped. Check the label bounds, not the whole row containing trailing actions.
+Keep useful shortcut, unavailable-action and additional-context hints separate from these
+name-only hints.
 Shortcut hints use the shared 14-point monospace key badges; axis/channel labels retain their
 separate 12-point role.
 Interaction Guide reuses the status hint descriptors, key badges and canonical mouse glyphs.
@@ -172,6 +177,11 @@ pointer descriptions on one column even when a double-click suffix is present. D
 text origins with component-aligned text or add invisible caption gaps to unlabeled hints.
 
 ## Spacing, alignment, and corners
+
+Use a 4-point layout grid and 8-point group spacing as the starting scale; dense controls
+may use 2-point increments. Choose layout sizes and clearances from that scale before deriving
+nested radii. This does not quantize stroke widths, icon paths, font metrics or scaled output
+to even pixels. Retain an established component-specific exception only with its owning rule.
 
 Every container owns explicit content insets. Every row or group owns its item gaps.
 Text padding, icon-to-text spacing, and clearance on either side of a divider are separate
@@ -216,7 +226,19 @@ Settings navigation measures complete localized category names with the same res
 inherited icon extent and padding used by its buttons. English category names use title case.
 A hover tooltip does not replace a complete caption when the layout has room for it.
 
-Adjacent nested rounded surfaces share one resolved corner budget:
+Electron rectangular surfaces use Mojive's G2 cubic Bézier corners through the shared SVG
+painter in `electron/src/smooth-corners.ts`. Retain authored radii. Derive adjacent nested
+contours by normal offsets from a shared reference, checking both transition footprints and
+curvature extrema. Capsules use the native G3 180-degree end profile through that same path
+entry point; a saturated half-height radius must not disable their smoothing. True circular
+controls retain circles. Backgrounds and boundaries use
+one paint layer; Canvas readouts use the same generator. See the [corner guide](../how-to/ui-corners.md#electron-surfaces)
+for the smoothing definition, constraints and verification. Native ImGui component scopes
+retain their adopted drawing profiles.
+
+Adjacent nested rounded surfaces share one resolved radius budget. For smooth Electron
+surfaces, this equation describes the circular portion; the complete contour follows the
+normal-offset construction in the corner guide:
 
 ```text
 inner_radius = max(0, outer_radius - actual_inset)
@@ -259,20 +281,52 @@ tonal neutral fill for secondary actions (Undo, Cancel, or dialog dismissal), an
 buttons for lightweight utilities. Selected navigation and filter states retain their own
 tinted treatment; they are not a substitute for a committing action. Primary hover feedback
 must preserve caption contrast rather than washing out its fill. Native extension buttons
-and workspace painters share the secondary palette. Inspect real popup footers, pending-edit
-actions, panel actions and toolbar buttons in idle, hover, held and disabled states.
+and workspace painters share the secondary palette. Viewport tools and Snapping use solid
+accent for selection; their hover and held states retain the semantic primary fill and ink.
+A generic tinted-selection rule must not replace that fill when the pointer enters. Inspect
+real popup footers, pending-edit actions, panel actions and toolbar buttons in idle, hover,
+held and disabled states.
 
 Plain help and status tooltips resolve the active control radius rather than an
 import-time geometry constant. They own a separate surface, so a caller's nested
 corner constraint must not leak into them. Shortcut hints retain the corner budget
 derived from their keycap and inset. Form and color popups use an 8-point inset;
 modals use 12 points, deriving their outer corners from the controls inside.
+Electron uses the shared themed tooltip owner instead of browser `title` bubbles. Its interaction
+guide reuses native mouse glyphs and separate keycaps; wrap complete input gestures together.
+Hint captions use the normal body role. Electron shortcut hints use a 4-point keycap radius,
+6-point inset and derived 10-point shell; larger body text increases the keycap height to preserve
+equal clearances. These layout dimensions follow the same 2-point increments as other controls.
+Use compact action captions and context notes, resolve modifiers from the host platform, and
+list only bindings implemented by that frontend. Hints inside modals retain their dialog owner.
+Collapsible section titles need complete rounded hit surfaces and explicit text insets. Keep
+caption alignment with adjacent property labels by extending the hover surface into the section
+gutter. Color comparison swatches retain clearance on every adjacent edge of their button;
+derive the swatch corner from that actual clearance, not from the standalone swatch style.
+The Electron color editor uses a 16-point shell, 8-point inset and 8-point controls; its
+20-point comparison swatches have 4-point clearance and 4-point corners.
+The standalone color trigger uses the same 28-point height, 8-point outer corner,
+20-point swatch and equal 4-point leading/top/bottom clearance.
+Verify these resolved values in the real workspace as well as component fixtures. Generic
+button rules must not override a component's inset or radius when stylesheet order changes.
+Scope component geometry under its owner rather than depending on import order.
+Color previews paint one rounded surface. Composite transparency over each checker cell
+before painting; independently antialiased checker and color layers expose corner fringes.
+Inspect dark opaque colors, partial transparency, fractional scale and framebuffer density.
+Connected choices and XYZ fields also paint each outer corner once. Their frame provides
+layout and corner values; the edge segments provide opaque themed fills and the rounded
+silhouette. Do not combine a rounded frame background, rounded child fills and a second
+rounded overflow clip. Check a uniform-fill raster against one rounded reference surface
+to detect repeated edge coverage that radius measurements alone cannot expose.
+
 Floating menus, choices, color editors and modals have one neutral native border. Their
 shadow has a broad, continuous Gaussian-like falloff outside that border, slightly heavier
 below the surface. Reuse local native gradient meshes when moving or repainting a window;
 do not rebuild blur textures every frame. Avoid narrow linear fringes that read as another
 border, stepped outline rings, or an accent halo around an entire popup. Each popup owner
-paints its shadow once; the renderer needs no extra blur pass.
+paints its shadow once; the renderer needs no extra blur pass. Electron resolves one subtle
+neutral edge and a broad shadow from the active palette; avoid overlapping dark outline rings
+or tight secondary shadows that make the edge appear dirty.
 
 Slider thumbs retain their solid accent identity across idle, hover and held states.
 Use restrained accent and track changes for feedback; do not switch the thumb to text ink,
@@ -300,6 +354,21 @@ same row, leaving visible space on both sides of the badge glyph. Computed typog
 must survive the production authored-default resolver. Verify emitted native font sizes,
 not only the specification or isolated specimen; changing font size alone must not
 change the badge reset target.
+Electron's compact form revision uses one 28px base height for scalar inputs, numeric channels,
+Select triggers and segmented choices. Frames grow to the larger body/numeric font size plus
+8px when needed. Channel badges use the same numeric font and size as their values. Derive
+badge width from the field height, cap height and character advance; keep font side bearings
+and glyph proportions intact. All five Electron segmented consumers share `Segmented`, its
+4px outer radius and state palette. Interior fields keep their shared 4px radius; popup
+ancestry alone is not a nested-corner constraint.
+Electron Inspector density comes from group spacing, not shorter input frames. Use 8px between
+property rows and from the heading target to its first row; keep 12px section insets above and
+below. Account for the combined margin, padding and row minimum height before adjusting any
+one value. Do not accumulate blank space around a shorter control inside a taller row.
+RGB and RGBA use the same joined badge-and-value control as XYZ, with channels in one
+horizontal row. Keep the badge beside its value in every format; do not turn it into an
+above-field caption. Reserve width for all channels, including alpha, rather than reducing
+numeric typography. Channel reset restores that channel's original value.
 The adopted 12/14/16 type steps are a project convention, not a requirement that
 every font or scaled raster size be even. Judge visible glyph size and baseline together.
 
@@ -309,6 +378,14 @@ equal leading and bottom inset. Fractional authored radii are valid. Inspect the
 window to assess the compositor edge; an internal framebuffer capture cannot show that edge.
 Search fields keep their capsule silhouette. A capsule's leading icon uses its end-circle
 placement. Neither is a generic rectangular child whose radius should be overwritten.
+Electron search fields use one `SearchField` component for Scene, Project files, Joints,
+Cameras, Output, Settings and file-dialog filtering. The component owns the 28px frame, 16px
+leading icon, body typography, placeholder ink, 20px circular clear action and inset focus
+contour. Panel styles own placement and available width only. Clearing retains input focus.
+Search icons, clear discs, switch thumbs and chip icons use the actual capsule profile to
+compute optical end placement. The angular mean end clearance matches side clearance; a
+circular child and a noncircular G3 shell cannot maintain an exact constant gap at every angle.
+
 
 G3 smoothing is optional and disabled by default in the adopted workspace. Keep the geometry
 contract available without restoring earlier experimental appearances. The nested-radius rule
@@ -383,7 +460,7 @@ as selects and numeric fields; reflow only when the measured content cannot fit.
 | Gizmo value feedback | Transform drags, joint precision rails, and range endpoints share `workspace/gizmo_readout.py`: the numeric field’s resolved font, height, padding and radius on the floating surface. Center text by cap height, retain semantic axis dots, and scale viewport-edge clearance with the UI. Precision rails paint the track first, full-height limit ticks centered across it second, and the round thumb last. Inset the painted track by its cap radius so it cannot protrude past the ticks; preserve full-range hit and value mapping. During a gesture, a shorter tick marks the starting value on the rail and a distinct darker segment spans the start and current values in either direction. The change segment has flat caps at the reference boundary so no rounded bulge protrudes beneath the origin tick. The thumb covers the origin tick when they coincide. |
 | Floating forms | Reuse `ui/workspace/floating.py` and the shared popup geometry. Closing a chooser preserves the selected joint; double-click focus can dismiss the chooser while retaining the gizmo. |
 | Inspector | Properties owns geometry shape/dimensions; Physics owns contact/mass; Material owns appearance. A presentation refactor must not hide or duplicate these capabilities. |
-| Output | Preserve selection, context-menu copying, search, severity filters, multiline messages, and clearing. Distinguish empty history from unmatched filters. Avoid a repeated copy button on every row. |
+| Output | Align severity glyphs with the first line’s visible text metrics, including localized fallback fonts. Scale the complete glyph with output typography and retain first-line alignment for multiline messages. Preserve selection, context-menu copying, search, severity filters, multiline messages, and clearing. Distinguish empty history from unmatched filters. Avoid a repeated copy button on every row. |
 
 For stable numeric layout, test `51.1 → 59.0`, sign changes, long values, unit promotion,
 and narrow fields. Fixed layout does not justify large unused blank regions: budgets remain
@@ -400,6 +477,27 @@ owner such as a text field or modal can temporarily take priority.
 One pointer gesture has one owner through release or cancellation, even if a modifier is
 released first or the pointer leaves the control. Preserve queued event positions. Popup
 dismissal consumes its triggering click so it cannot also select a different scene entity.
+Electron menu, timeline and help key labels resolve the preload platform: Ctrl/Alt on Windows
+and Linux, Command/Option on macOS. The displayed command modifier also owns dispatch.
+
+Binding editors record input directly: keyboard chords, mouse buttons, modifiers and wheel.
+Render the result with the same keycaps and mouse glyphs used by interaction hints. Keep preset
+selection separate from binding capture; do not require a key dropdown or typed gesture syntax.
+Reset is a trailing icon action. Put brief instructions in contextual hints rather than permanent
+small-text paragraphs. Section headings, joint pose captions, camera metadata, timeline lane names
+and transient errors retain the normal body size; do not reuse compact badge/tick typography for
+these readable labels. Capture, cancellation, conflict handling and persistence must agree with
+actual dispatch and every displayed shortcut. Camera movement and transform tools
+must share the same conflict domain. The native W/A/S/D/Q/E movement map coexists with V/G/R
+tools through distinct bindings, rather than allowing one held key to move the view and switch
+a tool. Text entry and modal owners suppress viewport movement; focus loss clears held input.
+Application/window accelerators remain reserved in both recording and preference restoration;
+include native Close, Hide, Minimize and Quit roles when checking platform conflicts.
+
+One underlying property has one control within an Inspector. Domain-specific activation replaces
+an equivalent generic visibility control; tree actions may remain synchronized alternative entry
+points. Preserve separate controls only when their effects are independent.
+
 Native text input and modal dialogs own their keyboard events. Respect physical Ctrl/Cmd
 semantics on macOS and route shortcuts through the existing binding layer.
 
@@ -505,3 +603,10 @@ Keep temporary measurements and captures under `output/` and reusable instructio
 files. The repository skill `skills/mojive-ui-design/SKILL.md` routes contributors through this
 workflow; it does not own another copy of the specification. A new rule does not create an
 approval gate: use the project's existing visual review and baseline policy.
+
+Electron status bars show task status, interaction hints and concise time/frame-rate feedback.
+Rendering submission timings, draw-call counts and triangle counts belong to diagnostics.
+Timeline and Output panel controls belong together in the activity navigation.
+Camera cards use primary ink for the name and secondary ink for projection/resolution. Wrap
+metadata from its actual available width instead of a fixed card-width threshold. Joint and
+actuator metadata follows the same hierarchy without shrinking normal body text.

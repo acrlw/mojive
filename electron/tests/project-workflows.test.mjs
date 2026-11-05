@@ -90,7 +90,7 @@ before(async () => {
   });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
   await page.getByRole('treeitem').first().waitFor();
-  await page.getByTitle('Project files', { exact: true }).click();
+  await page.getByRole('button', { name: 'Project files', exact: true }).click();
   await mkdir('../output/electron/verification', { recursive: true });
 });
 after(async () => {
@@ -108,7 +108,7 @@ const location = () => page.getByRole('textbox', { name: 'Location', exact: true
 const confirm = () => page.getByRole('button', { name: 'Select folder', exact: true });
 const heading = () => page.locator('.left-content .group-eyebrow');
 const open = async () => {
-  await page.getByTitle('Open project folder', { exact: true }).click();
+  await page.getByRole('button', { name: 'Open project folder', exact: true }).click();
   await page.getByRole('dialog', { name: 'Open project folder', exact: true }).waitFor();
   await page.waitForFunction(
     () => document.querySelector('.file-dialog-list')?.getAttribute('aria-busy') === 'false',
@@ -130,7 +130,7 @@ const navigate = async (directory) => {
 const chosen = async (expected) => {
   await confirm().click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  assert.equal(await heading().getAttribute('title'), expected);
+  assert.equal(await heading().getAttribute('data-tooltip'), expected);
   assert.equal(opened.at(-1), expected);
   await page.waitForFunction(() => window.projectMenu.state.hasProject);
 };
@@ -178,7 +178,7 @@ test('project picker commits current directory, explicit child and typed locatio
   await page.getByRole('option', { name: '3rdparty', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(opened.length, count);
-  assert.equal(await heading().getAttribute('title'), project);
+  assert.equal(await heading().getAttribute('data-tooltip'), project);
   await open();
   await location().fill(path.join(temporary, 'missing'));
   await confirm().click();
@@ -195,19 +195,21 @@ test('project root survives folder navigation and scene loads; close clears file
   await open();
   await location().fill(project);
   await chosen(project);
-  const robots = page.locator(`.file-row[title="${path.join(project, 'robots')}"]`);
+  const robots = page.locator(`.file-row[data-tooltip="${path.join(project, 'robots')}"]`);
   await robots.dblclick();
   assert.equal(
-    await heading().getAttribute('title'),
+    await heading().getAttribute('data-tooltip'),
     project,
     'explorer folders never replace the project root',
   );
-  await page.locator(`.file-row[title="${path.join(project, 'robots', 'arm.urdf')}"]`).dblclick();
+  await page
+    .locator(`.file-row[data-tooltip="${path.join(project, 'robots', 'arm.urdf')}"]`)
+    .dblclick();
   await page.waitForFunction(() =>
     document.querySelector('.document-title').textContent.includes('Project Robot'),
   );
   assert.equal(
-    await heading().getAttribute('title'),
+    await heading().getAttribute('data-tooltip'),
     project,
     'loading a model does not replace the explorer with model siblings',
   );
@@ -225,7 +227,7 @@ test('project root survives folder navigation and scene loads; close clears file
   await page.screenshot({
     path: '../output/electron/verification/project-open-scene-preserved.png',
   });
-  await page.getByTitle('Close project folder', { exact: true }).click();
+  await page.getByRole('button', { name: 'Close project folder', exact: true }).click();
   await page.locator('.left-panel .empty').getByText('No folder open', { exact: true }).waitFor();
   assert.equal(await heading().count(), 0);
   assert.equal(await page.locator('.file-row').count(), 0);
@@ -234,7 +236,10 @@ test('project root survives folder navigation and scene loads; close clears file
   assert.match(await page.locator('.document-title').innerText(), /Project Robot/);
   assert.equal(await page.locator('.dirty-dot').count(), 1);
   await page.waitForFunction(() => !window.projectMenu.state.hasProject);
-  assert.equal(await page.getByTitle('Close project folder', { exact: true }).isDisabled(), true);
+  assert.equal(
+    await page.getByRole('button', { name: 'Close project folder', exact: true }).isDisabled(),
+    true,
+  );
   await page.evaluate(() => window.projectMenu.invoke('edit.undo'));
   await page.waitForFunction(
     () => Number(document.querySelector('input[aria-label="Position X"]')?.value) === 0,
@@ -278,7 +283,7 @@ test('the actual Mojive repository opens with every root entry and searches file
   await chosen(repository);
   const expected = await projects.list(repository);
   assert.deepEqual(
-    await page.locator('.file-row').evaluateAll((rows) => rows.map((row) => row.title)),
+    await page.locator('.file-row').evaluateAll((rows) => rows.map((row) => row.dataset.tooltip)),
     expected.map((file) => file.path),
   );
   assert.ok(expected.some((file) => file.name === '3rdparty'));
@@ -287,12 +292,12 @@ test('the actual Mojive repository opens with every root entry and searches file
   await page.screenshot({ path: '../output/electron/verification/project-mojive-root.png' });
   await page.locator('.panel-search input').fill('joint_gizmo.xml');
   await page
-    .locator(`.file-row[title="${path.join(repository, 'assets', 'joint_gizmo.xml')}"]`)
+    .locator(`.file-row[data-tooltip="${path.join(repository, 'assets', 'joint_gizmo.xml')}"]`)
     .waitFor();
   await page.screenshot({
     path: '../output/electron/verification/project-mojive-recursive-search.png',
   });
-  await page.getByTitle('Close project folder', { exact: true }).click();
+  await page.getByRole('button', { name: 'Close project folder', exact: true }).click();
   assert.equal(await page.locator('.file-row').count(), 0);
   assert.equal(await page.locator('.panel-search input').count(), 0);
   assert.deepEqual(errors, []);

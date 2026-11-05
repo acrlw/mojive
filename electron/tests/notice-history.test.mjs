@@ -1,3 +1,4 @@
+import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -13,14 +14,7 @@ before(async () => {
     cacheDir: 'node_modules/.vite-notice-history-test',
     server: { host: '127.0.0.1', port: 0, hmr: false },
     optimizeDeps: {
-      include: [
-        'react',
-        'react-dom',
-        'react-dom/client',
-        'react/jsx-runtime',
-        'three',
-        'figma-squircle',
-      ],
+      include: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'three'],
     },
     logLevel: 'error',
   });
@@ -31,6 +25,8 @@ before(async () => {
     headless: true,
   });
   page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(7000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript(() => {
@@ -55,7 +51,9 @@ beforeEach(async () => {
 const notice = () => page.locator('.operation-notice');
 const action = (label) => notice().getByRole('button', { name: label, exact: true });
 const titles = () =>
-  page.getByRole('treeitem').evaluateAll((nodes) => nodes.map((node) => node.title).sort());
+  page
+    .getByRole('treeitem')
+    .evaluateAll((nodes) => nodes.map((node) => node.dataset.tooltip).sort());
 async function add(kind = 'Box') {
   await page
     .getByRole('navigation', { name: 'Application menu' })
@@ -199,25 +197,29 @@ test('seeking, recording and playback permanently invalidate previously publishe
   assert.equal(await page.locator('.operation-notice-action').count(), 0);
   await invokeRemembered('before-seek');
   assert.ok((await titles()).includes(box));
-  await timeline.getByTitle('Capture scene pose at playhead (K)', { exact: true }).click();
+  await timeline
+    .getByRole('button', { name: 'Capture scene pose at playhead (K)', exact: true })
+    .click();
   await rememberAction('before-record');
   const keyCount = await timeline.locator('.keyframe').count();
-  await timeline.getByTitle('Record scene frames', { exact: true }).click();
+  await timeline.getByRole('button', { name: 'Record scene frames', exact: true }).click();
   await page.locator('.operation-notice-action').waitFor({ state: 'detached' });
   await invokeRemembered('before-record');
   assert.equal(await timeline.locator('.keyframe').count(), keyCount);
   await page.waitForTimeout(100);
-  await timeline.getByTitle('Stop recording', { exact: true }).click();
+  await timeline.getByRole('button', { name: 'Stop recording', exact: true }).click();
   assert.equal(await page.locator('.operation-notice-action').count(), 0);
-  await timeline.getByTitle('Go to start', { exact: true }).click();
-  await timeline.getByTitle('Capture scene pose at playhead (K)', { exact: true }).click();
+  await timeline.getByRole('button', { name: 'Go to start', exact: true }).click();
+  await timeline
+    .getByRole('button', { name: 'Capture scene pose at playhead (K)', exact: true })
+    .click();
   await rememberAction('before-play');
   const savedKeys = await timeline.locator('.keyframe').count();
-  await timeline.getByTitle('Play (Space)', { exact: true }).click();
+  await timeline.getByRole('button', { name: 'Play (Space)', exact: true }).click();
   await page.locator('.operation-notice-action').waitFor({ state: 'detached' });
   await invokeRemembered('before-play');
   assert.equal(await timeline.locator('.keyframe').count(), savedKeys);
-  await timeline.getByTitle('Pause (Space)', { exact: true }).click();
+  await timeline.getByRole('button', { name: 'Pause (Space)', exact: true }).click();
   await invokeRemembered('before-play');
   assert.equal(await timeline.locator('.keyframe').count(), savedKeys);
   assert.equal(await page.locator('.operation-notice-action').count(), 0);
@@ -227,6 +229,8 @@ test('seeking, recording and playback permanently invalidate previously publishe
 test('actual Chinese operation messages and history actions appear at the viewport lower-left in both themes', async () => {
   for (const appearance of ['dark', 'light']) {
     const review = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    await review.addInitScript(installPaintStyle);
+    await review.evaluate(installPaintStyle);
     try {
       await review.addInitScript((appearance) => {
         localStorage.setItem(
@@ -267,7 +271,7 @@ test('actual Chinese operation messages and history actions appear at the viewpo
           bottom: p.bottom - r.bottom,
           right: p.right - r.right,
           height: r.height,
-          font: getComputedStyle(el).fontFamily,
+          font: window.paintStyle(el).fontFamily,
         };
       });
       assert.ok(Math.abs(metrics.left - 15) < 0.1);
@@ -278,9 +282,9 @@ test('actual Chinese operation messages and history actions appear at the viewpo
       );
       assert.equal(metrics.height, 55);
       assert.match(metrics.font, /MiSans/);
-      await review
-        .locator('.viewport-content')
-        .screenshot({ path: `../output/electron/verification/notice-history-${appearance}-zh-125.png` });
+      await review.locator('.viewport-content').screenshot({
+        path: `../output/electron/verification/notice-history-${appearance}-zh-125.png`,
+      });
     } finally {
       await review.close();
     }

@@ -31,8 +31,11 @@ try {
     await page.reload();
     await page.locator('.tree-row').first().waitFor();
     await page.evaluate(() => document.fonts.ready);
-    await page.locator('.activity-rail').getByTitle('Project files', { exact: true }).click();
-    await page.getByTitle('Open project folder', { exact: true }).click();
+    await page
+      .locator('.activity-rail')
+      .getByRole('button', { name: 'Project files', exact: true })
+      .click();
+    await page.getByRole('button', { name: 'Open project folder', exact: true }).click();
     const location = page.getByRole('textbox', { name: 'Location', exact: true });
     await location.waitFor();
     await page.waitForFunction(

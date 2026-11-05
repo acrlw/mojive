@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { SceneDocument, SceneNode } from './contracts';
-import { Button, Empty, Icon, Section, Squircle } from './components';
+import { SearchField, Button, Empty, Icon, Section, Squircle } from './components';
 import { readCameraView } from './scene-camera';
 import { useControlPopover } from './CustomControls';
 import { t, useLanguage } from './i18n';
@@ -75,24 +75,14 @@ export function CamerasPanel({
         </div>
       </div>
       {searchVisible && (
-        <div className="camera-panel-search search-field">
-          <Icon name="search" size={16} />
-          <input
-            autoFocus
-            aria-label={t('Search cameras')}
-            placeholder={t('Search cameras') + '…'}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          {search && (
-            <Button
-              icon="close"
-              title="Clear search"
-              aria-label={t('Clear search')}
-              onClick={() => setSearch('')}
-            />
-          )}
-        </div>
+        <SearchField
+          className="camera-panel-search"
+          autoFocus
+          label={t('Search cameras')}
+          placeholder={`${t('Search cameras')}…`}
+          value={search}
+          onChange={setSearch}
+        />
       )}
       <div className="camera-panel-scroll">
         <div className="camera-editor-source">
@@ -206,7 +196,8 @@ function CameraCard({
           className="camera-entry-name"
           onClick={() => onSelect(node.id)}
           onDoubleClick={() => onView(node.id)}
-          title={node.name}
+          data-tooltip={node.name}
+          data-tooltip-overflow="span:not(.icon)"
           aria-label={node.name}
         >
           <Icon name="camera" />
@@ -235,10 +226,7 @@ function CameraCard({
         </div>
       </div>
       <div className="camera-entry-body">
-        <div
-          className="camera-entry-meta"
-          title={`${t(projection)} · ${view.resolution[0]} × ${view.resolution[1]}`}
-        >
+        <div className="camera-entry-meta">
           <span className="camera-entry-projection">
             <Icon name={view.projection} size={14} />
             <span>{t(projection)}</span>

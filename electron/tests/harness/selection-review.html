@@ -67,11 +67,13 @@
       function Review() {
         const [selected, select] = useState(null),
           [revision, refresh] = useState(0),
+          [inputBindings, setInputBindings] = useState(undefined),
           api = useRef(null);
         f.api = api;
         f.selected = selected;
         f.select = select;
         f.refresh = () => refresh((v) => v + 1);
+        f.setInputBindings = setInputBindings;
         return React.createElement(
           'div',
           { style: { width: '100vw', height: '100vh', position: 'relative' } },
@@ -83,7 +85,7 @@
             frame: 'world',
             geometry: 'default',
             revision,
-            settings: { showGrid: false, showViewCube: false },
+            settings: { showGrid: false, showViewCube: false, inputBindings },
             onSelect: select,
             onChange: f.refresh,
           }),

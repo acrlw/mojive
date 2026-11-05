@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { Joint, SceneDocument } from './contracts';
-import { Button, Empty, Icon } from './components';
+import { SearchField, Button, Empty, Icon } from './components';
 import { JointEditor, jointContext, jointIcon, jointTypeLabel } from './JointEditor';
 import { t } from './i18n';
 import { jointDisplayPose } from './joint-pose';
@@ -129,17 +129,14 @@ export function JointPanel({
         </div>
       )}
       {searchVisible && (
-        <div className="joint-panel-search search-field">
-          <Icon name="search" size={16} />
-          <input
-            autoFocus
-            aria-label={t('Search joints')}
-            placeholder={`${t('Search joints')}…`}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          {search && <Button icon="close" title="Clear search" onClick={() => setSearch('')} />}
-        </div>
+        <SearchField
+          className="joint-panel-search"
+          autoFocus
+          label={t('Search joints')}
+          placeholder={`${t('Search joints')}…`}
+          value={search}
+          onChange={setSearch}
+        />
       )}
       {status && (
         <p className="joint-panel-status" role="status">
@@ -197,7 +194,6 @@ export function JointPanel({
                 <JointEditor
                   doc={doc!}
                   joint={joint}
-                  controlRadius={4}
                   onBegin={() => {
                     onSelect(joint.id);
                     onBegin();

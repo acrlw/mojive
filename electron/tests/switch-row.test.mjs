@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -28,6 +29,8 @@ before(async () => {
     headless: true,
   });
   page = await browser.newPage({ viewport: { width: 440, height: 300 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__switch_row_test`);
   await page.evaluate(async () => {
     const { default: React } = await import('/node_modules/.vite-switch-row-test/deps/react.js'),
@@ -84,7 +87,7 @@ test('label, row whitespace and track activate the same switch once', async () =
   assert.equal(await row.evaluate((node) => node.tagName), 'BUTTON');
   assert.equal(await row.locator('button,input,[tabindex]').count(), 0);
   assert.equal(await row.locator('.custom-switch').getAttribute('aria-hidden'), 'true');
-  assert.equal(await row.getAttribute('title'), null);
+  assert.equal(await row.getAttribute('data-tooltip'), null);
   assert.equal(await row.getAttribute('id'), 'grid-switch');
   await row.locator('.switch-row-label').click();
   await row.click({ position: { x: 180, y: 14 } });
@@ -97,10 +100,11 @@ test('one tab stop owns native Space and Enter activation and a single focus out
   await page.evaluate(() => (window.switchRowFixture.changes = []));
   await page.locator('#before').focus();
   await page.keyboard.press('Tab');
+  await settlePaint(page);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'grid-switch');
   const row = page.locator('#grid-switch');
   const outlines = await row.evaluate((node) =>
-    [node, ...node.querySelectorAll('*')].map((item) => getComputedStyle(item).outlineStyle),
+    [node, ...node.querySelectorAll('*')].map((item) => window.paintStyle(item).outlineStyle),
   );
   assert.deepEqual(outlines, ['solid', 'none', 'none', 'none']);
   await page.keyboard.press('Space');
@@ -145,7 +149,7 @@ test('translated captions, explicit names and hints retain their separate semant
   const row = page.getByRole('switch', { name: '网格', exact: true });
   await row.waitFor();
   assert.equal(await row.locator('.switch-row-label').textContent(), '显示网格');
-  assert.equal(await row.getAttribute('title'), '显示网格');
+  assert.equal(await row.getAttribute('data-tooltip'), '显示网格');
   await page.evaluate(() => {
     const fixture = window.switchRowFixture;
     fixture.name = undefined;
@@ -166,17 +170,17 @@ test('whole-row hover and hold preserve native switch geometry and paint in both
         },
         canvas = document.createElement('canvas'),
         context = canvas.getContext('2d');
-      context.fillStyle = getComputedStyle(track).backgroundColor;
+      context.fillStyle = window.paintStyle(track).backgroundColor;
       context.fillRect(0, 0, 1, 1);
       return {
         row: bounds(node),
         track: bounds(track),
         thumb: bounds(thumb),
         color: [...context.getImageData(0, 0, 1, 1).data].slice(0, 3),
-        thumbColor: getComputedStyle(thumb).backgroundColor,
-        shape: getComputedStyle(thumb).cornerShape,
-        radius: getComputedStyle(thumb).borderRadius,
-        rowBackground: getComputedStyle(node).backgroundColor,
+        thumbColor: window.paintStyle(thumb).backgroundColor,
+        shape: window.paintStyle(thumb).cornerShape,
+        radius: window.paintStyle(thumb).borderRadius,
+        rowBackground: window.paintStyle(node).backgroundColor,
       };
     });
   // Rounded native draw_switch palette outputs; CSS keeps fractional channels until paint.
@@ -206,7 +210,9 @@ test('whole-row hover and hold preserve native switch geometry and paint in both
       ],
     },
   };
-  await mkdir(new URL('../../output/electron/verification/switch-row/', import.meta.url), { recursive: true });
+  await mkdir(new URL('../../output/electron/verification/switch-row/', import.meta.url), {
+    recursive: true,
+  });
   for (const theme of ['dark', 'light']) {
     for (const checked of [false, true]) {
       await page.evaluate(

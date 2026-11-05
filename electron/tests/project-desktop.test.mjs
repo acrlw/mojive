@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-test('actual desktop project root and native Close Project action retain the edited scene across close/reopen', async () => {
+test('actual desktop project root and platform Close Project action retain the edited scene across close/reopen', async () => {
   const temporary = await realpath(
     await mkdtemp(path.join(os.tmpdir(), 'mojive-project-desktop-')),
   );
@@ -36,7 +36,24 @@ test('actual desktop project root and native Close Project action retain the edi
     page.setDefaultTimeout(10000);
     page.on('pageerror', (error) => errors.push(error.message));
     await page.getByRole('treeitem').first().waitFor();
+    const native = process.platform === 'darwin';
     const action = async (id) => {
+      if (!native) {
+        if (id === 'locale.en') {
+          return app.evaluate(({ BrowserWindow }, action) => {
+            BrowserWindow.getAllWindows()[0].webContents.send('mojive:menu-action', action);
+          }, id);
+        }
+        const [group, label] = {
+          'add.box': ['Add', 'Box'],
+          'file.openProject': ['File', 'Open project folder…'],
+          'file.closeProject': ['File', 'Close project folder'],
+          'edit.undo': ['Edit', 'Undo'],
+          'edit.redo': ['Edit', 'Redo'],
+        }[id];
+        await page.locator(`[data-menu="${group}"]`).click();
+        return page.getByRole('menuitem', { name: new RegExp('^' + label) }).click();
+      }
       for (let index = 0; index < 80; index++) {
         if (
           await app.evaluate(
@@ -53,10 +70,18 @@ test('actual desktop project root and native Close Project action retain the edi
         item.click(item, BrowserWindow.getAllWindows()[0], {});
       }, id);
     };
-    const enabled = async () =>
-      app.evaluate(
-        ({ Menu }) => Menu.getApplicationMenu().getMenuItemById('file.closeProject').enabled,
-      );
+    const enabled = async () => {
+      if (native)
+        return app.evaluate(
+          ({ Menu }) => Menu.getApplicationMenu().getMenuItemById('file.closeProject').enabled,
+        );
+      await page.locator('[data-menu="File"]').click();
+      const value = await page
+        .getByRole('menuitem', { name: 'Close project folder', exact: true })
+        .isEnabled();
+      await page.keyboard.press('Escape');
+      return value;
+    };
     const waitEnabled = async (value) => {
       for (let i = 0; i < 40; i++) {
         if ((await enabled()) === value) return;
@@ -65,7 +90,7 @@ test('actual desktop project root and native Close Project action retain the edi
       assert.equal(await enabled(), value);
     };
     await action('locale.en');
-    await page.getByTitle('Project files', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Project files', exact: true }).waitFor();
     await action('add.box');
     const x = page.getByLabel('Position X', { exact: true });
     await x.dblclick();
@@ -77,12 +102,15 @@ test('actual desktop project root and native Close Project action retain the edi
     await page.getByRole('textbox', { name: 'Location', exact: true }).fill(folder);
     await page.getByRole('button', { name: 'Select folder', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
-    assert.equal(await page.locator('.left-content .group-eyebrow').getAttribute('title'), folder);
+    assert.equal(
+      await page.locator('.left-content .group-eyebrow').getAttribute('data-tooltip'),
+      folder,
+    );
     assert.equal(await page.locator('.file-row').count(), 1);
     await waitEnabled(true);
     await page.locator('.file-row').click();
     await page
-      .locator(`.file-row[title="${path.join(folder, '3rdparty', 'resource.txt')}"]`)
+      .locator(`.file-row[data-tooltip="${path.join(folder, '3rdparty', 'resource.txt')}"]`)
       .waitFor();
     await page.locator('.panel-search input').fill('resource');
     await page.waitForFunction(
@@ -101,22 +129,24 @@ test('actual desktop project root and native Close Project action retain the edi
     assert.equal(Number(await x.inputValue()), 2);
     await page.evaluate(() => document.activeElement?.blur());
     await page.waitForFunction(() => !document.activeElement?.matches('input,textarea'));
-    for (let index = 0; index < 80; index++) {
-      if (
-        await app.evaluate(
-          ({ Menu }) =>
-            Menu.getApplicationMenu().getMenuItemById('view.focusAll').accelerator === 'Shift+F',
+    if (native) {
+      for (let index = 0; index < 80; index++) {
+        if (
+          await app.evaluate(
+            ({ Menu }) =>
+              Menu.getApplicationMenu().getMenuItemById('view.focusAll').accelerator === 'Shift+F',
+          )
         )
-      )
-        break;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(
+        await app.evaluate(
+          ({ Menu }) => Menu.getApplicationMenu().getMenuItemById('view.focusAll').accelerator,
+        ),
+        'Shift+F',
+      );
     }
-    assert.equal(
-      await app.evaluate(
-        ({ Menu }) => Menu.getApplicationMenu().getMenuItemById('view.focusAll').accelerator,
-      ),
-      'Shift+F',
-    );
     await action('edit.undo');
     await page.waitForFunction(
       () => Number(document.querySelector('input[aria-label="Position X"]')?.value) === 0,
@@ -129,9 +159,12 @@ test('actual desktop project root and native Close Project action retain the edi
     await page.getByRole('textbox', { name: 'Location', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Select folder', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
-    assert.equal(await page.locator('.left-content .group-eyebrow').getAttribute('title'), folder);
+    assert.equal(
+      await page.locator('.left-content .group-eyebrow').getAttribute('data-tooltip'),
+      folder,
+    );
     await waitEnabled(true);
-    await page.getByTitle('Close project folder', { exact: true }).click();
+    await page.getByRole('button', { name: 'Close project folder', exact: true }).click();
     await waitEnabled(false);
     assert.equal(Number(await x.inputValue()), 2);
     await mkdir('../output/electron/verification', { recursive: true });
@@ -141,7 +174,9 @@ test('actual desktop project root and native Close Project action retain the edi
     console.error(error);
     if (page) {
       console.error(await page.locator('body').innerText());
-      await page.screenshot({ path: '../output/electron/verification/project-desktop-failure.png' });
+      await page.screenshot({
+        path: '../output/electron/verification/project-desktop-failure.png',
+      });
     }
     throw error;
   } finally {

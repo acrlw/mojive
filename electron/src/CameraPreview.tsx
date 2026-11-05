@@ -229,7 +229,8 @@ export function CameraPreview({
         <div className="camera-preview-header">
           <button
             className="camera-preview-title"
-            title={name}
+            data-tooltip={name}
+            aria-label={name}
             disabled={!!pinned}
             onPointerDown={(event) => {
               if (event.button !== 0 || pinned) return;

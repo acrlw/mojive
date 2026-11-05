@@ -26,7 +26,7 @@ after(async () => {
 beforeEach(async () => {
   errors.length = 0;
   await page.goto(base + '/tests/harness/camera-review.html');
-  await page.waitForFunction(() => window.cameraReview?.api.current);
+  await page.waitForFunction(() => window.cameraReview?.api?.current);
   await page.waitForTimeout(50);
   await page.evaluate(async () => {
     const f = window.cameraReview,
@@ -208,15 +208,37 @@ test('actual workspace tree double-click moves through intermediate framing and 
     ),
   );
   await app.goto(base);
-  const row = app.locator('[role=treeitem][title="01_revolute_anchor"]');
+  const row = app.locator('[role=treeitem][data-tooltip="01_revolute_anchor"]');
   await row.waitFor();
+  // Hold the animation clock while screenshots wait for compositor frames.
+  await app.evaluate(() => {
+    window.focusClock = performance.now();
+    Object.defineProperty(performance, 'now', {
+      configurable: true,
+      value: () => window.focusClock,
+    });
+  });
   const canvas = app.getByTestId('viewport-canvas'),
     before = await canvas.screenshot();
   await row.dblclick();
-  await app.waitForTimeout(90);
-  const mid = await canvas.screenshot({ path: '../output/electron/verification/tree-focus-intermediate.png' });
-  await app.waitForTimeout(400);
-  const end = await canvas.screenshot({ path: '../output/electron/verification/tree-focus-settled.png' });
+  await app.evaluate(() => {
+    window.focusClock += 90;
+  });
+  await app.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const mid = await canvas.screenshot({
+    path: '../output/electron/verification/tree-focus-intermediate.png',
+  });
+  await app.evaluate(() => {
+    window.focusClock += 400;
+  });
+  await app.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const end = await canvas.screenshot({
+    path: '../output/electron/verification/tree-focus-settled.png',
+  });
   assert.equal(await row.getAttribute('aria-selected'), 'true');
   assert.notDeepEqual(mid, before);
   assert.notDeepEqual(end, mid);
@@ -349,11 +371,14 @@ test('actual tree double-click preserves active View and Pilot without moving th
     ),
   );
   await app.goto(base);
-  const row = app.locator('[role=treeitem][title="01_revolute_anchor"]');
+  const row = app.locator('[role=treeitem][data-tooltip="01_revolute_anchor"]');
   await row.waitFor();
   await row.click();
   for (const label of ['View Camera', 'Pilot camera']) {
-    await app.locator('.activity-rail').getByTitle('Cameras', { exact: true }).click();
+    await app
+      .locator('.activity-rail')
+      .getByRole('button', { name: 'Cameras', exact: true })
+      .click();
     await app
       .locator('.camera-entry')
       .first()
@@ -361,7 +386,7 @@ test('actual tree double-click preserves active View and Pilot without moving th
       .click();
     await app.locator('.viewport-content.has-scene-camera').waitFor();
     await app.waitForTimeout(330);
-    await app.locator('.activity-rail').getByTitle('Scene', { exact: true }).click();
+    await app.locator('.activity-rail').getByRole('button', { name: 'Scene', exact: true }).click();
     const canvas = app.getByTestId('viewport-canvas'),
       before = await canvas.screenshot();
     await row.dblclick();

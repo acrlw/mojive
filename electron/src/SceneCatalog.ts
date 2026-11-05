@@ -6,33 +6,25 @@ export const SCENE_CATALOG = [
   {
     id: 'joint_gizmo',
     name: 'Joint gizmos',
-    nameZh: '关节操作示例',
     description: 'Revolute, prismatic, ball, free and compound joints, with precision limits.',
-    descriptionZh: '旋转、滑动、球形、自由与复合关节，以及精密限位。',
     source: 'assets/joint_gizmo.xml',
   },
   {
     id: 'atelier_arm',
     name: 'Atelier arm',
-    nameZh: 'Atelier 机械臂',
     description: 'A six-axis URDF arm with a coupled gripper and drive metadata.',
-    descriptionZh: '六轴 URDF 机械臂、联动夹爪与驱动器信息。',
     source: 'demo/atelier_arm.urdf',
   },
   {
     id: 'geometry_lab',
     name: 'Geometry comparison',
-    nameZh: '几何显示对比',
     description: 'Visual meshes and collision proxies with overlapping surfaces.',
-    descriptionZh: '可视几何、碰撞代理及重叠表面对比。',
     source: 'Programmatic URDF',
   },
   {
     id: 'primitive_gallery',
     name: 'Scene objects',
-    nameZh: '场景对象',
     description: 'Primitives, lights and cameras in an editable studio scene.',
-    descriptionZh: '可编辑的基本体、灯光与相机场景。',
     source: 'Programmatic scene',
   },
 ] as const;

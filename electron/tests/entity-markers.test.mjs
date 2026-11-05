@@ -27,7 +27,10 @@ before(async () => {
   await mkdir('../output/electron/verification', { recursive: true });
 });
 after(async () => {
-  await writeFile('../output/electron/verification/entity-marker-sizes.json', JSON.stringify(measurements, null, 2));
+  await writeFile(
+    '../output/electron/verification/entity-marker-sizes.json',
+    JSON.stringify(measurements, null, 2),
+  );
   await browser?.close();
   await server?.close();
 });

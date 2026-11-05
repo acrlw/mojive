@@ -31,6 +31,7 @@ before(async () => {
       '/node_modules/.vite-timeline-test/deps/react-dom_client.js'
     );
     const { setLanguage } = await import('/src/i18n.ts');
+    const { Group } = await import('/node_modules/three/build/three.module.js');
     setLanguage('en');
     const { Timeline, timelineTimeCaption } = await import('/src/Timeline.tsx');
     await import('/src/design-tokens.css');
@@ -38,6 +39,7 @@ before(async () => {
     window.fixture = { begins: 0, commits: 0, cancels: 0, timeCaption: timelineTimeCaption };
     const doc = {
       name: 'Scene',
+      root: new Group(),
       joints: Array.from({ length: 9 }, (_, i) => ({
         id: String(i),
         name: `Joint ${i}`,
@@ -358,7 +360,7 @@ test('key drag, nudge and metadata extend the timeline instead of clamping to it
   assert.equal(await page.evaluate(() => fixture.keys[0].time), 10 + 1 / 60);
   assert.equal(await page.evaluate(() => fixture.duration), 20);
   await editNumber('Keyframe time', 3700.25);
-  await page.getByRole('button', { name: 'Apply', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply keyframe details', exact: true }).click();
   assert.equal(await page.evaluate(() => fixture.keys[0].time), 3700.25);
   assert.equal(await page.evaluate(() => fixture.duration), 3710);
 });
@@ -582,7 +584,9 @@ test('wheel keeps the cursor time fixed across zero at normal and fractional UI 
       }
     }
     assert.equal(await page.evaluate(() => fixture.duration), 10);
-    await page.screenshot({ path: `../output/electron/verification/timeline-wheel-anchor-${scale}x.png` });
+    await page.screenshot({
+      path: `../output/electron/verification/timeline-wheel-anchor-${scale}x.png`,
+    });
   }
   await page.locator('#fixture').evaluate((el) => (el.style.zoom = 1));
 });

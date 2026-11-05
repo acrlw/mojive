@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -19,7 +20,10 @@ before(async () => {
 after(async () => {
   await browser?.close();
   await server?.close();
-  await writeFile('../output/electron/verification/switch-row-integration.json', JSON.stringify(evidence, null, 2));
+  await writeFile(
+    '../output/electron/verification/switch-row-integration.json',
+    JSON.stringify(evidence, null, 2),
+  );
 });
 async function resize(page, width, scale) {
   const handle = page.locator('[role=separator][aria-orientation=vertical]').last(),
@@ -49,6 +53,8 @@ for (const [language, appearance, scale] of [
         viewport: { width: Math.round(1700 * scale), height: Math.round(1100 * scale) },
       }),
       errors = [];
+    await page.addInitScript(installPaintStyle);
+    await page.evaluate(installPaintStyle);
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript(
       (settings) => localStorage.setItem('mojive.electron.settings.v1', JSON.stringify(settings)),
@@ -82,7 +88,7 @@ for (const [language, appearance, scale] of [
               trackHeight: b.height / scale,
               thumbWidth: c.width / scale,
               thumbHeight: c.height / scale,
-              thumbRadius: getComputedStyle(thumb).borderRadius,
+              thumbRadius: window.paintStyle(thumb).borderRadius,
               rowWidth: a.width / scale,
               overflow: row.scrollWidth - row.clientWidth,
             };
@@ -122,15 +128,17 @@ for (const [language, appearance, scale] of [
           };
         }, target);
         await page.mouse.move(point.x, point.y);
-        const hover = await visible.evaluate((row) => getComputedStyle(row).backgroundColor);
+        await settlePaint(page);
+        const hover = await visible.evaluate((row) => window.paintStyle(row).backgroundColor);
         assert.notEqual(hover, 'rgba(0, 0, 0, 0)');
         if (target === 'gap')
           await page.locator('.inspector').screenshot({
             path: `../output/electron/verification/switch-row-inspector-${language}-${appearance}-${width}-${scale}x-hover.png`,
           });
         await page.mouse.down();
+        await settlePaint(page);
         await expectChecked(visible, true);
-        const held = await visible.evaluate((row) => getComputedStyle(row).backgroundColor);
+        const held = await visible.evaluate((row) => window.paintStyle(row).backgroundColor);
         assert.notEqual(held, hover);
         if (target === 'gap')
           await page.locator('.inspector').screenshot({
@@ -138,7 +146,7 @@ for (const [language, appearance, scale] of [
           });
         await page.mouse.up();
         await expectChecked(visible, false);
-        await page.keyboard.press('Meta+z');
+        await page.keyboard.press('ControlOrMeta+z');
         await expectChecked(visible, true);
       }
       await visible.focus();
@@ -146,9 +154,9 @@ for (const [language, appearance, scale] of [
       await expectChecked(visible, false);
       await visible.press('Enter');
       await expectChecked(visible, true);
-      await page.keyboard.press('Meta+z');
+      await page.keyboard.press('ControlOrMeta+z');
       await expectChecked(visible, false);
-      await page.keyboard.press('Meta+z');
+      await page.keyboard.press('ControlOrMeta+z');
       await expectChecked(visible, true);
       const fields = await page.locator('.camera-property-row').evaluateAll((rows) =>
         rows.map((row) => {
@@ -181,7 +189,7 @@ for (const [language, appearance, scale] of [
     await xInput.press('Enter');
     assert.equal(await xInput.inputValue(), '-999.999');
     const numericBudget = await xInput.evaluate((input, scale) => {
-      const style = getComputedStyle(input),
+      const style = window.paintStyle(input),
         context = document.createElement('canvas').getContext('2d');
       context.font = `${style.fontSize} ${style.fontFamily}`;
       return {
@@ -210,10 +218,42 @@ for (const [language, appearance, scale] of [
     await page.keyboard.press('Escape');
     await page.mouse.up();
     assert.equal(await xInput.inputValue(), '-999.999');
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press('ControlOrMeta+z');
     assert.equal(await xInput.inputValue(), '0.000');
     // Collapsing another section changes the shared budget without changing the panel width.
-    await resize(page, 410, scale);
+    const projection = page
+      .locator('.camera-properties > .section')
+      .nth(1)
+      .locator('.section-disclosure');
+    const minimumInlineWidth = async () => {
+      await settlePaint(page);
+      return page.evaluate(() => {
+        const section = document.querySelector('.inspector-content > .section .section-content');
+        const grid = section.closest('.inspector-content');
+        const input = section.querySelector('input'),
+          style = getComputedStyle(input);
+        const axis = section.querySelector('.axis'),
+          axisStyle = getComputedStyle(axis);
+        const canvas = document.createElement('canvas').getContext('2d');
+        canvas.font = `${style.fontSize} ${style.fontFamily}`;
+        const field =
+          canvas.measureText('-999.999').width +
+          parseFloat(style.paddingLeft) +
+          parseFloat(style.paddingRight) +
+          parseFloat(axisStyle.width);
+        const paneInset =
+          parseFloat(getComputedStyle(section.closest('.inspector')).width) - section.clientWidth;
+        return (
+          parseFloat(getComputedStyle(grid).gridTemplateColumns) + 12 + field * 3 + 8 + paneInset
+        );
+      });
+    };
+    const expandedWidth = await minimumInlineWidth();
+    await projection.click();
+    const collapsedWidth = await minimumInlineWidth();
+    assert.ok(expandedWidth > collapsedWidth, 'Projection captions change the shared label budget');
+    await projection.click();
+    await resize(page, Math.round((expandedWidth + collapsedWidth) / 2), scale);
     const transform = page
       .locator('.inspector-content > .section')
       .first()
@@ -223,10 +263,6 @@ for (const [language, appearance, scale] of [
         document.querySelector('.inspector-content > .section .section-content')?.dataset
           .vectorLabels === 'above',
     );
-    const projection = page
-      .locator('.camera-properties > .section')
-      .nth(1)
-      .locator('.section-disclosure');
     await projection.click();
     await page.waitForFunction(
       () =>
@@ -258,7 +294,7 @@ for (const [language, appearance, scale] of [
     await expectChecked(light, true);
     await light.locator('.switch-row-label').click();
     await expectChecked(light, false);
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press('ControlOrMeta+z');
     await expectChecked(light, true);
     await page.locator('.viewport-navigation button:has([data-icon=layers])').click();
     const layerRows = page.locator('.viewport-layers-popup .switch-row');

@@ -26,7 +26,8 @@ test('custom desktop file dialog browses, opens URDF/folders, saves with an owne
                 res.statusCode = 302;
                 res.setHeader(
                   'Location',
-                  '/tests/harness/file-dialog-review.html?directory=' + encodeURIComponent(temporary),
+                  '/tests/harness/file-dialog-review.html?directory=' +
+                    encodeURIComponent(temporary),
                 );
                 res.end();
                 return;

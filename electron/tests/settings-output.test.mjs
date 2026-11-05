@@ -1,3 +1,4 @@
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import { createServer as createTcpServer } from 'node:net';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,8 +19,12 @@ before(async () => {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1100, height: 820 } });
+  await page.addInitScript(installPaintStyle);
+  await page.evaluate(installPaintStyle);
   page.setDefaultTimeout(5000);
-  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/tests/harness/ui-settings-review.html`);
+  await page.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/ui-settings-review.html`,
+  );
   await page.waitForFunction(() => window.uiState);
 });
 after(async () => {
@@ -60,7 +65,7 @@ test('Chinese is default; settings translate immediately, persist and apply exac
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   assert.equal(
     await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--panel-color').trim(),
+      window.paintStyle(document.documentElement).getPropertyValue('--panel-color').trim(),
     ),
     '#F1F3EF',
   );
@@ -70,13 +75,13 @@ test('Chinese is default; settings translate immediately, persist and apply exac
   await page.getByRole('option', { name: '18', exact: true }).click();
   assert.match(
     await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--font-mono'),
+      window.paintStyle(document.documentElement).getPropertyValue('--font-mono'),
     ),
     /MiSans/,
   );
   assert.equal(
     await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--numeric-font-size').trim(),
+      window.paintStyle(document.documentElement).getPropertyValue('--numeric-font-size').trim(),
     ),
     '18px',
   );
@@ -163,13 +168,13 @@ test('settings category dimensions stay fixed and segments share one equal conne
   assert.ok(general.width <= 640);
   assert.ok(Math.abs(general.height - general.surface) < 2, JSON.stringify(general));
   const segment = await page.locator('.settings-segment').evaluate((node) => ({
-    padding: getComputedStyle(node).padding,
-    gap: getComputedStyle(node).gap,
+    padding: window.paintStyle(node).padding,
+    gap: window.paintStyle(node).gap,
     children: [...node.querySelectorAll('button')].map((child) => ({
       width: child.getBoundingClientRect().width,
       left: child.getBoundingClientRect().left,
       right: child.getBoundingClientRect().right,
-      radius: getComputedStyle(child).borderRadius,
+      radius: window.paintStyle(child).borderRadius,
     })),
   }));
   assert.equal(segment.padding, '0px');
@@ -219,35 +224,43 @@ test('settings stays inside the viewport at200% shell scale and shared buttons r
   await page.getByRole('option', { name: 'English', exact: true }).click();
   const search = page.getByRole('textbox', { name: 'Search all settings', exact: true });
   await search.click();
+  await settlePaint(page);
   const focus = await search.evaluate((node) => ({
-    inner: getComputedStyle(node).outlineStyle,
-    outer: getComputedStyle(node.parentElement).outlineColor,
-    border: getComputedStyle(document.documentElement).getPropertyValue('--ui-border').trim(),
-    shape: getComputedStyle(node.parentElement).cornerShape,
+    inner: window.paintStyle(node).outlineStyle,
+    outer: window.paintStyle(node.parentElement).outlineColor,
+    border: window.paintStyle(document.documentElement).getPropertyValue('--ui-border').trim(),
+    surface: node.parentElement.getAttribute('data-smooth-surface'),
+    paint: node.parentElement.style.getPropertyValue('--smooth-paint'),
   }));
   assert.equal(focus.inner, 'none');
   assert.equal(focus.outer, 'rgba(0, 0, 0, 0.15)');
-  assert.match(focus.shape, /^(round|superellipse\(1\))$/);
+  assert.ok(focus.surface);
+  assert.match(decodeURIComponent(focus.paint), /<path[^>]+d=/);
   const close = page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true });
   await close.focus();
   assert.equal(await close.evaluate((node) => document.activeElement === node), true);
-  assert.equal(await close.evaluate((node) => getComputedStyle(node).clipPath), 'none');
-  assert.equal(await close.evaluate((node) => getComputedStyle(node).borderRadius), '4px');
+  assert.equal(await close.evaluate((node) => window.paintStyle(node).clipPath), 'none');
+  assert.ok(
+    Math.abs(
+      (await close.evaluate((node) => parseFloat(window.paintStyle(node).borderRadius))) - 4,
+    ) < 0.001,
+  );
   await close.press('Enter');
   assert.equal(await page.getByRole('dialog').count(), 0);
   await page.evaluate(() => (document.getElementById('root').style.zoom = '1'));
 });
 test('current camera, light, timeline and export captions remain localized without confusing appearance and entity names', async () => {
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
+    const { message } = await import('/src/i18n.ts');
     const { t, normalizeSettings } = window.uiModules;
     return {
       captions: [
         'System',
         'Light',
         'Light source',
-        'Added light',
-        'Eye X',
-        'Target Z',
+        message('Added {{kind}}', { kind: message('light') }),
+        message('{{label}} {{axis}}', { label: message('Eye'), axis: 'X' }),
+        message('{{label}} {{axis}}', { label: message('Target'), axis: 'Z' }),
         'Selected frustum / light range',
         'Follow locked',
         'Record from playhead',
@@ -275,4 +288,71 @@ test('current camera, light, timeline and export captions remain localized witho
   ]);
   assert.equal(result.defaults, true);
   assert.equal(result.persisted, false);
+});
+
+test('corner smoothing updates G2 surface paint without changing authored radii or layout and persists', async () => {
+  const view = await browser.newPage({ viewport: { width: 1200, height: 1000 } });
+  await view.addInitScript(() =>
+    localStorage.setItem('mojive.electron.settings.v1', JSON.stringify({ language: 'en' })),
+  );
+  await view.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/ui-settings-review.html`,
+  );
+  await view.getByRole('button', { name: 'Settings', exact: true }).click();
+  await view
+    .getByRole('textbox', { name: 'Search all settings', exact: true })
+    .fill('Corner smoothing');
+  const field = view.getByRole('textbox', { name: 'Corner smoothing', exact: true });
+  await field.waitFor();
+  assert.equal(await field.inputValue(), '60');
+  const inspect = () =>
+    view.locator('.settings-surface').evaluate((element) => ({
+      radii: JSON.parse(element.dataset.smoothRadii),
+      amount: Number(element.dataset.smoothAmount),
+      paint: element.style.getPropertyValue('--smooth-paint'),
+      width: element.getBoundingClientRect().width,
+      height: element.getBoundingClientRect().height,
+    }));
+  const initial = await inspect();
+  for (const value of [0, 100, 35]) {
+    await field.fill(String(value));
+    await field.press('Enter');
+    await view.waitForFunction(
+      (value) =>
+        Number(document.querySelector('.settings-surface')?.dataset.smoothAmount) === value / 100,
+      value,
+    );
+    const state = await inspect();
+    assert.deepEqual(state.radii, [16, 16, 16, 16]);
+    assert.equal(state.width, initial.width);
+    assert.equal(state.height, initial.height);
+    assert.notEqual(state.paint, initial.paint);
+    assert.equal(
+      await view.evaluate(
+        () => JSON.parse(localStorage.getItem('mojive.electron.settings.v1')).cornerSmoothing,
+      ),
+      value,
+    );
+  }
+  // Reload without the initial-setting script overwriting the saved preference.
+  const saved = await view.evaluate(() => localStorage.getItem('mojive.electron.settings.v1'));
+  assert.equal(JSON.parse(saved).cornerSmoothing, 35);
+  assert.equal(await view.evaluate(() => window.uiModules.readSettings().cornerSmoothing), 35);
+  const search = view.getByRole('textbox', { name: 'Search all settings', exact: true });
+  await search.fill('Capsule smoothing');
+  const capsule = view.getByRole('textbox', { name: 'Capsule smoothing', exact: true });
+  assert.equal(await capsule.inputValue(), '38.2');
+  await capsule.fill('25');
+  await capsule.press('Enter');
+  await view.waitForFunction(
+    () => Number(document.querySelector('.settings-search')?.dataset.smoothAmount) === 0.25,
+  );
+  assert.equal((await inspect()).amount, 0.35);
+  assert.equal(await view.evaluate(() => window.uiModules.readSettings().capsuleSmoothing), 25);
+  await search.fill('');
+  await view.getByRole('button', { name: 'Restore defaults', exact: true }).click();
+  await settlePaint(view);
+  assert.equal(await view.evaluate(() => window.uiState.settings.cornerSmoothing), 60);
+  assert.equal(await view.evaluate(() => window.uiState.settings.capsuleSmoothing), 38.2);
+  await view.close();
 });

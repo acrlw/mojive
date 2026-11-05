@@ -15,17 +15,19 @@
   padding: 8px;
   flex-shrink: 0;
 }
-.timeline .timeline-control-group {
+.timeline .timeline-control-group:not(.segmented) {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
   flex-wrap: nowrap;
   gap: 4px;
 }
-.timeline .timeline-toolbar .button,
-.timeline .timeline-toolbar .number-field {
+.timeline .timeline-toolbar .button:not(.segmented > button) {
   height: var(--timeline-control-height);
   min-height: var(--timeline-control-height);
+}
+.timeline .timeline-toolbar .number-field {
+  height: var(--field-height);
 }
 .timeline .timeline-toolbar .number-field input {
   height: 100%;
@@ -99,32 +101,6 @@
   font: var(--numeric-font-size, 14px) var(--font-numeric, var(--font-mono));
   width: calc(6ch + 32px);
   flex: 0 0 calc(6ch + 32px);
-}
-.timeline .timeline-follow {
-  display: flex;
-  flex-wrap: nowrap;
-  padding: 0;
-  gap: 0;
-  min-height: var(--timeline-control-height);
-  height: var(--timeline-control-height);
-  border-radius: 4px;
-  align-items: stretch;
-  overflow: hidden;
-}
-.timeline .timeline-follow .button {
-  width: 28px;
-  min-width: 28px;
-  height: var(--timeline-control-height);
-  padding: 0;
-  flex: 1;
-  border-radius: 0;
-  box-shadow: none;
-}
-.timeline .timeline-follow .button:first-child {
-  border-radius: 4px 0 0 4px;
-}
-.timeline .timeline-follow .button:last-child {
-  border-radius: 0 4px 4px 0;
 }
 /* Native workspace/timeline_track.py: an opaque 8x9pt head and 85% 1pt line. */
 .timeline .playhead {
@@ -324,4 +300,10 @@
   .timeline-scrolling-range {
     display: block;
   }
+}
+
+.timeline .timeline-follow > .button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
 }

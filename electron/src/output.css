@@ -68,32 +68,6 @@
 .mojive-output .output-severity-error {
   color: var(--ui-danger);
 }
-.mojive-output .output-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  background: var(--input-color);
-  border-radius: 9999px;
-  padding: 0 3px 0 10px;
-  margin-top: 0;
-  flex: 1 1 140px;
-  min-width: 120px;
-  max-width: 360px;
-  border: 1px solid transparent;
-}
-.mojive-output .output-search > .icon {
-  color: var(--muted-color);
-}
-.mojive-output .output-search input {
-  border: 0;
-  outline: 0;
-  background: transparent;
-  flex: 1;
-  width: 0;
-  min-width: 0;
-  font: inherit;
-}
 
 .mojive-output .output-messages {
   overflow: auto;
@@ -102,11 +76,12 @@
   padding: 8px 4px;
   font-family: var(--font-output, var(--font-mono));
   font-size: var(--output-font-size, 14px);
+  line-height: 1.4;
   outline: none;
 }
 .mojive-output .output-message {
   display: grid;
-  grid-template-columns: 16px max-content minmax(0, 1fr);
+  grid-template-columns: var(--output-icon-size, 16px) max-content minmax(0, 1fr);
   gap: 6px;
   align-items: start;
   min-height: 28px;
@@ -117,7 +92,9 @@
   outline: none;
 }
 .mojive-output .output-message > .icon {
-  margin-top: 2px;
+  width: var(--output-icon-size, 16px) !important;
+  height: var(--output-icon-size, 16px) !important;
+  margin-top: var(--output-icon-top, 0px);
 }
 .mojive-output .output-message time {
   color: var(--dim-color);
@@ -152,10 +129,6 @@
   color: var(--ui-danger);
   font-family: var(--font-ui);
   font-size: var(--body-font-size, 14px);
-}
-
-.mojive-output .output-search:focus-within {
-  border-color: var(--ui-border);
 }
 
 .mojive-output {
@@ -202,4 +175,10 @@
   .mojive-output .output-toolbar.with-search > .output-search {
     grid-row: 3;
   }
+}
+
+.mojive-output .output-search {
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 360px;
 }

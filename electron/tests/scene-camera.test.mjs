@@ -15,7 +15,9 @@ before(async () => {
   browser = await chromium.launch({ channel: 'chrome', headless: true });
   page = await browser.newPage({ viewport: { width: 1380, height: 900 }, deviceScaleFactor: 1 });
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/tests/harness/camera-review.html`);
+  await page.goto(
+    `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/camera-review.html`,
+  );
   await page.waitForLoadState('networkidle');
   await page.waitForFunction(() => window.cameraReview?.api?.current);
   await page.locator('[data-camera-properties]').waitFor();
@@ -500,7 +502,9 @@ test('camera actions stay in two rows while View/Pilot return in place and proje
     }),
   );
   assert.ok(fit.every(Boolean));
-  await properties.screenshot({ path: '../output/electron/verification/camera-actions-narrow-insets.png' });
+  await properties.screenshot({
+    path: '../output/electron/verification/camera-actions-narrow-insets.png',
+  });
   await actions.getByRole('button', { name: 'Return to editor', exact: true }).click();
   await page.evaluate(() => {
     document.querySelector('#root > div').style.gridTemplateColumns = '300px minmax(0, 1fr) 340px';

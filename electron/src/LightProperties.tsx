@@ -40,7 +40,7 @@ export function LightProperties({ doc, node, onBegin, onCommit, onChange }: Ligh
     <div
       className="camera-property-row"
       key={key}
-      title={key === 'range' ? t('0 means unlimited') : undefined}
+      data-tooltip={key === 'range' ? t('0 means unlimited') : undefined}
     >
       <label>
         {t(label)}

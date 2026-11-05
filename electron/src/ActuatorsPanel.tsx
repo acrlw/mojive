@@ -20,13 +20,11 @@ export function ActuatorsPanel({
   selectedId,
   onSelect,
   onFocus,
-  onOpen,
 }: {
   doc: SceneDocument | null;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onFocus: (id: string) => void;
-  onOpen: () => void;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   useEffect(() => setExpanded({}), [doc?.root.uuid]);
@@ -35,9 +33,6 @@ export function ActuatorsPanel({
     <div className="joint-panel actuators-panel">
       <div className="joint-panel-header">
         <h2>{t('Actuators')}</h2>
-        <div className="joint-panel-tools">
-          <Button icon="robot" title="Open URDF" onClick={onOpen} />
-        </div>
       </div>
       <div className="joint-panel-list">
         {actuators.map((actuator, index) => {
@@ -84,7 +79,7 @@ export function ActuatorsPanel({
                 >
                   <span>{actuator.joint || t('No joint')}</span>
                 </Button>
-                <span className="actuator-reduction" title={t('Reduction')}>
+                <span className="actuator-reduction" data-tooltip={t('Reduction')}>
                   <span>{t('Reduction')}</span>
                   <span>{actuator.mechanicalReduction ?? 1}</span>
                 </span>
@@ -94,13 +89,13 @@ export function ActuatorsPanel({
                   {actuator.type && (
                     <>
                       <dt>{t('Type')}</dt>
-                      <dd title={actuator.type}>{actuator.type}</dd>
+                      <dd data-tooltip={actuator.type}>{actuator.type}</dd>
                     </>
                   )}
                   {actuator.transmission && (
                     <>
                       <dt>{t('Transmission')}</dt>
-                      <dd title={actuator.transmission}>{actuator.transmission}</dd>
+                      <dd data-tooltip={actuator.transmission}>{actuator.transmission}</dd>
                     </>
                   )}
                 </dl>
@@ -109,15 +104,8 @@ export function ActuatorsPanel({
           );
         })}
         {!actuators.length && (
-          <Empty
-            title={t('No actuators defined')}
-            action={
-              <Button icon="robot" onClick={onOpen}>
-                {t('Open URDF')}
-              </Button>
-            }
-          >
-            {t('Actuators are read from URDF transmissions.')}
+          <Empty title={t('No actuators defined')}>
+            {t('Actuators are provided by the scene source.')}
           </Empty>
         )}
       </div>
