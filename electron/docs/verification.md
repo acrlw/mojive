@@ -75,6 +75,9 @@ run, and `CORPUS_FILTER` to limit a focused reproduction to paths containing a g
 run starts fresh and records the engine version, Git revision, source/lockfile hash, model bundle
 identities and failure phases. It distinguishes fragments, plugin-dependent entries and failures;
 an actionable compatibility diagnostic is still a failed load, not a successful conversion.
+Corpus and render reviews read binary resources through a directory-scoped transport; model
+filenames are not routed through Vite module URLs. Reserved filename characters must round-trip
+without turning a valid asset into an HTML fallback or a false missing-resource report.
 State checks restore the complete integration snapshot and compare the next two steps with the
 original continuation. They do not certify appearance or every desktop timeline interaction.
 Run render captures separately and inspect textures, ground, skybox, lights and transparency.

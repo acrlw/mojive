@@ -99,8 +99,8 @@ by the Three.js PBR material. Appearance is therefore not claimed to match the n
 
 The corpus review checks model compilation, scene construction, stepping, full-state restoration
 and deterministic continuation; it is not an exhaustive visual or timeline review of every model.
-Plugin-bearing entries are
-excluded from that review, and some non-plugin inputs still fail engine schema or mesh validation.
+Plugin-dependent entries are reported separately; other failed loads retain their resource,
+entry-point or engine compatibility diagnostics.
 Older flex models may require an explicit source migration: MuJoCo 3.15 removed `contact internal`,
 and 3.13 changed implicit flex elasticity integration. The loader retains the engine diagnostic
 and reports these incompatibilities without silently changing the model's physics.

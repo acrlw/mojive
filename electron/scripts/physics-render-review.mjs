@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { routeReviewResources } from './review-resources.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const diagnostics = process.argv.includes('--diagnostics');
@@ -17,6 +18,7 @@ const results = [];
 try {
   for (const file of files) {
     const page = await browser.newPage({ viewport: { width: 1000, height: 750 } });
+    await routeReviewResources(page, path.dirname(file));
     const errors = [];
     await page.route('**/__review', (route) => route.fulfill({ contentType: 'text/html', body: '<html><body style="margin:0"></body></html>' }));
     page.on('pageerror', (e) => errors.push(e.message));
@@ -33,9 +35,9 @@ try {
       const { sceneFocusBounds } = await import('/src/viewport/focus-bounds.ts');
       const { CameraFocusTransition } = await import('/src/viewport/camera-focus.ts');
       const mj = await load({ locateFile: () => '/node_modules/@mujoco/mujoco/mujoco.wasm' });
-      const dir = file.slice(0, file.lastIndexOf('/') + 1), name = file.slice(file.lastIndexOf('/') + 1);
+      const name = file.slice(file.lastIndexOf('/') + 1);
       const bundle = await loadModelBundle(name, name, async (resource) => {
-        const response = await fetch('/@fs' + dir + resource);
+        const response = await fetch('/__model_resource?path=' + encodeURIComponent(resource));
         if (!response.ok) throw new Error(resource + ': ' + response.status);
         return new Uint8Array(await response.arrayBuffer());
       });

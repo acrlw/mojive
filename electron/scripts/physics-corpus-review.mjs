@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { routeReviewResources } from './review-resources.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const roots = process.argv.slice(2).map((p) => path.resolve(p));
@@ -42,6 +43,7 @@ async function hashSources(dir) {
 }
 await hashSources(path.join(root, 'src'));
 hash.update(await readFile(fileURLToPath(import.meta.url))).update(await readFile(path.join(root, 'package-lock.json')));
+hash.update(await readFile(new URL('./review-resources.mjs', import.meta.url)));
 metadata.sourceHash = hash.digest('hex');
 await writeFile(path.join(out, 'metadata.json'), JSON.stringify(metadata, null, 2));
 const server = await createServer({ root, configFile: false, server: { host: '127.0.0.1', port: 0, hmr: false, watch: null,
@@ -55,6 +57,7 @@ try {
   // Each model gets an isolated WASM heap, including models near the memory limit.
   for (let start = 0; start < pending.length; start += 1) {
     const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+    await routeReviewResources(page, pending[start].base);
     await page.route('**/__review', (route) => route.fulfill({ contentType: 'text/html', body: '<html><body></body></html>' }));
     await page.goto(server.resolvedUrls.local[0] + '__review');
     metadata.runtimeVersion = await page.evaluate(async () => {
@@ -63,14 +66,14 @@ try {
       return window.mj.mj_versionString();
     });
     for (const item of pending.slice(start, start + 1)) {
-      const result = await page.evaluate(async ({ base, entry }) => {
+      const result = await page.evaluate(async ({ entry }) => {
         let backend, phase = 'resources', bundleId;
         try {
           const { loadModelBundle } = await import('/src/resources/loadModelBundle.ts');
           const { MujocoBackend } = await import('/src/physics/backends/mujoco/MujocoBackend.ts');
           const { SceneBinding } = await import('/src/physics/SceneBinding.ts');
           const bundle = await loadModelBundle(entry, entry, async (name) => {
-            const response = await fetch('/@fs' + base + '/' + name.split('/').map(encodeURIComponent).join('/'));
+            const response = await fetch('/__model_resource?path=' + encodeURIComponent(name));
             if (!response.ok) throw new Error('Resource ' + name + ': ' + response.status);
             return new Uint8Array(await response.arrayBuffer());
           });
