@@ -56,6 +56,8 @@ export function InteractionGuide({ bindings }: { bindings: InputBindings }) {
     { title: 'Transform tools', inputs: actions(['select', 'position', 'rotation']) },
     { title: 'World / body frame', inputs: action('frame') },
     { title: 'Snapping', inputs: action('snap') },
+    { title: 'Translation perturbation', inputs: <>{action('perturb')}<MouseHint button="left" /></>, note: 'Dynamic body' },
+    { title: 'Rotation perturbation', inputs: <>{action('perturb')}<MouseHint button="right" /></>, note: 'Dynamic body' },
     {
       title: 'Focus',
       inputs: (
@@ -79,6 +81,8 @@ export function InteractionGuide({ bindings }: { bindings: InputBindings }) {
       ),
     },
     { title: 'Playback', inputs: action('playback') },
+    { title: 'Previous simulation frame', inputs: action('previousFrame') },
+    { title: 'Step simulation', inputs: action('stepFrame') },
     { title: 'Capture keyframe', inputs: action('capture') },
   ];
   return (

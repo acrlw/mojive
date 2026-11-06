@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron } from 'playwright';
+import { build } from 'esbuild';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const preflight = process.argv.includes('--preflight');
@@ -10,6 +11,17 @@ const name = preflight ? 'bundle-preflight' : 'bundle';
 const out = path.join(root, '../output/electron/verification');
 const executable = path.join(root, '../output/electron/release/Mojive.app/Contents/MacOS/Mojive');
 await mkdir(out, { recursive: true });
+const fixtureBundle = await build({
+  stdin: {
+    contents: "export { createCatalogScene } from './src/SceneCatalog'; export { saveWorkspace } from './src/editor';",
+    resolveDir: root,
+  },
+  bundle: true,
+  write: false,
+  format: 'iife',
+  globalName: 'editableFixture',
+  platform: 'browser',
+});
 const errors = [];
 const app = await _electron.launch({
   executablePath: executable,
@@ -48,8 +60,9 @@ try {
     };
   });
   assert.equal(status.url, 'mojive-app://app/index.html');
-  assert.match(status.title, /Joint/);
-  assert.equal(status.objects, 45);
+  assert.equal(status.title.trim(), '关节操作示例');
+  assert.ok(status.objects >= 45);
+  await page.locator('.simulation-toolbar').waitFor();
   assert.equal(status.nativeMenu, true);
   assert.equal(status.logo, false);
   assert.equal(status.miSans, true);
@@ -67,6 +80,22 @@ try {
     await page.waitForTimeout(150);
   }
   await page.screenshot({ path: path.join(out, `${name}.png`) });
+  // Keep the real packaged MuJoCo startup above; authoring uses an explicit
+  // kinematic workspace imported through the production drop path.
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  await page.evaluate(`(async () => {
+    ${fixtureBundle.outputFiles[0].text}
+    const doc = await editableFixture.createCatalogScene('joint_gizmo');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([editableFixture.saveWorkspace(doc, [], 10)],
+      'joint-fixture.mojive.json', { type: 'application/json' }));
+    document.querySelector('.app-shell').dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer,
+    }));
+  })()`);
+  await page.locator('.tree-row.type-robot[data-tooltip="joint_gizmo_acceptance"]').waitFor();
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.simulation-toolbar').count(), 0);
   await page.locator('.activity-rail > button:has([data-icon=camera])').click();
   await page.locator('.camera-entry-name').first().click();
   await page.locator('.camera-properties').waitFor();
@@ -142,7 +171,7 @@ try {
       {
         preflight,
         scope:
-          'Actual packaged Mojive.app launch; embedded fonts, URDF, sandbox bridge, native menu, Chinese UI, four geometry modes, live camera preview and View/Pilot toggles',
+          'Actual packaged Mojive.app launch; live MuJoCo startup, embedded fonts, sandbox bridge, native menu, Chinese UI, four geometry modes; explicit editable workspace for camera preview, View/Pilot toggles and joint controls',
         runtime,
         status,
         errors,

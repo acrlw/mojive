@@ -385,6 +385,15 @@ div.vector-group {
   min-width: 0;
   gap: 4px;
 }
+.vector-group[data-vector-layout='above'] > label,
+.vector-group[data-vector-layout='above'] > .vector-fields,
+.vector-group[data-vector-layout='stack'] > label,
+.vector-group[data-vector-layout='stack'] > .vector-fields {
+  grid-column: 1 / -1;
+}
+.vector-group[data-vector-layout='stack'] > .vector-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
 @container (max-width:359px) {
   .vector-group > label,
   .vector-group > .vector-fields {

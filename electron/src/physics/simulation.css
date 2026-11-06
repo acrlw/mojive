@@ -1,0 +1,63 @@
+.viewport-topbar.has-simulation {
+  display: grid;
+  /* Equal minimum side tracks keep Play centered before horizontal scrolling is needed. */
+  grid-template-columns: minmax(136px, 1fr) auto minmax(136px, 1fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.viewport-topbar.has-simulation > .geometry-selector {
+  justify-self: end;
+}
+.simulation-toolbar {
+  display: grid;
+  grid-template-columns: 80px auto 80px;
+  align-items: center;
+  gap: 8px;
+}
+.simulation-actions,
+.simulation-transport {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.simulation-actions {
+  justify-content: flex-start;
+}
+.simulation-toolbar .button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+.simulation-toolbar .number-field {
+  width: 80px;
+  height: 28px;
+}
+@container (max-width: 1120px) {
+  .has-simulation .projection-caption,
+  .has-simulation .geometry-selector button > span:not(.icon) {
+    display: none;
+  }
+  .has-simulation .segmented.geometry-selector button .icon {
+    display: inline-flex;
+  }
+  .has-simulation .segmented.geometry-selector button {
+    min-width: 34px;
+    width: 34px;
+    padding: 0;
+  }
+}
+.environment-property > label {
+  color: var(--muted-color);
+}
+.environment-vector {
+  display: grid;
+  gap: 6px;
+}
+.environment-vector > label {
+  color: var(--muted-color);
+}
+.environment-vector > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  gap: 4px;
+}

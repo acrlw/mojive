@@ -505,6 +505,8 @@ export function VectorFields({
   onCommit,
   unit,
   resetValues,
+  step,
+  onCancel,
 }: {
   label: string;
   values: number[];
@@ -513,9 +515,38 @@ export function VectorFields({
   onCommit: () => void;
   unit?: string;
   resetValues?: readonly number[];
+  step?: number;
+  onCancel?: () => void;
 }) {
+  const group = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = group.current!;
+    // Inspector sections share a label column; standalone vectors own their reflow.
+    if (element.closest('.inspector')) return;
+    const labelElement = element.querySelector('label')!,
+      axis = element.querySelector<HTMLElement>('.axis')!,
+      input = element.querySelector('input')!,
+      context = document.createElement('canvas').getContext('2d')!;
+    const measure = () => {
+      const style = getComputedStyle(input), scale = element.getBoundingClientRect().width / element.offsetWidth;
+      context.font = `${style.fontSize} ${style.fontFamily}`;
+      const fieldsWidth = 3 * (context.measureText('-999.999').width +
+        parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + axis.getBoundingClientRect().width / scale) + 8;
+      const range = document.createRange();
+      range.selectNodeContents(labelElement);
+      const labelWidth = range.getBoundingClientRect().width / scale;
+      element.dataset.vectorLayout = element.clientWidth >= labelWidth + 12 + fieldsWidth
+        ? 'inline' : element.clientWidth >= fieldsWidth ? 'above' : 'stack';
+      element.style.setProperty('--vector-label-width', `${labelWidth}px`);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(element); observer.observe(axis); observer.observe(labelElement);
+    document.fonts.addEventListener('loadingdone', measure);
+    measure();
+    return () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', measure); };
+  }, [label, unit]);
   return (
-    <div className="vector-group">
+    <div className="vector-group" ref={group}>
       <label>
         {t(label)}
         {unit && <span className="vector-unit">({unit})</span>}
@@ -531,6 +562,8 @@ export function VectorFields({
             onChange={(v) => onChange(i, v)}
             onBegin={onBegin}
             onCommit={onCommit}
+            onCancel={onCancel}
+            step={step}
             onReset={() => {
               onBegin();
               onChange(i, resetValues?.[i] ?? 0);

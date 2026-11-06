@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -126,7 +127,7 @@ for (const scale of [1, 1.25, 2])
           { language, appearance, uiScale: scale },
         );
         await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
-        await page.locator('.tree-row.type-link').first().waitFor();
+        await openEditableJointScene(page);
         await page.evaluate(() => document.fonts.ready);
         for (const width of [280, 480]) {
           await resize(page, width, scale);

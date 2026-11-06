@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { readFile, readdir, mkdir } from 'node:fs/promises';
@@ -98,6 +99,7 @@ test('Chinese Inspector and timeline localize enums and built-in titles while pr
   page.setDefaultTimeout(7000);
   try {
     await page.goto(base);
+    await openEditableJointScene(page);
     await page.locator('.tree-row[data-tooltip="01_revolute_y"]').click();
     assert.equal(await page.locator('.inspector .property-value').first().innerText(), '旋转关节');
     assert.equal(await page.locator('.timeline .lane-header').innerText(), '关节操作示例');

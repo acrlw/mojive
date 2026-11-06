@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -312,7 +313,7 @@ test('actual Inspector toggle records undo/redo while disabled floor remains tre
     ),
   );
   await page.goto(base);
-  await page.getByRole('treeitem').first().waitFor();
+  await openEditableJointScene(page);
   const floor = page.locator('.tree-row[data-tooltip="floor"]');
   await floor.click();
   const toggle = page.getByRole('switch', { name: 'Select in viewport', exact: true });

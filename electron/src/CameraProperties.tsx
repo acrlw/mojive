@@ -92,6 +92,7 @@ export function CameraProperties({
             </span>
           </Button>
           <Button
+            disabled={!!node.object.userData.physicsOwned}
             title={
               active && piloting
                 ? 'Return to Editor Camera'
@@ -106,7 +107,7 @@ export function CameraProperties({
               {t(active && piloting ? 'Return to editor' : 'Pilot camera')}
             </span>
           </Button>
-          <Button icon="camera-align" title="Align to view" onClick={onAlign}>
+          <Button icon="camera-align" title="Align to view" disabled={!!node.object.userData.physicsOwned} onClick={onAlign}>
             <span className="camera-action-label">{t('Align to view')}</span>
           </Button>
           <Button icon="capture-image" onClick={onCapture}>
@@ -125,6 +126,7 @@ export function CameraProperties({
             {(['perspective', 'orthographic'] as const).map((projection) => (
               <Button
                 key={projection}
+                disabled={!!node.object.userData.physicsOwned}
                 icon={projection}
                 title={projection === 'perspective' ? 'Perspective' : 'Orthographic'}
                 aria-label={t(projection === 'perspective' ? 'Perspective' : 'Orthographic')}
@@ -228,7 +230,7 @@ export function CameraProperties({
           </div>
         ))}
       </Section>
-      <Section title="World view">
+      {!node.object.userData.physicsOwned && <Section title="World view">
         {(['position', 'target', 'up'] as const).map((key) => (
           <VectorFields
             key={key}
@@ -245,7 +247,7 @@ export function CameraProperties({
             onCommit={onCommit}
           />
         ))}
-      </Section>
+      </Section>}
       {error && (
         <p className="camera-error" role="status">
           {t(error)}

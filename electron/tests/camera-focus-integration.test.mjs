@@ -1,3 +1,4 @@
+import { openEditableScene } from './helpers/editable-scene.mjs';
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -92,6 +93,69 @@ async function drag(dx, dy) {
   await page.mouse.move(x + dx, y + dy);
   await page.mouse.up();
 }
+
+for (const cameraMode of ['editor', 'view', 'pilot'])
+  test(`Environment focus follows Frame All from ${cameraMode}, including its transition`, async () => {
+    await page.evaluate(async (mode) => {
+      const f = window.cameraReview,
+        T = await import('/node_modules/three/build/three.module.js'),
+        environment = new T.Group();
+      // A geometry-free entity's location must not determine scene framing.
+      environment.position.set(90, -40, 20);
+      f.doc.root.add(environment);
+      f.doc.nodes.push({
+        id: 'environment',
+        name: 'Environment',
+        kind: 'environment',
+        object: environment,
+        visible: true,
+      });
+      f.refresh();
+      if (mode !== 'editor') f.api.current.useSceneCamera(f.cameraId, mode === 'pilot');
+    }, cameraMode);
+    await advance(280);
+    const start = await view(),
+      expected = await page.evaluate(async (start) => {
+        const T = await import('/node_modules/three/build/three.module.js'),
+          { CameraFocusTransition } = await import('/src/viewport/camera-focus.ts'),
+          { cameraForTransition } = await import('/src/viewport/camera-transition.ts'),
+          { sceneFocusBounds } = await import('/src/viewport/focus-bounds.ts'),
+          doc = window.cameraReview.doc,
+          rect = document.querySelector('[data-testid="viewport-canvas"]').getBoundingClientRect(),
+          bounds = sceneFocusBounds(doc),
+          // Frame All uses the visible viewport, not the scene camera's output aspect.
+          curve = new CameraFocusTransition(
+            { ...start, resolution: [Math.round(rect.width), Math.round(rect.height)] },
+            bounds,
+            { frameScene: true, duration: 0.35 },
+          ),
+          rendered = (sample) => ({
+            ...sample,
+            up: new T.Vector3(0, 1, 0)
+              .applyQuaternion(cameraForTransition(sample, rect.width / rect.height).quaternion)
+              .toArray(),
+          });
+        return {
+          bounds,
+          entityBounds: sceneFocusBounds(doc, 'environment'),
+          middle: rendered(curve.sample(0.175)),
+          end: rendered(curve.end),
+        };
+      }, start);
+    assert.deepEqual(expected.entityBounds, expected.bounds);
+    await focus('environment');
+    pose(await view(), start);
+    pose(await advance(175), expected.middle);
+    pose(await advance(175), expected.end);
+    assert.deepEqual(await page.evaluate(() => window.cameraReview.state), {
+      id: null,
+      pilot: false,
+    });
+    await page.getByTestId('viewport-canvas').screenshot({
+      path: `../output/electron/verification/environment-frame-all-${cameraMode}.png`,
+    });
+    assert.deepEqual(errors, []);
+  });
 
 test('body focus uses own finite geometry, elevated eye-to-center direction and native sampled travel', async () => {
   const start = await view();
@@ -208,7 +272,8 @@ test('actual workspace tree double-click moves through intermediate framing and 
     ),
   );
   await app.goto(base);
-  const row = app.locator('[role=treeitem][data-tooltip="01_revolute_anchor"]');
+  await openEditableScene(app);
+  const row = app.locator('[role=treeitem][data-tooltip^="Box " ]').first();
   await row.waitFor();
   // Hold the animation clock while screenshots wait for compositor frames.
   await app.evaluate(() => {
@@ -244,6 +309,44 @@ test('actual workspace tree double-click moves through intermediate framing and 
   assert.notDeepEqual(end, mid);
   assert.deepEqual(appErrors, []);
   await app.close();
+});
+
+test('actual Environment tree double-click frames the whole MuJoCo scene', async () => {
+  const app = await browser.newPage({ viewport: { width: 1440, height: 960 } }),
+    appErrors = [];
+  app.on('pageerror', (error) => appErrors.push(error.message));
+  await app.addInitScript(() =>
+    localStorage.setItem(
+      'mojive.electron.settings.v1',
+      JSON.stringify({ language: 'en', appearance: 'dark' }),
+    ),
+  );
+  try {
+    await app.goto(base);
+    const environment = app.locator('.tree-row.type-environment');
+    await environment.waitFor();
+    await app.locator('.busy-overlay').waitFor({ state: 'detached' });
+    await app.locator('.tree-row.type-link').first().dblclick();
+    await app.waitForTimeout(450);
+    const canvas = app.getByTestId('viewport-canvas'),
+      before = await canvas.screenshot();
+    await environment.dblclick();
+    await app.waitForTimeout(450);
+    const focused = await canvas.screenshot({
+      path: '../output/electron/verification/environment-tree-frame-all.png',
+    });
+    assert.equal(await environment.getAttribute('aria-selected'), 'true');
+    assert.notDeepEqual(focused, before);
+    await app
+      .locator('.viewport-navigation')
+      .getByRole('button', { name: 'Frame all', exact: true })
+      .click();
+    await app.waitForTimeout(450);
+    assert.deepEqual(await canvas.screenshot(), focused);
+    assert.deepEqual(appErrors, []);
+  } finally {
+    await app.close();
+  }
 });
 
 test('resizing a focused free camera preserves pixel aspect and vertical magnification', async () => {
@@ -371,7 +474,8 @@ test('actual tree double-click preserves active View and Pilot without moving th
     ),
   );
   await app.goto(base);
-  const row = app.locator('[role=treeitem][data-tooltip="01_revolute_anchor"]');
+  await openEditableScene(app);
+  const row = app.locator('[role=treeitem][data-tooltip^="Box " ]').first();
   await row.waitFor();
   await row.click();
   for (const label of ['View Camera', 'Pilot camera']) {

@@ -77,6 +77,7 @@ before(async () => {
       readProjectDirectory: window.readLocalDirectory,
       searchProject: window.searchLocalProject,
       readUrdf: window.readLocalUrdf,
+      openModelPath: window.readLocalUrdf,
       hasNativeMenu: false,
       platform: 'linux',
       onMenuAction: (callback) => {

@@ -42,3 +42,6 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.actuator-control-actions {
+  margin-top: 8px;
+}

@@ -184,7 +184,7 @@ function CameraCard({
     { label: 'Align to view', icon: 'camera-align', run: () => onAlign(node.id) },
     { label: 'Capture image', icon: 'capture-image', run: () => onCapture(node.id) },
     { label: 'Delete camera', icon: 'delete', run: () => onDelete(node.id) },
-  ];
+  ].filter((action) => !node.object.userData.physicsOwned || !['Align to view', 'Delete camera'].includes(action.label));
   return (
     <Squircle
       radius={12}
@@ -250,6 +250,7 @@ function CameraCard({
           />
           <Button
             icon="move"
+            disabled={!!node.object.userData.physicsOwned}
             title={pilotingCamera ? 'Return to Editor Camera' : 'Pilot camera'}
             aria-label={t(pilotingCamera ? 'Return to Editor Camera' : 'Pilot camera')}
             aria-pressed={pilotingCamera}

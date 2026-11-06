@@ -320,10 +320,14 @@
       "description": "Original Electron editor action masters using Mojive's adopted canonical grid and stroke policy. These extend the Electron catalogue without changing native renderer or gizmo geometry."
     },
     "icons": {
-      "camera-align": "camera-align.svg"
+      "camera-align": "camera-align.svg",
+      "favorite": "favorite.svg",
+      "asset-library": "asset-library.svg"
     },
     "semantics": {
-      "camera-align": "Align an authored camera to the current editor view: a camera, an outgoing direction arrow and a destination view corner. Distinct from Reset, View Camera, Pilot and Capture image."
+      "camera-align": "Align an authored camera to the current editor view: a camera, an outgoing direction arrow and a destination view corner. Distinct from Reset, View Camera, Pilot and Capture image.",
+      "favorite": "A five-point star marks favorite model assets, distinct from the bookmark used for scene snapshots.",
+      "asset-library": "A collection of outlined tiles represents the model library, distinct from the project file folder and viewport layers."
     }
   }
 }

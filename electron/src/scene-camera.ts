@@ -113,6 +113,9 @@ export function updateCameraView(doc: SceneDocument, id: string, patch: CameraPa
     old = node.object as SceneCamera,
     previous = readCameraView(node),
     next = { ...previous, ...patch };
+  if (old.userData.physicsOwned && (patch.position || patch.target || patch.up ||
+      (patch.projection !== undefined && patch.projection !== previous.projection)))
+    throw new Error('The simulation backend owns this camera pose and projection type.');
   if (
     patch.focalLength !== undefined ||
     (patch.sensorWidth !== undefined && patch.fov === undefined) ||

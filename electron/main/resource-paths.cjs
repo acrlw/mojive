@@ -122,8 +122,8 @@ class Projects {
         kind: entry.isDirectory() ? 'directory' : 'file',
       }));
   }
-  async search(root, query) {
-    if (typeof query !== 'string' || !query.trim() || query.length > 256)
+  async search(root, query, extensions = null) {
+    if (typeof query !== 'string' || (!query.trim() && !extensions) || query.length > 256)
       throw new Error('Enter a project search query of at most 256 characters.');
     const needle = query.trim().toLocaleLowerCase(),
       files = [],
@@ -132,7 +132,8 @@ class Projects {
     for (let index = 0; index < pending.length; index++) {
       for (const file of await this.list(pending[index])) {
         if (++visited > 100000) return { files, truncated: true };
-        if (file.name.toLocaleLowerCase().includes(needle)) {
+        if ((!extensions || (file.kind === 'file' && extensions.includes(path.extname(file.name).toLowerCase()))) &&
+          file.name.toLocaleLowerCase().includes(needle)) {
           if (files.length === 1000) return { files, truncated: true };
           files.push(file);
         }

@@ -35,6 +35,9 @@ const requiredFiles = [
   'dist/menu-icons/manifest.json',
   'dist/demo/atelier_arm.urdf',
   'dist/demo/joint_gizmo.xml',
+  'dist/demo/physics_pendulum.xml',
+  'dist/licenses/MuJoCo-LICENSE.txt',
+  'dist/licenses/MuJoCo-THIRD_PARTY_NOTICES.txt',
   'dist/fonts/MiSans-License.pdf',
   'dist/fonts/JetBrainsMono-OFL.txt',
   ...runtimeFiles.map((name) => `main/${name}`),
@@ -70,6 +73,8 @@ async function fileDigests(directory, prefix = '') {
   return result;
 }
 const sourceDigests = await fileDigests(path.join(root, 'dist'), 'dist');
+if (!Object.keys(sourceDigests).some((filename) => /^dist\/assets\/mujoco-.*\.wasm$/.test(filename)))
+  throw new Error('The production build is missing the MuJoCo WebAssembly runtime.');
 if (process.argv.includes('--check')) {
   console.log(
     `Package input verified: ${Object.keys(sourceDigests).length} built files; Electron ${runtimeVersion}; ${process.arch}.`,
@@ -93,7 +98,7 @@ try {
         preflight,
         productName: 'Mojive',
         version: metadata.version,
-        description: 'Mojive URDF scene editor',
+        description: 'Mojive interactive 3D and simulation viewer',
         type: 'module',
         main: 'main/main.cjs',
         license: 'MIT',
@@ -132,7 +137,7 @@ try {
     );
   await writeFile(
     path.join(licenses, 'README.txt'),
-    'Runtime notices for Mojive. MiSans and JetBrains Mono licenses and font provenance are included in dist/fonts/. React, React DOM, Three.js, i18next, react-i18next and their runtime helpers are bundled into dist/assets/. Electron and Chromium notices are preserved here and with the runtime.\n',
+    'Runtime notices for Mojive. MiSans and JetBrains Mono licenses and font provenance are included in dist/fonts/. MuJoCo and its third-party notices are included in dist/licenses/. React, React DOM, Three.js, i18next, react-i18next and their runtime helpers are bundled into dist/assets/. Electron and Chromium notices are preserved here and with the runtime.\n',
   );
 
   const { downloadArtifact } = require('@electron/get');

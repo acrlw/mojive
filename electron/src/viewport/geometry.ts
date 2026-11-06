@@ -236,7 +236,7 @@ export function arrow(
     );
   return result;
 }
-const cornerTemplate = (() => {
+export const cornerTemplate = (() => {
   const points = smoothTurn(Math.PI * 0.5, 4),
     end = points[points.length - 1];
   return points.map((p): P => [p[0] / end[0], p[1] / end[1]]);

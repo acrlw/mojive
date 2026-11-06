@@ -247,7 +247,8 @@ export function Timeline(props: Props) {
     end: navigationRef.current.start + width / navigationRef.current.pixelsPerSecond,
   });
   const updateView = (range: TimeRange) => {
-    const next = { start: range.start, pixelsPerSecond: width / (range.end - range.start) };
+    const bounded = clampView(range, navigationLimits(navigationTimes, manualRange.current));
+    const next = { start: bounded.start, pixelsPerSecond: width / (bounded.end - bounded.start) };
     if (
       !Number.isFinite(next.start) ||
       !Number.isFinite(next.pixelsPerSecond) ||
@@ -266,7 +267,7 @@ export function Timeline(props: Props) {
     const range = currentView();
     return Math.max(0, range.start + pointerRatio(clientX) * (range.end - range.start));
   };
-  // The scrollbar is a bounded navigation proxy. Rendering uses the exact signed
+  // The scrollbar is a bounded navigation proxy. Rendering uses the exact
   // range, avoiding CSS size limits and fractional scrollLeft rounding at high zoom.
   const scrollSpan = Math.max(0, limits.upper - limits.lower - (viewEnd - viewStart));
   const scrollTravel = Math.min(1_000_000, scrollSpan * pixelsPerSecond);
@@ -829,7 +830,7 @@ export function Timeline(props: Props) {
     else if (command && key === 'd' && lane === 'keys') duplicate();
     else if (key === 'delete' || key === 'backspace') remove();
     else if (matchesKey(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'playback', event)) {
-      play();
+      if (!event.repeat) play();
     } else if (key === 'home') seek(first);
     else if (key === 'end') seek(last);
     else if (matchesKey(props.inputBindings ?? DEFAULT_INPUT_BINDINGS, 'focus', event)) fit();
@@ -999,7 +1000,7 @@ export function Timeline(props: Props) {
     ) {
       event.preventDefault();
       event.stopPropagation();
-      play();
+      if (!event.repeat) play();
       return;
     }
     const globalCommand =
@@ -1070,7 +1071,7 @@ export function Timeline(props: Props) {
         label={t(frames.length > 1 ? 'Loop start' : 'View start')}
         value={frames.length > 1 ? first : viewStart}
         formatValue={timelineTimeCaption}
-        min={frames.length > 1 ? 0 : -Infinity}
+        min={0}
         max={frames.length > 1 ? last : viewEnd - 0.001}
         disabled={busy}
         onChange={(value) => {

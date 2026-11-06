@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getSceneRendering } from '../scene-rendering.ts';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 let areaInitialized = false;
 
@@ -33,7 +34,31 @@ export function createViewportScene() {
   (grid.material as THREE.Material).transparent = true;
   (grid.material as THREE.Material).opacity = 0.6;
   scene.add(grid);
+  const ambient = new THREE.AmbientLight();
+  const headlight = new THREE.DirectionalLight(0xffffff, Math.PI);
+  scene.add(ambient, headlight, headlight.target);
+  ambient.visible = headlight.visible = false;
+  let configured: THREE.Object3D | undefined;
   return {
+    configure(root: THREE.Object3D) {
+      if (root === configured) return;
+      configured = root;
+      const description = getSceneRendering(root);
+      hemi.visible = key.visible = fill.visible = !description;
+      ambient.visible = headlight.visible = !!description;
+      scene.background = description?.skybox ?? new THREE.Color('#22272d');
+      if (description) {
+        ambient.color.fromArray(description.ambient); ambient.intensity = Math.PI;
+        headlight.color.fromArray(description.headlight);
+        scene.fog = description.fogEnd > description.fogStart
+          ? new THREE.Fog(new THREE.Color(...description.fog), description.fogStart, description.fogEnd) : null;
+      } else scene.fog = null;
+    },
+    update(camera: THREE.Camera) {
+      headlight.position.copy(camera.position);
+      camera.getWorldDirection(headlight.target.position).add(camera.position);
+      headlight.target.updateMatrixWorld();
+    },
     scene,
     grid,
     dispose() {

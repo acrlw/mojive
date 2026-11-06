@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 export type EntityKind =
   | 'robot'
   | 'world'
+  | 'environment'
   | 'geom'
   | 'link'
   | 'joint'
@@ -93,9 +94,11 @@ export interface FileListing {
 }
 export interface DesktopBridge {
   browseFiles: (path?: string, includeHidden?: boolean) => Promise<FileListing>;
+  openModelPath: (path: string) => Promise<OpenResource>;
   openUrdfPath: (path: string) => Promise<OpenResource>;
   openProjectPath: (path: string) => Promise<{ path: string; name: string; files: ProjectFile[] }>;
   readProjectDirectory: (path: string) => Promise<ProjectFile[]>;
+  searchModelAssets: (path: string, query: string) => Promise<{ files: ProjectFile[]; truncated: boolean }>;
   searchProject: (
     path: string,
     query: string,

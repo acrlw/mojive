@@ -38,6 +38,8 @@ test('a large first subtree never consumes sibling directory entries and recursi
       found.files.map((file) => file.path),
       [target],
     );
+    const assets = await projects.search(temporary, '', ['.xml', '.urdf']);
+    assert.deepEqual(assets.files.map((file) => file.path), [target]);
     const broad = await projects.search(temporary, 'file-');
     assert.equal(broad.files.length, 1000);
     assert.equal(broad.truncated, true, 'bounded search explicitly reports incomplete results');

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { sceneCommands } from './scene-commands';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
@@ -145,6 +146,7 @@ export async function loadUrdf(
   content: string,
   resourceBase = '',
   files: ProjectFile[] = [],
+  resolveResource?: (url: string) => string,
 ): Promise<SceneDocument> {
   const xml = new DOMParser().parseFromString(content, 'application/xml');
   if (xml.querySelector('parsererror'))
@@ -174,6 +176,7 @@ export async function loadUrdf(
   const nodeByName = new Map<string, SceneNode>();
   const materials = new Map(direct(robot, 'material').map((element) => [nameOf(element), element]));
   const manager = new THREE.LoadingManager();
+  if (resolveResource) manager.setURLModifier(resolveResource);
   const failedResources = new Set<string>();
   manager.onError = (url) => failedResources.add(url);
   let activeResources = 0;
@@ -476,6 +479,11 @@ export function setJointConfiguration(
     const angle = 2 * Math.acos(THREE.MathUtils.clamp(q.w, -1, 1));
     if (angle > joint.angularLimit) q.slerp(new THREE.Quaternion(), 1 - joint.angularLimit / angle);
   }
+  const commands = sceneCommands(doc);
+  if (commands) {
+    commands.setJointPosition(joint.id, joint.type === 'free' ? [...position, ...q.toArray()] : q.toArray());
+    return;
+  }
   joint.position ??= new THREE.Vector3();
   joint.rotation ??= new THREE.Quaternion();
   joint.position.fromArray(position);
@@ -489,6 +497,7 @@ export function setJointConfiguration(
 
 /** Commit a generic object transform as the joint's authored frame, keeping its value. */
 export function authorJointTransform(doc: SceneDocument, id: string): void {
+  if (sceneCommands(doc)) throw new Error('Model structure is owned by the physics source.');
   const joint = doc.joints.find((item) => item.id === id);
   if (!joint) throw new Error(`Unknown joint: ${id}`);
   joint.object.updateMatrix();
@@ -506,6 +515,11 @@ export function setJoint(doc: SceneDocument, id: string, value: number): void {
     if (value !== 0)
       throw new Error('Use a position/quaternion configuration for a multi-DOF joint.');
     setJointConfiguration(doc, id, { position: [0, 0, 0], rotation: [0, 0, 0, 1] });
+    return;
+  }
+  const commands = sceneCommands(doc);
+  if (commands) {
+    commands.setJointPosition(joint.id, [THREE.MathUtils.clamp(value, joint.lower, joint.upper)]);
     return;
   }
   const update = (current: Joint, next: number, path = new Set<string>()) => {
@@ -652,6 +666,8 @@ export function removeNode(doc: SceneDocument, id: string): string[] {
         add(joint.id);
     }
   }
+  if (doc.nodes.some((node) => removed.has(node.id) && node.object.userData.physicsOwned))
+    throw new Error('The simulation backend owns this model structure.');
   const detached = doc.nodes
     .filter((node) => removed.has(node.id) && (!node.parentId || !removed.has(node.parentId)))
     .map((node) => node.object);

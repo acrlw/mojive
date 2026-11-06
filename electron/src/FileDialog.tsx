@@ -4,7 +4,7 @@ import { SearchField, Button, Icon, Squircle, SwitchRow } from './components';
 import { t, useLanguage } from './i18n';
 import './file-dialog.css';
 
-export type FileDialogKind = 'urdf' | 'scene' | 'project' | 'save';
+export type FileDialogKind = 'urdf' | 'model' | 'scene' | 'project' | 'save';
 export type FileDialogProps = {
   kind: FileDialogKind;
   initialPath?: string;
@@ -16,6 +16,7 @@ export type FileDialogProps = {
 };
 const copy = {
   en: {
+    model: 'Open simulation model',
     urdf: 'Open URDF',
     scene: 'Open saved scene',
     project: 'Open project folder',
@@ -52,6 +53,7 @@ const copy = {
     forward: 'Forward',
   },
   zh: {
+    model: '打开仿真模型',
     urdf: '打开 URDF',
     scene: '打开已保存场景',
     project: '打开项目文件夹',
@@ -118,7 +120,7 @@ export function FileDialog({
     entry.directory ||
     (kind === 'save' &&
       entry.name.toLowerCase().endsWith(extension === '.mojive.json' ? '.json' : extension)) ||
-    (kind === 'urdf'
+    (kind === 'model' ? /\.(xml|urdf)$/i.test(entry.name) : kind === 'urdf'
       ? entry.name.toLowerCase().endsWith('.urdf')
       : kind === 'scene'
         ? entry.name.toLowerCase().endsWith('.json')
@@ -443,7 +445,7 @@ export function FileDialog({
               }}
             />
             <span className="file-dialog-type">
-              {kind === 'urdf'
+              {kind === 'model' ? '*.xml, *.urdf' : kind === 'urdf'
                 ? '*.urdf'
                 : kind === 'save'
                   ? `*${extension}`

@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
@@ -45,7 +46,7 @@ test('Inspector measurement subscriptions follow rapid selection, folding and re
       };
     });
     await page.goto(url);
-    await page.locator('.tree-row.type-camera').first().waitFor();
+    await openEditableJointScene(page);
     await page.evaluate(() => document.fonts.ready);
     for (let i = 0; i < 6; i++) {
       for (const kind of ['camera', 'light', 'link', 'joint']) {

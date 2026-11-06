@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -203,6 +204,7 @@ test('actual workspace anchor and child highlights occupy distinct pixels; model
     ),
   );
   await page.goto(base);
+  await openEditableJointScene(page);
   const exact = (name) => page.locator(`[role=treeitem][data-tooltip="${name}"]`);
   const anchor = exact('01_revolute_anchor');
   await anchor.waitFor();

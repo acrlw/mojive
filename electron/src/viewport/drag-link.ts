@@ -56,6 +56,7 @@ export class DragLinkRaster {
     width: number,
     height: number,
     dpr: number,
+    radius = 5,
   ) {
     const gl = this.gl,
       w = Math.round(width * dpr),
@@ -74,7 +75,7 @@ export class DragLinkRaster {
     gl.uniform4f(uniform('v_core_color'), 0.98, 0.98, 0.99, 1);
     gl.uniform4f(uniform('v_edge_color'), 0.68, 0.71, 0.76, 1);
     gl.uniform1f(uniform('v_width'), 2 * dpr);
-    gl.uniform1f(uniform('v_radius'), 5 * dpr);
+    gl.uniform1f(uniform('v_radius'), radius * dpr);
     gl.uniform1f(uniform('v_edge'), 0.75 * dpr);
     gl.uniform1f(uniform('v_smoothing'), 0.618);
     const pad = 10 * dpr,

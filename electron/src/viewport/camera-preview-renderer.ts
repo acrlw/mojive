@@ -1,3 +1,4 @@
+import { installSurfaceTexture } from '../scene-rendering';
 import * as THREE from 'three';
 import type { GeometryMode, SceneDocument } from '../contracts';
 import { cameraFromView, type CameraViewState } from '../scene-camera';
@@ -114,6 +115,7 @@ export class CameraPreviewRenderer {
     const values = entry.copy as unknown as Record<string, unknown>;
     for (const [key, value] of Object.entries(source))
       if (value instanceof THREE.Texture) values[key] = this.texture(value);
+    installSurfaceTexture(entry.copy);
     return entry.copy;
   }
   private geometry(source: THREE.BufferGeometry) {
@@ -156,6 +158,7 @@ export class CameraPreviewRenderer {
         joints: doc.joints.map((joint) => ({ ...joint, object: this.objects.get(joint.object)! })),
       };
       this.environment.scene.add(root);
+      this.environment.configure(doc.root);
     }
     this.used.clear();
     for (const [source, copy] of this.pairs) {

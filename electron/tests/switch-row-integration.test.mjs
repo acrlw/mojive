@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,6 +62,7 @@ for (const [language, appearance, scale] of [
       { language, appearance, uiScale: scale },
     );
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
+    await openEditableJointScene(page);
     await page.locator('.tree-row.type-camera').first().click();
     await page.evaluate(() => document.fonts.ready);
     for (const width of [280, 480]) {

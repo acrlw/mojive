@@ -1,3 +1,4 @@
+import { openEditableScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, after } from 'node:test';
@@ -26,6 +27,7 @@ before(async () => {
   });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
   await page.waitForLoadState('networkidle');
+  await openEditableScene(page, true);
 });
 after(async () => {
   await browser?.close();

@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { createServer } from 'vite';
@@ -26,7 +27,7 @@ async function workspace(platform = 'Linux x86_64', scale = 1) {
     { platform, scale },
   );
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
-  await page.locator('.tree-row').first().waitFor();
+  await openEditableJointScene(page);
   await page.evaluate(() => document.fonts.ready);
   return page;
 }

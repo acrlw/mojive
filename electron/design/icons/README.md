@@ -16,6 +16,11 @@ arrow, viewing a camera, piloting, focusing, and image capture. The camera apert
 destination/arrow clearance remain open at small sizes. This local extension does not change
 native renderer, world helpers or G3 gizmo geometry.
 
+`asset-library` uses a collection of outlined tiles for model discovery, distinct from the
+project folder. `favorite` uses a star, leaving the bookmark for saved scene-state snapshots.
+Both follow the same grid and stroke policy; production navigation and asset preview captures
+are included in `make physics-review`.
+
 Run `node --test tests/camera-align-icon.test.mjs` for generated-source equality, canonical
 geometry, transparent aperture coverage at 16/20/24 points, fractional scales and 1×/2× density.
 The test produces shared-control comparison galleries and actual Inspector/menu hover captures

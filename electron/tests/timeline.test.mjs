@@ -559,7 +559,7 @@ async function wheelAt(ratio, deltaY, deltaMode = 0, deltaX = 0) {
   });
 }
 
-test('wheel keeps the cursor time fixed across zero at normal and fractional UI scale', async () => {
+test('wheel anchors the cursor until the zero boundary at normal and fractional UI scale', async () => {
   for (const scale of [1, 1.25]) {
     await resetExtent();
     await page.locator('#fixture').evaluate((el, scale) => (el.style.zoom = scale), scale);
@@ -574,7 +574,7 @@ test('wheel keeps the cursor time fixed across zero at normal and fractional UI 
         const after = await view(),
           nextSpan = after.end - after.start;
         assert.ok(
-          Math.abs(anchor - (after.start + actualRatio * nextSpan)) < 1e-8,
+          Math.abs(after.start - Math.max(0, anchor - actualRatio * nextSpan)) < 1e-8,
           `${scale}/${ratio}/${delta}: pointer drift ${JSON.stringify({ before, after, anchor, geometry: await page.locator('.timeline-track').evaluate((el) => ({ rect: el.getBoundingClientRect().toJSON(), width: el.offsetWidth, parent: el.parentElement.getBoundingClientRect().toJSON() })) })}`,
         );
         assert.ok(
@@ -594,8 +594,7 @@ test('wheel keeps the cursor time fixed across zero at normal and fractional UI 
 test('batched wheel input saturates, reverses immediately and never changes recording extent', async () => {
   await resetExtent();
   await page.getByRole('button', { name: 'Follow off', exact: true }).click();
-  const range = await view(),
-    ratio = 0.35;
+  const ratio = 0.35;
   let anchor;
   const burst = async (deltaY) => {
     const actualRatio = await page.locator('.timeline-track').evaluate(
@@ -629,13 +628,10 @@ test('batched wheel input saturates, reverses immediately and never changes reco
     return actualRatio;
   };
   const actualRatio = await burst(1000000);
-  anchor = range.start + actualRatio * (range.end - range.start);
   let current = await view();
   assert.ok(Math.abs(current.end - current.start - 60) < 1e-8);
-  assert.ok(
-    Math.abs(current.start + actualRatio * 60 - anchor) < 1e-8,
-    JSON.stringify({ current, range, anchor }),
-  );
+  assert.equal(current.start, 0);
+  anchor = actualRatio * 60;
   await wheelAt(ratio, -100);
   current = await view();
   assert.ok(current.end - current.start < 60);
@@ -674,4 +670,40 @@ test('pixel, line and page wheel units agree; labels and numeric fields do not z
     .getByRole('textbox', { name: 'Timeline zoom', exact: true })
     .dispatchEvent('wheel', { deltaY: 100 });
   assert.deepEqual(await view(), before);
+});
+
+test('pan, scrollbar, manual entry and both Follow modes retain the zero origin', async () => {
+  await resetExtent();
+  await page.getByRole('button', { name: 'Follow off', exact: true }).click();
+  await editNumber('View end', 4010);
+  await editNumber('View start', 4000);
+  await wheelAt(0.5, 0, 0, -1e6);
+  assert.deepEqual(await view(), { start: 0, end: 10 });
+  await scrollToTime(20);
+  await scrollToTime(0);
+  assert.equal((await view()).start, 0);
+  await editNumber('View start', -2000);
+  assert.equal((await view()).start, 0, 'manual entry has the same zero boundary');
+  const box = await page.locator('.timeline-track').boundingBox();
+  await page.mouse.move(box.x + 100, box.y + 70);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + 500, box.y + 70, { steps: 5 });
+  await page.mouse.up({ button: 'right' });
+  assert.equal((await view()).start, 0, 'right-drag pan stops at zero');
+  for (const mode of ['page', 'locked']) {
+    await page.getByRole('button', { name: `Follow ${mode}`, exact: true }).click();
+    await page.evaluate(() => fixture.setRecording(true));
+    await page.waitForTimeout(50);
+    assert.deepEqual(await view(), { start: 0, end: 10 });
+    await page.evaluate(() => fixture.setTime(0.01));
+    await page.waitForTimeout(50);
+    assert.deepEqual(await view(), { start: 0, end: 10 });
+    await page.evaluate(() => {
+      fixture.setRecording(false);
+      fixture.setTime(0);
+    });
+  }
+  const ticks = await page.locator('.ruler-tick').allTextContents();
+  assert.ok(ticks.length > 0 && ticks.every((text) => parseFloat(text) >= 0));
+  assert.equal(await page.evaluate(() => fixture.duration), 10, 'view navigation is not content');
 });

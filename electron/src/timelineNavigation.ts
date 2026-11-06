@@ -1,4 +1,4 @@
-/** View navigation mirrors python/interaction/timeline.py; it never edits content time. */
+/** Native zoom response with a zero-based editor view; navigation never edits content time. */
 export interface TimeRange {
   start: number;
   end: number;
@@ -22,20 +22,21 @@ export function navigationLimits(times: readonly number[], manual?: TimeRange | 
   let lo = Infinity,
     hi = -Infinity;
   for (const value of times)
-    if (Number.isFinite(value)) {
+    if (Number.isFinite(value) && value >= 0) {
       lo = Math.min(lo, value);
       hi = Math.max(hi, value);
     }
-  if (manual && valid(manual)) {
+  const validManual = manual && valid(manual) && manual.start >= 0;
+  if (validManual) {
     lo = Math.min(lo, manual.start);
     hi = Math.max(hi, manual.end);
   }
   if (lo === Infinity) lo = hi = 0;
   const maxSpan = Math.max(60, Math.min(MAX_SPAN / 4, hi - lo) * 4, minimumSpan(lo, hi));
   return {
-    lower: Math.max(-Number.MAX_VALUE, lo - maxSpan),
+    lower: 0,
     upper: Math.min(Number.MAX_VALUE, hi + maxSpan),
-    minSpan: manual && valid(manual) ? Math.min(0.001, manual.end - manual.start) : 0.001,
+    minSpan: validManual ? Math.min(0.001, manual.end - manual.start) : 0.001,
     maxSpan,
   };
 }
@@ -49,8 +50,7 @@ export function clampView(range: TimeRange, limits: ViewLimits): TimeRange {
   );
   // Reconstructing endpoints may exceed the bound by a few ULPs. This is
   // saturation, not a runaway view that needs recentering.
-  if (originalSpan > limits.maxSpan + minimumSpan(start, end) * 1e-3)
-    start = limits.lower / 2 + limits.upper / 2 - span / 2;
+  if (originalSpan > limits.maxSpan + minimumSpan(start, end) * 1e-3) start = limits.lower;
   else if (span !== originalSpan) start = start / 2 + end / 2 - span / 2;
   start = Math.max(limits.lower, Math.min(start, limits.upper - span));
   return { start, end: start + span };
@@ -84,6 +84,8 @@ export function zoomView(
     ),
   );
   const start = anchor - ratio * next;
+  // At time zero the boundary takes priority over cursor anchoring. Keep the
+  // requested scale so zoom-out still works when the first frame is visible.
   return clampView({ start, end: start + next }, limits);
 }
 

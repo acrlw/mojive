@@ -678,7 +678,7 @@ body.resizing-y {
   grid-column: 1 / -1;
   min-width: 0;
 }
-.inspector :is(.section, .camera-properties, .light-properties),
+.inspector :is(.section, .camera-properties, .light-properties, .environment-properties),
 .inspector .section-content:has(> :is(.vector-group, .property-row, .camera-property-row)) {
   display: grid;
   grid-column: 1 / -1;

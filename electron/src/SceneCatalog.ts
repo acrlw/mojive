@@ -69,7 +69,7 @@ function emptyDocument(name: string) {
   return { doc, world };
 }
 
-/** Reproduce the maintained joint acceptance scene; this is a kinematic scene adapter. */
+/** Kinematic fixture for backend-independent editor checks. The application loads this MJCF through loadAsset. */
 export function createNativeJointScene(xml: string): SceneDocument {
   const parsed = new DOMParser().parseFromString(xml, 'application/xml');
   if (parsed.querySelector('parsererror')) throw new Error('Invalid joint example XML.');

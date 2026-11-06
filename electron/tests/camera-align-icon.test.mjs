@@ -1,3 +1,4 @@
+import { openEditableScene } from './helpers/editable-scene.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -250,7 +251,7 @@ test('actual camera Inspector and camera menu use the new alignment glyph in res
         );
       }, appearance);
       await page.goto(base);
-      await page.getByRole('treeitem').first().waitFor();
+      await openEditableScene(page);
       await page
         .locator('.activity-rail')
         .getByRole('button', { name: 'Cameras', exact: true })

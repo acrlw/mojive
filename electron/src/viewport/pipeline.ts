@@ -1,3 +1,4 @@
+import { installSurfaceTexture } from '../scene-rendering';
 import * as THREE from 'three';
 import type { SceneDocument, SceneNode, GeometryMode } from '../contracts';
 import { selectionGeometry } from '../scene-selection';
@@ -97,6 +98,7 @@ export class ViewportPipeline {
       let cached = this.collision.get(m);
       if (!cached) {
         cached = m.clone();
+        installSurfaceTexture(cached);
         if ('color' in cached)
           (cached as THREE.MeshStandardMaterial).color.setRGB(
             0.8,
@@ -117,6 +119,7 @@ export class ViewportPipeline {
       let opaque = this.comparisonMaterials.get(material);
       if (!opaque) {
         opaque = material.clone();
+        installSurfaceTexture(opaque);
         opaque.transparent = true;
         opaque.blending = THREE.NoBlending;
         opaque.depthWrite = true;
@@ -221,6 +224,7 @@ export class ViewportPipeline {
       for (const r of records) {
         r.o.visible =
           r.visible &&
+          (mode !== 'default' || r.o.userData.defaultVisible !== false) &&
           options.geometryVisible !== false &&
           (Array.isArray(r.material)
             ? r.material.some((m) => m.opacity > 0)

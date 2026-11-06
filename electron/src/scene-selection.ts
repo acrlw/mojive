@@ -21,7 +21,7 @@ export function selectionGeometryOwner(
   if (selected === null) return null;
   const node = doc.nodes.find((node) => node.id === selected);
   if (!node || !isViewportPickable(node.object)) return null;
-  if (['world', 'robot', 'camera', 'light'].includes(node.kind)) return null;
+  if (['world', 'environment', 'robot', 'camera', 'light'].includes(node.kind)) return null;
   if (node.kind !== 'joint') return node;
   const joint = doc.joints.find((joint) => joint.id === node.id);
   if (!joint) return null;

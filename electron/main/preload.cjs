@@ -3,10 +3,12 @@ contextBridge.exposeInMainWorld('mojive', {
   platform: process.platform,
   browseFiles: (path, includeHidden) =>
     ipcRenderer.invoke('mojive:browse-files', path, includeHidden),
+  openModelPath: (path) => ipcRenderer.invoke('mojive:open-model-path', path),
   openUrdfPath: (path) => ipcRenderer.invoke('mojive:open-urdf-path', path),
   openProjectPath: (path) => ipcRenderer.invoke('mojive:open-project-path', path),
   readProjectDirectory: (path) => ipcRenderer.invoke('mojive:read-project-directory', path),
   searchProject: (path, query) => ipcRenderer.invoke('mojive:search-project', path, query),
+  searchModelAssets: (path, query) => ipcRenderer.invoke('mojive:search-model-assets', path, query),
   openScenePath: (path) => ipcRenderer.invoke('mojive:open-scene-path', path),
   saveScenePath: (path, content, overwrite) =>
     ipcRenderer.invoke('mojive:save-scene-path', path, content, overwrite),

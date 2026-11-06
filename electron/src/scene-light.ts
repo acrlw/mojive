@@ -64,6 +64,9 @@ export function updateLight(doc: SceneDocument, id: string, patch: Partial<Light
   const old = node.object as SceneLight,
     previous = readLight(node),
     next = { ...previous, ...patch };
+  if (old.userData.physicsOwned && (patch.direction ||
+      (patch.type !== undefined && patch.type !== previous.type)))
+    throw new Error('The simulation backend owns this light pose and type.');
   if (
     !['point', 'spot', 'directional', 'area', 'hemisphere'].includes(next.type) ||
     !/^#[0-9a-f]{6}$/i.test(next.color) ||
@@ -162,7 +165,7 @@ export function updateLight(doc: SceneDocument, id: string, patch: Partial<Light
   const needsDirection =
     (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) &&
     !light.target.userData.lightTarget;
-  if (patch.direction !== undefined || patch.type !== undefined || needsDirection) {
+  if (!light.userData.physicsOwned && (patch.direction !== undefined || patch.type !== undefined || needsDirection)) {
     const direction = new THREE.Vector3().fromArray(next.direction).normalize(),
       eye = light.getWorldPosition(new THREE.Vector3()),
       up = Math.abs(direction.z) > 0.999 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
@@ -173,7 +176,7 @@ export function updateLight(doc: SceneDocument, id: string, patch: Partial<Light
       rotation.premultiply(light.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
     light.quaternion.copy(rotation);
   }
-  if (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) {
+  if (!light.userData.physicsOwned && (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight)) {
     let target =
       light.children.find((child) => child.userData.lightTarget) ??
       (light.target.parent === light ? light.target : undefined);

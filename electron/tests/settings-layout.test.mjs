@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +37,7 @@ async function workspace(appearance, uiScale = 1, language = 'en', width = 1700,
     { appearance, uiScale, language, uiFontSize },
   );
   await page.goto(base);
-  await page.getByRole('treeitem').first().waitFor();
+  await openEditableJointScene(page);
   await page.evaluate(() => document.fonts.ready);
   return page;
 }

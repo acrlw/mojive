@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -119,7 +120,9 @@ test('search, chip icons and switch discs follow fitted optical centers after sm
     await settings(page, { capsuleSmoothing, uiScale: 1.25 });
     for (let i = 0; i < 2; i++) {
       await page.locator('[role=switch]').click();
-      await page.waitForTimeout(150);
+      await page.waitForFunction(() =>
+        document.getAnimations().every((animation) => animation.playState === 'finished'),
+      );
       assertCenters(await capsuleLayout(page));
     }
   }
@@ -238,7 +241,7 @@ test('production field and segmented families retain the same radius, height and
       { language: 'en', appearance, uiScale },
     );
     await page.goto(base);
-    await page.locator('.tree-row').first().waitFor();
+    await openEditableJointScene(page);
     await page.evaluate(() => document.fonts.ready);
     const readGroup = async (selector) => {
       const group = page.locator(selector).first();

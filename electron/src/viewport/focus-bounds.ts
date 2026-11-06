@@ -102,7 +102,7 @@ export function sceneFocusBounds(doc: SceneDocument, id?: string): FocusBounds {
   if (id === undefined) return scene;
   const node = doc.nodes.find((candidate) => candidate.id === id);
   if (!node) throw Error(`Scene node is unavailable: ${id}`);
-  if (node.kind === 'world') return scene;
+  if (node.kind === 'world' || node.kind === 'environment') return scene;
   const bounds = sceneNodeBounds(doc, id);
   if (bounds) return bounds;
   const radius = Math.hypot(...scene.half) * 2 * 0.025;

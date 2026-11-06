@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import type { SceneDocument, Tool, Frame, GeometryMode } from './contracts';
 import { createPrimitive } from './scene';
 import { isViewportPickable } from './scene-selection';
+import { sceneCommands } from './scene-commands';
 import {
   cameraNode,
   readCameraView,
@@ -40,6 +41,8 @@ import { sceneFocusBounds, sceneNodeBounds } from './viewport/focus-bounds';
 import { jointFocusPlan } from './viewport/joint-focus';
 import { PreciseInputPopover } from './viewport/precise-input';
 import { JointPicker } from './viewport/joint-picker';
+import { PerturbationGesture } from './viewport/perturbation';
+import { PerturbationFeedback } from './viewport/perturbation-feedback';
 import {
   DEFAULT_VIEWPORT_LAYERS,
   objectGizmosEnabled,
@@ -100,6 +103,8 @@ export interface ViewportProps {
   onSelect: (id: string | null) => void;
   onChange: () => void;
   onBegin?: () => void;
+  onPerturbBegin?: () => void;
+  onPerturbCancel?: () => void;
   onCommit?: () => void;
   onProjectionChange?: (mode: 'perspective' | 'orthographic') => void;
 }
@@ -222,7 +227,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       surface: '#252a2f',
       ink: '#e6e8eb',
     };
-    const { scene, grid, dispose: disposeEnvironment } = createViewportScene();
+    const environment = createViewportScene();
+    const { scene, grid, dispose: disposeEnvironment } = environment;
     const perspective = new THREE.PerspectiveCamera(42, 1, 0.001, 10000),
       orthographic = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, 10000);
     let camera: THREE.Camera = perspective;
@@ -231,11 +237,15 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       sceneRenderCamera: SceneCamera | undefined;
     function selectedGizmosEnabled() {
       const p = latest.current;
+      const object = p.document.nodes.find((node) => node.id === p.selected)?.object;
       // Native viewing_selected_camera yields both paint and input ownership.
       return (
+        !perturbationHeld() &&
+        !perturbation.active &&
         (!activeCamera || p.selected !== activeCamera) &&
         p.layers?.gizmos !== false &&
-        objectGizmosEnabled(p.document.nodes.find((node) => node.id === p.selected)?.object)
+        (!object?.userData.physicsOwned || p.tool === 'joint') &&
+        objectGizmosEnabled(object)
       );
     }
     const navigationUp = new THREE.Vector3(0, 0, 1);
@@ -376,6 +386,15 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       onCommit: () => latest.current.onCommit?.(),
       invalidate,
     });
+    const perturbation = new PerturbationGesture();
+    const perturbationFeedback = new PerturbationFeedback();
+    function finishPerturbation(cancelled = false) {
+      if (!perturbation.end()) return;
+      if (cancelled) latest.current.onPerturbCancel?.();
+      else latest.current.onCommit?.();
+      renderer.domElement.style.cursor = 'default';
+      invalidate();
+    }
     function beginPilot() {
       if (pilotStart || !activeCamera || !piloting) return;
       const node = cameraNode(latest.current.document, activeCamera);
@@ -474,6 +493,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         previousPilot = piloting,
         previousProjection = ortho;
       const node = id ? cameraNode(latest.current.document, id) : null;
+      if (pilot && node?.object.userData.physicsOwned)
+        throw new Error('The simulation backend owns this camera pose and projection type.');
       if (id === previousId) {
         finishPilot();
         piloting = Boolean(id && pilot);
@@ -748,11 +769,14 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       margin = latest.current.settings?.focusMargin ?? 1.15,
       orientation?: [number, number],
     ) {
+      const doc = latest.current.document;
+      const node = id === undefined ? undefined : doc.nodes.find((node) => node.id === id);
+      if (id !== undefined && !node) return;
+      // Environment is scene-wide: use the complete Frame All transition and camera exit.
+      if (node?.kind === 'environment') id = undefined;
       // Native node/joint focus requests cannot replace an active scene camera.
       // Frame All and ViewCube alignment have separate navigation entry points.
       if (activeCamera && id !== undefined && orientation === undefined) return;
-      const doc = latest.current.document;
-      if (id && !doc.nodes.some((node) => node.id === id)) return;
       const start = currentRenderedView(),
         previousProjection = ortho;
       finishPilot();
@@ -933,9 +957,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         p.document,
         p.selected,
         p.activeJoint,
-        p.tool !== 'select' &&
-          layers.gizmos &&
-          objectGizmosEnabled(p.document.nodes.find((node) => node.id === p.selected)?.object),
+        p.tool !== 'select' && selectedGizmosEnabled(),
       );
       gizmo.configure({
         snapEnabled: p.snapEnabled,
@@ -947,10 +969,12 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         readoutStyle,
       });
       if (attached !== p.document) {
+        perturbation.end();
         const reset = !attached || resetKey !== p.cameraResetKey;
         if (attached) scene.remove(attached.root);
         attached = p.document;
         scene.add(attached.root);
+        environment.configure(attached.root);
         resetKey = p.cameraResetKey;
         if (reset) {
           useSceneCamera(null, false, false);
@@ -1009,6 +1033,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           layers.influence !== false &&
           settings?.showEntityInfluence !== false,
       );
+      environment.update(camera);
       pipeline.render(scene, camera, p.document, layers.selection ? p.selected : null, p.geometry, {
         ...settings,
         geometryVisible: layers.geometry,
@@ -1031,10 +1056,18 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         camera,
         p.document,
         p.selected,
-        selectedGizmosEnabled() ? p.tool : 'select',
+        selectedGizmosEnabled() && !perturbation.active ? p.tool : 'select',
         p.frame,
         width,
         height,
+      );
+      perturbationFeedback.draw(
+        overlay.getContext('2d')!,
+        perturbation,
+        camera,
+        width,
+        height,
+        Math.min(window.devicePixelRatio, 2),
       );
       precise.validate();
       viewCube.update(camera);
@@ -1075,14 +1108,14 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       kind: 'orbit' | 'pan' | 'dolly' | null;
       select: boolean;
     } | null = null;
-    const pick = (p: [number, number]) => {
+    const pickHit = (p: [number, number]): { id: string; point?: THREE.Vector3 } | null => {
       const helper =
         !activeCamera &&
         latest.current.layers?.helpers !== false &&
         latest.current.settings?.showEntityIcons !== false
           ? markers.pick(p)
           : null;
-      if (helper) return helper;
+      if (helper) return { id: helper };
       if (latest.current.layers?.geometry === false) return null;
       const ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2((p[0] / width) * 2 - 1, 1 - (p[1] / height) * 2), camera);
@@ -1112,14 +1145,34 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         )
           continue;
         for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
-          if (o.userData.nodeId) return String(o.userData.nodeId);
+          if (o.userData.nodeId) return { id: String(o.userData.nodeId), point: hit.point };
         }
       }
       return null;
     };
+    const pick = (p: [number, number]) => pickHit(p)?.id ?? null;
     const heldKeys = new Set<string>();
     const bindings = () => latest.current.settings?.inputBindings ?? DEFAULT_INPUT_BINDINGS;
     let flyModifiers = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
+    function perturbationHeld() {
+      return (
+        !!sceneCommands(latest.current.document)?.perturbation &&
+        keyHeld(bindings().keys.perturb, flyModifiers, heldKeys)
+      );
+    }
+    const updateModifiers = (e: MouseEvent | KeyboardEvent) => {
+      const wasPerturbing = perturbationHeld();
+      flyModifiers = {
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+      };
+      if (wasPerturbing !== perturbationHeld()) {
+        gizmo.hoverAt([-9999, -9999]);
+        invalidate();
+      }
+    };
     let flyTime: number | null = null;
     let flyPilot = false;
     let flyEngaged = false;
@@ -1181,9 +1234,37 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       invalidate();
     }
     const down = (e: PointerEvent) => {
-      if (precise.active || e.defaultPrevented || navigation || gizmo.active) return;
+      if (precise.active || e.defaultPrevented || navigation || gizmo.active || perturbation.active)
+        return;
       renderer.domElement.focus();
       const input = bindings();
+      updateModifiers(e);
+      if (perturbationHeld()) {
+        const hit = pickHit(point(e));
+        // Perturb the selection, including drags beginning over empty space or another body.
+        if (
+          perturbation.begin(
+            latest.current.document,
+            latest.current.selected,
+            camera,
+            point(e),
+            width,
+            height,
+            e.pointerId,
+            e.button,
+            () => latest.current.onPerturbBegin?.(),
+            hit?.point ? { id: hit.id, point: hit.point } : undefined,
+          )
+        ) {
+          stopFly();
+          animation = null;
+          renderer.domElement.setPointerCapture(e.pointerId);
+          renderer.domElement.style.cursor = 'grabbing';
+        }
+        e.preventDefault();
+        invalidate();
+        return;
+      }
       const kind =
         (['pan', 'dolly', 'orbit'] as const).find((action) =>
           matchesPointer(input, action, e, heldKeys),
@@ -1216,13 +1297,27 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     };
     const move = (e: PointerEvent) => {
       const p = point(e);
+      updateModifiers(e);
+      if (perturbation.active) {
+        if (perturbation.owns(e.pointerId)) {
+          perturbation.move(p);
+          invalidate();
+        }
+        return;
+      }
       if (gizmo.active) {
         gizmo.move(p, false, keyHeld(bindings().keys.snap, e, heldKeys));
         return;
       }
       if (!navigation) {
         renderer.domElement.style.cursor =
-          selectedGizmosEnabled() && gizmo.hoverAt(p) ? 'grab' : 'default';
+          (perturbationHeld() &&
+            sceneCommands(latest.current.document)?.perturbation?.bodyAt(
+              latest.current.selected ?? '',
+            )) ||
+          (selectedGizmosEnabled() && gizmo.hoverAt(p))
+            ? 'grab'
+            : 'default';
         return;
       }
       const dx = p[0] - navigation.last[0],
@@ -1262,6 +1357,13 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       navigation.last = p;
     };
     const up = (e: PointerEvent) => {
+      if (perturbation.active) {
+        if (!perturbation.releases(e.pointerId, e.button)) return;
+        finishPerturbation();
+        if (renderer.domElement.hasPointerCapture(e.pointerId))
+          renderer.domElement.releasePointerCapture(e.pointerId);
+        return;
+      }
       if ((navigation && e.button !== navigation.button) || (gizmo.active && e.button !== 0))
         return;
       if (gizmo.active) {
@@ -1280,8 +1382,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         renderer.domElement.releasePointerCapture(e.pointerId);
     };
     const cancel = () => {
+      finishPerturbation(true);
       stopFly(true);
       heldKeys.clear();
+      flyModifiers = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
       gizmo.setSnapping(false);
       finishPilot(true);
       gizmo.end(true);
@@ -1349,6 +1453,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (perturbation.active) return;
       if (!matchesPointer(bindings(), 'zoom', e, heldKeys, true)) return;
       zoomBy(
         e.deltaY *
@@ -1358,6 +1463,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       );
     };
     const dbl = (e: MouseEvent) => {
+      if (perturbation.active || keyHeld(bindings().keys.perturb, e, heldKeys)) return;
       const target = selectedGizmosEnabled() ? gizmo.preciseInput(point(e)) : null;
       if (target) {
         e.preventDefault();
@@ -1374,6 +1480,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       }
     };
     const keydown = (e: KeyboardEvent) => {
+      updateModifiers(e);
       heldKeys.add(eventKey(e));
       flyModifiers = {
         ctrlKey: e.ctrlKey,
@@ -1391,6 +1498,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         if (
           !precise.active &&
           !gizmo.active &&
+          !perturbation.active &&
           (!navigation || navigation.kind) &&
           (!activeCamera || piloting)
         ) {
@@ -1401,7 +1509,14 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         return;
       }
       gizmo.setSnapping(keyHeld(bindings().keys.snap, e, heldKeys));
+      invalidate();
       if (e.key === 'Escape') {
+        if (perturbation.active) {
+          finishPerturbation(true);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         if (flyTime !== null || flyPilot) {
           stopFly(true);
           e.preventDefault();
@@ -1419,8 +1534,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         navigation = null;
       }
       if (
-        matchesKey(bindings(), 'focus', e) ||
-        keyboardChord(e) === focusAllAccelerator(bindings())
+        !perturbation.active &&
+        (matchesKey(bindings(), 'focus', e) || keyboardChord(e) === focusAllAccelerator(bindings()))
       ) {
         focus(
           keyboardChord(e) === focusAllAccelerator(bindings())
@@ -1446,6 +1561,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         })
       )
         stopFly();
+      if (perturbation.active && !perturbationHeld()) finishPerturbation();
       if (document.activeElement === renderer.domElement) invalidate();
       gizmo.setSnapping(keyHeld(bindings().keys.snap, e, heldKeys));
     };
@@ -1461,8 +1577,9 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     renderer.domElement.addEventListener('pointerup', up);
     renderer.domElement.addEventListener('pointercancel', cancel);
     renderer.domElement.addEventListener('lostpointercapture', () => {
-      if (navigation || gizmo.active) cancel();
+      if (navigation || gizmo.active || perturbation.active) cancel();
     });
+    window.addEventListener('keydown', updateModifiers);
     window.addEventListener('blur', cancel);
     renderer.domElement.addEventListener('wheel', wheel, { passive: false });
     renderer.domElement.addEventListener('dblclick', dbl);
@@ -1563,6 +1680,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     resize();
     invalidate();
     return () => {
+      window.removeEventListener('keydown', updateModifiers);
       window.clearInterval(statsTimer);
       if (pilotWheelTimer) clearTimeout(pilotWheelTimer);
       window.removeEventListener('blur', cancel);
@@ -1573,6 +1691,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       cancelAnimationFrame(queued);
       observer.disconnect();
       themeObserver.disconnect();
+      perturbation.end();
+      perturbationFeedback.dispose();
       precise.dispose();
       jointPicker.dispose();
       viewCube.dispose();

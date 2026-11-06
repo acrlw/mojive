@@ -4,6 +4,7 @@ import { Button, Empty } from './components';
 import { EntityCard } from './EntityCard';
 import { jointIcon } from './JointEditor';
 import { t } from './i18n';
+import { ActuatorControls, type ActuatorControlsProps } from './physics/ActuatorControls';
 import './joint-panel.css';
 import './actuators-panel.css';
 
@@ -20,11 +21,13 @@ export function ActuatorsPanel({
   selectedId,
   onSelect,
   onFocus,
+  controls,
 }: {
   doc: SceneDocument | null;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onFocus: (id: string) => void;
+  controls?: Pick<ActuatorControlsProps, 'actuators' | 'values' | 'onBegin' | 'onCommit' | 'onChange'>;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   useEffect(() => setExpanded({}), [doc?.root.uuid]);
@@ -35,7 +38,8 @@ export function ActuatorsPanel({
         <h2>{t('Actuators')}</h2>
       </div>
       <div className="joint-panel-list">
-        {actuators.map((actuator, index) => {
+        {controls ? <ActuatorControls key={doc?.root.uuid} {...controls} selectedId={selectedId}
+          onSelect={onSelect} onFocus={onFocus} /> : actuators.map((actuator, index) => {
           const joint = doc?.joints.find((item) => item.name === actuator.joint);
           const key = `${actuator.transmission ?? ''}:${actuator.name}:${index}`;
           const open = expanded[key] ?? false;
@@ -103,7 +107,7 @@ export function ActuatorsPanel({
             </EntityCard>
           );
         })}
-        {!actuators.length && (
+        {!(controls?.actuators.length ?? actuators.length) && (
           <Empty title={t('No actuators defined')}>
             {t('Actuators are provided by the scene source.')}
           </Empty>

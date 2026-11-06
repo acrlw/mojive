@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, after } from 'node:test';
@@ -62,6 +63,7 @@ for (const scale of [1, 1.25])
     }, scale);
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
     await page.waitForLoadState('networkidle');
+    await openEditableJointScene(page);
     const shell = await page.locator('.app-shell').evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return {

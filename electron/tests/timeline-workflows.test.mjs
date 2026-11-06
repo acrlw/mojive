@@ -1,3 +1,4 @@
+import { openEditableScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,7 +45,7 @@ after(async () => {
 beforeEach(async () => {
   errors.length = 0;
   await page.goto(base, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('treeitem').first().waitFor();
+  await openEditableScene(page);
   await page.getByTestId('viewport-canvas').waitFor();
   await page.getByTestId('timeline').waitFor();
   await page
@@ -481,7 +482,7 @@ test('actual App key selection, clipboard, duplicate, nudge and Delete keep capt
   await keys().first().click();
   await keys()
     .last()
-    .click({ modifiers: ['Control'] });
+    .click({ modifiers: ['ControlOrMeta'] });
   assert.equal(await selectedKeys().count(), 2);
   await keys()
     .nth(1)
@@ -491,10 +492,10 @@ test('actual App key selection, clipboard, duplicate, nudge and Delete keep capt
     2,
     'Shift-click selects the interval from the primary key',
   );
-  await timeline().press('Control+a');
+  await timeline().press('ControlOrMeta+a');
   assert.equal(await selectedKeys().count(), 3);
-  await timeline().press('Control+c');
-  await timeline().press('Control+d');
+  await timeline().press('ControlOrMeta+c');
+  await timeline().press('ControlOrMeta+d');
   assert.equal(await keys().count(), 6);
   assert.equal(await selectedKeys().count(), 3);
   await timeline().press('Delete');
@@ -506,7 +507,7 @@ test('actual App key selection, clipboard, duplicate, nudge and Delete keep capt
   );
   await time(2);
   await timeline().focus();
-  await timeline().press('Control+v');
+  await timeline().press('ControlOrMeta+v');
   await page.waitForFunction(() => document.querySelectorAll('[data-scene-frame]').length === 6);
   assert.equal(await selectedKeys().count(), 3);
   const pasted = await selectedKeys().evaluateAll((items) =>
@@ -521,7 +522,7 @@ test('actual App key selection, clipboard, duplicate, nudge and Delete keep capt
   }
   await timeline().locator(`[data-scene-frame="${pasted[0]}"]`).dblclick();
   assert.equal(await x(), 1, 'Pasted preset contains its source pose, not the current scene');
-  await timeline().press('Control+a');
+  await timeline().press('ControlOrMeta+a');
   await timeline().press('Delete');
   assert.equal(await keys().count(), 0);
   assert.equal(await x(), 1);

@@ -1,3 +1,4 @@
+import { openEditableScene } from './helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { createServer } from 'vite';
@@ -32,6 +33,7 @@ for (const [language, appearance, scale] of [
     );
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
     await page.waitForLoadState('networkidle');
+    await openEditableScene(page, language === 'zh');
     await page.evaluate(() => document.fonts.ready);
     const insets = await page.locator('.activity-rail').evaluate((rail) => {
       const rect = rail.getBoundingClientRect(),

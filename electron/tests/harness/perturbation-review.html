@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+  <head><base href="/"/><meta charset="UTF-8"/><title>Physical pointer interaction</title></head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useRef, useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import * as THREE from 'three';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      import { Viewport } from '/src/Viewport.tsx';
+      import { PhysicsDocument } from '/src/physics/PhysicsDocument.ts';
+      import { loadMujocoBackend } from '/src/physics/WorkerBackend.ts';
+      import { createModelBundle } from '/src/resources/modelBundle.ts';
+      import { cameraFromView } from '/src/scene-camera.ts';
+      import { applySettings, normalizeSettings } from '/src/settings.tsx';
+      const xml = `<mujoco><option gravity="0 0 0" timestep=".002"/>
+        <worldbody><light pos="0 -2 4"/><geom name="floor" type="plane" size="3 3 .1"/>
+          <body name="selected" pos="0 0 .7"><freejoint name="free"/>
+            <geom name="box" type="box" size=".2 .15 .2" rgba=".4 .7 .4 1"/></body>
+          <body name="other" pos="1 0 .7"><freejoint/>
+            <geom name="other_box" type="box" size=".15 .15 .15" rgba=".4 .5 .8 1"/></body>
+        </worldbody></mujoco>`;
+      const bundle = await createModelBundle('Perturbation', 'model.xml', [
+        { path: 'model.xml', bytes: new TextEncoder().encode(xml) },
+      ]);
+      const runtime = await PhysicsDocument.load(bundle, loadMujocoBackend);
+      const doc = runtime.document;
+      const f = window.perturbationReview = {
+        runtime, doc, begins: 0, commits: 0, cancels: 0, errors: [],
+        body: doc.nodes.find(n => n.name === 'selected'),
+        other: doc.nodes.find(n => n.name === 'other'),
+        fixed: doc.nodes.find(n => n.name === 'floor'),
+        project(node) {
+          const camera = cameraFromView(f.api.current.getCameraView());
+          const point = node.object.getWorldPosition(new THREE.Vector3()).project(camera);
+          return [(point.x + 1) * innerWidth / 2, (1 - point.y) * innerHeight / 2];
+        },
+      };
+      runtime.setErrorHandler(error => f.errors.push(String(error)));
+      applySettings(normalizeSettings({ language: 'en', appearance: 'dark' }));
+      function Review() {
+        const [selected, select] = useState(f.body.id), [revision, refresh] = useState(0);
+        const api = useRef(null);
+        f.api = api; f.select = select; f.selected = selected;
+        f.refresh = () => refresh(n => n + 1);
+        return React.createElement('div', { style: { height: '100vh', position: 'relative' } },
+          React.createElement(Viewport, {
+            ref: api, document: doc, selected, tool: 'joint', frame: 'world', geometry: 'default', revision,
+            onSelect: select, onChange: f.refresh,
+            onPerturbBegin: () => f.begins++, onCommit: () => f.commits++, onPerturbCancel: () => f.cancels++,
+          }));
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

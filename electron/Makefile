@@ -2,20 +2,21 @@
 
 .PHONY: help package bundle-smoke clean
 help:
-	@printf "%s\n" "make install       Install locked Node dependencies" "make run           Build and launch Electron" "make dev           Start the renderer development server" "make check         Build and run regression tests" "make acceptance    Check and capture desktop workflows" "make package       Build a macOS app in ../output/electron/release" "make bundle-smoke  Verify the packaged application" "make clean         Remove generated Electron artifacts"
+	@printf "%s\n" "make install       Install locked Node dependencies" "make run           Build and launch Electron" "make dev           Start the renderer development server" "make check         Build and run regression tests" "make acceptance    Check and capture desktop workflows" "make physics-review Verify WASM, assets and state replay" "make package       Build a macOS app in ../output/electron/release" "make bundle-smoke  Verify the packaged application" "make clean         Remove generated Electron artifacts"
 
 package:
 	npm run package
 bundle-smoke:
 	npm run bundle-smoke
+	node scripts/physics-review.mjs --packaged
 clean:
 	rm -rf dist public/menu-icons ../output/electron
 
 .PHONY: ensure-deps install dev run check acceptance design viewcube-review ui-review viewport-review timeline-review controls-review layout-review camera-review camera-self-review project-review scrollbar-review switch-review actuator-review
 ensure-deps:
-	@test -x node_modules/.bin/tsc && test -f node_modules/electron/path.txt || npm ci --no-audit --no-fund
+	node scripts/ensure-deps.cjs
 install:
-	npm ci --no-audit --no-fund
+	node scripts/ensure-deps.cjs --force
 package bundle-smoke dev run check design actuator-review viewcube-review ui-review viewport-review timeline-review timeline-wheel-review controls-review layout-review camera-review camera-self-review project-review scrollbar-review switch-review: ensure-deps
 dev:
 	npm run dev
@@ -91,3 +92,9 @@ localization-review: ensure-deps
 .PHONY: corners-review
 corners-review: ensure-deps
 	node --test --test-concurrency=1 tests/smooth-geometry.test.mjs tests/smooth-capsule.test.mjs tests/capsule-layout.test.mjs tests/nested-corners.test.mjs tests/shared-controls.test.mjs tests/gizmo-feedback.test.mjs
+
+.PHONY: physics-review
+physics-review: ensure-deps
+	npm run build
+	node --test --test-concurrency=1 tests/physics-backend.test.mjs tests/physics-scene.test.mjs tests/physics-worker.test.mjs tests/physics-workspace.test.mjs tests/simulation-history.test.mjs tests/simulation-keyboard.test.mjs tests/assets.test.mjs tests/perturbation-input.test.mjs tests/camera-focus-integration.test.mjs
+	node scripts/physics-review.mjs

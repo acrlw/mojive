@@ -1,3 +1,4 @@
+import { openEditableJointScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
@@ -164,15 +165,31 @@ for (const [appearance, language, uiScale, uiFontSize = 14] of [
     await page.locator('[data-menu=Help]').click();
     await page.locator('.menu-help button').first().click();
     const guide = page.locator('.interaction-guide');
-    assert.equal(await guide.locator('.guide-row').count(), 13);
-    assert.equal(await guide.locator('[data-icon^=status-mouse-]').count(), 5);
+    assert.equal(await guide.locator('.guide-row').count(), 17);
+    assert.equal(await guide.locator('[data-icon^=status-mouse-]').count(), 7);
     assert.equal(await guide.locator('.guide-tool').count(), 0);
+    for (const [english, chinese, key] of [
+      ['Playback', '播放控制', 'Space'],
+      ['Previous simulation frame', '上一帧仿真', '←'],
+      ['Step simulation', '单步仿真', '→'],
+    ]) {
+      const row = guide.locator('.guide-row').filter({
+        has: page.getByText(language === 'zh' ? chinese : english, { exact: true }),
+      });
+      assert.equal(await row.count(), 1, `${english} must have its own guide row`);
+      assert.deepEqual(await row.locator('kbd').allTextContents(), [key]);
+    }
     const pan = guide
       .locator('.guide-row')
       .filter({ hasText: language === 'zh' ? '平移视角' : 'Pan' });
     assert.equal(await pan.locator('.input-mouse').count(), 1);
-    assert.doesNotMatch(await guide.innerText(), /[⌘⌥]/);
-    assert.equal(await guide.getByRole('img', { name: 'Ctrl+Z', exact: true }).count(), 1);
+    const mac = await page.evaluate(() => /Mac/i.test(navigator.platform));
+    if (mac) assert.match(await guide.innerText(), /⌘/);
+    else assert.doesNotMatch(await guide.innerText(), /[⌘⌥]/);
+    assert.equal(
+      await guide.getByRole('img', { name: mac ? '⌘ Z' : 'Ctrl+Z', exact: true }).count(),
+      1,
+    );
     const overflow = await guide.evaluate((el) =>
       [...el.querySelectorAll('.guide-inputs,.guide-gesture,.input-chord')]
         .filter((node) => node.scrollWidth > node.clientWidth + 1)
@@ -201,6 +218,7 @@ for (const [appearance, language, uiScale, uiFontSize = 14] of [
 test('entity name hints appear only while the actual label is clipped', async () => {
   const page = await browser.newPage({ viewport: { width: 1700, height: 1100 } });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
+  await openEditableJointScene(page);
   const row = page.locator('.tree-row[data-tooltip="01_revolute_y"]');
   await row.waitFor();
   const label = row.locator('.tree-label');

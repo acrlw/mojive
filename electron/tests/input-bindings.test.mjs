@@ -141,6 +141,7 @@ test('settings remap atomically, persist and update tools, menus, guide and time
   );
   const count = await page.locator('.keyframe').count();
   await page.keyboard.press('v');
+  await page.waitForFunction((count) => document.querySelectorAll('.keyframe').length === count + 1, count);
   assert.equal(await page.locator('.keyframe').count(), count + 1);
   assert.equal(
     await page
@@ -161,7 +162,8 @@ test('settings remap atomically, persist and update tools, menus, guide and time
   await page.locator('[data-menu=Help]').click();
   await page.getByRole('menuitem', { name: 'Interaction guide' }).click();
   const guide = page.locator('.interaction-guide');
-  for (const key of ['H', 'B', 'Alt', 'V', 'P'])
+  const mac = await page.evaluate(() => /Mac/i.test(navigator.platform));
+  for (const key of ['H', 'B', mac ? '⌥' : 'Alt', 'V', 'P'])
     assert.ok((await guide.getByRole('img', { name: key, exact: true }).count()) >= 1);
   assert.equal(
     await guide
@@ -202,7 +204,7 @@ test('settings remap atomically, persist and update tools, menus, guide and time
   await record(page, 'Rotation tool', 'Control+Alt+h');
   assert.equal(
     await page.getByRole('button', { name: 'Rotation tool', exact: true }).textContent(),
-    'Ctrl+Alt+H',
+    mac ? '⌃+⌥+H' : 'Ctrl+Alt+H',
   );
   await page
     .locator('.settings-header')

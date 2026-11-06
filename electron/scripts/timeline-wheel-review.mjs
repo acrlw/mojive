@@ -140,9 +140,8 @@ try {
       const before = await view();
       const actualRatio = await wheel(ratio, delta, mode);
       const after = await view();
-      const error = Math.abs(
-        before.start + actualRatio * span(before) - after.start - actualRatio * span(after),
-      );
+      const expectedStart = Math.max(0, before.start + actualRatio * (span(before) - span(after)));
+      const error = Math.abs(expectedStart - after.start);
       assert.ok(error < 1e-7, `Cursor anchor error: ${error}`);
       const units = delta / (mode === 0 ? 100 : mode === 1 ? 3 : 1);
       const expectedFactor = Math.exp(Math.max(-4, Math.min(4, units)) * 0.18);
@@ -170,6 +169,14 @@ try {
     for (let i = 0; i < 24; i++) await wheel(0.58, 1000000);
     const maximum = await view();
     assert.ok(span(maximum) <= 60.000001, `Runaway view: ${JSON.stringify(maximum)}`);
+    assert.equal(maximum.start, 0, 'zoom-out cannot expose negative time');
+    await wheel(0.5, -1000000, 0, true);
+    assert.equal((await view()).start, 0, 'pan cannot cross the zero boundary');
+    assert.ok(
+      (await panel.locator('.ruler-tick').allTextContents()).every((t) => parseFloat(t) >= 0),
+    );
+    const boundaryCapture = `timeline-zero-${appearance}-${uiScale}x.png`;
+    await page.screenshot({ path: path.join(out, boundaryCapture) });
     for (let i = 0; i < 24; i++) await wheel(0.58, -1000000);
     const minimum = await view();
     assert.ok(span(minimum) >= 0.00099999);
@@ -179,6 +186,8 @@ try {
     await follow('page');
     const record = panel.locator('.record-button');
     await record.click();
+    await settle();
+    assert.ok((await view()).start >= 0, 'recording follow starts at zero');
     await page.waitForFunction(
       () => Number(document.querySelector('.time-readout input')?.value) > 10.2,
       undefined,
@@ -203,11 +212,12 @@ try {
       afterLock,
       maximum,
       minimum,
+      boundaryCapture,
       recordedThrough,
       capture,
     });
     console.log(
-      `PASS ${appearance}/${uiScale}: cursor anchoring, bounded wheel, pan, locked follow, recording > 10 s`,
+      `PASS ${appearance}/${uiScale}: zero boundary, cursor anchoring, bounded wheel, pan, locked follow, recording > 10 s`,
     );
   }
   assert.deepEqual(report.errors, []);

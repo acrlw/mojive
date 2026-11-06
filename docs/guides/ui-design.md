@@ -494,9 +494,40 @@ a tool. Text entry and modal owners suppress viewport movement; focus loss clear
 Application/window accelerators remain reserved in both recording and preference restoration;
 include native Close, Hide, Minimize and Quit roles when checking platform conflicts.
 
+Physical perturbation belongs to the selected dynamic body, including drags begun over empty
+viewport space. Ctrl with the left/right mouse button translates/rotates that body and suppresses
+ordinary gizmos and navigation. Translation uses the body's surface point when hit, otherwise a
+camera-facing plane at body depth; rotation pivots at the body origin. Release of the button or
+modifier ends the force; Escape, focus loss and lost capture cancel it without leaving a held force.
+Physics examples must enter through the live backend rather than a kinematic preview loader.
+
 One underlying property has one control within an Inspector. Domain-specific activation replaces
 an equivalent generic visibility control; tree actions may remain synchronized alternative entry
 points. Preserve separate controls only when their effects are independent.
+
+Physics Environment controls inherit the loaded model's values. Keep timestep and gravity directly
+available, with backend-specific solver and contact settings in collapsed groups. A simulation reset
+does not restore environment defaults; expose those as distinct actions. Capability descriptors feed
+the existing numeric, vector, selection and whole-row Boolean controls rather than engine-specific
+widget copies. Actuator inputs reuse joint-card geometry and transaction behavior.
+Simulation transport shares the viewport navigation row. Center Previous frame, Play/Pause and
+Single step as one group; keep reset and Environment separate from transport, and identify speed
+through its control hint. Show simulation time once in the status bar. Narrow layouts retain all
+actions and reduce captions before consuming another viewport row. Reserve symmetric space for the
+left and right groups so asymmetric captions cannot shift the centered playback control. When the
+remaining width cannot fit full-size controls, allow horizontal scrolling instead of overlaps.
+Previous frame restores a full dynamic backend state from the bounded 1000-frame history;
+resuming replaces the discarded future.
+Frame navigation retains current Environment settings; document undo owns parameter changes.
+Space toggles simulation playback, and Left/Right step backward/forward while paused. Route toolbar
+and keyboard actions through the same guards; held keys do not queue discrete steps or retrigger
+Play/Pause. Text entry, dialogs, button activation and focused Timeline editing retain input ownership.
+Environment focus uses the complete Frame All operation, including exiting a scene camera and the
+same nonlinear camera transition. Tree double-click, Focus selected and Frame All share this route;
+a geometry-free Environment entity's transform must not determine its focus bounds.
+Asset discovery and project-file navigation have distinct entry symbols. A model preview owns an
+independent document, camera and optional simulation runtime; browsing or closing it must not mutate
+the open scene, its selection, simulation time or undo history. Opening the model is an explicit action.
 
 Native text input and modal dialogs own their keyboard events. Respect physical Ctrl/Cmd
 semantics on macOS and route shortcuts through the existing binding layer.
@@ -511,6 +542,9 @@ Timeline gestures remain usable without physics, models, or recorded takes. Gate
 their capability boundary. Keep simulation control, recorded-take replay, range selection,
 and Loop distinct. Bound zoom/time values, preserve holes after deleted samples, and align
 samples, frame cells, range endpoints, and playhead to the same time mapping.
+Electron timeline navigation has a zero lower boundary shared by wheel zoom, pan, scrollbars,
+manual view fields and Follow. Preserve the pointer's time anchor away from boundaries; at
+zero keep the zoom scale and clamp the view origin. Navigation bounds never cap recording.
 
 Camera selection, preview, and editor navigation retain their declared modes. Focusing an
 entity uses its current world pose and smooth camera movement; joint focus should leave its

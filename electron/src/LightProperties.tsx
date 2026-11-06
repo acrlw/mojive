@@ -71,6 +71,7 @@ export function LightProperties({ doc, node, onBegin, onCommit, onChange }: Ligh
           <label>{t('Type')}</label>
           <Select
             label="Light type"
+            disabled={!!node.object.userData.physicsOwned}
             value={state.type}
             options={(['point', 'directional', 'spot', 'area', 'hemisphere'] as LightKind[]).map(
               (value) => ({
@@ -145,7 +146,7 @@ export function LightProperties({ doc, node, onBegin, onCommit, onChange }: Ligh
           {row('Emitter height', 'height', 0.001, 1e6, 'm')}
         </Section>
       )}
-      {state.type !== 'point' && state.type !== 'hemisphere' && (
+      {!node.object.userData.physicsOwned && state.type !== 'point' && state.type !== 'hemisphere' && (
         <Section title="Light direction">
           <VectorFields
             label="Direction (world)"

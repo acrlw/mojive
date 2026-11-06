@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneDocument } from './contracts';
+import type { PhysicsSnapshot } from './physics/contracts';
 import { setJoint, setJointConfiguration } from './scene';
 export interface Pose {
   transforms: Record<string, { p: number[]; q: number[]; s: number[] }>;
@@ -7,22 +8,24 @@ export interface Pose {
   jointOrigins?: Record<string, number[]>;
   jointConfigurations?: Record<string, { position: number[]; rotation: number[] }>;
 }
-export interface Keyframe {
+export interface RecordedSceneState {
+  pose: Pose;
+  simulation?: PhysicsSnapshot;
+}
+export interface Keyframe extends RecordedSceneState {
   id: string;
   name?: string;
   time: number;
-  pose: Pose;
 }
-export interface SceneSnapshot {
+export interface SceneSnapshot extends RecordedSceneState {
   id: string;
   name: string;
   time: number;
-  pose: Pose;
 }
 export interface SceneTake {
   id: string;
   name: string;
-  frames: { time: number; pose: Pose }[];
+  frames: ({ time: number } & RecordedSceneState)[];
 }
 export interface WorkspaceTimeline {
   snapshots: SceneSnapshot[];
@@ -35,6 +38,15 @@ export function sampleTake(
   take: SceneTake,
   time: number,
   mode: 'nearest' | 'floor' = 'nearest',
+): number {
+  const index = takeFrameIndex(take, time, mode);
+  if (index < 0) return index;
+  assertPoseCompatible(doc, take.frames[index].pose);
+  applyPose(doc, take.frames[index].pose);
+  return index;
+}
+export function takeFrameIndex(
+  take: SceneTake, time: number, mode: 'nearest' | 'floor' = 'nearest',
 ): number {
   if (!Number.isFinite(time)) throw Error('Invalid take sample time');
   if (mode !== 'nearest' && mode !== 'floor') throw Error('Invalid take sampling mode');
@@ -57,8 +69,6 @@ export function sampleTake(
           : time - frames[low - 1].time <= frames[low].time - time
             ? low - 1
             : low;
-  assertPoseCompatible(doc, frames[index].pose);
-  applyPose(doc, frames[index].pose);
   return index;
 }
 const own = <T>(values: Record<string, T> | undefined, id: string): T | undefined =>
@@ -127,12 +137,14 @@ export function capturePose(doc: SceneDocument): Pose {
     ),
   };
 }
-export function applyPose(doc: SceneDocument, pose: Pose) {
+export function applyPose(doc: SceneDocument, pose: Pose, localOnly = false) {
   for (const joint of doc.joints) {
+    if (localOnly && joint.object.userData.physicsOwned) continue;
     const origin = own(pose.jointOrigins, joint.id);
     if (origin) joint.origin.fromArray(origin);
   }
   for (const node of doc.nodes) {
+    if (localOnly && node.object.userData.physicsOwned) continue;
     const t = own(pose.transforms, node.id);
     if (t) {
       node.object.position.fromArray(t.p);
@@ -141,6 +153,17 @@ export function applyPose(doc: SceneDocument, pose: Pose) {
     }
   }
   for (const joint of doc.joints) {
+    if (localOnly && joint.object.userData.physicsOwned) continue;
+    // Detached replay/export scenes retain published transforms; joint proxies are not a kinematic chain.
+    if (joint.object.userData.physicsOwned) {
+      joint.value = pose.joints[joint.id];
+      const configuration = own(pose.jointConfigurations, joint.id);
+      if (configuration) {
+        joint.position?.fromArray(configuration.position);
+        joint.rotation?.fromArray(configuration.rotation);
+      }
+      continue;
+    }
     if (joint.type === 'ball' || joint.type === 'free') {
       const config = own(pose.jointConfigurations, joint.id);
       if (config) setJointConfiguration(doc, joint.id, config);
@@ -245,6 +268,8 @@ export function encodeDocument(doc: SceneDocument) {
     nodes: doc.nodes.map(({ object, ...n }) => ({ ...n, uuid: object.uuid })),
     joints: doc.joints.map(({ object, axis, origin, position, rotation, ...j }) => ({
       ...j,
+      lower: j.lower === -Infinity ? null : j.lower,
+      upper: j.upper === Infinity ? null : j.upper,
       uuid: object.uuid,
       axis: axis.toArray(),
       origin: origin.toArray(),
@@ -270,6 +295,8 @@ export function decodeDocument(data: ReturnType<typeof encodeDocument>): SceneDo
     nodes: snapshot.nodes.map(({ uuid, ...n }) => ({ ...n, object: find(uuid) })),
     joints: snapshot.joints.map(({ uuid, axis, origin, position, rotation, ...j }) => ({
       ...j,
+      lower: j.lower ?? -Infinity,
+      upper: j.upper ?? Infinity,
       object: find(uuid),
       axis: new THREE.Vector3().fromArray(axis),
       origin: new THREE.Matrix4().fromArray(origin),
@@ -445,6 +472,7 @@ function validateDocument(value: unknown): void {
     'ground',
     'light',
     'camera',
+    'environment',
   ]);
   for (const value of array(doc.nodes, 'scene nodes')) {
     const node = record(value, 'scene node'),
@@ -459,7 +487,12 @@ function validateDocument(value: unknown): void {
     const object = objects.get(uuid)?.data;
     if (!object || object === rootObject)
       throw Error(`Scene object ${uuid} is missing or is the collection root`);
-    const expectedType = ['robot', 'world', 'geom', 'link', 'joint'].includes(node.kind as string)
+    const metadata = record(object.userData, 'object metadata');
+    const physicsOwned = metadata.physicsOwned === true;
+    if (physicsOwned && !record(rootObject.userData, 'scene metadata').physicsSourceId)
+      throw Error('Physics entities require a source identity');
+    const expectedType = ['robot', 'world', 'link', 'joint', 'environment'].includes(node.kind as string) ||
+      (node.kind === 'geom' && !physicsOwned)
       ? 'Group'
       : node.kind === 'light'
         ? 'PointLight'
@@ -549,6 +582,16 @@ function validateDocument(value: unknown): void {
     }
   }
   for (const node of nodes.values()) {
+    const entry = objects.get(node.uuid as string)!;
+    const metadata = record(entry.data.userData, 'object metadata');
+    // Engine-derived joint/camera/light poses are world-space proxies. Their
+    // logical owner remains a body, without inventing a transform hierarchy.
+    if (metadata.physicsWorldFrame === true) {
+      if (metadata.physicsOwned !== true || !['joint', 'camera', 'light'].includes(node.kind as string) ||
+        !nodes.has(node.parentId as string) || entry.parent !== rootObject.uuid)
+        throw Error('Invalid physics world-frame proxy');
+      continue;
+    }
     const parent =
       node.parentId === undefined ? rootObject.uuid : nodes.get(node.parentId as string)?.uuid;
     if (!parent || objects.get(node.uuid as string)?.parent !== parent)
@@ -585,14 +628,18 @@ function validateDocument(value: unknown): void {
     }
     if (joint.angularLimit !== undefined && number(joint.angularLimit, 'joint angular limit') < 0)
       throw Error('Invalid angular limit');
-    const lower = number(joint.lower, 'joint lower limit'),
-      upper = number(joint.upper, 'joint upper limit');
+    const physicsOwned = record(objects.get(node.uuid as string)!.data.userData, 'joint metadata').physicsOwned === true;
+    const lower = physicsOwned && joint.lower === null ? -Infinity : number(joint.lower, 'joint lower limit'),
+      upper = physicsOwned && joint.upper === null ? Infinity : number(joint.upper, 'joint upper limit');
     number(joint.value, 'joint position');
     if (lower > upper) throw Error('Reversed joint limits');
     const parent = links.get(text(joint.parent, 'joint parent')),
       child = links.get(text(joint.child, 'joint child'));
     if (!parent || !child) throw Error('Joint references a missing or disconnected link');
-    if (joint.bodyId !== undefined) {
+    if (physicsOwned) {
+      if (joint.bodyId !== child.id || node.parentId !== child.id || child.parentId !== parent.id)
+        throw Error('Physics joint owner does not match its body hierarchy');
+    } else if (joint.bodyId !== undefined) {
       if (joint.bodyId !== child.id) throw Error('Joint body identity does not match its child');
       let cursor: Record<string, unknown> | undefined = child;
       const chain = new Set<string>();

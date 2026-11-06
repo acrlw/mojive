@@ -14,7 +14,8 @@ They are disposable evidence, not checked-in baselines or application resources.
 
 Electron's postinstall script verifies/repairs runtime installation if the package installer
 exits before its archive has finished downloading. It verifies the upstream archive checksum.
-Normal frontend execution and the default test suite do not require a physics backend.
+URDF viewing and editing do not require a running physics backend. The default test suite
+also exercises the pinned official MuJoCo WASM package in Node and a browser Worker.
 
 ## Required checks
 
@@ -51,12 +52,20 @@ Inspect its images and JSON results under `output/electron/verification/` from t
 | `make scrollbar-review`      | Hover, held, idle and two-axis scroll ownership                                                                                              |
 | `make switch-review`         | Whole-row toggles and pointer cancellation                                                                                                   |
 | `make actuator-review`       | Actuator/joint cards and actual desktop captures                                                                                             |
+| `make physics-review`        | Real WASM, Environment edits/reset/undo, independent asset preview, recording beyond ten seconds and physical workspace roundtrip             |
 
 Browser harness HTML files are maintained under `tests/harness/` and served by Vite. They
 exercise production components; the production bundle starts only from `index.html`.
 Native geometry references under `tests/fixtures/` and `tests/*-reference.json` are retained
 source fixtures. Regenerate them deliberately with the relevant `scripts/export-native-*.py`
 command and review the numerical/visual differences; ordinary tests must not rewrite them.
+
+`make physics-review` writes production captures and its report to `output/electron/physics/`
+from the repository root. The backend tests cover invalid-command atomicity, model defaults,
+full-state restoration and continuation, resource identity, Worker lifecycle, and engine-free
+viewer operation. The workspace test also checks translation and rotation perturbation ownership
+under perspective and orthographic cameras. Inspect the dark/light Environment, actuator,
+asset-preview and three-lane recording captures; a successful build alone is not visual acceptance.
 
 ## Packaging acceptance
 
@@ -73,9 +82,11 @@ Electron archive checksum, and writes `package-manifest.json`. Source harnesses,
 dependencies, private filesystem paths and test captures are excluded. Font, icon, Electron,
 Chromium and runtime dependency licenses accompany the app.
 
-The bundle smoke test launches the packaged executable with an isolated profile and checks
-sandboxing, fonts, loading, geometry modes, cameras and joint controls. Inspect `bundle.json`
-and its screenshots in the verification directory. Packaging is local and unsigned;
+The bundle smoke target launches the packaged executable with an isolated profile and checks
+sandboxing, fonts, loading, geometry modes, cameras and joint controls. It also runs the physical
+workspace workflow against the packaged WASM Worker. Inspect `bundle.json` and its screenshots
+in the verification directory, plus `output/electron/physics/packaged/review.json` and captures.
+Packaging is local and unsigned;
 notarization and other-platform distribution remain outside this configuration.
 
 ## Design synchronization

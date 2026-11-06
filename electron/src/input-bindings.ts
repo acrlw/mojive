@@ -17,8 +17,11 @@ export const INPUT_ACTIONS = {
   focus: 'Focus',
   frame: 'World / Body',
   snap: 'Snapping',
+  perturb: 'Physics perturbation',
   capture: 'Capture keyframe',
   playback: 'Playback',
+  previousFrame: 'Previous simulation frame',
+  stepFrame: 'Step simulation',
   ...FLY_ACTIONS,
 } as const;
 export type InputAction = keyof typeof INPUT_ACTIONS;
@@ -35,6 +38,8 @@ export interface InputBindings {
 }
 export const KEY_CHOICES = [
   'Space',
+  'ArrowLeft',
+  'ArrowRight',
   'Shift',
   'Control',
   'Alt',
@@ -52,8 +57,11 @@ export const DEFAULT_INPUT_BINDINGS: InputBindings = {
     focus: 'F',
     frame: 'T',
     snap: 'Shift',
+    perturb: 'Control',
     capture: 'K',
     playback: 'Space',
+    previousFrame: 'ArrowLeft',
+    stepFrame: 'ArrowRight',
     flyForward: 'W',
     flyBack: 'S',
     flyLeft: 'A',
@@ -90,6 +98,8 @@ export function keyLabel(key: string | null) {
         Control: mac ? '⌃' : 'Ctrl',
         Alt: mac ? '⌥' : 'Alt',
         Meta: systemKeyLabel(),
+        ArrowLeft: '←',
+        ArrowRight: '→',
       } as Record<string, string>
     )[key] ?? key
   );

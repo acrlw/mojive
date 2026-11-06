@@ -20,6 +20,7 @@
     "bundle-smoke": "node scripts/bundle-smoke.mjs"
   },
   "dependencies": {
+    "@mujoco/mujoco": "3.17.0",
     "i18next": "^26.7.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

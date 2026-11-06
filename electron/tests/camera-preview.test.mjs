@@ -1,3 +1,4 @@
+import { openEditableScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import assert from 'node:assert/strict';
 import { test, before, beforeEach, after } from 'node:test';
@@ -408,6 +409,7 @@ test('production preview and direct projection controls fit dark/light workspace
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/`);
     await page.waitForLoadState('networkidle');
     const chinese = language !== 'en';
+    await openEditableScene(page, chinese);
     await page
       .locator('.activity-rail')
       .getByRole('button', { name: chinese ? '相机' : 'Cameras', exact: true })

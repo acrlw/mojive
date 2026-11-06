@@ -2,9 +2,23 @@ import { _electron as electron } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { build } from 'esbuild';
 const root = process.cwd(),
   out = path.join(root, '../output/electron/verification');
 await mkdir(out, { recursive: true });
+// The desktop keeps its compiled renderer and real MuJoCo startup. Authoring checks
+// import the maintained kinematic fixture through the public workspace drop path.
+const fixtureBundle = await build({
+  stdin: {
+    contents: "export { createCatalogScene } from './src/SceneCatalog'; export { saveWorkspace } from './src/editor';",
+    resolveDir: root,
+  },
+  bundle: true,
+  write: false,
+  format: 'iife',
+  globalName: 'editableFixture',
+  platform: 'browser',
+});
 const app = await electron.launch({
   args: [
     root,
@@ -48,6 +62,22 @@ async function check(name, fn) {
 }
 async function capture(name) {
   await page.screenshot({ path: path.join(out, name + '.png'), timeout: 15000 });
+}
+async function openEditableJointScene() {
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  await page.evaluate(`(async () => {
+    ${fixtureBundle.outputFiles[0].text}
+    const doc = await editableFixture.createCatalogScene('joint_gizmo');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([editableFixture.saveWorkspace(doc, [], 10)],
+      'joint-fixture.mojive.json', { type: 'application/json' }));
+    document.querySelector('.app-shell').dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer,
+    }));
+  })()`);
+  await page.locator('.tree-row.type-robot[data-tooltip="joint_gizmo_acceptance"]').waitFor();
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.simulation-toolbar').count(), 0);
 }
 async function typeValue(label, value) {
   const input = page.getByLabel(label, { exact: true });
@@ -106,6 +136,7 @@ try {
       assert.equal(await page.locator('html').getAttribute('lang'), 'zh-CN');
       assert.equal((await page.locator('.document-title').innerText()).trim(), '关节操作示例');
       assert.equal(await page.locator('.timeline .lane-header').innerText(), '关节操作示例');
+      await page.locator('.simulation-toolbar').waitFor();
       assert.equal(
         await page.locator('.titlebar nav').count(),
         process.platform === 'darwin' ? 0 : 1,
@@ -141,6 +172,17 @@ try {
         await page.locator('[data-menu=View]').hover();
         assert.equal(await page.locator('.menu').count(), 0);
       }
+      assert.equal(await page.locator('.left-panel .panel-header > .icon').count(), 0);
+      assert.equal(await page.getByRole('button', { name: '聚焦全部', exact: true }).count(), 1);
+      assert.equal(await page.locator('.viewport-topbar .geometry-selector').count(), 1);
+      assert.match(s.body, /MiSans/);
+      assert.equal(await page.locator('.geometry-selector button').count(), 4);
+    },
+  );
+  await check(
+    'Editable joint workspace retains local authoring and scene context actions',
+    async () => {
+      await openEditableJointScene();
       const row = page.locator('.tree-row').filter({ hasText: '01_revolute_y' }).first();
       await row.click({ button: 'right' });
       await page.locator('.menu-object:popover-open').waitFor();
@@ -151,12 +193,7 @@ try {
       await page.getByRole('menuitem', { name: '复制名称', exact: true }).click();
       assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), '01_revolute_y');
       await app.evaluate(({ clipboard }, text) => clipboard.writeText(text), previousClipboard);
-      assert.equal(await page.locator('.left-panel .panel-header > .icon').count(), 0);
-      assert.equal(await page.getByRole('button', { name: '聚焦全部', exact: true }).count(), 1);
-      assert.equal(await page.locator('.viewport-topbar .geometry-selector').count(), 1);
-      assert.match(s.body, /MiSans/);
       assert.equal((await page.locator('.type-all').innerText()).trim(), '45');
-      assert.equal(await page.locator('.geometry-selector button').count(), 4);
     },
   );
   await check(
@@ -172,8 +209,8 @@ try {
       await action('help.interaction');
       const guide = page.locator('.interaction-guide');
       await guide.waitFor();
-      assert.equal(await guide.locator('.guide-row').count(), 13);
-      assert.equal(await guide.locator('[data-icon^=status-mouse-]').count(), 5);
+      assert.equal(await guide.locator('.guide-row').count(), 17);
+      assert.equal(await guide.locator('[data-icon^=status-mouse-]').count(), 7);
       if (process.platform !== 'darwin') assert.doesNotMatch(await guide.innerText(), /[⌘⌥]/);
       await capture('desktop-input-guide-dark-zh');
       await page.locator('.info-dialog .dialog-heading button').click();
@@ -213,7 +250,8 @@ try {
       await page.keyboard.down('Alt');
       await orbit.click({ button: 'left' });
       await page.keyboard.up('Alt');
-      assert.equal(await orbit.locator('kbd').innerText(), 'Alt');
+      const mac = await app.evaluate(() => process.platform === 'darwin');
+      assert.equal(await orbit.locator('kbd').innerText(), mac ? '⌥' : 'Alt');
       await dialog.screenshot({ path: path.join(out, 'desktop-mouse-bindings-dark.png') });
       await dialog
         .locator('.settings-header')
@@ -317,6 +355,7 @@ try {
     await page.reload();
     await page.waitForSelector('[role=treeitem]');
     assert.equal(await page.evaluate(() => localStorage.getItem('mojive.layout')), stored);
+    await openEditableJointScene();
   });
   await check(
     'Type filters and search return selectable rows without phantom expand controls',

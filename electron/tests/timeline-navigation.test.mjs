@@ -66,19 +66,34 @@ test('wheel units have equivalent modest steps and retain precise fractional mot
   }
 });
 
-test('zoom uses the native exponential factor and preserves the cursor time across zero', () => {
-  const limits = navigationLimits([0, 10]);
-  const original = { start: 0, end: 10 };
+test('zoom uses the native exponential factor and preserves the cursor time away from boundaries', () => {
+  const limits = navigationLimits([0, 30]);
+  const original = { start: 20, end: 30 };
   for (const ratio of [0.05, 0.35, 0.95]) {
     const anchor = at(original, ratio);
     const outward = zoomView(original, ratio, -1, limits);
     close(span(outward), 10 * Math.exp(0.18), 'one outward notch');
     close(at(outward, ratio), anchor, 'outward pointer anchor');
-    assert.ok(outward.start < 0, 'navigation context may precede the first frame');
     const inward = zoomView(outward, ratio, 1, limits);
     close(inward.start, original.start, 'reverse wheel start');
     close(inward.end, original.end, 'reverse wheel end');
   }
+});
+
+test('zooming out at zero retains the scale without revealing negative time', () => {
+  const limits = navigationLimits([0, 10]);
+  assert.equal(limits.lower, 0);
+  for (const ratio of [0, 0.05, 0.35, 0.95, 1]) {
+    const outward = zoomView({ start: 0, end: 10 }, ratio, -1, limits);
+    assert.equal(outward.start, 0);
+    close(span(outward), 10 * Math.exp(0.18), 'zero-boundary wheel response');
+    const inward = zoomView(outward, ratio, 1, limits);
+    close(at(inward, ratio), at(outward, ratio), 'inward zoom resumes cursor anchoring');
+    assert.ok(span(inward) < span(outward), 'reverse wheel responds immediately');
+  }
+  assert.deepEqual(clampView({ start: -4000, end: -3990 }, limits), { start: 0, end: 10 });
+  assert.deepEqual(clampView({ start: -1, end: 9 }, limits), { start: 0, end: 10 });
+  assert.equal(navigationLimits([0, 10], { start: -4000, end: 10 }).maxSpan, 60);
 });
 
 test('precise wheel packets compose without rounding away motion or changing the anchor', () => {
@@ -99,13 +114,13 @@ test('repeated extreme wheel input saturates safely and reversing remains immedi
   assert.equal(limits.maxSpan, 60);
   for (const ratio of [0.05, 0.35, 0.95]) {
     let view = { start: 0, end: 1 };
-    const anchor = at(view, ratio);
     for (let index = 0; index < 500; index++) {
       view = zoomView(view, ratio, -1e300, limits);
       assertBounded(view, limits);
-      close(at(view, ratio), anchor, 'outward saturation anchor');
+      assert.equal(view.start, 0, 'outward zoom stops at the first frame');
     }
     close(span(view), limits.maxSpan, 'maximum span');
+    const anchor = at(view, ratio);
     view = zoomView(view, ratio, 1, limits);
     assert.ok(span(view) < limits.maxSpan, 'reverse wheel must leave the limit immediately');
     for (let index = 0; index < 500; index++) {

@@ -17,8 +17,8 @@ protocol.registerSchemesAsPrivileged(
 );
 let mainWindow;
 let menuController;
-async function selectedUrdf(filename, register = false) {
-  if (typeof filename !== 'string' || !filename.toLowerCase().endsWith('.urdf'))
+async function selectedUrdf(filename, register = false, model = false) {
+  if (typeof filename !== 'string' || !(model ? /\.(xml|urdf)$/i.test(filename) : filename.toLowerCase().endsWith('.urdf')))
     throw new Error('Choose a .urdf resource.');
   if (register) {
     const directory = path.dirname(filename);
@@ -109,6 +109,10 @@ app.whenReady().then(async () => {
     const { filename } = await projects.authorized(filePath(directory));
     return projects.search(filename, query);
   });
+  handle('mojive:search-model-assets', async (directory, query) => {
+    const { filename } = await projects.authorized(filePath(directory));
+    return projects.search(filename, query, ['.xml', '.urdf']);
+  });
   handle('mojive:open-scene-path', async (filename) => {
     const result = await fileAccess.readScene(filename);
     await projects.register(path.dirname(result.path));
@@ -123,6 +127,7 @@ app.whenReady().then(async () => {
   handle('mojive:confirm-close', () => {
     mainWindow.destroy();
   });
+  handle('mojive:open-model-path', async (filename) => selectedUrdf(await fs.realpath(filePath(filename)), true, true));
   handle('mojive:read-urdf', (filename) => selectedUrdf(filename));
   mainWindow = new BrowserWindow({
     width: 1540,
@@ -166,7 +171,7 @@ app.whenReady().then(async () => {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          `default-src 'self'; script-src 'self'${developmentUrl ? " 'unsafe-eval'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: mojive-resource:; font-src 'self'; connect-src 'self' mojive-resource:${dev}; object-src 'none'; base-uri 'self'; frame-src 'none'`,
+          `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${developmentUrl ? " 'unsafe-eval'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: mojive-resource:; font-src 'self'; connect-src 'self' mojive-resource:${dev}; object-src 'none'; base-uri 'self'; frame-src 'none'`,
         ],
       },
     });

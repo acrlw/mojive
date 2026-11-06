@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const MENU_ICONS = {
   'app.settings': 'settings',
   'file.openUrdf': 'file',
+  'file.openSimulation': 'file',
   'file.openProject': 'folder',
   'file.closeProject': 'close',
   'file.openScene': 'scene',
@@ -128,6 +129,7 @@ function createMenuController(getWindow, development = false) {
           label: t('file'),
           submenu: [
             item('file.openUrdf', 'openUrdf', { accelerator: 'Command+O' }),
+            item('file.openSimulation', 'openSimulation'),
             item('file.openProject', 'openProject', { accelerator: 'Command+Shift+O' }),
             item('file.closeProject', 'closeProject', { enabled: state.hasProject }),
             item('file.openScene', 'openScene'),
