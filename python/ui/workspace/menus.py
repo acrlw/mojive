@@ -39,7 +39,6 @@ class Menus:
         self.color_editor = ColorEditor()
         self.shading = "Solid"
         self.menu_rects = {}
-        self.menu_center_y = 0.0
         self.menu_height = 0.0
         self.visible_menus = TOP_MENUS
         self.overflow_menus = ()
@@ -208,23 +207,22 @@ class Menus:
         if not imgui.begin_menu_bar():
             return
         self._bar_menu_open = any(imgui.is_popup_open(name) for name in (*TOP_MENUS, "More"))
-        imgui.set_cursor_pos_x(44 * self.s)
         position = imgui.get_cursor_screen_pos()
         height = self.trigger_size("File")[1]
         title = self.ui.component_style("titlebar")
         if region is not None:
-            position.x = region.x + (26 + title.get("columnGap", title.get("gap", 10))) * self.s
+            position.x = region.x
             position.y = title.align_rect(region, 0, height * self.s, horizontal="start").y
         else:
             padding = title.edges("padding", self.s)
             content_height = DESIGN.application_height * self.s - padding[1] - padding[3]
+            position.x = imgui.get_window_pos().x + padding[0]
             position.y = (
                 imgui.get_window_pos().y
                 + padding[1]
                 + max(0, (content_height - height * self.s) / 2)
             )
         imgui.set_cursor_screen_pos(position)
-        self.menu_center_y = position.y + height * self.s / 2
         if right_edge is None:
             right_edge = imgui.get_window_pos().x + imgui.get_window_width() - 57 * self.s
         self.visible_menus, self.overflow_menus = self.bar_layout(

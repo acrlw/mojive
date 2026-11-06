@@ -159,24 +159,6 @@ def chrome(workspace):
                     - action_width
                     - style.get("columnGap", style.get("gap", 10)) * scale,
                 )
-            center_y = workspace.menus.menu_center_y
-            from mojive.ui.workspace.widgets import ACCENT
-
-            brand_width = u.measure("M", 18)
-            u.text(
-                content.x + (28 * scale - brand_width) / 2,
-                center_y - 9 * scale,
-                "M",
-                ACCENT,
-                18,
-                bold=True,
-            )
-            workspace.rects["application-logo"] = [
-                content.x + 2 * scale,
-                center_y - 12 * scale,
-                24 * scale,
-                24 * scale,
-            ]
             menu_right = max(
                 (r[0] + r[2] for r in workspace.menus.menu_rects.values()), default=content.x
             )
@@ -279,13 +261,11 @@ def chrome(workspace):
                     ),
                 )
             gap = style.get("columnGap", style.get("gap", 10)) * scale
-            after_logo = content.x + 26 * scale
             u.record_component_box(
                 "titlebar",
                 box,
                 key="application-titlebar",
                 fields=[
-                    workspace.rects["application-logo"],
                     *workspace.menus.menu_rects.values(),
                     *(
                         u.hits[key]
@@ -299,7 +279,6 @@ def chrome(workspace):
                 ],
                 fieldRegions={
                     name: [
-                        [after_logo, content.y, gap, content.height],
                         [menu_right, content.y, gap, content.height],
                         [content.right - action_width - gap, content.y, gap, content.height],
                     ]

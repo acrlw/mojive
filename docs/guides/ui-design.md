@@ -257,6 +257,7 @@ shrinking typography or flattening the larger separation between semantic groups
 Menu rows retain 10-point horizontal content insets in addition to the shell's
 4-point inset. Removing an unused icon column must not remove the text's breathing room.
 The application menu bar uses a 36-point shell around its existing 28-point controls.
+Its first menu starts at the shell's content inset, with no brand glyph or reserved logo slot.
 Reduce surplus vertical clearance before shrinking captions or hit targets. Larger authored
 controls still expand the shell, and fractional scales reserve the complete native row.
 Ordinary framed controls use a 4-point radius at their existing 28-point height.
