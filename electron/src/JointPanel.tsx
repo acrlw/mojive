@@ -16,6 +16,7 @@ type Props = {
   onFocus: (id: string) => void;
   onBegin: () => void;
   onCommit: () => void;
+  onCancel?: () => void;
   onChange: () => void;
   showHeader?: boolean;
 };
@@ -53,6 +54,7 @@ export function JointPanel({
   onFocus,
   onBegin,
   onCommit,
+  onCancel,
   onChange,
   showHeader = true,
 }: Props) {
@@ -199,6 +201,7 @@ export function JointPanel({
                     onBegin();
                   }}
                   onCommit={onCommit}
+                  onCancel={onCancel}
                   onChange={onChange}
                 />
               )}

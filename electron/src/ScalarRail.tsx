@@ -11,6 +11,7 @@ interface ScalarRailProps {
   unboundedSpan?: number;
   onBegin: () => void;
   onCommit: () => void;
+  onCancel?: () => void;
   onChange: (value: number) => void;
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -20,6 +21,7 @@ export function ScalarRail({
   value, min: lo, max: hi, label, valueText, disabled = false, unboundedSpan = 1,
   onBegin,
   onCommit,
+  onCancel,
   onChange,
 }: ScalarRailProps) {
   const drag = useRef<{
@@ -30,8 +32,8 @@ export function ScalarRail({
   } | null>(null);
   const element = useRef<HTMLDivElement>(null);
   const [initial, setInitial] = useState<number | null>(null);
-  const callbacks = useRef({ onBegin, onCommit, onChange });
-  callbacks.current = { onBegin, onCommit, onChange };
+  const callbacks = useRef({ onBegin, onCommit, onCancel, onChange });
+  callbacks.current = { onBegin, onCommit, onCancel, onChange };
   const bounded = Number.isFinite(lo) && Number.isFinite(hi) && hi > lo;
   const fraction = (value: number) =>
     bounded ? clamp((value - lo) / (hi - lo || 1), 0, 1) : 0.5;
@@ -41,8 +43,12 @@ export function ScalarRail({
     if (!state) return;
     drag.current = null;
     setInitial(null);
-    if (cancel) callbacks.current.onChange(state.initial);
-    callbacks.current.onCommit();
+    if (state.pointer !== null && element.current?.hasPointerCapture(state.pointer))
+      element.current.releasePointerCapture(state.pointer);
+    if (cancel) {
+      callbacks.current.onChange(state.initial);
+      (callbacks.current.onCancel ?? callbacks.current.onCommit)();
+    } else callbacks.current.onCommit();
   };
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -51,8 +57,13 @@ export function ScalarRail({
       event.stopPropagation();
       finish(true);
     };
+    const blur = () => finish(true);
     window.addEventListener('keydown', escape, true);
-    return () => window.removeEventListener('keydown', escape, true);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', escape, true);
+      window.removeEventListener('blur', blur);
+    };
   }, []);
   const pointerValue = (x: number, precision = false) => {
     const state = drag.current,
@@ -100,11 +111,9 @@ export function ScalarRail({
       onPointerUp={(event) => {
         if (drag.current?.pointer !== event.pointerId) return;
         finish();
-        if (event.currentTarget.hasPointerCapture(event.pointerId))
-          event.currentTarget.releasePointerCapture(event.pointerId);
       }}
       onPointerCancel={() => finish(true)}
-      onLostPointerCapture={() => finish()}
+      onLostPointerCapture={() => finish(true)}
       onBlur={() => {
         if (drag.current?.pointer === null) finish();
       }}

@@ -142,13 +142,13 @@ export default function App() {
   const [settings, updateSettings] = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [layers, setLayers] = useState({ ...DEFAULT_VIEWPORT_LAYERS });
-  const resolvedLayers = {
+  const resolvedLayers = useMemo(() => ({
     ...layers,
     grid: settings.showGrid,
     viewCube: settings.showViewCube,
     helpers: settings.showEntityIcons,
     influence: settings.showEntityInfluence ?? true,
-  };
+  }), [layers, settings.showGrid, settings.showViewCube, settings.showEntityIcons, settings.showEntityInfluence]);
   function changeLayers(next: typeof resolvedLayers) {
     setLayers(next);
     updateSettings({
@@ -347,6 +347,7 @@ export default function App() {
   const undo = useRef<Snapshot[]>([]);
   const redo = useRef<Snapshot[]>([]);
   const pending = useRef<Snapshot | null>(null);
+  const recordingJointBaseline = useRef<PhysicsHistoryEntry | null>(null);
   const logId = useRef(0);
   const recordClock = useRef<{
     start: number;
@@ -475,12 +476,44 @@ export default function App() {
     pending.current = baseline;
     historyWork.current = Promise.all([historyWork.current, baseline.captured]).catch(report);
   }
+  function beginJoint() {
+    if (!physics.current) {
+      begin();
+      return;
+    }
+    physics.current.session.pause();
+    // A recording owns the document transaction; keep its joint gesture cancellation separate.
+    if (state.current.recording && !recordingJointBaseline.current) {
+      const baseline = capturePhysicsHistory(physics.current.session);
+      recordingJointBaseline.current = baseline;
+      historyWork.current = Promise.all([historyWork.current, baseline.captured]).catch(report);
+    }
+    beginPhysics();
+  }
+  function jointChanged() {
+    // Physics targets publish their applied frame asynchronously through the session.
+    if (!physics.current) changed();
+  }
+  function cancelJoint() {
+    const baseline = recordingJointBaseline.current;
+    recordingJointBaseline.current = null;
+    if (baseline) {
+      historyWork.current = Promise.all([historyWork.current, restore(baseline)]).catch(report);
+    } else {
+      cancel();
+    }
+  }
   function cancel() {
     const backup = pending.current;
     pending.current = null;
-    if (backup) void historyWork.current.then(() => restore(backup)).catch(report);
+    if (!backup) return;
+    // Physics cancellation must enter the session queue before another gesture can begin.
+    historyWork.current = (backup.kind === 'physics'
+      ? Promise.all([historyWork.current, restore(backup)])
+      : historyWork.current.then(() => restore(backup))).catch(report);
   }
   function commit(): Snapshot | null {
+    recordingJointBaseline.current = null;
     if (state.current.recording) return null;
     if (pending.current?.kind === 'physics') {
       const baseline = pending.current, runtime = physics.current;
@@ -553,7 +586,8 @@ export default function App() {
     if (s.kind === 'physics') {
       await restorePhysicsHistory(s, physics.current?.session);
       setPlaying(false);
-      changed();
+      invalidateNoticeAction();
+      setDirty(true);
       return;
     }
     const old = state.current.doc;
@@ -625,9 +659,13 @@ export default function App() {
     physics.current?.dispose();
     physics.current = runtime;
     setSimulation(runtime?.session.current ?? null);
+    let appliedFrame = runtime?.session.current.frame;
     physicsUnsubscribe.current = runtime?.session.subscribe((value) => {
       setSimulation(value);
-      setRevision((revision) => revision + 1);
+      if (value.frame !== appliedFrame) {
+        appliedFrame = value.frame;
+        setRevision((revision) => revision + 1);
+      }
       if (value.error) report(value.error);
     }) ?? null;
     runtime?.setErrorHandler(report);
@@ -671,6 +709,7 @@ export default function App() {
     undo.current = [];
     redo.current = [];
     pending.current = null;
+    recordingJointBaseline.current = null;
     setHistoryTick((t) => t + 1);
     setRevision((r) => r + 1);
     for (const w of next.warnings) log(w, 'warn');
@@ -2159,9 +2198,10 @@ export default function App() {
               activeJointId={activeJoint}
               onSelect={setSelected}
               onFocus={(id) => viewport.current?.focus(id)}
-              onBegin={begin}
+              onBegin={beginJoint}
               onCommit={commit}
-              onChange={changed}
+              onCancel={cancelJoint}
+              onChange={jointChanged}
             />
           )}
           {left === 'cameras' && (
@@ -2286,6 +2326,9 @@ export default function App() {
               onSelect={setSelected}
               onProjectionChange={setProjection}
               onBegin={begin}
+              onJointBegin={beginJoint}
+              onJointChange={jointChanged}
+              onJointCancel={cancelJoint}
               onPerturbBegin={beginPhysics}
               onPerturbCancel={() => { if (!state.current.recording) cancel(); }}
               onChange={changed}
@@ -2484,9 +2527,10 @@ export default function App() {
                         doc={doc!}
                         joint={joint}
                         showScalarLabel
-                        onBegin={begin}
+                        onBegin={beginJoint}
                         onCommit={commit}
-                        onChange={changed}
+                        onCancel={cancelJoint}
+                        onChange={jointChanged}
                       />
                     </Section>
                   )}

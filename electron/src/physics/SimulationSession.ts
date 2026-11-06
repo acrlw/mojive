@@ -19,6 +19,19 @@ export interface SimulationState {
   error: string | null;
 }
 
+type TargetCommand = Extract<PhysicsCommand, { type: 'jointPose' | 'perturbTarget' }>;
+interface PendingTarget {
+  command: TargetCommand;
+  completion: Promise<PhysicsFrame>;
+}
+
+function sameTarget(left: TargetCommand, right: TargetCommand): boolean {
+  return left.type === 'jointPose'
+    ? right.type === 'jointPose' && left.id === right.id
+    : right.type === 'perturbTarget' && left.target.bodyId === right.target.bodyId &&
+      left.target.mode === right.target.mode;
+}
+
 /** Serial command ownership and playback scheduling, independent of UI and engines. */
 export class SimulationSession {
   private backend: PhysicsBackend | null = null;
@@ -34,6 +47,7 @@ export class SimulationSession {
   };
   private listeners = new Set<(state: SimulationState) => void>();
   private queue: Promise<unknown> = Promise.resolve();
+  private pendingTarget: PendingTarget | undefined;
   private generation = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastTick = 0;
@@ -92,6 +106,7 @@ export class SimulationSession {
       if (epoch !== this.loadEpoch) throw new Error('Simulation loading was superseded.');
       this.pause();
       this.generation++;
+      this.pendingTarget = undefined;
       this.backend?.dispose();
       this.backend = candidate;
       this.elapsed = 0;
@@ -112,6 +127,8 @@ export class SimulationSession {
   }
 
   private enqueue<T>(action: (backend: PhysicsBackend) => Promise<T>): Promise<T> {
+    // Captures and discrete commands delimit gestures; later targets cannot replace work before them.
+    this.pendingTarget = undefined;
     const backend = this.backend,
       generation = this.generation;
     const operation = this.queue.then(() => {
@@ -124,7 +141,27 @@ export class SimulationSession {
   }
 
   async execute(command: PhysicsCommand): Promise<PhysicsFrame> {
+    if (command.type === 'jointPose') this.pause();
     return this.enqueue((backend) => this.apply(backend, command));
+  }
+
+  /** Keep the latest unstarted pointer target without building a queue of obsolete poses. */
+  updateTarget(command: TargetCommand): Promise<PhysicsFrame> {
+    // Joint posing edits qpos directly; physical perturbation intentionally continues simulation.
+    if (command.type === 'jointPose') this.pause();
+    if (this.pendingTarget && sameTarget(this.pendingTarget.command, command)) {
+      this.pendingTarget.command = command;
+      return this.pendingTarget.completion;
+    }
+    const pending: PendingTarget = {
+      command,
+      completion: this.enqueue((backend) => {
+        if (this.pendingTarget === pending) this.pendingTarget = undefined;
+        return this.apply(backend, pending.command);
+      }),
+    };
+    this.pendingTarget = pending;
+    return pending.completion;
   }
 
   stepBack(): Promise<PhysicsFrame> {
@@ -178,6 +215,25 @@ export class SimulationSession {
   capture(): Promise<PhysicsSnapshot> {
     return this.enqueue((backend) => backend.capture());
   }
+
+  /** Reserve cancellation's place before the next gesture, even while its baseline is pending. */
+  restoreCaptured(captured: Promise<PhysicsSnapshot>): Promise<PhysicsFrame> {
+    this.pause();
+    const generation = this.generation;
+    // Observe rejection now: the queue may still be executing an earlier slow command.
+    const result = captured.then(
+      (snapshot) => ({ ok: true as const, snapshot }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    return this.enqueue(async (backend) => {
+      const outcome = await result;
+      if (backend !== this.backend || generation !== this.generation)
+        throw new Error('The simulation is no longer active.');
+      if (!outcome.ok) throw outcome.error;
+      return this.apply(backend, { type: 'restore', snapshot: outcome.snapshot });
+    });
+  }
+
   setSpeed(speed: number): void {
     if (!Number.isFinite(speed) || speed <= 0 || speed > 16)
       throw new Error('Playback speed must be between 0 and 16.');
@@ -231,6 +287,7 @@ export class SimulationSession {
   detach(): void {
     this.pause();
     this.generation++;
+    this.pendingTarget = undefined;
     this.loadEpoch++;
     this.elapsed = 0;
     this.backend?.dispose();

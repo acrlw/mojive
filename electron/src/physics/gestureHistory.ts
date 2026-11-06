@@ -23,11 +23,9 @@ export async function physicsHistoryChanged(before: PhysicsHistoryEntry, after: 
 }
 
 export async function restorePhysicsHistory(entry: PhysicsHistoryEntry, session?: SimulationSession): Promise<void> {
-  const snapshot = await entry.captured;
   if (session !== entry.session || session.current.source !== entry.source)
     throw new Error('The simulation history belongs to a different model.');
-  session.pause();
   // The backend validates and restores its complete state atomically. The existing
   // SceneBinding consumes the published frame, so geometry and materials stay intact.
-  await session.execute({ type: 'restore', snapshot });
+  await session.restoreCaptured(entry.captured);
 }

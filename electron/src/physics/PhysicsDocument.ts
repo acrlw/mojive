@@ -2,7 +2,7 @@ import { capturePose, type Keyframe } from '../editor';
 import type { SceneDocument } from '../contracts';
 import { bindSceneCommands } from '../scene-commands';
 import type { ModelBundle } from '../resources/modelBundle';
-import type { PhysicsBackendFactory, PhysicsSnapshot } from './contracts';
+import type { PhysicsBackendFactory, PhysicsCommand, PhysicsFrame, PhysicsSnapshot } from './contracts';
 import { SceneBinding } from './SceneBinding';
 import { SimulationSession } from './SimulationSession';
 import { checkModelLoad, type ModelLoadOptions } from '../resources/loading.ts';
@@ -17,6 +17,7 @@ export class PhysicsDocument {
   private unbind: () => void = () => {};
   private unsubscribe: () => void;
   private onError: (error: unknown) => void = () => {};
+  private targetOperation: Promise<PhysicsFrame> | undefined;
 
   private constructor(bundle: ModelBundle, binding: SceneBinding, session: SimulationSession) {
     this.bundle = bundle; this.binding = binding; this.session = session;
@@ -53,16 +54,27 @@ export class PhysicsDocument {
   }
   get document(): SceneDocument { return this.binding.document; }
   setErrorHandler(handler: (error: unknown) => void): void { this.onError = handler; }
+  private updateTarget(command: Extract<PhysicsCommand, { type: 'jointPose' | 'perturbTarget' }>): void {
+    const operation = this.session.updateTarget(command);
+    if (operation === this.targetOperation) return;
+    this.targetOperation = operation;
+    void operation.then(() => {
+      if (this.targetOperation === operation) this.targetOperation = undefined;
+    }, (error) => {
+      if (this.targetOperation === operation) this.targetOperation = undefined;
+      this.onError(error);
+    });
+  }
   private bind(): void {
     this.unbind();
     this.unbind = bindSceneCommands(this.document, {
       setJointPosition: (id, position) => {
-        void this.session.execute({ type: 'jointPose', id, position }).catch((error) => this.onError(error));
+        this.updateTarget({ type: 'jointPose', id, position });
       },
       ...(this.binding.source.capabilities.includes('perturbation') ? { perturbation: {
         bodyAt: (id: string) => this.binding.bodyAt(id),
         update: (target: import('./contracts').PerturbationTarget) => {
-          void this.session.execute({ type: 'perturbTarget', target }).catch((error) => this.onError(error));
+          this.updateTarget({ type: 'perturbTarget', target });
         },
         clear: () => { void this.session.execute({ type: 'clearPerturbation' }).catch((error) => this.onError(error)); },
       } } : {}),

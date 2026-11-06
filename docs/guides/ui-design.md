@@ -622,6 +622,14 @@ idle. Separate UI work, renderer work, initialization, and system pressure. Reus
 geometry and measurements with explicit invalidation and bounded caches; skip invisible ink
 without removing active native items. Do not flatten corners, change spacing, or shrink text
 as an unrequested optimization.
+For asynchronous physics edits, distinguish the requested gesture value from the last acknowledged
+scene frame. Rebase only at a real limit; a delayed frame is not a clamp. Coalesce superseded
+continuous targets before backend execution, while preserving capture, commit, cancel and undo
+barriers. Pose editing pauses simulation; physical perturbation retains its running-state semantics.
+Cancellation reserves its restore position in the command queue before awaiting an asynchronous
+baseline. Escape, window blur and unexpected pointer-capture loss restore the same baseline;
+clear gesture ownership before releasing capture.
+Stable hover must return to idle after dwell feedback settles, including after a drag ends.
 At capacity, measurement caches evict cold entries rather than clearing hot layouts along with
 them. Repeated scene-row insertion and scrolling must preserve frequently used geometry and its
 field-read evidence. Bulk cache churn can promote short-lived layout objects into older GC

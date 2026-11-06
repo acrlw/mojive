@@ -87,8 +87,10 @@ interface Drag {
   total: number;
   jointValue?: number;
   jointOriginValue?: number;
+  jointRequestedValue?: number;
   configurationPosition?: number[];
   configurationRotation?: number[];
+  configurationWorldOrigin?: THREE.Matrix4;
   lastVector: THREE.Vector3;
   ring: P[];
   tangent: P;
@@ -118,6 +120,7 @@ export class GizmoOverlay {
     kind: 'limit' | 'rail';
     joint: Joint;
     original: number;
+    lastRequested: number;
     limit?: JointTick['kind'];
   } | null = null;
   private dragLink: DragLinkRaster | null = null;
@@ -168,6 +171,7 @@ export class GizmoOverlay {
       onBegin?: () => void;
       onChange: () => void;
       onCommit?: () => void;
+      onCancel?: () => void;
       invalidate: () => void;
     },
   ) {
@@ -570,6 +574,17 @@ export class GizmoOverlay {
       axisHit = this.hingeAxisHit(p),
       hit = projection ? jointHit(p, projection, axisHit) : { hit: axisHit, limit: null },
       rail = projection?.rail ?? null;
+    // Settled hover does not poll. Refresh its last-seen time on departure so
+    // the precision rail retains the native exit grace after a stationary hover.
+    if (this.precisionVisible && this.hover && !hit.hit && !inRail(p, rail))
+      this.dwell.update(
+        projection?.id ?? null,
+        !!rail,
+        true,
+        this.precisionHovered,
+        this.jointEdit?.kind === 'rail',
+        now,
+      );
     this.precisionHovered = this.precisionVisible && inRail(p, rail);
     this.precisionVisible = this.dwell.update(
       projection?.id ?? null,
@@ -582,10 +597,19 @@ export class GizmoOverlay {
     this.limitHover = this.precisionHovered ? null : hit.limit;
     if (this.joint)
       this.hover = hit.hit || this.precisionHovered ? (projection?.slide ? 'a2' : 'r2') : null;
-    if (rail && (hit.hit || this.precisionVisible) && this.dwellTimer === undefined)
+    const waitingForDwell =
+      !!rail &&
+      !this.jointEdit &&
+      ((!this.precisionVisible && hit.hit) ||
+        (this.precisionVisible && !hit.hit && !this.precisionHovered));
+    if (!waitingForDwell && this.dwellTimer !== undefined) {
+      window.clearTimeout(this.dwellTimer);
+      this.dwellTimer = undefined;
+    }
+    if (waitingForDwell && this.dwellTimer === undefined)
       this.dwellTimer = window.setTimeout(() => {
         this.dwellTimer = undefined;
-        this.callbacks.invalidate();
+        this.hoverAt(this.currentPointer);
       }, 40);
     return hit.hit || this.precisionHovered;
   }
@@ -770,6 +794,7 @@ export class GizmoOverlay {
         kind: 'limit',
         joint: this.joint,
         original: this.joint.value,
+        lastRequested: this.joint.value,
         limit: this.limitHover.kind,
       };
       this.callbacks.invalidate();
@@ -777,7 +802,12 @@ export class GizmoOverlay {
     }
     if (this.precisionHovered && this.jointProjection.rail) {
       this.callbacks.onBegin?.();
-      this.jointEdit = { kind: 'rail', joint: this.joint, original: this.joint.value };
+      this.jointEdit = {
+        kind: 'rail',
+        joint: this.joint,
+        original: this.joint.value,
+        lastRequested: this.joint.value,
+      };
       this.moveJointEdit(p, !!this.settings.snapEnabled || this.snapModifier);
       return true;
     }
@@ -798,8 +828,9 @@ export class GizmoOverlay {
         const step = edit.joint.type === 'prismatic' ? this.translationStep : this.rotationStep;
         value = Math.max(rail.lower, Math.min(rail.upper, snapValue(value, step)));
       }
-      if (Math.abs(value - edit.joint.value) > 1e-12) {
+      if (Math.abs(value - edit.lastRequested) > 1e-12) {
         setJoint(this.doc, edit.joint.id, value);
+        edit.lastRequested = value;
         this.callbacks.onChange();
         this.rebuild();
       }
@@ -807,9 +838,25 @@ export class GizmoOverlay {
     this.draw();
     this.callbacks.invalidate();
   }
-  private rebaseJointDrag(d: Drag, p: P) {
-    d.jointValue = this.joint!.value;
-    if (this.joint!.type === 'prismatic') d.worldPosition.copy(this.currentWorldPosition());
+  private applyJointDrag(d: Drag, p: P, requested: number, raw: number) {
+    const joint = this.joint!,
+      applied = Math.max(joint.lower, Math.min(joint.upper, requested));
+    if (Math.abs(applied - (d.jointRequestedValue ?? d.jointOriginValue ?? 0)) > 1e-12) {
+      setJoint(this.doc, joint.id, applied);
+      d.jointRequestedValue = applied;
+    }
+    // Physics acknowledges values asynchronously. Only a real limit clamp rebases
+    // the gesture; an older acknowledged pose must not become its new origin.
+    const outside = requested < joint.lower - 1e-12 || requested > joint.upper + 1e-12,
+      heldOutside =
+        (requested <= joint.lower + 1e-12 && raw < joint.lower - 1e-12) ||
+        (requested >= joint.upper - 1e-12 && raw > joint.upper + 1e-12);
+    if (outside || heldOutside) this.rebaseJointDrag(d, p, applied);
+  }
+  private rebaseJointDrag(d: Drag, p: P, applied: number) {
+    if (this.joint!.type === 'prismatic')
+      d.worldPosition.addScaledVector(d.handle.direction, applied - (d.jointValue ?? 0));
+    d.jointValue = applied;
     d.start = p;
     d.angle = 0;
     d.total = 0;
@@ -828,7 +875,7 @@ export class GizmoOverlay {
         setJoint(this.doc, edit.joint.id, edit.original);
         this.callbacks.onChange();
       }
-      this.callbacks.onCommit?.();
+      (cancel ? (this.callbacks.onCancel ?? this.callbacks.onCommit) : this.callbacks.onCommit)?.();
     } else if (
       !cancel &&
       this.limitHover &&
@@ -1057,9 +1104,20 @@ export class GizmoOverlay {
   hoverAt(p: P) {
     this.currentPointer = p;
     if (this.joint) {
+      const hover = this.hover,
+        precisionVisible = this.precisionVisible,
+        precisionHovered = this.precisionHovered,
+        limit = this.limitHover?.kind;
       const hit = this.refreshJointHover(p);
-      this.draw();
-      this.callbacks.invalidate();
+      if (
+        hover !== this.hover ||
+        precisionVisible !== this.precisionVisible ||
+        precisionHovered !== this.precisionHovered ||
+        limit !== this.limitHover?.kind
+      ) {
+        this.draw();
+        this.callbacks.invalidate();
+      }
       return hit;
     }
     const h = this.hit(p),
@@ -1140,8 +1198,15 @@ export class GizmoOverlay {
       total: 0,
       jointValue: this.joint?.value,
       jointOriginValue: this.joint?.value,
+      jointRequestedValue: this.joint?.value,
       configurationPosition: this.configurationJoint?.position?.toArray(),
       configurationRotation: this.configurationJoint?.rotation?.toArray(),
+      configurationWorldOrigin: this.configurationJoint
+        ? new THREE.Matrix4().multiplyMatrices(
+            this.configurationJoint.object.parent?.matrixWorld ?? new THREE.Matrix4(),
+            this.configurationJoint.origin,
+          )
+        : undefined,
       lastVector: new THREE.Vector3(),
       ring: [],
       tangent: [1, 0],
@@ -1215,7 +1280,9 @@ export class GizmoOverlay {
     if (!d) return;
     d.snapping = snap;
     const h = d.handle,
-      precision = shift ? 0.1 : 1;
+      precision = shift ? 0.1 : 1,
+      configurationPosition = this.configurationJoint ? d.worldPosition.clone() : null,
+      configurationRotation = this.configurationJoint ? d.worldQuaternion.clone() : null;
     let scalar = 0,
       rawScalar = 0;
     if (h.kind === 'ring') {
@@ -1257,23 +1324,18 @@ export class GizmoOverlay {
       d.total = snap ? snapValue(d.angle, this.rotationStep) : d.angle;
       if (this.joint) {
         const requested = (d.jointValue ?? 0) + d.total;
-        setJoint(this.doc, this.joint.id, requested);
-        if (
-          Math.abs(this.joint.value - requested) > 1e-12 ||
-          (this.joint.value <= this.joint.lower + 1e-12 &&
-            (d.jointValue ?? 0) + d.angle < this.joint.lower - 1e-12) ||
-          (this.joint.value >= this.joint.upper - 1e-12 &&
-            (d.jointValue ?? 0) + d.angle > this.joint.upper + 1e-12)
-        )
-          this.rebaseJointDrag(d, p);
+        this.applyJointDrag(d, p, requested, (d.jointValue ?? 0) + d.angle);
       } else {
         const world = new THREE.Quaternion()
           .setFromAxisAngle(h.direction, d.total)
           .multiply(d.worldQuaternion);
-        const parent =
-          d.object.parent?.getWorldQuaternion(new THREE.Quaternion()).invert() ??
-          new THREE.Quaternion();
-        d.object.quaternion.copy(parent.multiply(world));
+        if (configurationRotation) configurationRotation.copy(world);
+        else {
+          const parent =
+            d.object.parent?.getWorldQuaternion(new THREE.Quaternion()).invert() ??
+            new THREE.Quaternion();
+          d.object.quaternion.copy(parent.multiply(world));
+        }
       }
     } else if (h.kind === 'trackball') {
       const angles: P = [
@@ -1291,12 +1353,15 @@ export class GizmoOverlay {
         rotvec = right.multiplyScalar(angles[0]).addScaledVector(up, angles[1]);
       d.total = rotvec.length();
       const q = new THREE.Quaternion()
-          .setFromAxisAngle(rotvec.normalize(), d.total)
-          .multiply(d.worldQuaternion),
-        parent =
+        .setFromAxisAngle(rotvec.normalize(), d.total)
+        .multiply(d.worldQuaternion);
+      if (configurationRotation) configurationRotation.copy(q);
+      else {
+        const parent =
           d.object.parent?.getWorldQuaternion(new THREE.Quaternion()).invert() ??
           new THREE.Quaternion();
-      d.object.quaternion.copy(parent.multiply(q));
+        d.object.quaternion.copy(parent.multiply(q));
+      }
     } else {
       const normal =
           h.kind === 'axis'
@@ -1345,15 +1410,7 @@ export class GizmoOverlay {
       }
       if (this.joint) {
         const requested = (d.jointValue ?? 0) + scalar;
-        setJoint(this.doc, this.joint.id, requested);
-        if (
-          Math.abs(this.joint.value - requested) > 1e-12 ||
-          (this.joint.value <= this.joint.lower + 1e-12 &&
-            (d.jointValue ?? 0) + rawScalar < this.joint.lower - 1e-12) ||
-          (this.joint.value >= this.joint.upper - 1e-12 &&
-            (d.jointValue ?? 0) + rawScalar > this.joint.upper + 1e-12)
-        )
-          this.rebaseJointDrag(d, p);
+        this.applyJointDrag(d, p, requested, (d.jointValue ?? 0) + rawScalar);
       } else if (this.tool === 'scale') {
         const amount =
           h.axis < 0
@@ -1368,17 +1425,23 @@ export class GizmoOverlay {
           );
       } else {
         const target = d.worldPosition.clone().add(delta);
-        if (d.object.parent) d.object.parent.worldToLocal(target);
-        d.object.position.copy(target);
+        if (configurationPosition) configurationPosition.copy(target);
+        else {
+          if (d.object.parent) d.object.parent.worldToLocal(target);
+          d.object.position.copy(target);
+        }
       }
     }
     d.last = p;
     d.object.updateMatrixWorld(true);
-    if (this.configurationJoint)
+    if (this.configurationJoint && configurationPosition && configurationRotation)
+      // Configuration requests use the frozen gesture pose. Physics-owned
+      // proxies change only when their authoritative scene frame arrives.
       this.writeConfigurationPose(
         this.configurationJoint,
-        d.object.getWorldPosition(new THREE.Vector3()),
-        d.object.getWorldQuaternion(new THREE.Quaternion()),
+        configurationPosition,
+        configurationRotation,
+        d.configurationWorldOrigin,
       );
     if (
       !this.configurationJoint &&
@@ -1399,9 +1462,11 @@ export class GizmoOverlay {
     const d = this.drag;
     if (!d) return;
     if (cancel) {
-      d.object.position.copy(d.position);
-      d.object.quaternion.copy(d.quaternion);
-      d.object.scale.copy(d.scale);
+      if (!this.joint && !this.configurationJoint) {
+        d.object.position.copy(d.position);
+        d.object.quaternion.copy(d.quaternion);
+        d.object.scale.copy(d.scale);
+      }
       if (this.joint) setJoint(this.doc, this.joint.id, d.jointOriginValue ?? 0);
       if (this.configurationJoint)
         setJointConfiguration(this.doc, this.configurationJoint.id, {
@@ -1418,7 +1483,7 @@ export class GizmoOverlay {
       this.callbacks.onChange();
     }
     this.drag = null;
-    this.callbacks.onCommit?.();
+    (cancel ? (this.callbacks.onCancel ?? this.callbacks.onCommit) : this.callbacks.onCommit)?.();
     this.rebuild();
     this.draw();
     this.callbacks.invalidate();
@@ -1427,12 +1492,15 @@ export class GizmoOverlay {
     joint: Joint,
     position: THREE.Vector3,
     rotation: THREE.Quaternion,
+    worldOrigin?: THREE.Matrix4,
   ) {
     joint.object.parent?.updateWorldMatrix(true, false);
-    const origin = new THREE.Matrix4().multiplyMatrices(
-        joint.object.parent?.matrixWorld ?? new THREE.Matrix4(),
-        joint.origin,
-      ),
+    const origin =
+        worldOrigin ??
+        new THREE.Matrix4().multiplyMatrices(
+          joint.object.parent?.matrixWorld ?? new THREE.Matrix4(),
+          joint.origin,
+        ),
       baseRotation = new THREE.Quaternion().setFromRotationMatrix(origin).invert();
     setJointConfiguration(this.doc, joint.id, {
       position:

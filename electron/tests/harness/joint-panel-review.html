@@ -17,7 +17,8 @@
       import { createCatalogScene } from '/src/SceneCatalog.ts';
       import { applySettings, normalizeSettings } from '/src/settings.tsx';
       const doc = await createCatalogScene('joint_gizmo');
-      window.jointReview = { doc, begins: 0, commits: 0, copied: '', errors: [] };
+      window.jointReview = { doc, begins: 0, commits: 0, cancels: 0, copied: '', errors: [] };
+      const cancelGestures = new URLSearchParams(location.search).has('cancel');
       window.mojive = {
         writeClipboardText: async (text) => {
           window.jointReview.copied = text;
@@ -48,6 +49,9 @@
             onCommit: () => {
               window.jointReview.commits++;
             },
+            onCancel: cancelGestures ? () => {
+              window.jointReview.cancels++;
+            } : undefined,
             onChange: () => refresh((value) => value + 1),
           }),
         );

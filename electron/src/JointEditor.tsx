@@ -45,6 +45,7 @@ type JointEditorProps = {
   joint: Joint;
   onBegin: () => void;
   onCommit: () => void;
+  onCancel?: () => void;
   onChange: () => void;
   showScalarLabel?: boolean;
 };
@@ -55,6 +56,7 @@ export function JointEditor({
   joint: j,
   onBegin,
   onCommit,
+  onCancel,
   onChange,
   showScalarLabel = false,
 }: JointEditorProps) {
@@ -96,6 +98,7 @@ export function JointEditor({
             unit="m"
             onBegin={onBegin}
             onCommit={onCommit}
+            onCancel={onCancel}
             onChange={(axis, value) => {
               const p = jointDisplayPose(j).position.toArray();
               p[axis] = value;
@@ -110,6 +113,7 @@ export function JointEditor({
           unit="°"
           onBegin={onBegin}
           onCommit={onCommit}
+          onCancel={onCancel}
           onChange={(axis, value) => {
             const a = [...angles];
             a[axis] = value;
@@ -143,7 +147,7 @@ export function JointEditor({
         <ScalarRail value={j.value} min={j.lower} max={j.upper}
           label={t('{{name}} slider', { name: j.name })} disabled={!!j.mimic}
           valueText={`${display(j.value).toFixed(3)} ${slide ? 'm' : '°'}`}
-          onBegin={onBegin} onCommit={onCommit} onChange={update} />
+          onBegin={onBegin} onCommit={onCommit} onCancel={onCancel} onChange={update} />
       )}
       <Numeric
         value={display(j.value)}
@@ -155,6 +159,7 @@ export function JointEditor({
         disabled={!!j.mimic}
         onBegin={onBegin}
         onCommit={onCommit}
+        onCancel={onCancel}
         onChange={(value) => update(slide ? value : THREE.MathUtils.degToRad(value))}
       />
     </div>

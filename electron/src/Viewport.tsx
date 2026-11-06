@@ -103,6 +103,9 @@ export interface ViewportProps {
   onSelect: (id: string | null) => void;
   onChange: () => void;
   onBegin?: () => void;
+  onJointBegin?: () => void;
+  onJointChange?: () => void;
+  onJointCancel?: () => void;
   onPerturbBegin?: () => void;
   onPerturbCancel?: () => void;
   onCommit?: () => void;
@@ -380,10 +383,41 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       if (!queued && !disposed) queued = requestAnimationFrame(draw);
     }
     invalidateRef.current = invalidate;
+    let capturedPointerId: number | null = null;
+    function capturePointer(id: number) {
+      capturedPointerId = id;
+      renderer.domElement.setPointerCapture(id);
+    }
+    function releasePointer() {
+      const id = capturedPointerId;
+      capturedPointerId = null;
+      if (id !== null && renderer.domElement.hasPointerCapture(id))
+        renderer.domElement.releasePointerCapture(id);
+      renderer.domElement.style.cursor = 'default';
+    }
+    let jointGesture = false;
     const gizmo = new GizmoOverlay(overlay, {
-      onBegin: () => latest.current.onBegin?.(),
-      onChange: () => latest.current.onChange(),
-      onCommit: () => latest.current.onCommit?.(),
+      onBegin: () => {
+        const current = latest.current;
+        jointGesture = current.tool === 'joint';
+        (jointGesture ? current.onJointBegin ?? current.onBegin : current.onBegin)?.();
+      },
+      onChange: () => {
+        const current = latest.current;
+        (jointGesture ? current.onJointChange ?? current.onChange : current.onChange)();
+      },
+      onCommit: () => {
+        jointGesture = false;
+        releasePointer();
+        latest.current.onCommit?.();
+      },
+      onCancel: () => {
+        const current = latest.current,
+          cancel = jointGesture ? current.onJointCancel ?? current.onCommit : current.onCommit;
+        jointGesture = false;
+        releasePointer();
+        cancel?.();
+      },
       invalidate,
     });
     const perturbation = new PerturbationGesture();
@@ -1258,7 +1292,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         ) {
           stopFly();
           animation = null;
-          renderer.domElement.setPointerCapture(e.pointerId);
+          capturePointer(e.pointerId);
           renderer.domElement.style.cursor = 'grabbing';
         }
         e.preventDefault();
@@ -1277,7 +1311,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         !e.metaKey;
       if (primary && selectedGizmosEnabled() && gizmo.begin(point(e))) {
         gizmo.setSnapping(snap);
-        renderer.domElement.setPointerCapture(e.pointerId);
+        capturePointer(e.pointerId);
         e.preventDefault();
         return;
       }
@@ -1292,7 +1326,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         select: primary && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey,
       };
       renderer.domElement.focus();
-      renderer.domElement.setPointerCapture(e.pointerId);
+      capturePointer(e.pointerId);
       e.preventDefault();
     };
     const move = (e: PointerEvent) => {
@@ -1306,7 +1340,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         return;
       }
       if (gizmo.active) {
-        gizmo.move(p, false, keyHeld(bindings().keys.snap, e, heldKeys));
+        if (capturedPointerId === e.pointerId)
+          gizmo.move(p, false, keyHeld(bindings().keys.snap, e, heldKeys));
         return;
       }
       if (!navigation) {
@@ -1320,6 +1355,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
             : 'default';
         return;
       }
+      if (navigation.id !== e.pointerId) return;
       const dx = p[0] - navigation.last[0],
         dy = p[1] - navigation.last[1];
       if (Math.hypot(p[0] - navigation.start[0], p[1] - navigation.start[1]) > 4)
@@ -1360,10 +1396,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       if (perturbation.active) {
         if (!perturbation.releases(e.pointerId, e.button)) return;
         finishPerturbation();
-        if (renderer.domElement.hasPointerCapture(e.pointerId))
-          renderer.domElement.releasePointerCapture(e.pointerId);
+        releasePointer();
         return;
       }
+      if (capturedPointerId !== e.pointerId) return;
       if ((navigation && e.button !== navigation.button) || (gizmo.active && e.button !== 0))
         return;
       if (gizmo.active) {
@@ -1378,8 +1414,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         navigation = null;
         if (!flyEngaged) finishPilot();
       }
-      if (renderer.domElement.hasPointerCapture(e.pointerId))
-        renderer.domElement.releasePointerCapture(e.pointerId);
+      releasePointer();
     };
     const cancel = () => {
       finishPerturbation(true);
@@ -1390,6 +1425,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       finishPilot(true);
       gizmo.end(true);
       navigation = null;
+      releasePointer();
     };
     const zoomBy = (delta: number, settle = true) => {
       if (!Number.isFinite(delta)) return;
@@ -1512,7 +1548,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       invalidate();
       if (e.key === 'Escape') {
         if (perturbation.active) {
-          finishPerturbation(true);
+          cancel();
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -1529,9 +1565,13 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
           e.stopPropagation();
           return;
         }
-        if (gizmo.active) gizmo.end(true);
-        else latest.current.onSelect(null);
-        navigation = null;
+        if (gizmo.active || navigation) {
+          cancel();
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        latest.current.onSelect(null);
       }
       if (
         !perturbation.active &&

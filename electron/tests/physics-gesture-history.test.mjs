@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { SimulationSession } from '../src/physics/SimulationSession.ts';
 import { capturePhysicsHistory, physicsHistoryChanged, restorePhysicsHistory } from '../src/physics/gestureHistory.ts';
 
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((accept, fail) => { resolve = accept; reject = fail; });
+  return { promise, resolve, reject };
+}
+
 async function fixture(t) {
   const source = { id: 'model', bodies: [], joints: [], cameras: [], lights: [], actuators: [], geometries: [],
     toJSON() { throw new Error('History must not serialize scene assets.'); } };
@@ -61,6 +67,79 @@ test('cancel restores the gesture baseline and unchanged gestures do not create 
   await session.execute({ type: 'controls', values: [{ id: 'motor', value: 1 }] });
   await restorePhysicsHistory(before, session);
   assert.deepEqual(await session.capture(), await before.captured);
+});
+
+test('cancel reserves its queue position before a new gesture while the original capture is pending', async (t) => {
+  const { session, backend } = await fixture(t);
+  const initial = await session.capture(), gate = deferred(), started = deferred();
+  t.after(() => gate.resolve());
+  const capture = backend.capture.bind(backend);
+  let hold = true;
+  backend.capture = async () => {
+    const snapshot = await capture();
+    if (hold) { hold = false; started.resolve(); await gate.promise; }
+    return snapshot;
+  };
+  const canceledBefore = capturePhysicsHistory(session);
+  const canceledUpdate = session.updateTarget({ type: 'perturbTarget', target: {
+    bodyId: 'body', position: [1, 2, 3], rotation: [0, 0, 0, 1],
+  } });
+  const cancellation = restorePhysicsHistory(canceledBefore, session);
+  const nextBefore = capturePhysicsHistory(session);
+  const nextUpdate = session.updateTarget({ type: 'perturbTarget', target: {
+    bodyId: 'body', position: [4, 5, 6], rotation: [0, 0, 0, 1],
+  } });
+  const nextAfter = capturePhysicsHistory(session);
+  await started.promise;
+  gate.resolve();
+  await Promise.all([canceledUpdate, cancellation, nextUpdate]);
+  assert.deepEqual(await nextBefore.captured, initial, 'The next gesture starts after cancellation restores its full baseline.');
+  const committed = await nextAfter.captured;
+  assert.deepEqual(committed.interaction.target.position, [4, 5, 6]);
+  assert.deepEqual(await session.capture(), committed, 'A delayed old restore cannot overwrite the new gesture.');
+  await restorePhysicsHistory(nextBefore, session);
+  assert.deepEqual(await session.capture(), initial);
+  await restorePhysicsHistory(nextAfter, session);
+  assert.deepEqual(await session.capture(), committed);
+});
+
+test('a rejected cancellation baseline is observed while earlier work is blocked and the queue recovers', async (t) => {
+  const { session, backend } = await fixture(t);
+  const gate = deferred(), started = deferred(), baseline = deferred();
+  t.after(() => gate.resolve());
+  const execute = backend.execute.bind(backend);
+  backend.execute = async (command) => {
+    if (command.type === 'controls') { started.resolve(); await gate.promise; }
+    return execute(command);
+  };
+  const update = session.execute({ type: 'controls', values: [{ id: 'motor', value: 0.4 }] });
+  const rejection = assert.rejects(session.restoreCaptured(baseline.promise), /Baseline rejected/);
+  await started.promise;
+  baseline.reject(new Error('Baseline rejected'));
+  await new Promise(setImmediate);
+  gate.resolve();
+  await Promise.all([update, rejection]);
+  assert.equal((await session.capture()).state[1], 0.4);
+  await session.execute({ type: 'controls', values: [{ id: 'motor', value: 0.8 }] });
+  assert.equal((await session.capture()).state[1], 0.8);
+});
+
+test('a cancellation awaiting its baseline cannot restore to a detached backend', async (t) => {
+  const { session, backend } = await fixture(t);
+  const initial = await session.capture(), baseline = deferred();
+  let restores = 0;
+  const execute = backend.execute.bind(backend);
+  backend.execute = async (command) => {
+    if (command.type === 'restore') restores++;
+    return execute(command);
+  };
+  const rejection = assert.rejects(session.restoreCaptured(baseline.promise), /no longer active/);
+  await new Promise(setImmediate);
+  await session.attach({ ...backend, source: { ...backend.source } });
+  baseline.resolve(initial);
+  await rejection;
+  assert.equal(restores, 0, 'Neither the detached backend nor its replacement receives the stale restore.');
+  assert.deepEqual(await session.capture(), initial);
 });
 
 test('capture failures cannot commit or restore a stale baseline', async (t) => {

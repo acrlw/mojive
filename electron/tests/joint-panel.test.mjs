@@ -183,6 +183,87 @@ test('expanded ball/free fields edit real configuration and remain readable in l
     .screenshot({ path: '../output/electron/verification/joint-panel-native-light-125.png' });
 });
 
+test('joint scalar and vector gesture cancellation reaches the transaction owner without committing', async () => {
+  const cancelPage = await browser.newPage({ viewport: { width: 700, height: 940 } });
+  try {
+    await cancelPage.goto(
+      `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/joint-panel-review.html?cancel`,
+    );
+    await cancelPage.locator('.joint-entry').first().waitFor();
+    const value = () => cancelPage.evaluate(() => ({
+      scalar: window.jointReview.doc.joints.find((joint) => joint.name === '06_precision_hinge_y').value,
+      position: window.jointReview.doc.joints.find((joint) => joint.name === '04_free_6dof').position.toArray(),
+      begins: window.jointReview.begins,
+      commits: window.jointReview.commits,
+      cancels: window.jointReview.cancels,
+    }));
+    const before = await value();
+    const scrub = async (element) => {
+      await element.scrollIntoViewIfNeeded();
+      const bounds = await element.boundingBox();
+      await cancelPage.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      await cancelPage.mouse.down();
+      await cancelPage.mouse.move(bounds.x + bounds.width / 2 + 45, bounds.y + bounds.height / 2, { steps: 3 });
+    };
+    const slider = cancelPage.getByRole('slider', { name: '06_precision_hinge_y slider', exact: true });
+    await slider.evaluate((element) => element.addEventListener('pointerdown', (event) => {
+      element.dataset.reviewPointerId = String(event.pointerId);
+    }));
+    const hasCapture = () => slider.evaluate((element) =>
+      element.hasPointerCapture(Number(element.dataset.reviewPointerId)));
+    await scrub(slider);
+    assert.notEqual((await value()).scalar, before.scalar);
+    assert.equal(await hasCapture(), true);
+    await cancelPage.keyboard.press('Escape');
+    assert.equal(await hasCapture(), false, 'Escape releases pointer ownership before mouseup');
+    await cancelPage.mouse.up();
+    const scalarCanceled = await value();
+    assert.equal(scalarCanceled.scalar, before.scalar);
+    assert.equal(scalarCanceled.begins, 1);
+    assert.equal(scalarCanceled.commits, 0);
+    assert.equal(scalarCanceled.cancels, 1);
+
+    const free = cancelPage.locator('.joint-entry').filter({ hasText: '04_free_6dof' });
+    await free.locator('.entity-card-heading').click();
+    await scrub(free.getByRole('textbox', { name: 'Position X', exact: true }));
+    assert.notDeepEqual((await value()).position, before.position);
+    await cancelPage.keyboard.press('Escape');
+    await cancelPage.mouse.up();
+    const vectorCanceled = await value();
+    assert.deepEqual(vectorCanceled.position, before.position);
+    assert.equal(vectorCanceled.begins, 2);
+    assert.equal(vectorCanceled.commits, 0);
+    assert.equal(vectorCanceled.cancels, 2);
+
+    await scrub(slider);
+    assert.notEqual((await value()).scalar, before.scalar);
+    await cancelPage.evaluate(() => window.dispatchEvent(new Event('blur')));
+    assert.equal(await hasCapture(), false, 'Window blur releases pointer ownership immediately.');
+    await cancelPage.mouse.up();
+    const blurCanceled = await value();
+    assert.equal(blurCanceled.scalar, before.scalar);
+    assert.equal(blurCanceled.commits, 0);
+    assert.equal(blurCanceled.cancels, 3);
+
+    await scrub(slider);
+    assert.notEqual((await value()).scalar, before.scalar);
+    await slider.evaluate((element) => element.releasePointerCapture(Number(element.dataset.reviewPointerId)));
+    await cancelPage.mouse.move(1, 1);
+    await cancelPage.mouse.up();
+    const captureCanceled = await value();
+    assert.equal(captureCanceled.scalar, before.scalar, 'Unexpected lost capture restores the baseline.');
+    assert.equal(captureCanceled.commits, 0);
+    assert.equal(captureCanceled.cancels, 4, 'Lost capture and pointerup cannot finish the gesture twice.');
+
+    await scrub(slider);
+    await cancelPage.mouse.up();
+    assert.equal((await value()).commits, 1);
+    assert.equal((await value()).cancels, 4);
+  } finally {
+    await cancelPage.close();
+  }
+});
+
 test('free world pose edits invert the authored parent frame and survive save/restore', async () => {
   const result = await page.evaluate(async () => {
     const { jointDisplayPose, setJointDisplayPose } = await import('/src/joint-pose.ts');

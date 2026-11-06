@@ -99,7 +99,7 @@ physics-review: ensure-deps
 	node --test --test-concurrency=1 tests/physics-backend.test.mjs tests/physics-scene.test.mjs tests/physics-worker.test.mjs tests/physics-workspace.test.mjs tests/simulation-history.test.mjs tests/simulation-keyboard.test.mjs tests/assets.test.mjs tests/perturbation-input.test.mjs tests/camera-focus-integration.test.mjs
 	node scripts/physics-review.mjs
 
-.PHONY: physics-corpus-review physics-render-review perturbation-performance-review model-loading-review
+.PHONY: physics-corpus-review physics-render-review perturbation-performance-review joint-performance-review model-loading-review
 physics-corpus-review: ensure-deps
 	node scripts/physics-corpus-review.mjs $(ARGS)
 physics-render-review: ensure-deps
@@ -107,6 +107,10 @@ physics-render-review: ensure-deps
 perturbation-performance-review: ensure-deps
 	node --test --test-concurrency=1 tests/physics-gesture-history.test.mjs tests/scene.test.mjs
 	node scripts/perturbation-performance-review.mjs $(ARGS)
+
+joint-performance-review: ensure-deps
+	node --test --test-concurrency=1 tests/simulation-targets.test.mjs tests/physics-gesture-history.test.mjs
+	node scripts/joint-performance-review.mjs $(ARGS)
 
 model-loading-review: ensure-deps
 	npm run compile-menu-icons
