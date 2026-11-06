@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { sceneCommands } from './scene-commands';
+import { getSceneRendering } from './scene-rendering';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
@@ -685,59 +686,68 @@ export function removeNode(doc: SceneDocument, id: string): string[] {
   doc.joints = nextJoints;
   if (nextActuators) doc.root.userData.actuators = nextActuators;
   // Dispose only detached resources: user-authored objects can share live resources.
-  const liveGeometry = new Set<THREE.BufferGeometry>(),
-    liveMaterial = new Set<THREE.Material>(),
-    liveTexture = new Set<THREE.Texture>();
-  doc.root.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
-      liveGeometry.add(object.geometry);
-      for (const mat of Array.isArray(object.material) ? object.material : [object.material]) {
-        liveMaterial.add(mat);
-        for (const value of Object.values(mat))
-          if (value instanceof THREE.Texture) liveTexture.add(value);
-      }
-    }
-  });
-  const geometry = new Set<THREE.BufferGeometry>(),
-    materials = new Set<THREE.Material>(),
-    textures = new Set<THREE.Texture>();
-  for (const root of detached)
-    root.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        if (!liveGeometry.has(object.geometry)) geometry.add(object.geometry);
-        for (const mat of Array.isArray(object.material) ? object.material : [object.material])
-          if (!liveMaterial.has(mat)) {
-            materials.add(mat);
-            for (const value of Object.values(mat))
-              if (value instanceof THREE.Texture && !liveTexture.has(value)) textures.add(value);
-          }
-      }
-    });
-  geometry.forEach((value) => value.dispose());
-  materials.forEach((value) => value.dispose());
-  textures.forEach((value) => value.dispose());
+  disposeResources(collectResources(detached), collectResources([doc.root]));
   doc.root.updateMatrixWorld(true);
   return [...removed];
 }
 
-export function disposeDocument(doc: SceneDocument): void {
+function collectResources(roots: THREE.Object3D[]) {
   const geometries = new Set<THREE.BufferGeometry>(),
     materials = new Set<THREE.Material>(),
-    textures = new Set<THREE.Texture>();
-  doc.root.traverse((object) => {
-    if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
-      geometries.add(object.geometry);
-      (Array.isArray(object.material) ? object.material : [object.material]).forEach((value) =>
-        materials.add(value),
-      );
-    }
-  });
+    textures = new Set<THREE.Texture>(),
+    shadows = new Set<THREE.LightShadow>();
+  for (const root of roots) {
+    const skybox = getSceneRendering(root)?.skybox;
+    if (skybox) textures.add(skybox);
+    root.traverse((object) => {
+      if (
+        object instanceof THREE.Mesh ||
+        object instanceof THREE.Line ||
+        object instanceof THREE.Points
+      ) {
+        geometries.add(object.geometry);
+        for (const material of Array.isArray(object.material) ? object.material : [object.material])
+          materials.add(material);
+      } else if (object instanceof THREE.Sprite) materials.add(object.material);
+      if (object instanceof THREE.Mesh) {
+        if (object.customDepthMaterial) materials.add(object.customDepthMaterial);
+        if (object.customDistanceMaterial) materials.add(object.customDistanceMaterial);
+      }
+      if (
+        object instanceof THREE.DirectionalLight ||
+        object instanceof THREE.SpotLight ||
+        object instanceof THREE.PointLight
+      )
+        shadows.add(object.shadow);
+    });
+  }
   materials.forEach((mat) => {
     for (const value of Object.values(mat)) if (value instanceof THREE.Texture) textures.add(value);
-    mat.dispose();
   });
-  geometries.forEach((value) => value.dispose());
-  textures.forEach((value) => value.dispose());
+  return { geometries, materials, textures, shadows };
+}
+
+function disposeResources(
+  resources: ReturnType<typeof collectResources>,
+  live?: ReturnType<typeof collectResources>,
+) {
+  resources.geometries.forEach((value) => {
+    if (!live?.geometries.has(value)) value.dispose();
+  });
+  resources.materials.forEach((value) => {
+    if (!live?.materials.has(value)) value.dispose();
+  });
+  resources.textures.forEach((value) => {
+    if (!live?.textures.has(value)) value.dispose();
+  });
+  resources.shadows.forEach((value) => {
+    if (!live?.shadows.has(value)) value.dispose();
+  });
+}
+
+export function disposeDocument(doc: SceneDocument): void {
+  // Shadow materials, shadow targets and scene backgrounds are document-owned too.
+  disposeResources(collectResources([doc.root]));
 }
 export async function createDemo(): Promise<SceneDocument> {
   const url = new URL('demo/atelier_arm.urdf', document.baseURI);

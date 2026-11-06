@@ -53,6 +53,9 @@ Inspect its images and JSON results under `output/electron/verification/` from t
 | `make switch-review`         | Whole-row toggles and pointer cancellation                                                                                                   |
 | `make actuator-review`       | Actuator/joint cards and actual desktop captures                                                                                             |
 | `make physics-review`        | Real WASM, Environment edits/reset/undo, independent asset preview, recording beyond ten seconds and physical workspace roundtrip             |
+| `make physics-corpus-review ARGS="/path/to/models"` | Resource resolution, compilation, scene binding, full-state restore and deterministic continuation across a model directory |
+| `make physics-render-review ARGS="/path/to/scene.xml"` | Rendered appearance and material diagnostics for explicit representative scenes |
+| `make perturbation-performance-review` | Production App model replacement, Visual/Collision perturbation timing, state-only Undo/Redo, cancellation and recording transactions |
 
 Browser harness HTML files are maintained under `tests/harness/` and served by Vite. They
 exercise production components; the production bundle starts only from `index.html`.
@@ -66,6 +69,25 @@ full-state restoration and continuation, resource identity, Worker lifecycle, an
 viewer operation. The workspace test also checks translation and rotation perturbation ownership
 under perspective and orthographic cameras. Inspect the dark/light Environment, actuator,
 asset-preview and three-lane recording captures; a successful build alone is not visual acceptance.
+
+Corpus results default to `output/electron/physics-corpus/`; use `CORPUS_OUT` to preserve a previous
+run, and `CORPUS_FILTER` to limit a focused reproduction to paths containing a given string. Each
+run starts fresh and records the engine version, Git revision, source/lockfile hash, model bundle
+identities and failure phases. It distinguishes fragments, plugin-dependent entries and failures;
+an actionable compatibility diagnostic is still a failed load, not a successful conversion.
+State checks restore the complete integration snapshot and compare the next two steps with the
+original continuation. They do not certify appearance or every desktop timeline interaction.
+Run render captures separately and inspect textures, ground, skybox, lights and transparency.
+
+`make electron-perturbation-performance-review ARGS="--first /path/to/first.xml --model /path/to/second.xml --body body_name"`
+from the repository root opens two models in the actual Electron App before exercising Ctrl
+translation and rotation in Visual/Collision, both paused and playing. Results and production
+captures are written to `output/electron/perturbation-performance/`. It measures pointer begin/end,
+command drain, frame cost and animation-frame gaps; physical gestures must not serialize the
+scene document. State checks cover complete Undo/Redo snapshots without replacing the scene,
+Escape cancellation, rejected-restore atomicity, and one Undo/Redo transaction for a recorded take.
+Run this benchmark without competing CPU/GPU verification. A healthy sustained frame percentile
+does not rule out a long main-thread stall at the start or end of a gesture.
 
 ## Packaging acceptance
 

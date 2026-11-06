@@ -91,6 +91,7 @@ import { ENVIRONMENT_ID } from './physics/SceneBinding';
 import type { SimulationState } from './physics/SimulationSession';
 import type { PhysicsCommand, PhysicsSnapshot } from './physics/contracts';
 import { applySceneState, captureSceneState } from './physics/sceneState';
+import { capturePhysicsHistory, physicsHistoryChanged, restorePhysicsHistory, type PhysicsHistoryEntry } from './physics/gestureHistory';
 import { AssetBrowser } from './assets/AssetBrowser';
 import { AssetPreviewDialog } from './assets/AssetPreviewDialog';
 import { fileAsset, sampleAsset, readAssetLibrary, writeAssetLibrary, rememberAsset, type Asset } from './assets/catalog';
@@ -98,13 +99,15 @@ import { loadAsset, loadAssetPreview } from './assets/loadAsset';
 import { browserBundles } from './resources/browserBundle';
 import { droppedFiles } from './resources/dropFiles';
 
-type Snapshot = {
+type DocumentSnapshot = {
+  kind: 'document';
   document: ReturnType<typeof encodeDocument>;
   keys: Keyframe[];
   duration: number;
   timeline: WorkspaceTimeline;
   physics?: PhysicsSnapshot;
 };
+type Snapshot = DocumentSnapshot | PhysicsHistoryEntry;
 type Log = { id: number; level: 'info' | 'warn' | 'err'; time: string; text: LocalizedText };
 const kinds: Record<string, string> = {
   environment: 'env',
@@ -433,10 +436,11 @@ export default function App() {
     if (doc && node && doc.joints.some((j) => j.id === node.id)) authorJointTransform(doc, node.id);
     changed();
   }
-  function snapshot(): Snapshot | null {
+  function snapshot(): DocumentSnapshot | null {
     const s = state.current;
     return s.doc
       ? {
+          kind: 'document',
           document: encodeDocument(s.doc),
           physics: physics.current?.session.current.snapshot ?? undefined,
           keys: structuredClone(s.keys),
@@ -449,14 +453,26 @@ export default function App() {
     invalidateNoticeAction();
     setPlaying(false);
     if (pauseSimulation && !state.current.recording) physics.current?.session.pause();
+    // A document edit (including starting a recording) needs its own authored baseline.
+    if (pending.current?.kind === 'physics') commit();
     if (!pending.current) {
       const baseline = snapshot();
       pending.current = baseline;
       if (baseline && physics.current) {
         // Capture before subsequent commands in the session queue, including pending playback.
-        historyWork.current = physics.current.session.capture().then((value) => { baseline.physics = value; }).catch(report);
+        const capture = physics.current.session.capture();
+        historyWork.current = Promise.all([historyWork.current, capture]).then(([, value]) => { baseline.physics = value; }).catch(report);
       }
     }
+  }
+  function beginPhysics() {
+    invalidateNoticeAction();
+    setPlaying(false);
+    // Recording already owns a document transaction that includes every captured frame.
+    if (state.current.recording || pending.current || !physics.current) return;
+    const baseline = capturePhysicsHistory(physics.current.session);
+    pending.current = baseline;
+    historyWork.current = Promise.all([historyWork.current, baseline.captured]).catch(report);
   }
   function cancel() {
     const backup = pending.current;
@@ -465,11 +481,28 @@ export default function App() {
   }
   function commit(): Snapshot | null {
     if (state.current.recording) return null;
+    if (pending.current?.kind === 'physics') {
+      const baseline = pending.current, runtime = physics.current;
+      pending.current = null;
+      if (!runtime || runtime.session !== baseline.session || runtime.session.current.source !== baseline.source) return null;
+      // Queue after the gesture's final command. Assets and viewer authoring did not change.
+      const current = capturePhysicsHistory(runtime.session);
+      historyWork.current = Promise.all([historyWork.current, physicsHistoryChanged(baseline, current)]).then(([, modified]) => {
+        if (!modified || physics.current !== runtime || runtime.session.current.source !== baseline.source) return;
+        undo.current.push(baseline);
+        if (undo.current.length > 50) undo.current.shift();
+        redo.current = [];
+        setHistoryTick((tick) => tick + 1);
+        setDirty(true);
+      }).catch(report);
+      return baseline;
+    }
     if (pending.current && physics.current) {
       const baseline = pending.current, runtime = physics.current;
       pending.current = null;
       const current = snapshot()!;
-      historyWork.current = runtime.session.capture().then((value) => {
+      const capture = runtime.session.capture();
+      historyWork.current = Promise.all([historyWork.current, capture]).then(([, value]) => {
         if (physics.current !== runtime) return;
         current.physics = value;
         if (JSON.stringify(baseline) === JSON.stringify(current)) return;
@@ -516,6 +549,12 @@ export default function App() {
   }
   async function restore(s: Snapshot) {
     seekEpoch.current++;
+    if (s.kind === 'physics') {
+      await restorePhysicsHistory(s, physics.current?.session);
+      setPlaying(false);
+      changed();
+      return;
+    }
     const old = state.current.doc;
     const next = decodeDocument(s.document);
     try {
@@ -545,17 +584,19 @@ export default function App() {
   async function history(direction: 'undo' | 'redo') {
     if (historyBusy.current) return;
     historyBusy.current = true;
-    physics.current?.session.pause();
-    await stopRecording();
-    await historyWork.current;
-    const from = direction === 'undo' ? undo : redo,
-      to = direction === 'undo' ? redo : undo;
-    const s = from.current.at(-1);
-    if (!s) { historyBusy.current = false; return; }
     try {
-      const current = snapshot();
+      physics.current?.session.pause();
+      await stopRecording();
+      await historyWork.current;
+      const from = direction === 'undo' ? undo : redo,
+        to = direction === 'undo' ? redo : undo;
+      const s = from.current.at(-1);
+      if (!s) return;
+      const current = s.kind === 'physics' && physics.current
+        ? capturePhysicsHistory(physics.current.session) : snapshot();
       if (!current) return;
-      if (physics.current) current.physics = await physics.current.session.capture();
+      if (current.kind === 'physics') await current.captured;
+      else if (physics.current) current.physics = await physics.current.session.capture();
       await restore(s);
       from.current.pop();
       to.current.push(current);
@@ -2071,7 +2112,7 @@ export default function App() {
               controls={simulation?.source?.capabilities.includes('controls') && simulation.frame ? {
                 actuators: simulation.source.actuators,
                 values: simulation.frame.controls,
-                onBegin: () => begin(false),
+                onBegin: beginPhysics,
                 onCommit: commit,
                 onChange: (id, value) => simulationCommand({ type: 'controls', values: [{ id, value }] }),
               } : undefined}
@@ -2165,7 +2206,7 @@ export default function App() {
               onSelect={setSelected}
               onProjectionChange={setProjection}
               onBegin={begin}
-              onPerturbBegin={() => begin(false)}
+              onPerturbBegin={beginPhysics}
               onPerturbCancel={() => { if (!state.current.recording) cancel(); }}
               onChange={changed}
               onCommit={commit}

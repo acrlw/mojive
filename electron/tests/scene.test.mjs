@@ -460,6 +460,87 @@ test('deleting objects retains shared resources until the last owner and leaves 
   assert.equal(result.released, true);
 });
 
+test('document replacement disposes shadow materials, light targets and skybox exactly once', async () => {
+  const counts = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/three/build/three.module.js');
+    const { disposeDocument } = await import('/src/scene.ts');
+    const { setSceneRendering } = await import('/src/scene-rendering.ts');
+    const root = new THREE.Group();
+    const texture = new THREE.Texture(),
+      skybox = new THREE.CubeTexture();
+    const geometry = new THREE.BoxGeometry();
+    const material = new THREE.MeshStandardMaterial({ map: texture });
+    const depth = new THREE.MeshDepthMaterial({ map: texture });
+    const distance = new THREE.MeshDistanceMaterial({ map: texture });
+    for (let index = 0; index < 2; index++) {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.customDepthMaterial = depth;
+      mesh.customDistanceMaterial = distance;
+      root.add(mesh);
+    }
+    const light = new THREE.DirectionalLight();
+    light.shadow.map = new THREE.WebGLRenderTarget(16, 16);
+    light.shadow.mapPass = new THREE.WebGLRenderTarget(16, 16);
+    root.add(light);
+    setSceneRendering(root, { skybox });
+    const resources = {
+      geometry,
+      material,
+      depth,
+      distance,
+      texture,
+      skybox,
+      shadow: light.shadow.map,
+      shadowPass: light.shadow.mapPass,
+    };
+    const counts = Object.fromEntries(Object.keys(resources).map((key) => [key, 0]));
+    for (const [key, resource] of Object.entries(resources))
+      resource.addEventListener('dispose', () => counts[key]++);
+    disposeDocument({ root });
+    return counts;
+  });
+  assert.deepEqual(counts, {
+    geometry: 1,
+    material: 1,
+    depth: 1,
+    distance: 1,
+    texture: 1,
+    skybox: 1,
+    shadow: 1,
+    shadowPass: 1,
+  });
+});
+
+test('deleting a mesh retains shared shadow materials and textures until the last owner', async () => {
+  const result = await page.evaluate(async () => {
+    const THREE = await import('/node_modules/three/build/three.module.js');
+    const { createDemo, createPrimitive, removeNode, disposeDocument } = await import(
+      '/src/scene.ts'
+    );
+    const doc = await createDemo();
+    const texture = new THREE.Texture();
+    const depth = new THREE.MeshDepthMaterial({ map: texture });
+    const distance = new THREE.MeshDistanceMaterial({ map: texture });
+    const nodes = [createPrimitive('box'), createPrimitive('box')];
+    for (const node of nodes) {
+      node.object.customDepthMaterial = depth;
+      node.object.customDistanceMaterial = distance;
+      doc.root.add(node.object);
+      doc.nodes.push(node);
+    }
+    const counts = { depth: 0, distance: 0, texture: 0 };
+    for (const [key, resource] of Object.entries({ depth, distance, texture }))
+      resource.addEventListener('dispose', () => counts[key]++);
+    removeNode(doc, nodes[0].id);
+    const retained = { ...counts };
+    removeNode(doc, nodes[1].id);
+    disposeDocument(doc);
+    return { retained, released: counts };
+  });
+  assert.deepEqual(result.retained, { depth: 0, distance: 0, texture: 0 });
+  assert.deepEqual(result.released, { depth: 1, distance: 1, texture: 1 });
+});
+
 test('Z-up cylinder and capsule vertices survive Undo snapshots, saved scenes and timeline sampling', async () => {
   const result = await page.evaluate(async () => {
     const { createDemo, createPrimitive, loadUrdf, disposeDocument, setJoint } = await import(

@@ -1369,9 +1369,9 @@ ui-floating:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_floating_surfaces.py $(ARGS)
 
 # The desktop frontend has its own dependencies; Python setup remains independent.
-.PHONY: electron electron-install electron-dev electron-check electron-acceptance electron-physics-review electron-package electron-bundle-smoke electron-clean
+.PHONY: electron electron-install electron-dev electron-check electron-acceptance electron-physics-review electron-physics-corpus-review electron-physics-render-review electron-perturbation-performance-review electron-package electron-bundle-smoke electron-clean
 electron:
 	$(MAKE) -C electron run
 
-electron-install electron-dev electron-check electron-acceptance electron-physics-review electron-package electron-bundle-smoke electron-clean:
+electron-install electron-dev electron-check electron-acceptance electron-physics-review electron-physics-corpus-review electron-physics-render-review electron-perturbation-performance-review electron-package electron-bundle-smoke electron-clean:
 	$(MAKE) -C electron $(patsubst electron-%,%,$@)
