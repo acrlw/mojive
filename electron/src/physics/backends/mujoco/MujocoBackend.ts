@@ -8,6 +8,7 @@ import { readSource } from './source.ts';
 import { MujocoPerturbation } from './perturbation.ts';
 import { writeQuaternion } from '../../rotation.ts';
 import { MujocoDeformables } from './deformables.ts';
+import { explainModelCompatibility } from './modelCompatibility.ts';
 
 /** Owns all WASM handles. Neither the renderer nor presenters receive engine objects. */
 export class MujocoBackend implements PhysicsBackend {
@@ -55,7 +56,7 @@ export class MujocoBackend implements PhysicsBackend {
     } catch (error) {
       if (backend) backend.dispose();
       else { buffer?.delete(); option?.delete(); data?.delete(); model?.delete(); }
-      throw error;
+      throw explainModelCompatibility(error, bundle.entry, mj.mj_versionString());
     } finally { vfs.delete(); }
   }
 

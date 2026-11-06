@@ -88,13 +88,22 @@ kinematic loader. The physics adapter uses pinned `@mujoco/mujoco` 3.17.0 in bot
 the browser; the default single-thread runtime does not require SharedArrayBuffer. Rendering uses
 Three.js, not MuJoCo's native renderer. The scene bridge maps rigid primitives, meshes, heightfields,
 dynamic flex/skin surfaces, RGB/RGBA surface textures, skyboxes, fog, model lights and cameras.
-Base color, opacity, emission, roughness and metallic values are applied; additional texture roles
-and MuJoCo's legacy specular, shininess and reflectance behavior are not reproduced. Three.js
-appearance is therefore not claimed to match the native renderer exactly.
+Base color, opacity, emission, roughness and metallic values are applied, including 2D normal,
+occlusion, roughness, metallic, opacity and packed ORM textures. Color textures honor explicit
+linear/sRGB declarations (sRGB is the viewer fallback); material data textures remain linear.
+Unspecified MuJoCo PBR factors use a neutral multiplier for data textures; untextured surfaces
+derive roughness from legacy shininess and default to non-metallic. Explicit zero values are retained.
+Emissive texture layers and non-color cubemap layers are not yet mapped. MuJoCo's legacy
+specular, shininess, planar reflectance and light attenuation/exponent behavior are not reproduced
+by the Three.js PBR material. Appearance is therefore not claimed to match the native renderer exactly.
 
-The corpus review checks model compilation, scene construction, stepping and state restoration;
-it is not an exhaustive visual or timeline review of every model. Plugin-bearing entries are
+The corpus review checks model compilation, scene construction, stepping, full-state restoration
+and deterministic continuation; it is not an exhaustive visual or timeline review of every model.
+Plugin-bearing entries are
 excluded from that review, and some non-plugin inputs still fail engine schema or mesh validation.
+Older flex models may require an explicit source migration: MuJoCo 3.15 removed `contact internal`,
+and 3.13 changed implicit flex elasticity integration. The loader retains the engine diagnostic
+and reports these incompatibilities without silently changing the model's physics.
 The asset browser provides live 3D previews; automatic thumbnail caching is not implemented.
 Model topology and per-body mass/inertia authoring are outside the viewer scope.
 

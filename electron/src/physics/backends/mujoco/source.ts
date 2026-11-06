@@ -1,6 +1,7 @@
 import type { MainModule, MjModel } from '@mujoco/mujoco';
 import type { GeometryShape, PhysicsSource, Quaternion, Vector3, EnvironmentField } from '../../contracts';
 import type { ModelBundle } from '../../../resources/modelBundle';
+import { readSurface } from './material.ts';
 
 const v3 = (values: ArrayLike<number>, index: number): Vector3 => [values[3 * index], values[3 * index + 1], values[3 * index + 2]];
 export const xyzw = (values: ArrayLike<number>, offset: number): Quaternion => [values[offset + 1], values[offset + 2], values[offset + 3], values[offset]];
@@ -68,7 +69,6 @@ export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, 
     fog: v3(colors.fog, 0), fogStart: map.fogstart * extent, fogEnd: map.fogend * extent,
     near: map.znear * extent, far: map.zfar * extent, extent };
   stats.delete(); colors.delete(); headlight.delete(); map.delete(); visual.delete();
-  const roles = mj.mjtTextureRole;
   // Match the native adapter: collision proxies are separate only when their
   // welded body also owns a non-colliding appearance. World floors stay shared.
   const collision = Array.from({ length: model.ngeom }, (_, i) => !!(model.geom_contype[i] || model.geom_conaffinity[i]));
@@ -89,20 +89,10 @@ export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, 
       const material = model.geom_matid[i];
       const geomColor = rgba(model.geom_rgba, i);
       const defaultColor = geomColor.every((v, k) => Math.abs(v - (k === 3 ? 1 : 0.5)) < 1e-6);
-      let texture = -1;
-      if (material >= 0) {
-        texture = model.mat_texid[material * roles.mjNTEXROLE.value + roles.mjTEXROLE_RGB.value];
-        if (texture < 0) texture = model.mat_texid[material * roles.mjNTEXROLE.value + roles.mjTEXROLE_RGBA.value];
-      }
       return { id: `physics:geom:${i}`, name: name(O.mjOBJ_GEOM.value, i, `Geometry ${i + 1}`),
         bodyId: bodyId(model.geom_bodyid[i]), position: v3(model.geom_pos, i), rotation: xyzw(model.geom_quat, i * 4),
         shape: shape(mj, model, i), color: material < 0 || !defaultColor ? geomColor : rgba(model.mat_rgba, material),
-        roughness: material < 0 ? 0.5 : model.mat_roughness[material],
-        metallic: material < 0 ? 0 : model.mat_metallic[material],
-        ...(material >= 0 ? { material: { name: name(O.mjOBJ_MATERIAL.value, material, `Material ${material}`), texture,
-          repeat: [model.mat_texrepeat[material * 2], model.mat_texrepeat[material * 2 + 1]] as [number, number],
-          uniform: !!model.mat_texuniform[material], emission: model.mat_emission[material],
-          specular: model.mat_specular[material], shininess: model.mat_shininess[material], reflectance: model.mat_reflectance[material] } } : {}),
+        ...readSurface(mj, model, material),
         group: model.geom_group[i], collidable: collision[i], defaultVisible: model.geom_group[i] < 3,
         role: !collision[i] ? 'visual' : model.geom_bodyid[i] === 0 || !visualBodies.has(owner(i)) ? 'both' : 'collision',
       };
@@ -147,6 +137,8 @@ export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, 
       const width = model.tex_width[i], height = model.tex_height[i], channels = model.tex_nchannel[i];
       const start = Number(model.tex_adr[i]);
       return { name: name(O.mjOBJ_TEXTURE.value, i, `Texture ${i}`), width, height, channels,
+        colorSpace: model.tex_colorspace[i] === mj.mjtColorSpace.mjCOLORSPACE_LINEAR.value ? 'linear' as const
+          : model.tex_colorspace[i] === mj.mjtColorSpace.mjCOLORSPACE_SRGB.value ? 'srgb' as const : undefined,
         type: model.tex_type[i] === mj.mjtTexture.mjTEXTURE_2D.value ? '2d' as const
           : model.tex_type[i] === mj.mjtTexture.mjTEXTURE_SKYBOX.value ? 'skybox' as const : 'cube' as const,
         pixels: new Uint8Array(model.tex_data.subarray(start, start + width * height * channels)) };

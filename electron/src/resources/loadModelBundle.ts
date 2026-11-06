@@ -1,5 +1,7 @@
 import { createModelBundle, modelPath, type ModelBundle } from './modelBundle';
 
+class ResourceReadError extends Error {}
+
 /** Resolve declared resources only; never scan an entire project to open one model. */
 export async function loadModelBundle(
   name: string,
@@ -11,7 +13,13 @@ export async function loadModelBundle(
   const load = async (path: string) => {
     path = modelPath(path);
     if (files.has(path)) return files.get(path)!;
-    const bytes = await read(path);
+    let bytes: Uint8Array;
+    try { bytes = await read(path); }
+    catch (error) { throw new ResourceReadError(`${path}: ${error instanceof Error ? error.message : String(error)}`); }
+    // Development servers can return the app shell with HTTP 200 for a missing asset.
+    const prefix = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart();
+    if (/^(?:<!doctype\s+html\b|<html\b)/i.test(prefix))
+      throw new ResourceReadError(`${path}: received HTML instead of a model resource`);
     total += bytes.byteLength;
     if (files.size >= 10000 || total > 512 * 1024 * 1024)
       throw new Error('Model resources exceed the package limit (10,000 files or 512 MiB).');
@@ -19,45 +27,77 @@ export async function loadModelBundle(
     return bytes;
   };
   const dirname = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
-  const parse = async (path: string, xml: Map<string, Document>, visiting = new Set<string>()): Promise<void> => {
-    path = modelPath(path);
-    if (visiting.has(path)) throw new Error(`Cyclic model include: ${path}`);
-    if (xml.has(path)) return;
-    const document = new DOMParser().parseFromString(new TextDecoder().decode(await load(path)), 'application/xml');
-    if (document.querySelector('parsererror')) throw new Error(`Invalid model XML: ${path}`);
-    xml.set(path, document);
-    for (const include of document.querySelectorAll('include[file]'))
-      await parse(modelPath(dirname(path) + include.getAttribute('file')!), xml, new Set(visiting).add(path));
+  const resolve = async (candidates: string[], declaration: string): Promise<string> => {
+    const failures: string[] = [];
+    const tried = new Set<string>();
+    for (const candidate of candidates) {
+      let path: string;
+      try { path = modelPath(candidate); }
+      catch (error) { failures.push(String(error)); continue; }
+      if (tried.has(path)) continue;
+      tried.add(path);
+      try { await load(path); return path; }
+      catch (error) {
+        if (!(error instanceof ResourceReadError)) throw error;
+        failures.push(error.message);
+      }
+    }
+    throw new Error(`Cannot resolve ${declaration}. Tried ${failures.join('; ')}`);
   };
   const compiled = new Set<string>();
   const dependencies = async (entry: string, visiting = new Set<string>()): Promise<void> => {
     entry = modelPath(entry);
     if (visiting.has(entry)) throw new Error(`Cyclic model attachment: ${entry}`);
     if (compiled.has(entry)) return;
-    const xml = new Map<string, Document>();
-    await parse(entry, xml);
     const entryDir = dirname(entry);
-    let meshDir = '', textureDir = '';
-    for (const document of xml.values()) for (const compiler of document.querySelectorAll('compiler')) {
-      meshDir = compiler.getAttribute('meshdir') ?? compiler.getAttribute('assetdir') ?? meshDir;
-      textureDir = compiler.getAttribute('texturedir') ?? compiler.getAttribute('assetdir') ?? textureDir;
+    const elements: { element: Element; path: string }[] = [];
+    const parse = async (path: string, parents = new Set<string>()): Promise<void> => {
+      if (parents.has(path)) throw new Error(`Cyclic model include: ${path}`);
+      const document = new DOMParser().parseFromString(new TextDecoder().decode(await load(path)), 'application/xml');
+      if (document.querySelector('parsererror')) throw new Error(`Invalid model XML: ${path}`);
+      const walk = async (element: Element): Promise<void> => {
+        elements.push({ element, path });
+        if (element.tagName === 'include' && element.hasAttribute('file')) {
+          const file = element.getAttribute('file')!;
+          const included = await resolve([entryDir + file, dirname(path) + file], `<include file="${file}"> in ${path}`);
+          await parse(included, new Set(parents).add(path));
+        } else for (const child of element.children) await walk(child);
+      };
+      await walk(document.documentElement);
+    };
+    await parse(entry);
+    let assetDir = '', meshDir = '', textureDir = '';
+    // Includes are expanded in document order, and share the entry's compiler settings.
+    for (const { element } of elements) if (element.tagName === 'compiler') {
+      assetDir = element.getAttribute('assetdir') ?? assetDir;
+      meshDir = element.getAttribute('meshdir') ?? meshDir;
+      textureDir = element.getAttribute('texturedir') ?? textureDir;
     }
-    for (const document of xml.values()) {
-      for (const resource of document.querySelectorAll('mesh, texture, hfield, skin, flexcomp')) {
-        const directory = resource.tagName === 'texture' ? textureDir : meshDir;
+    for (const { element: resource, path } of elements) {
+      const tag = resource.tagName;
+      const resolveAsset = (file: string, directory: string, attribute = 'file') =>
+        // MuJoCo tries compiler/main-model paths before the declaring include's directory.
+        resolve([entryDir + (directory ? directory + '/' : '') + file, dirname(path) + file],
+          `<${tag} ${attribute}="${file}"> in ${path}`);
+      if (['mesh', 'texture', 'hfield', 'skin', 'flexcomp'].includes(tag)) {
+        // Flexcomp's mesh/GMSH loader also applies compiler.meshdir after XML parsing.
+        const directory = tag === 'texture' ? textureDir || assetDir
+          : tag === 'mesh' || tag === 'flexcomp' ? meshDir || assetDir : assetDir;
         const attributes = resource.tagName === 'texture'
           ? ['file', 'fileleft', 'fileright', 'fileup', 'filedown', 'filefront', 'fileback'] : ['file'];
         for (const attribute of attributes) {
           const file = resource.getAttribute(attribute);
-          if (file) await load(modelPath(entryDir + (directory ? directory + '/' : '') + file));
+          if (file) await resolveAsset(file, directory, attribute);
         }
       }
       // Attached models have their own compiler directories, unlike includes.
-      for (const resource of document.querySelectorAll('asset > model[file]'))
-        await dependencies(modelPath(entryDir + resource.getAttribute('file')!), new Set(visiting).add(entry));
-      for (const resource of document.querySelectorAll('mesh[filename]')) {
+      if (tag === 'model' && resource.parentElement?.tagName === 'asset' && resource.hasAttribute('file')) {
+        const attached = await resolveAsset(resource.getAttribute('file')!, '');
+        await dependencies(attached, new Set(visiting).add(entry));
+      }
+      if (tag === 'mesh' && resource.hasAttribute('filename')) {
         const file = resource.getAttribute('filename')!.replace(/^package:\/\//, '');
-        await load(modelPath(entryDir + file));
+        await resolveAsset(file, meshDir || assetDir, 'filename');
       }
     }
     compiled.add(entry);

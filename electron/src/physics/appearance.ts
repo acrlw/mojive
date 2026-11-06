@@ -25,7 +25,7 @@ export function createTexture(source: PhysicsTexture): THREE.DataTexture | THREE
     texture = new THREE.CubeTexture(faces as unknown as HTMLImageElement[]);
   }
   texture.name = source.name;
-  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.colorSpace = source.colorSpace === 'linear' ? THREE.LinearSRGBColorSpace : THREE.SRGBColorSpace;
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.generateMipmaps = true;
@@ -40,17 +40,39 @@ export function applySurface(material: THREE.MeshStandardMaterial, geometry: THR
   material.name = description.name;
   material.emissive.copy(material.color).multiplyScalar(description.emission);
   const texture = textures[description.texture];
-  if (!texture) return;
-  material.map = texture.clone();
-  material.map.needsUpdate = true;
+  if (texture) {
+    material.map = texture.clone();
+    material.map.needsUpdate = true;
+    material.transparent ||= !!description.textureAlpha;
+  }
   if (texture instanceof THREE.CubeTexture) {
     geometry.computeBoundingBox();
     const size = geometry.boundingBox!.getSize(new THREE.Vector3()).multiplyScalar(.5);
     if (source.shape.type === 'capsule') size.setScalar(source.shape.radius);
     material.userData.surfaceScale = description.uniform ? [1, 1, 1] : size.toArray().map((v) => 1 / (v || 1));
     installSurfaceTexture(material);
-  } else {
-    material.map.repeat.set(...description.repeat);
+  }
+  // Data maps are linear quantities. ORM uses R/G/B, matching Three's AO,
+  // roughness and metalness channels; standalone scalar maps expand to RGB.
+  const map2d = (id: number | undefined) => {
+    const map = id === undefined ? undefined : textures[id];
+    if (!map || map instanceof THREE.CubeTexture) return null;
+    const copy = map.clone();
+    copy.colorSpace = THREE.NoColorSpace;
+    copy.needsUpdate = true;
+    return copy;
+  };
+  const maps = description.maps;
+  material.normalMap = map2d(maps?.normal);
+  material.aoMap = map2d(maps?.occlusion ?? maps?.orm);
+  material.roughnessMap = map2d(maps?.roughness ?? maps?.orm);
+  material.metalnessMap = map2d(maps?.metallic ?? maps?.orm);
+  material.alphaMap = map2d(maps?.opacity);
+  material.transparent ||= !!material.alphaMap;
+  const uvMaps = [material.map, material.normalMap, material.aoMap, material.roughnessMap, material.metalnessMap, material.alphaMap]
+    .filter((map): map is THREE.Texture => !!map && !(map instanceof THREE.CubeTexture));
+  if (uvMaps.length) {
+    for (const map of uvMaps) map.repeat.set(...description.repeat);
     if (source.shape.type !== 'mesh' || !geometry.hasAttribute('uv')) {
       const positions = geometry.getAttribute('position');
       const uv = new Float32Array(positions.count * 2);
@@ -60,7 +82,7 @@ export function applySurface(material: THREE.MeshStandardMaterial, geometry: THR
         uv[i * 2] = positions.getX(i) / (description.uniform ? 2 : size.x || 1) * description.repeat[0] + .5;
         uv[i * 2 + 1] = -positions.getY(i) / (description.uniform ? 2 : size.y || 1) * description.repeat[1] + .5;
       }
-      material.map.repeat.set(1, 1);
+      for (const map of uvMaps) map.repeat.set(1, 1);
       geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     }
   }

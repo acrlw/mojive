@@ -33,10 +33,15 @@ export interface PhysicsGeometry extends Transform {
   role?: 'visual' | 'collision' | 'both';
   defaultVisible?: boolean;
   deformable?: boolean;
-  material?: { name: string; texture: number; repeat: [number, number]; uniform: boolean; emission: number; specular: number; shininess: number; reflectance: number };
+  material?: {
+    name: string; texture: number; textureAlpha?: boolean; repeat: [number, number]; uniform: boolean;
+    emission: number; specular: number; shininess: number; reflectance: number;
+    maps?: Partial<Record<'normal' | 'occlusion' | 'roughness' | 'metallic' | 'opacity' | 'orm', number>>;
+  };
 }
 export interface PhysicsTexture {
   name: string; type: '2d' | 'cube' | 'skybox'; width: number; height: number; channels: number; pixels: Uint8Array;
+  colorSpace?: 'linear' | 'srgb';
 }
 export interface PhysicsVisualEnvironment {
   ambient: Vector3; headlight: Vector3; fog: Vector3; fogStart: number; fogEnd: number;

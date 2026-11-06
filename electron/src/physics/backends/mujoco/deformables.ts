@@ -1,5 +1,6 @@
 import type { MainModule, MjModel, MjData, MjvScene, MjvOption, MjvPerturb, MjvCamera } from '@mujoco/mujoco';
 import type { PhysicsSource, PhysicsFrame, PhysicsGeometry } from '../../contracts';
+import { readSurface } from './material.ts';
 
 /** MuJoCo owns skinning and flex surface generation; only neutral mesh buffers leave the backend. */
 export class MujocoDeformables {
@@ -27,7 +28,6 @@ export class MujocoDeformables {
         const id = `physics:${kind}:${i}`, matid = kind === 'flex' ? model.flex_matid[i] : model.skin_matid[i];
         const colors = kind === 'flex' ? model.flex_rgba : model.skin_rgba;
         const group = kind === 'flex' ? model.flex_group[i] : model.skin_group[i];
-        const material = matid >= 0 ? this.material(matid) : undefined;
         const color = Array.from(colors.subarray(i * 4, i * 4 + 4)) as PhysicsGeometry['color'];
         if (matid >= 0 && color.every((v, k) => Math.abs(v - (k === 3 ? 1 : .5)) < 1e-6))
           color.splice(0, 4, ...model.mat_rgba.subarray(matid * 4, matid * 4 + 4));
@@ -37,20 +37,10 @@ export class MujocoDeformables {
         source.geometries.push({ id, name: mj.mj_id2name(model, kind === 'flex' ? mj.mjtObj.mjOBJ_FLEX.value : mj.mjtObj.mjOBJ_SKIN.value, i) || `${kind} ${i + 1}`,
           bodyId: source.bodies[0].id, position: [0, 0, 0], rotation: [0, 0, 0, 1],
           shape: { type: 'mesh', positions: new Float32Array(size), normals: new Float32Array(size), uv, indices },
-          color, material, group, defaultVisible: group < 3, role: 'both', deformable: true, collidable: kind === 'flex',
-          metallic: matid < 0 ? 0 : model.mat_metallic[matid], roughness: matid < 0 ? .5 : model.mat_roughness[matid] });
+          color, ...readSurface(mj, model, matid), group, defaultVisible: group < 3, role: 'both', deformable: true, collidable: kind === 'flex' });
         this.meshes.push({ id, kind, index: i, size });
       }
     }
-  }
-
-  private material(i: number): NonNullable<PhysicsGeometry['material']> {
-    const { mj, model: m } = this, roles = mj.mjtTextureRole;
-    let texture = m.mat_texid[i * roles.mjNTEXROLE.value + roles.mjTEXROLE_RGB.value];
-    if (texture < 0) texture = m.mat_texid[i * roles.mjNTEXROLE.value + roles.mjTEXROLE_RGBA.value];
-    return { name: mj.mj_id2name(m, mj.mjtObj.mjOBJ_MATERIAL.value, i) || `Material ${i}`, texture,
-      repeat: [m.mat_texrepeat[i * 2], m.mat_texrepeat[i * 2 + 1]], uniform: !!m.mat_texuniform[i],
-      emission: m.mat_emission[i], specular: m.mat_specular[i], shininess: m.mat_shininess[i], reflectance: m.mat_reflectance[i] };
   }
 
   private update(): void {
