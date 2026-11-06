@@ -4,7 +4,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { Projects, within } = require('./resource-paths.cjs');
 const { FileAccess, filePath } = require('./file-access.cjs');
-const { createMenuController } = require('./menu.cjs');
+const { createMenuController, openDocumentation } = require('./menu.cjs');
 const projects = new Projects();
 const developmentUrl = process.env.MOJIVE_DEV_URL;
 if (developmentUrl && !/^http:\/\/127\.0\.0\.1:\d+\/?$/.test(developmentUrl))
@@ -155,7 +155,11 @@ app.whenReady().then(async () => {
     require('electron').clipboard.writeText(text);
   });
   handle('mojive:update-menu', (state) => menuController.update(state));
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // The Help command is the only renderer request allowed to open a browser.
+    void openDocumentation(url).catch((error) => console.error('Could not open documentation:', error));
+    return { action: 'deny' };
+  });
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   // The renderer's beforeunload guard owns unsaved state. Its custom confirmation
   // may save, discard, or keep editing; destroy is requested only after resolution.

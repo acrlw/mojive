@@ -1,3 +1,4 @@
+import { openSampleScene } from '../tests/helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { _electron } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -63,7 +64,7 @@ try {
     await page.waitForTimeout(500);
   };
   phase = 'load primitive scene and camera';
-  await action('scene.primitive_gallery');
+  await openSampleScene(page, 'Scene objects');
   await page.waitForFunction(() =>
     document.querySelector('.document-title')?.textContent.includes('Scene objects'),
   );

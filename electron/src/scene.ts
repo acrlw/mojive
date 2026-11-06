@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { sceneCommands } from './scene-commands';
-import { getSceneRendering } from './scene-rendering';
+import { collectResources, disposeResources, disposeDocument } from './scene-resources';
+export { disposeDocument } from './scene-resources';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
@@ -627,8 +628,8 @@ export function createPrimitive(kind: EntityKind, name?: string): SceneNode {
   object.receiveShadow = true;
   return { id, name: label, kind, object, visible: true, properties };
 }
-/** Delete at a joint boundary and include dependent mimic branches atomically. */
-export function removeNode(doc: SceneDocument, id: string): string[] {
+/** Validate the entire removal boundary before publishing commands or mutating the scene. */
+function nodeRemovalPlan(doc: SceneDocument, id: string): Set<string> {
   const nodes = new Map(doc.nodes.map((node) => [node.id, node]));
   const selected = nodes.get(id);
   if (!selected) throw new Error(`Unknown object: ${id}`);
@@ -669,6 +670,20 @@ export function removeNode(doc: SceneDocument, id: string): string[] {
   }
   if (doc.nodes.some((node) => removed.has(node.id) && node.object.userData.physicsOwned))
     throw new Error('The simulation backend owns this model structure.');
+  const actuators = doc.root.userData.actuators;
+  if (actuators !== undefined && !Array.isArray(actuators))
+    throw new Error('Invalid actuator metadata.');
+  return removed;
+}
+
+export function canRemoveNode(doc: SceneDocument, id: string): boolean {
+  try { nodeRemovalPlan(doc, id); return true; }
+  catch { return false; }
+}
+
+/** Delete at a joint boundary and include dependent mimic branches atomically. */
+export function removeNode(doc: SceneDocument, id: string): string[] {
+  const removed = nodeRemovalPlan(doc, id);
   const detached = doc.nodes
     .filter((node) => removed.has(node.id) && (!node.parentId || !removed.has(node.parentId)))
     .map((node) => node.object);
@@ -676,8 +691,6 @@ export function removeNode(doc: SceneDocument, id: string): string[] {
     nextJoints = doc.joints.filter((joint) => !removed.has(joint.id));
   const nextJointNames = new Set(nextJoints.map((joint) => joint.name));
   const actuators = doc.root.userData.actuators;
-  if (actuators !== undefined && !Array.isArray(actuators))
-    throw new Error('Invalid actuator metadata.');
   const nextActuators = actuators?.filter((actuator: { joint: string }) =>
     nextJointNames.has(actuator.joint),
   );
@@ -691,64 +704,6 @@ export function removeNode(doc: SceneDocument, id: string): string[] {
   return [...removed];
 }
 
-function collectResources(roots: THREE.Object3D[]) {
-  const geometries = new Set<THREE.BufferGeometry>(),
-    materials = new Set<THREE.Material>(),
-    textures = new Set<THREE.Texture>(),
-    shadows = new Set<THREE.LightShadow>();
-  for (const root of roots) {
-    const skybox = getSceneRendering(root)?.skybox;
-    if (skybox) textures.add(skybox);
-    root.traverse((object) => {
-      if (
-        object instanceof THREE.Mesh ||
-        object instanceof THREE.Line ||
-        object instanceof THREE.Points
-      ) {
-        geometries.add(object.geometry);
-        for (const material of Array.isArray(object.material) ? object.material : [object.material])
-          materials.add(material);
-      } else if (object instanceof THREE.Sprite) materials.add(object.material);
-      if (object instanceof THREE.Mesh) {
-        if (object.customDepthMaterial) materials.add(object.customDepthMaterial);
-        if (object.customDistanceMaterial) materials.add(object.customDistanceMaterial);
-      }
-      if (
-        object instanceof THREE.DirectionalLight ||
-        object instanceof THREE.SpotLight ||
-        object instanceof THREE.PointLight
-      )
-        shadows.add(object.shadow);
-    });
-  }
-  materials.forEach((mat) => {
-    for (const value of Object.values(mat)) if (value instanceof THREE.Texture) textures.add(value);
-  });
-  return { geometries, materials, textures, shadows };
-}
-
-function disposeResources(
-  resources: ReturnType<typeof collectResources>,
-  live?: ReturnType<typeof collectResources>,
-) {
-  resources.geometries.forEach((value) => {
-    if (!live?.geometries.has(value)) value.dispose();
-  });
-  resources.materials.forEach((value) => {
-    if (!live?.materials.has(value)) value.dispose();
-  });
-  resources.textures.forEach((value) => {
-    if (!live?.textures.has(value)) value.dispose();
-  });
-  resources.shadows.forEach((value) => {
-    if (!live?.shadows.has(value)) value.dispose();
-  });
-}
-
-export function disposeDocument(doc: SceneDocument): void {
-  // Shadow materials, shadow targets and scene backgrounds are document-owned too.
-  disposeResources(collectResources([doc.root]));
-}
 export async function createDemo(): Promise<SceneDocument> {
   const url = new URL('demo/atelier_arm.urdf', document.baseURI);
   const response = await fetch(url);

@@ -23,9 +23,10 @@ export function AppMenu({
   );
   useControlPopover(trigger, popup, true, onClose, point);
   useLayoutEffect(() => {
-    popup.current
-      ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
-      ?.focus({ preventScroll: true });
+    const menu = popup.current;
+    const first = [...(menu?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+      .find((button) => button.closest('[role="menu"]') === menu);
+    (first ?? menu)?.focus({ preventScroll: true });
   }, []);
   useLayoutEffect(() => {
     if (!point) return;
@@ -47,6 +48,7 @@ export function AppMenu({
       popover={point ? 'manual' : 'auto'}
       className={`menu menu-${name.toLowerCase()}`}
       role="menu"
+      tabIndex={-1}
       onKeyDown={(event) => {
         event.stopPropagation();
         if (onNavigate && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
@@ -56,7 +58,7 @@ export function AppMenu({
         }
         const items = [
           ...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
-        ];
+        ].filter((button) => button.closest('[role="menu"]') === event.currentTarget);
         if (event.key === 'Escape' || event.key === 'Tab') {
           event.preventDefault();
           onClose();

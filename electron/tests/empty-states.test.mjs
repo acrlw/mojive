@@ -86,7 +86,7 @@ before(async () => {
       openProjectPath: window.openLocalProject,
       readProjectDirectory: window.readLocalDirectory,
       searchProject: window.searchLocalProject,
-      openUrdfPath: window.openLocalUrdf,
+      openModelPath: window.openLocalUrdf,
       hasNativeMenu: false,
       platform: 'linux',
       onMenuAction: () => () => {},
@@ -202,8 +202,9 @@ test('actuator empty state describes the scene source without a format-specific 
   await page.locator('[data-menu=File]').click();
   await page
     .locator('.menu-file')
-    .getByRole('menuitem', { name: /^Open URDF/ })
+    .getByRole('menuitem', { name: 'Open Model', exact: true })
     .click();
+  await page.getByRole('menuitem', { name: 'URDF model…', exact: true }).click();
   await dialog.waitFor();
   await page.locator('.file-dialog-list[aria-busy="false"]').waitFor();
   await dialog.getByRole('option', { name: 'arm.urdf', exact: true }).click();

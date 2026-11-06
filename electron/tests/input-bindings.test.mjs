@@ -499,7 +499,7 @@ test('system window shortcuts cannot be recorded or restored as viewport binding
 test('fly keys preserve scene-camera View and create one cancelable Pilot transaction', async () => {
   const page = await browser.newPage({ viewport: { width: 1540, height: 980 } });
   await page.goto(base + '/tests/harness/camera-review.html');
-  await page.waitForFunction(() => window.cameraReview?.api.current);
+  await page.waitForFunction(() => window.cameraReview?.api?.current);
   const canvas = page.getByTestId('viewport-canvas');
   const state = () =>
     page.evaluate(() => {

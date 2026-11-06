@@ -17,7 +17,8 @@
     "package": "npm run build && node scripts/package.mjs",
     "format": "prettier --write src main scripts tests docs README.md",
     "compile-menu-icons": "electron scripts/compile-menu-icons.cjs",
-    "bundle-smoke": "node scripts/bundle-smoke.mjs"
+    "bundle-smoke": "node scripts/bundle-smoke.mjs",
+    "predesktop": "npm run compile-menu-icons"
   },
   "dependencies": {
     "@mujoco/mujoco": "3.17.0",

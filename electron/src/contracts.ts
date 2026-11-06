@@ -66,10 +66,28 @@ export interface OpenResource {
   files: ProjectFile[];
 }
 export interface NativeMenuState {
+  blocked?: boolean;
+  hasDocument?: boolean;
+  selectionVisible?: boolean;
+  projection?: 'perspective' | 'orthographic';
+  tool?: Tool;
+  frame?: Frame;
+  showGizmos?: boolean;
+  panel?: string;
+  showOutput?: boolean;
+  hasSimulation?: boolean;
+  simulationPlaying?: boolean;
+  simulationRecording?: boolean;
+  simulationSpeed?: number;
+  canToggleSimulation?: boolean;
+  canSimulationPrevious?: boolean;
+  canSimulationStep?: boolean;
   focusKey?: string | null;
   focusAllKey?: string | null;
   locale: 'en' | 'zh-CN';
   theme: 'dark' | 'light';
+  canAdd?: boolean;
+  canDelete?: boolean;
   canUndo: boolean;
   canRedo: boolean;
   hasSelection: boolean;
@@ -79,6 +97,7 @@ export interface NativeMenuState {
   showTimeline: boolean;
   sceneId?: string;
   textInput?: boolean;
+  scopedKeyboard?: boolean;
 }
 export interface FileEntry {
   name: string;

@@ -1,4 +1,5 @@
 import type { ModelBundle } from '../resources/modelBundle';
+import type { ModelLoadProgress } from '../resources/loading';
 import type { PhysicsCommand, PhysicsSource, PhysicsFrame, PhysicsSnapshot, EnvironmentValues } from './contracts';
 
 export type BackendRequest =
@@ -11,4 +12,5 @@ export type WorkerRequest = BackendRequest & { requestId: number };
 export type WorkerResponse = { requestId: number } & (
   | { ok: true; value: BackendResponse }
   | { ok: false; error: string }
+  | { progress: ModelLoadProgress }
 );

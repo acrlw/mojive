@@ -30,6 +30,7 @@ test('model packages canonicalize paths and verify all content identities', asyn
 });
 
 test('real WASM loads relative includes and rejects missing resources without corrupting another model', async (t) => {
+  const filesystem = mj.FS.readdir('/').sort();
   const live = await backend(t);
   const packageWithInclude = await createModelBundle('Included', 'models/main.xml', [
     { path: 'models/main.xml', bytes: encode('<mujoco><include file="parts/body.xml"/></mujoco>') },
@@ -40,9 +41,29 @@ test('real WASM loads relative includes and rejects missing resources without co
   included.dispose();
   const missing = await createModelBundle('Missing', 'model.xml', [{ path: 'model.xml', bytes: encode('<mujoco><include file="absent.xml"/></mujoco>') }]);
   await assert.rejects(MujocoBackend.load(mj, missing));
+  assert.deepEqual(mj.FS.readdir('/').sort(), filesystem);
   assert.equal((await live.frame()).time, 0);
   await live.execute({ type: 'step', count: 10 });
   assert.ok((await live.frame()).time > 0);
+});
+
+test('memory filesystem loading isolates nested assets and cleans each candidate', async (t) => {
+  const filesystem = mj.FS.readdir('/').sort();
+  const assets = [
+    { path: 'models/main.xml', bytes: encode('<mujoco><compiler meshdir="../assets"/><asset><mesh name="shape" file="shape.obj"/></asset><include file="parts/body.xml"/></mujoco>') },
+    { path: 'models/parts/body.xml', bytes: encode('<mujoco><worldbody><geom name="one" type="mesh" mesh="shape"/></worldbody></mujoco>') },
+    { path: 'assets/shape.obj', bytes: encode('v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n') },
+  ];
+  const first = await createModelBundle('One', 'models/main.xml', assets);
+  const second = await createModelBundle('Two', first.entry, assets.map((file) => file.path.endsWith('body.xml')
+    ? { ...file, bytes: encode(new TextDecoder().decode(file.bytes).replace('name="one"', 'name="two"')) } : file));
+  const [one, two] = await Promise.all([MujocoBackend.load(mj, first), MujocoBackend.load(mj, second)]);
+  t.after(() => { one.dispose(); two.dispose(); });
+  assert.equal(one.source.geometries[0].name, 'one');
+  assert.equal(two.source.geometries[0].name, 'two');
+  assert.deepEqual(mj.FS.readdir('/').sort(), filesystem);
+  assert.ok((await one.frame()).bodyTransforms.every(Number.isFinite));
+  assert.ok((await two.frame()).bodyTransforms.every(Number.isFinite));
 });
 
 test('simulation passes ten seconds and publishes actual world transforms', async (t) => {

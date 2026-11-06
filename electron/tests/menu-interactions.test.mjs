@@ -32,6 +32,32 @@ async function workspace(platform = 'Linux x86_64', scale = 1) {
   return page;
 }
 const trigger = (page, name) => page.locator(`[data-menu="${name}"]`);
+async function assertMenuColumns(menu) {
+  const rows = await menu.locator(':scope > .workspace-menu-row').evaluateAll((elements) =>
+    elements.map((element) => {
+      const row = element.getBoundingClientRect();
+      const icon = element.querySelector('.workspace-menu-icon .icon').getBoundingClientRect();
+      const label = element.querySelector('.workspace-menu-label').getBoundingClientRect();
+      const indicator = element.querySelector('.workspace-menu-indicator').getBoundingClientRect();
+      return {
+        name: element.textContent.trim(),
+        iconX: icon.x,
+        labelX: label.x,
+        iconInset: icon.x - row.x,
+        labelGap: label.x - icon.right,
+        indicatorRight: indicator.right,
+      };
+    }),
+  );
+  assert.ok(rows.length > 1, 'compare real menu entries with different label and shortcut widths');
+  for (const row of rows) {
+    assert.ok(Math.abs(row.iconX - rows[0].iconX) < 0.5, `${row.name}: icon column must align`);
+    assert.ok(Math.abs(row.labelX - rows[0].labelX) < 0.5, `${row.name}: label column must align`);
+    assert.ok(Math.abs(row.indicatorRight - rows[0].indicatorRight) < 0.5, `${row.name}: indicator column must align`);
+    assert.ok(Math.abs(row.iconInset - 10) < 0.5, `${row.name}: icon needs the authored leading inset`);
+    assert.ok(Math.abs(row.labelGap - 8) < 0.5, `${row.name}: icon and label keep the authored gap`);
+  }
+}
 test('menu activation transfers by hover and arrows, then ends on Escape, action, outside click and toggle', async () => {
   const page = await workspace();
   const errors = [];
@@ -39,7 +65,7 @@ test('menu activation transfers by hover and arrows, then ends on Escape, action
   await trigger(page, 'Edit').hover();
   assert.equal(await page.locator('.menu').count(), 0);
   await trigger(page, 'File').click();
-  for (const name of ['Edit', 'Add', 'View', 'Help', 'File']) {
+  for (const name of ['Edit', 'Add', 'View', 'Simulate', 'Window', 'Help', 'File']) {
     await trigger(page, name).hover();
     await page.locator(`.menu-${name.toLowerCase()}:popover-open`).waitFor();
     const [anchor, popup] = await Promise.all([
@@ -65,10 +91,77 @@ test('menu activation transfers by hover and arrows, then ends on Escape, action
   await trigger(page, 'Add').hover();
   assert.equal(await page.locator('.menu').count(), 0);
   await trigger(page, 'View').click();
-  await page.getByRole('menuitem', { name: 'Frame all', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Frame all/ }).click();
   await trigger(page, 'Help').hover();
   assert.equal(await page.locator('.menu').count(), 0);
   assert.deepEqual(errors, []);
+  await page.close();
+});
+test('shared submenu ownership supports pointer transfer, keyboard return and checked dispatch', async () => {
+  const page = await workspace();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await trigger(page, 'View').click();
+  const projection = page.getByRole('menuitem', { name: 'Projection', exact: true });
+  await projection.hover();
+  const popup = page.locator('.menu-submenu-projection:popover-open');
+  await popup.waitFor();
+  assert.equal(await page.getByRole('menuitemradio', { name: 'Perspective', exact: true }).getAttribute('aria-checked'), 'true');
+  await page.getByRole('menuitemradio', { name: 'Orthographic', exact: true }).hover();
+  assert.equal(await page.locator('.menu-view:popover-open').count(), 1, 'parent stays open when entering its submenu');
+  await assertMenuColumns(page.locator('.menu-view:popover-open'));
+  await assertMenuColumns(popup);
+  await page.screenshot({ path: '../output/electron/verification/workspace-menu-projection.png' });
+  await page.getByRole('menuitemradio', { name: 'Orthographic', exact: true }).click();
+  assert.equal(await page.locator('.menu:popover-open').count(), 0);
+  await trigger(page, 'View').click();
+  await projection.focus();
+  await page.keyboard.press('ArrowRight');
+  await popup.waitFor();
+  assert.equal(await page.getByRole('menuitemradio', { name: 'Orthographic', exact: true }).getAttribute('aria-checked'), 'true');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await popup.count(), 0);
+  assert.equal(await projection.evaluate((el) => el === document.activeElement), true);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.getByRole('menuitem', { name: 'Transform tool', exact: true }).evaluate((el) => el === document.activeElement), true);
+  await page.keyboard.press('ArrowRight');
+  await page.locator('.menu-submenu-transformtool:popover-open').waitFor();
+  await page.keyboard.press('End');
+  assert.equal(await page.getByRole('menuitemradio', { name: 'Joint', exact: true }).evaluate((el) => el === document.activeElement), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.menu-view:popover-open').count(), 1);
+  await page.keyboard.press('Escape');
+  await trigger(page, 'Window').click();
+  await page.getByRole('menuitem', { name: 'Panels', exact: true }).hover();
+  await page.getByRole('menuitemradio', { name: 'Cameras', exact: true }).click();
+  await page.locator('.cameras-panel').waitFor();
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+test('fallback file shortcuts use the same scene open and save-as commands as the menu', async () => {
+  const page = await workspace();
+  await page.evaluate(() => {
+    window.mojive = {
+      hasNativeMenu: false,
+      platform: 'linux',
+      browseFiles: async () => ({ path: '/workspace', parent: null, entries: [], shortcuts: [] }),
+      onMenuAction: () => () => {},
+      updateMenuState: async () => {},
+    };
+  });
+  await trigger(page, 'File').click();
+  assert.equal(await page.getByRole('menuitem', { name: /^Open Scene/ }).locator('kbd').innerText(), 'Ctrl+O');
+  assert.equal(await page.getByRole('menuitem', { name: /^Save Scene As/ }).locator('kbd').innerText(), 'Ctrl+Shift+S');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+o');
+  const open = page.getByRole('dialog', { name: 'Open saved scene', exact: true });
+  await open.waitFor();
+  await open.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.keyboard.press('Control+Shift+s');
+  const save = page.getByRole('dialog', { name: 'Save scene as', exact: true });
+  await save.waitFor();
+  await save.getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(await page.locator('.file-dialog').count(), 0);
   await page.close();
 });
 for (const [platform, command, redo] of [
@@ -83,7 +176,7 @@ for (const [platform, command, redo] of [
     assert.equal(await page.locator('.menu-edit kbd').nth(1).innerText(), redo);
     assert.equal(
       await page.locator('.menu-edit kbd').nth(2).innerText(),
-      platform === 'MacIntel' ? '⌫' : 'Delete',
+      platform === 'MacIntel' ? '⌫' : 'Backspace',
     );
     await page.keyboard.press('Escape');
     const api = await page.evaluate(async () => {

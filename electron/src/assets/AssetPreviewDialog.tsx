@@ -3,6 +3,8 @@ import { Button, Empty } from '../components';
 import { InfoDialog } from '../InfoDialog';
 import { Viewport, type ViewportHandle, type ViewportSettings } from '../Viewport';
 import { t } from '../i18n';
+import { modelLoadStageLabels } from '../SceneLoadProgress';
+import type { ModelLoadProgress } from '../resources/loading';
 import type { Asset } from './catalog';
 import { PreviewSession, type AssetPreview, type AssetPreviewLoader } from './PreviewSession';
 import './assets.css';
@@ -13,12 +15,13 @@ export function AssetPreviewDialog({ asset, load, onClose, onOpen, settings }: {
 }) {
   const [preview, setPreview] = useState<AssetPreview | null>(null);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState<ModelLoadProgress>({ stage: 'resources' });
   const viewport = useRef<ViewportHandle>(null);
   useEffect(() => {
     const session = new PreviewSession();
     let cancelled = false;
-    setPreview(null); setError('');
-    void session.load(asset, load).then((next) => { if (!cancelled) setPreview(next); })
+    setPreview(null); setError(''); setProgress({ stage: 'resources' });
+    void session.load(asset, load, { onProgress: setProgress }).then((next) => { if (!cancelled) setPreview(next); })
       .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => { cancelled = true; session.dispose(); };
   }, [asset, load]);
@@ -33,7 +36,10 @@ export function AssetPreviewDialog({ asset, load, onClose, onOpen, settings }: {
       {preview ? <Viewport ref={viewport} document={preview.document} selected={null} tool="select"
         frame="world" geometry="default" revision={0} settings={settings} translate={t}
         onSelect={() => {}} onChange={() => {}} /> :
-        <Empty title={error ? 'Could not preview model' : 'Loading preview…'}>{error || undefined}</Empty>}
+        <Empty title={error ? 'Could not preview model' : 'Loading preview…'}>
+          {error || <span role="status">{t(modelLoadStageLabels[progress.stage])}
+            {progress.total !== undefined && ` · ${progress.completed ?? 0} / ${progress.total}`}</span>}
+        </Empty>}
     </div>
     <div className="asset-preview-footer">
       {preview && <span>{preview.document.nodes.length} {t('Objects')} · {preview.document.joints.length} {t('Joints')}</span>}

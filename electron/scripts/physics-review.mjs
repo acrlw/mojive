@@ -1,3 +1,4 @@
+import { chooseSampleScene } from '../tests/helpers/editable-scene.mjs';
 import { _electron as electron } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -82,7 +83,7 @@ try {
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await page.waitForSelector('[role=treeitem]');
   assert.equal(await app.evaluate(({ app }) => app.isPackaged), packaged);
-  // Startup and the example menu must load the same live MJCF as native make joint-gizmo.
+  // Startup and the asset example must load the same live MJCF as native make joint-gizmo.
   await page.getByRole('toolbar', { name: '仿真', exact: true }).waitFor();
   assert.match(await page.locator('.document-title').innerText(), /关节操作示例/);
   await page.locator('.activity-rail').getByRole('button', { name: '关节', exact: true }).click();
@@ -97,7 +98,7 @@ try {
   await page.getByRole('button', { name: '环境', exact: true }).click();
   await numeric('时间步长', 0.005);
   await waitValue('时间步长', 0.005);
-  await action('scene.joint_gizmo');
+  await chooseSampleScene(page, 'Joint gizmos', true);
   await page.getByRole('button', { name: '不保存', exact: true }).click();
   await page.getByRole('alertdialog').waitFor({ state: 'detached' });
   await page.getByRole('toolbar', { name: '仿真', exact: true }).waitFor();

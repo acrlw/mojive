@@ -270,7 +270,7 @@ test('project root survives folder navigation and scene loads; close clears file
     .getByRole('navigation', { name: 'Application menu' })
     .getByRole('button', { name: 'File', exact: true })
     .click();
-  await page.getByRole('menuitem', { name: 'Close project folder', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Close Project Folder', exact: true }).click();
   await page.locator('.left-panel .empty').getByText('No folder open', { exact: true }).waitFor();
   assert.equal(await heading().count(), 0);
   assert.equal(await x.inputValue(), '2.000');

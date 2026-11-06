@@ -119,7 +119,7 @@ async function roundTripWorkspace() {
     .getByRole('navigation', { name: 'Application menu' })
     .getByRole('button', { name: 'File', exact: true });
   await fileMenu.click();
-  await page.getByRole('menuitem', { name: /^Save scene…/ }).click();
+  await page.getByRole('menuitem', { name: /^Save Scene As…/ }).click();
   const saveDialog = page.getByRole('dialog', { name: 'Save scene as', exact: true });
   await saveDialog.locator('.file-dialog-list[aria-busy="false"]').waitFor();
   await saveDialog
@@ -129,7 +129,7 @@ async function roundTripWorkspace() {
   await saveDialog.waitFor({ state: 'hidden' });
   const saved = await page.evaluate(() => JSON.parse(window.recordingFile.content));
   await fileMenu.click();
-  await page.getByRole('menuitem', { name: 'Open saved scene…', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Open Scene…/ }).click();
   const openDialog = page.getByRole('dialog', { name: 'Open saved scene', exact: true });
   await openDialog
     .getByRole('option', { name: 'timeline-roundtrip.mojive.json', exact: true })

@@ -163,7 +163,13 @@ for (const [appearance, language, uiScale, uiFontSize = 14] of [
     await page.keyboard.press('Escape');
     await tip.waitFor({ state: 'detached' });
     await page.locator('[data-menu=Help]').click();
-    await page.locator('.menu-help button').first().click();
+    await page
+      .locator('.menu-help')
+      .getByRole('menuitem', {
+        name: language === 'zh' ? '交互指南' : 'Interaction guide',
+        exact: true,
+      })
+      .click();
     const guide = page.locator('.interaction-guide');
     assert.equal(await guide.locator('.guide-row').count(), 17);
     assert.equal(await guide.locator('[data-icon^=status-mouse-]').count(), 7);

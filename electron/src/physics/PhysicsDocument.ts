@@ -5,6 +5,8 @@ import type { ModelBundle } from '../resources/modelBundle';
 import type { PhysicsBackendFactory, PhysicsSnapshot } from './contracts';
 import { SceneBinding } from './SceneBinding';
 import { SimulationSession } from './SimulationSession';
+import { checkModelLoad, type ModelLoadOptions } from '../resources/loading.ts';
+import { disposeDocument } from '../scene-resources.ts';
 
 /** Composition boundary between simulation ownership and the editable viewer document. */
 export class PhysicsDocument {
@@ -30,12 +32,24 @@ export class PhysicsDocument {
     });
   }
 
-  static async load(bundle: ModelBundle, factory: PhysicsBackendFactory): Promise<PhysicsDocument> {
-    const backend = await factory(bundle), session = new SimulationSession();
+  static async load(bundle: ModelBundle, factory: PhysicsBackendFactory, options?: ModelLoadOptions): Promise<PhysicsDocument> {
+    checkModelLoad(options);
+    const backend = await factory(bundle, options), session = new SimulationSession();
+    let binding: SceneBinding | undefined;
+    let attaching = false;
     try {
+      checkModelLoad(options);
+      attaching = true;
       await session.attach(backend);
-      return new PhysicsDocument(bundle, new SceneBinding(backend.source, session.current.frame!), session);
-    } catch (error) { session.dispose(); throw error; }
+      binding = await SceneBinding.create(backend.source, session.current.frame!, options);
+      checkModelLoad(options);
+      return new PhysicsDocument(bundle, binding, session);
+    } catch (error) {
+      if (!attaching) backend.dispose();
+      session.dispose();
+      if (binding) disposeDocument(binding.document);
+      throw error;
+    }
   }
   get document(): SceneDocument { return this.binding.document; }
   setErrorHandler(handler: (error: unknown) => void): void { this.onError = handler; }

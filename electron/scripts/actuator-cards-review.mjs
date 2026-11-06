@@ -1,3 +1,4 @@
+import { openSampleScene } from '../tests/helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { _electron } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -93,7 +94,7 @@ try {
     await page.reload();
     await page.locator('.tree-row').first().waitFor();
     await page.evaluate(() => document.fonts.ready);
-    await action('scene.atelier_arm');
+    await openSampleScene(page, 'Atelier arm', language === 'zh-CN');
     await page.waitForFunction(() =>
       document.querySelector('.document-title')?.textContent.includes('Atelier'),
     );

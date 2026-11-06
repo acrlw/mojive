@@ -1,11 +1,32 @@
+import { readFileSync } from 'node:fs';
+
+const nativeChinese = JSON.parse(readFileSync(new URL('../../src/locales/zh.json', import.meta.url), 'utf8'));
+const electronChinese = JSON.parse(readFileSync(new URL('../../src/locales/electron-zh.json', import.meta.url), 'utf8'));
+const chineseCopy = { ...nativeChinese, ...electronChinese };
+const label = (text, chinese) => chinese ? chineseCopy[text] ?? text : text;
+
+/** Use the asset browser, the production owner for sample scenes and previews.
+ * Return before confirmation so callers can exercise unsaved-document protection.
+ */
+export async function chooseSampleScene(page, name, chinese = false) {
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  await page.locator('.activity-rail').getByRole('button', { name: label('Assets', chinese), exact: true }).click();
+  await page.locator('.asset-browser').getByRole('button', { name: label('Samples', chinese), exact: true }).click();
+  await page.locator('.asset-row').filter({ has: page.locator('strong', { hasText: label(name, chinese) }) })
+    .getByRole('button', { name: label('Open model', chinese), exact: true }).click();
+}
+
+export async function openSampleScene(page, name, chinese = false) {
+  await chooseSampleScene(page, name, chinese);
+  await page.waitForFunction((name) => document.querySelector('.document-title')?.textContent?.includes(name), label(name, chinese));
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  await page.locator('.activity-rail').getByRole('button', { name: label('Scene', chinese), exact: true }).click();
+}
+
 /** Load an explicitly editable scene; startup is a live MuJoCo model. */
 export async function openEditableScene(page, chinese = false) {
   await page.getByRole('treeitem').first().waitFor();
-  await page.getByRole('navigation', { name: chinese ? '应用菜单' : 'Application menu' })
-    .getByRole('button', { name: chinese ? '文件' : 'File', exact: true }).click();
-  await page.getByRole('menuitem', { name: chinese ? '场景对象' : 'Scene objects', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.document-title')?.textContent?.match(/Scene objects|场景对象/));
-  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  await openSampleScene(page, 'Scene objects', chinese);
 }
 
 /** Open the maintained kinematic joint fixture through the workspace import path.

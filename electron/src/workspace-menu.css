@@ -1,0 +1,22 @@
+.menu .workspace-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 10px;
+}
+.menu .workspace-menu-row .workspace-menu-icon {
+  display: flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+}
+.menu .workspace-menu-row .workspace-menu-label {
+  flex: 1;
+  white-space: nowrap;
+}
+.menu .workspace-menu-row .workspace-menu-indicator {
+  display: flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+}

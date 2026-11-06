@@ -224,10 +224,10 @@ test('switching open application menus opens the next menu with one click and re
   await page.getByRole('treeitem').first().waitFor();
   const nav = page.getByRole('navigation', { name: 'Application menu' });
   await nav.getByRole('button', { name: 'File', exact: true }).click();
-  await page.getByRole('menuitem', { name: /^Open URDF/ }).waitFor();
+  await page.getByRole('menuitem', { name: 'Open Model', exact: true }).waitFor();
   await nav.getByRole('button', { name: 'View', exact: true }).click();
   const menu = page.getByRole('menu');
-  await page.getByRole('menuitem', { name: 'Frame all', exact: true }).waitFor();
+  await page.getByRole('menuitem', { name: /^Frame all/ }).waitFor();
   // A stale light-dismiss toggle must not close the replacement menu on the next task.
   await page.waitForTimeout(80);
   assert.equal(await menu.count(), 1);

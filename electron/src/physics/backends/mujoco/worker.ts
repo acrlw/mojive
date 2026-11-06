@@ -13,17 +13,30 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   queue = queue.then(async () => {
     try {
       let value: BackendResponse;
+      const transfers: ArrayBuffer[] = [];
       if (request.type === 'load') {
-        const candidate = await MujocoBackend.load(await runtime, request.bundle);
+        const start = performance.now();
+        const onProgress: import('../../../resources/loading').ModelLoadOptions['onProgress'] = (progress) => {
+          self.postMessage({ requestId: request.requestId, progress: { ...progress, elapsedMs: performance.now() - start } } satisfies WorkerResponse);
+        };
+        onProgress({ stage: 'runtime' });
+        const candidate = await MujocoBackend.load(await runtime, request.bundle, { onProgress });
         backend?.dispose(); backend = candidate;
-        value = { source: backend.source, defaults: backend.defaults };
+        // The backend keeps its source for deformable updates and snapshots. Copy
+        // it here in the worker, then transfer the geometry buffers to the renderer.
+        const source = structuredClone(backend.source);
+        const collect = (item: unknown): void => {
+          if (ArrayBuffer.isView(item)) { transfers.push(item.buffer as ArrayBuffer); return; }
+          if (item && typeof item === 'object') for (const child of Object.values(item)) collect(child);
+        };
+        collect(source);
+        value = { source, defaults: backend.defaults };
       } else {
         if (!backend) throw new Error('No simulation model is loaded.');
         value = request.type === 'execute' ? await backend.execute(request.command)
           : await backend[request.type]();
       }
       const response: WorkerResponse = { requestId: request.requestId, ok: true, value };
-      const transfers: ArrayBuffer[] = [];
       if ('bodyTransforms' in value && value.bodyTransforms instanceof Float64Array) {
         transfers.push(value.bodyTransforms.buffer as ArrayBuffer);
         transfers.push((value.jointPositions as Float64Array).buffer as ArrayBuffer);
@@ -34,7 +47,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
         for (const update of (value as PhysicsFrame).geometryUpdates ?? [])
           transfers.push(update.positions.buffer as ArrayBuffer, update.normals.buffer as ArrayBuffer);
       }
-      self.postMessage(response, { transfer: transfers });
+      self.postMessage(response, { transfer: [...new Set(transfers)] });
     } catch (error) {
       const response: WorkerResponse = { requestId: request.requestId, ok: false,
         error: error instanceof Error ? error.message : String(error) };

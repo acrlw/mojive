@@ -9,6 +9,8 @@ import { MujocoPerturbation } from './perturbation.ts';
 import { writeQuaternion } from '../../rotation.ts';
 import { MujocoDeformables } from './deformables.ts';
 import { explainModelCompatibility } from './modelCompatibility.ts';
+import { checkModelLoad, type ModelLoadOptions } from '../../../resources/loading.ts';
+import { installModelFiles } from './modelFiles.ts';
 
 /** Owns all WASM handles. Neither the renderer nor presenters receive engine objects. */
 export class MujocoBackend implements PhysicsBackend {
@@ -25,20 +27,30 @@ export class MujocoBackend implements PhysicsBackend {
   private perturbation: MujocoPerturbation;
   private deformables?: MujocoDeformables;
 
-  static async load(mj: MainModule, input: ModelBundle): Promise<MujocoBackend> {
+  static async load(mj: MainModule, input: ModelBundle, loading?: ModelLoadOptions): Promise<MujocoBackend> {
+    checkModelLoad(loading);
+    loading?.onProgress?.({ stage: 'verify' });
     const bundle = await createModelBundle(input.name, input.entry, input.files);
+    checkModelLoad(loading);
     if (bundle.id !== input.id) throw new Error('Model package identity does not match its contents.');
     const vfs = new mj.MjVFS();
+    let resources: ReturnType<typeof installModelFiles> | undefined;
     let model: MjModel | undefined;
     let backend: MujocoBackend | undefined;
     let data: MjData | undefined, option: MjOption | undefined, buffer: DoubleBuffer | undefined;
     try {
-      for (const file of bundle.files) vfs.addBuffer(file.path, file.bytes);
-      model = mj.MjModel.from_xml_path(bundle.entry, vfs);
+      loading?.onProgress?.({ stage: 'compile' });
+      // MuJoCo resolves relative includes and assets from the absolute entry path.
+      // Each candidate gets its own filesystem root, including concurrent loads.
+      resources = installModelFiles(mj, bundle);
+      model = mj.MjModel.from_xml_path(resources.entry, vfs);
       data = new mj.MjData(model);
       option = model.opt;
       const options = new MujocoOptions(mj, option);
-      const source = readSource(mj, model, bundle, options.fields);
+      loading?.onProgress?.({ stage: 'source', completed: 0, total: model.ngeom });
+      const source = readSource(mj, model, bundle, options.fields, (completed) => {
+        loading?.onProgress?.({ stage: 'source', completed, total: model!.ngeom });
+      });
       buffer = new mj.DoubleBuffer(mj.mj_stateSize(model, mj.mjtState.mjSTATE_INTEGRATION.value));
       mj.mj_forward(model, data);
       backend = new MujocoBackend(mj, model, data, options, source, buffer);
@@ -57,7 +69,7 @@ export class MujocoBackend implements PhysicsBackend {
       if (backend) backend.dispose();
       else { buffer?.delete(); option?.delete(); data?.delete(); model?.delete(); }
       throw explainModelCompatibility(error, bundle.entry, mj.mj_versionString());
-    } finally { vfs.delete(); }
+    } finally { resources?.dispose(); vfs.delete(); }
   }
 
   private constructor(mj: MainModule, model: MjModel, data: MjData, options: MujocoOptions, source: PhysicsSource, buffer: DoubleBuffer) {

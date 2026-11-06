@@ -210,7 +210,13 @@ for (const [theme, language, scale] of [
     );
     await page.keyboard.press('Escape');
     await page.locator('[data-menu=Help]').click();
-    await page.locator('.menu-help button').first().click();
+    await page
+      .locator('.menu-help')
+      .getByRole('menuitem', {
+        name: language === 'zh' ? '交互指南' : 'Interaction guide',
+        exact: true,
+      })
+      .click();
     await corner(page, '.info-dialog', '.dialog-heading .button', ['right', 'top'], 'guide close');
     await page.locator('.info-dialog').screenshot({ path: `${out}/corners-guide-${theme}.png` });
     await page.keyboard.press('Escape');

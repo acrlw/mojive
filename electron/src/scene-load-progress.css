@@ -1,0 +1,19 @@
+.info-dialog.scene-load-dialog {
+  width: min(420px, calc(100vw / var(--dialog-zoom, 1) - 32px));
+  padding: 20px;
+  border-radius: 12px;
+}
+.info-dialog.scene-load-dialog::backdrop { background: #0002; backdrop-filter: none; }
+.scene-load-heading, .scene-load-stage, .scene-load-footer { display: flex; align-items: center; gap: 12px; }
+.scene-load-heading { justify-content: space-between; }
+.scene-load-heading strong { font-size: 16px; font-weight: 600; }
+.scene-load-heading > span, .scene-load-stage > span:last-child:not(:first-child) { font-family: var(--font-numeric, var(--font-mono)); font-variant-numeric: tabular-nums; color: var(--muted-color); }
+.scene-load-name { margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-color); }
+.scene-load-stage { margin-top: 20px; justify-content: space-between; }
+.scene-load-bar { width: 100%; height: 4px; margin: 10px 0 16px; border-radius: 2px; overflow: hidden; background: var(--input-color); }
+.scene-load-bar > span { display: block; height: 100%; background: var(--sage-color); border-radius: inherit; }
+.scene-load-bar.indeterminate > span { width: 36%; animation: scene-load-progress 1.4s ease-in-out infinite alternate; }
+.scene-load-footer > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim-color); }
+.scene-load-footer > button { min-width: 80px; }
+@keyframes scene-load-progress { from { transform: translateX(0); } to { transform: translateX(178%); } }
+@media (prefers-reduced-motion: reduce) { .scene-load-bar.indeterminate > span { animation: none; margin: auto; } }

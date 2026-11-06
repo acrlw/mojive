@@ -7,158 +7,216 @@ import vm from 'node:vm';
 
 const menuFile = new URL('../main/menu.cjs', import.meta.url);
 const localRequire = createRequire(menuFile);
-function menuFixture() {
-  const captures = [],
-    actions = [],
-    theme = {};
+function menuFixture(platform = 'darwin') {
+  const captures = [], actions = [], edits = [], external = [], theme = {};
   const electron = {
     app: { isPackaged: false },
     nativeTheme: theme,
     nativeImage: { createEmpty: () => ({ addRepresentation() {}, setTemplateImage() {} }) },
+    shell: { openExternal: async (url) => external.push(url) },
     Menu: {
       buildFromTemplate: (template) => template,
       setApplicationMenu: (menu) => captures.push(menu),
     },
   };
   const module = { exports: {} };
-  vm.runInNewContext(
-    readFileSync(menuFile, 'utf8'),
-    {
-      module,
-      exports: module.exports,
-      __dirname: fileURLToPath(new URL('../main/', import.meta.url)),
-      process: { platform: 'darwin' },
-      require: (name) => (name === 'electron' ? electron : localRequire(name)),
-    },
-    { filename: fileURLToPath(menuFile) },
-  );
+  vm.runInNewContext(readFileSync(menuFile, 'utf8'), {
+    module, exports: module.exports,
+    __dirname: fileURLToPath(new URL('../main/', import.meta.url)),
+    process: { platform },
+    require: (name) => name === 'electron' ? electron : name === 'node:fs'
+      ? { readFileSync: () => Buffer.alloc(0) } : localRequire(name),
+  }, { filename: fileURLToPath(menuFile) });
   const controller = module.exports.createMenuController(() => ({
     isDestroyed: () => false,
-    webContents: { send: (channel, action) => actions.push({ channel, action }) },
+    webContents: {
+      send: (channel, action) => actions.push({ channel, action }),
+      undo: () => edits.push('undo'), redo: () => edits.push('redo'), delete: () => edits.push('delete'),
+    },
   }));
-  return { controller, actions, captures, theme };
+  const flatten = (items) => items.flatMap((item) => [item, ...(item.submenu ? flatten(item.submenu) : [])]);
+  const item = (id) => flatten(captures.at(-1)).find((entry) => entry.id === id);
+  const group = (label) => captures.at(-1).find((entry) => entry.label === label).submenu;
+  return { controller, actions, captures, theme, item, group, flatten, edits, external, api: module.exports };
 }
-const chineseState = {
-  locale: 'zh-CN',
-  theme: 'light',
-  canUndo: false,
-  canRedo: false,
-  hasSelection: false,
-  showLeft: true,
-  showInspector: true,
-  showTimeline: true,
+const state = {
+  locale: 'en', theme: 'dark', canUndo: false, canRedo: false, hasSelection: false,
+  showLeft: true, showInspector: true, showTimeline: true,
 };
+const chineseState = { ...state, locale: 'zh-CN', theme: 'light' };
 
-test('native Add groups primitive objects separately from ground, light and camera, matching frontend order', () => {
-  const { captures } = menuFixture(),
-    add = captures.at(-1).find((item) => item.label === 'Add').submenu;
-  const items = Array.from(add, (item) => (item.type === 'separator' ? 'separator' : item.id));
-  assert.deepEqual(items, [
-    'add.box',
-    'add.sphere',
-    'add.cylinder',
-    'add.capsule',
-    'separator',
-    'add.ground',
-    'add.light',
-    'add.camera',
-  ]);
-  const frontend = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  const definition = frontend.match(/const additions:[\s\S]*?= \[([\s\S]*?)\];/)[1];
-  const frontendIds = [...definition.matchAll(/kind: '([^']+)'/g)].map(
-    (match) => `add.${match[1]}`,
-  );
-  assert.deepEqual(
-    items.filter((id) => id !== 'separator'),
-    frontendIds,
-  );
-  assert.match(
-    frontend,
-    /a\.kind === 'ground' && <hr \/>/,
-    'The frontend uses the same environment-group boundary',
-  );
+test('native groups and semantic boundaries match the shared native-parity catalog', () => {
+  const { captures, group, item, flatten } = menuFixture();
+  assert.deepEqual(Array.from(captures.at(-1), (entry) => entry.label),
+    ['Mojive', 'File', 'Edit', 'Add', 'View', 'Simulate', 'Window', 'Help']);
+  assert.deepEqual(Array.from(group('Add'), (entry) => entry.type === 'separator' ? 'separator' : entry.id),
+    ['add.box', 'add.sphere', 'add.cylinder', 'add.capsule', 'add.ground', 'separator', 'add.light', 'add.camera']);
+  assert.equal(group('View')[0].id, 'view.focusAll');
+  assert.deepEqual(Array.from(item('menu:projection').submenu, (entry) => entry.id),
+    ['view.perspective', 'view.orthographic']);
+  assert.deepEqual(Array.from(item('menu:openModel').submenu, (entry) => entry.id),
+    ['file.openSimulation', 'file.openUrdf']);
+  assert.ok(!flatten(group('Simulate')).some((entry) => entry.id === 'panel.actuators'),
+    'Actuators are a panel, not a physics adapter selector');
 });
 
-test('language updates preserve Add separators and use the same Camera term as the workspace', () => {
-  const { controller, captures, actions } = menuFixture();
-  controller.update(chineseState);
-  const add = captures.at(-1).find((item) => item.label === '添加').submenu;
-  const nativeCamera = add.find((item) => item.id === 'add.camera');
-  const workspace = JSON.parse(
-    readFileSync(new URL('../src/locales/zh.json', import.meta.url), 'utf8'),
-  );
-  assert.equal(nativeCamera.label, workspace.Camera);
-  assert.equal(nativeCamera.label, '相机');
-  assert.equal(add[4].type, 'separator');
-  assert.equal(add[5].label, '地面');
-  nativeCamera.click();
-  assert.equal(actions.at(-1).channel, 'mojive:menu-action');
-  assert.equal(actions.at(-1).action, 'add.camera');
-  const catalog = readFileSync(new URL('../src/SceneCatalog.ts', import.meta.url), 'utf8');
-  assert.ok(!catalog.includes('摄像机'), 'Scene catalog descriptions use the shared camera term');
+test('language updates preserve native Add separators and the shared Camera term', () => {
+  const { controller, group, item, actions } = menuFixture();
+  controller.update({ ...chineseState, canAdd: true });
+  assert.equal(item('add.camera').label, '相机');
+  assert.equal(item('add.ground').label, '平面');
+  assert.equal(group('添加')[5].type, 'separator');
+  item('add.camera').click();
+  assert.deepEqual(actions.at(-1), { channel: 'mojive:menu-action', action: 'add.camera' });
 });
 
-test('Close Project Folder follows project state independently from scene selection and window close', () => {
-  const { controller, captures, actions } = menuFixture();
-  const fileMenu = () =>
-    captures.at(-1).find((item) => item.submenu?.some((child) => child.id === 'file.openProject'))
-      .submenu;
-  assert.equal(fileMenu().find((item) => item.id === 'file.closeProject').enabled, false);
-  controller.update({ ...chineseState, hasProject: true });
-  const close = fileMenu().find((item) => item.id === 'file.closeProject');
-  assert.equal(close.enabled, true);
-  assert.equal(close.label, '关闭项目文件夹');
-  assert.ok(close.icon);
-  close.click();
+test('project and document actions follow their own capabilities independently from window close', () => {
+  const { controller, item, group, actions } = menuFixture();
+  assert.equal(item('file.closeProject').enabled, false);
+  assert.equal(item('file.save').enabled, false);
+  controller.update({ ...chineseState, hasProject: true, hasDocument: true });
+  assert.equal(item('file.closeProject').enabled, true);
+  assert.equal(item('file.save').enabled, true);
+  assert.equal(item('file.closeProject').label, '关闭项目文件夹');
+  item('file.closeProject').click();
   assert.equal(actions.at(-1).action, 'file.closeProject');
-  assert.ok(
-    fileMenu().some((item) => item.role === 'close'),
-    'Window close remains a separate system action',
-  );
-  controller.update({ ...chineseState, hasProject: false, hasSelection: true });
-  assert.equal(fileMenu().find((item) => item.id === 'file.closeProject').enabled, false);
-  assert.throws(
-    () => controller.update({ ...chineseState, hasProject: 'yes' }),
-    /Invalid native project state/,
-  );
+  assert.ok(group('文件').some((entry) => entry.role === 'close'));
+  controller.update({ ...chineseState, hasSelection: true });
+  assert.equal(item('file.closeProject').enabled, false);
+  assert.throws(() => controller.update({ ...chineseState, hasProject: 'yes' }), /Invalid native menu state: hasProject/);
 });
 
-test('native focus accelerators follow remapping, unbinding and text input ownership', () => {
-  const { controller, captures } = menuFixture();
-  const focus = () =>
-    captures
-      .at(-1)
-      .flatMap((item) => item.submenu ?? [])
-      .filter((item) => item.id?.startsWith('view.focus'));
-  controller.update({ ...chineseState, focusKey: 'G' });
-  assert.deepEqual(
-    Array.from(focus(), (item) => item.accelerator),
-    ['G', 'Shift+G'],
-  );
-  controller.update({ ...chineseState, focusKey: 'F', focusAllKey: null });
-  assert.equal(focus()[1].accelerator, undefined);
-  controller.update({ ...chineseState, focusKey: null });
-  assert.ok(focus().every((item) => item.accelerator === undefined));
-  controller.update({ ...chineseState, focusKey: 'R', textInput: true });
-  assert.ok(focus().every((item) => item.accelerator === undefined));
-  assert.throws(
-    () => controller.update({ ...chineseState, focusKey: 'Cmd+Q' }),
-    /Invalid native focus/,
-  );
+test('checked state follows tools, projection, panels and live simulation capabilities', () => {
+  const { controller, item } = menuFixture();
+  controller.update({ ...state, hasSelection: true, selectionVisible: true, projection: 'orthographic',
+    tool: 'rotation', frame: 'body', panel: 'cameras', hasSimulation: true, simulationPlaying: true,
+    simulationRecording: true, simulationSpeed: 0.5, canToggleSimulation: true,
+    canSimulationPrevious: true, canSimulationStep: true });
+  for (const id of ['edit.visibility', 'view.orthographic', 'tool.rotation', 'frame.body',
+    'panel.cameras', 'simulation.record', 'simulation.speed.0.5']) assert.equal(item(id).checked, true, id);
+  assert.equal(item('view.perspective').checked, false);
+  assert.equal(item('simulation.toggle').label, 'Pause simulation');
+  assert.equal(item('simulation.record').label, 'Stop recording');
+  assert.equal(item('simulation.previous').enabled, true);
+  assert.equal(item('simulation.step').enabled, true);
+  controller.update(state);
+  assert.equal(item('simulation.previous').enabled, false);
+  assert.equal(item('simulation.step').enabled, false);
+});
+
+test('modal blocking disables domain actions and suppresses stale native callbacks', () => {
+  const { controller, item, actions } = menuFixture();
+  const stale = item('add.box').click;
+  controller.update({ ...state, blocked: true, canUndo: true, hasSelection: true, hasProject: true });
+  for (const id of ['file.openScene', 'file.closeProject', 'add.box', 'edit.undo', 'view.focusSelection'])
+    assert.equal(item(id).enabled, false, id);
+  stale();
+  item('edit.undo').click();
+  assert.deepEqual(actions, []);
+});
+
+test('scene capabilities gate Add and Delete independently of selection', () => {
+  const { controller, item } = menuFixture();
+  controller.update({ ...state, hasSelection: true, canAdd: false, canDelete: false });
+  assert.equal(item('add.box').enabled, false);
+  assert.equal(item('edit.delete').enabled, false);
+  controller.update({ ...state, hasSelection: true, canAdd: true, canDelete: true });
+  assert.equal(item('add.box').enabled, true);
+  assert.equal(item('edit.delete').enabled, true);
+});
+
+test('hiding the sidebar clears the checked panel without rejecting the state', () => {
+  const { controller, item } = menuFixture();
+  controller.update({ ...state, panel: 'cameras' });
+  assert.equal(item('panel.cameras').checked, true);
+  controller.update({ ...state, panel: '', showLeft: false });
+  assert.equal(item('view.toggleLeft').checked, false);
+  for (const panel of ['scene', 'project', 'assets', 'joints', 'actuators', 'cameras', 'layers'])
+    assert.equal(item(`panel.${panel}`).checked, false, panel);
+});
+
+test('focus accelerators support remapping and unbinding while native text edits own undo/redo/delete', () => {
+  const { controller, item, edits, actions } = menuFixture();
+  controller.update({ ...state, focusKey: 'G' });
+  assert.equal(item('view.focusSelection').accelerator, 'G');
+  assert.equal(item('view.focusAll').accelerator, 'Shift+G');
+  controller.update({ ...state, focusKey: 'F', focusAllKey: null });
+  assert.equal(item('view.focusAll').accelerator, undefined);
+  controller.update({ ...state, focusKey: null });
+  assert.equal(item('view.focusSelection').accelerator, undefined);
+  assert.equal(item('view.focusAll').accelerator, undefined);
+  controller.update({ ...state, focusKey: 'R', textInput: true });
+  assert.equal(item('view.focusSelection').accelerator, undefined);
+  assert.equal(item('view.focusAll').accelerator, undefined);
+  for (const id of ['edit.undo', 'edit.redo', 'edit.delete']) {
+    assert.equal(item(id).enabled, true);
+    item(id).click();
+  }
+  assert.equal(item('edit.delete').accelerator, undefined);
+  assert.deepEqual(edits, ['undo', 'redo', 'delete']);
+  assert.deepEqual(actions, []);
+  assert.throws(() => controller.update({ ...state, focusKey: 'Cmd+Q' }), /Invalid native focus/);
+});
+
+test('configured directional focus keys translate to Electron accelerator names', () => {
+  const { controller, item } = menuFixture();
+  for (const [input, expected] of [['ArrowLeft', 'Left'], ['ArrowRight', 'Right'],
+    ['Meta+ArrowLeft', 'Command+Left'], ['Control+Alt+ArrowRight', 'Control+Alt+Right'], ['Space', 'Space']]) {
+    controller.update({ ...state, focusKey: input });
+    assert.equal(item('view.focusSelection').accelerator, expected);
+    assert.equal(item('view.focusAll').accelerator, `Shift+${expected}`);
+  }
+});
+
+test('modal text fields retain native edits while scene commands remain blocked', () => {
+  const { controller, item, edits, actions } = menuFixture();
+  controller.update({ ...state, blocked: true, textInput: true, canUndo: false, canRedo: false });
+  for (const id of ['edit.undo', 'edit.redo', 'edit.delete']) {
+    assert.equal(item(id).enabled, true, id);
+    item(id).click();
+  }
+  assert.deepEqual(edits, ['undo', 'redo', 'delete']);
+  assert.deepEqual(actions, []);
+  assert.equal(item('file.openScene').enabled, false);
+  assert.equal(item('add.box').enabled, false);
+});
+
+test('timeline focus preserves local focus, delete and clipboard keyboard ownership', () => {
+  const { controller, item, flatten, captures } = menuFixture();
+  controller.update({ ...state, scopedKeyboard: true, hasSelection: true, canDelete: true });
+  for (const id of ['view.focusSelection', 'view.focusAll', 'edit.delete']) {
+    assert.equal(item(id).accelerator, undefined, id);
+    assert.equal(item(id).enabled, true, `${id} is still available as an explicit scene menu action`);
+  }
+  for (const name of ['cut', 'copy', 'paste', 'selectAll']) {
+    assert.equal(item(`role.${name}`).enabled, false);
+    assert.equal(item(`role.${name}`).role, undefined);
+    assert.equal(item(`role.${name}`).accelerator, undefined);
+  }
+  controller.update({ ...state, scopedKeyboard: true, textInput: true });
+  for (const name of ['cut', 'copy', 'paste', 'selectAll'])
+    assert.ok(flatten(captures.at(-1)).some((entry) => entry.role === name), name);
+  controller.update(state);
+  assert.equal(item('view.focusSelection').accelerator, 'F');
+  assert.equal(item('edit.delete').accelerator, 'Backspace');
 });
 
 test('native system-role labels follow the app language independently of the host language', () => {
-  const { controller, captures } = menuFixture();
-  const roles = (items) =>
-    items.flatMap((item) => [
-      ...(item.role && item.role !== 'help' ? [item] : []),
-      ...(Array.isArray(item.submenu) ? roles(item.submenu) : []),
-    ]);
+  const { controller, captures, flatten } = menuFixture();
   controller.update(chineseState);
-  const zh = roles(captures.at(-1));
-  assert.ok(zh.length >= 14);
-  for (const item of zh) assert.match(item.label, /[\u3400-\u9fff]/, item.role);
-  assert.equal(zh.find((item) => item.role === 'copy').label, '复制');
-  controller.update({ ...chineseState, locale: 'en' });
-  assert.equal(roles(captures.at(-1)).find((item) => item.role === 'copy').label, 'Copy');
+  const roles = flatten(captures.at(-1)).filter((entry) => entry.role && entry.role !== 'help');
+  assert.ok(roles.length >= 14);
+  for (const item of roles) assert.match(item.label, /[\u3400-\u9fff]/, item.role);
+  assert.equal(roles.find((item) => item.role === 'copy').label, '复制');
+  controller.update(state);
+  assert.equal(flatten(captures.at(-1)).find((entry) => entry.role === 'copy').label, 'Copy');
+});
+
+test('documentation opens only the fixed project URL and non-macOS leaves the menu to the renderer', async () => {
+  const { api, external } = menuFixture();
+  assert.equal(await api.openDocumentation('https://example.com'), false);
+  assert.deepEqual(external, []);
+  assert.equal(await api.openDocumentation(), true);
+  assert.deepEqual(external, ['https://github.com/acrlw/mojive#readme']);
+  assert.equal(menuFixture('linux').captures.at(-1), null);
 });

@@ -151,4 +151,4 @@ export interface PhysicsBackend {
   capture(): Promise<PhysicsSnapshot>;
   dispose(): void;
 }
-export type PhysicsBackendFactory = (bundle: ModelBundle) => Promise<PhysicsBackend>;
+export type PhysicsBackendFactory = (bundle: ModelBundle, options?: import('../resources/loading').ModelLoadOptions) => Promise<PhysicsBackend>;

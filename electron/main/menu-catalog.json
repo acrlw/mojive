@@ -1,0 +1,585 @@
+[
+  {
+    "name": "File",
+    "label": "file",
+    "items": [
+      {
+        "action": "file.openScene",
+        "label": "openScene",
+        "icon": "scene",
+        "accelerator": "CommandOrControl+O"
+      },
+      {
+        "action": "file.save",
+        "label": "save",
+        "icon": "save",
+        "enabled": "hasDocument",
+        "accelerator": "CommandOrControl+Shift+S"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "label": "openModel",
+        "icon": "file",
+        "children": [
+          {
+            "action": "file.openSimulation",
+            "label": "openSimulation",
+            "icon": "file"
+          },
+          {
+            "action": "file.openUrdf",
+            "label": "openUrdf",
+            "icon": "robot"
+          }
+        ]
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "file.openProject",
+        "label": "openProject",
+        "icon": "folder"
+      },
+      {
+        "action": "file.closeProject",
+        "label": "closeProject",
+        "icon": "close",
+        "enabled": "hasProject"
+      }
+    ]
+  },
+  {
+    "name": "Edit",
+    "label": "edit",
+    "items": [
+      {
+        "action": "edit.undo",
+        "label": "undo",
+        "icon": "undo",
+        "enabled": "canUndo",
+        "accelerator": "CommandOrControl+Z"
+      },
+      {
+        "action": "edit.redo",
+        "label": "redo",
+        "icon": "redo",
+        "enabled": "canRedo",
+        "accelerator": "CommandOrControl+Shift+Z"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "edit.visibility",
+        "label": "visible",
+        "icon": "eye",
+        "type": "checkbox",
+        "checked": {
+          "key": "selectionVisible",
+          "value": true
+        },
+        "enabled": "hasSelection"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "edit.delete",
+        "label": "delete",
+        "icon": "delete",
+        "enabled": "canDelete",
+        "accelerator": "Backspace"
+      }
+    ]
+  },
+  {
+    "name": "Add",
+    "label": "add",
+    "items": [
+      {
+        "action": "add.box",
+        "label": "box",
+        "icon": "shape-box",
+        "enabled": "canAdd"
+      },
+      {
+        "action": "add.sphere",
+        "label": "sphere",
+        "icon": "shape-sphere",
+        "enabled": "canAdd"
+      },
+      {
+        "action": "add.cylinder",
+        "label": "cylinder",
+        "icon": "shape-cylinder",
+        "enabled": "canAdd"
+      },
+      {
+        "action": "add.capsule",
+        "label": "capsule",
+        "icon": "shape-capsule",
+        "enabled": "canAdd"
+      },
+      {
+        "action": "add.ground",
+        "label": "ground",
+        "icon": "shape-plane",
+        "enabled": "canAdd"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "add.light",
+        "label": "light",
+        "icon": "light",
+        "enabled": "canAdd"
+      },
+      {
+        "action": "add.camera",
+        "label": "camera",
+        "icon": "camera",
+        "enabled": "canAdd"
+      }
+    ]
+  },
+  {
+    "name": "View",
+    "label": "view",
+    "items": [
+      {
+        "action": "view.focusAll",
+        "label": "focusAll",
+        "icon": "fit",
+        "shortcut": "focusAllKey"
+      },
+      {
+        "action": "view.focusSelection",
+        "label": "focusSelection",
+        "icon": "target",
+        "enabled": "hasSelection",
+        "shortcut": "focusKey"
+      },
+      {
+        "label": "capture",
+        "icon": "capture-image",
+        "children": [
+          {
+            "action": "view.captureScene",
+            "label": "sceneImage",
+            "icon": "capture-image",
+            "enabled": "hasDocument"
+          }
+        ]
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "label": "projection",
+        "icon": "perspective",
+        "children": [
+          {
+            "action": "view.perspective",
+            "label": "perspective",
+            "icon": "perspective",
+            "type": "radio",
+            "checked": {
+              "key": "projection",
+              "value": "perspective"
+            }
+          },
+          {
+            "action": "view.orthographic",
+            "label": "orthographic",
+            "icon": "orthographic",
+            "type": "radio",
+            "checked": {
+              "key": "projection",
+              "value": "orthographic"
+            }
+          }
+        ]
+      },
+      {
+        "label": "transformTool",
+        "icon": "move",
+        "children": [
+          {
+            "action": "tool.select",
+            "label": "select",
+            "icon": "select",
+            "type": "radio",
+            "checked": {
+              "key": "tool",
+              "value": "select"
+            }
+          },
+          {
+            "action": "tool.position",
+            "label": "position",
+            "icon": "move",
+            "type": "radio",
+            "checked": {
+              "key": "tool",
+              "value": "position"
+            }
+          },
+          {
+            "action": "tool.rotation",
+            "label": "rotation",
+            "icon": "rotate",
+            "type": "radio",
+            "checked": {
+              "key": "tool",
+              "value": "rotation"
+            }
+          },
+          {
+            "action": "tool.scale",
+            "label": "scale",
+            "icon": "scale",
+            "type": "radio",
+            "checked": {
+              "key": "tool",
+              "value": "scale"
+            }
+          },
+          {
+            "action": "tool.joint",
+            "label": "joint",
+            "icon": "joint",
+            "type": "radio",
+            "checked": {
+              "key": "tool",
+              "value": "joint"
+            }
+          }
+        ]
+      },
+      {
+        "label": "gizmoOrientation",
+        "icon": "world",
+        "children": [
+          {
+            "action": "frame.world",
+            "label": "worldFrame",
+            "icon": "world",
+            "type": "radio",
+            "checked": {
+              "key": "frame",
+              "value": "world"
+            }
+          },
+          {
+            "action": "frame.body",
+            "label": "bodyFrame",
+            "icon": "body-frame",
+            "type": "radio",
+            "checked": {
+              "key": "frame",
+              "value": "body"
+            }
+          }
+        ]
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "view.toggleGizmos",
+        "label": "transformHandles",
+        "icon": "move",
+        "type": "checkbox",
+        "checked": {
+          "key": "showGizmos",
+          "value": true
+        }
+      }
+    ]
+  },
+  {
+    "name": "Simulate",
+    "label": "simulate",
+    "items": [
+      {
+        "action": "simulation.toggle",
+        "label": "play",
+        "icon": "play",
+        "activeLabel": "pause",
+        "activeIcon": "pause",
+        "checked": {
+          "key": "simulationPlaying",
+          "value": true
+        },
+        "enabled": "canToggleSimulation"
+      },
+      {
+        "action": "simulation.reset",
+        "label": "goToStart",
+        "icon": "first",
+        "enabled": "canToggleSimulation"
+      },
+      {
+        "action": "simulation.record",
+        "label": "recordSimulation",
+        "icon": "rec",
+        "type": "checkbox",
+        "checked": {
+          "key": "simulationRecording",
+          "value": true
+        },
+        "activeLabel": "stopRecording",
+        "enabled": "hasSimulation"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "simulation.previous",
+        "label": "previousFrame",
+        "icon": "stepb",
+        "enabled": "canSimulationPrevious"
+      },
+      {
+        "action": "simulation.step",
+        "label": "nextFrame",
+        "icon": "stepf",
+        "enabled": "canSimulationStep"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "label": "playbackSpeed",
+        "icon": "performance",
+        "children": [
+          {
+            "action": "simulation.speed.0.25",
+            "label": "speed0.25",
+            "type": "radio",
+            "checked": {
+              "key": "simulationSpeed",
+              "value": 0.25
+            },
+            "enabled": "hasSimulation"
+          },
+          {
+            "action": "simulation.speed.0.5",
+            "label": "speed0.5",
+            "type": "radio",
+            "checked": {
+              "key": "simulationSpeed",
+              "value": 0.5
+            },
+            "enabled": "hasSimulation"
+          },
+          {
+            "action": "simulation.speed.1",
+            "label": "speed1",
+            "type": "radio",
+            "checked": {
+              "key": "simulationSpeed",
+              "value": 1
+            },
+            "enabled": "hasSimulation"
+          },
+          {
+            "action": "simulation.speed.2",
+            "label": "speed2",
+            "type": "radio",
+            "checked": {
+              "key": "simulationSpeed",
+              "value": 2
+            },
+            "enabled": "hasSimulation"
+          }
+        ]
+      },
+      {
+        "action": "simulation.environment",
+        "label": "physicsOptions",
+        "icon": "env",
+        "enabled": "hasSimulation"
+      }
+    ]
+  },
+  {
+    "name": "Window",
+    "label": "window",
+    "items": [
+      {
+        "action": "view.toggleLeft",
+        "label": "showLeft",
+        "icon": "sidebar-left",
+        "type": "checkbox",
+        "checked": {
+          "key": "showLeft",
+          "value": true
+        },
+        "activeLabel": "hideLeft"
+      },
+      {
+        "action": "view.toggleInspector",
+        "label": "showRight",
+        "icon": "inspect",
+        "type": "checkbox",
+        "checked": {
+          "key": "showInspector",
+          "value": true
+        },
+        "activeLabel": "hideRight"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "label": "panels",
+        "icon": "sidebar-left",
+        "children": [
+          {
+            "action": "panel.scene",
+            "label": "scene",
+            "icon": "scene",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "scene"
+            }
+          },
+          {
+            "action": "panel.project",
+            "label": "project",
+            "icon": "folder",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "project"
+            }
+          },
+          {
+            "action": "panel.assets",
+            "label": "assets",
+            "icon": "asset-library",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "assets"
+            }
+          },
+          {
+            "action": "panel.joints",
+            "label": "joints",
+            "icon": "joint",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "joints"
+            }
+          },
+          {
+            "action": "panel.actuators",
+            "label": "actuators",
+            "icon": "control",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "actuators"
+            }
+          },
+          {
+            "action": "panel.cameras",
+            "label": "cameras",
+            "icon": "camera",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "cameras"
+            }
+          },
+          {
+            "action": "panel.layers",
+            "label": "layers",
+            "icon": "layers",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "layers"
+            }
+          },
+          {
+            "action": "view.toggleInspector",
+            "label": "inspector",
+            "icon": "inspect",
+            "type": "checkbox",
+            "checked": {
+              "key": "showInspector",
+              "value": true
+            }
+          },
+          {
+            "action": "panel.timeline",
+            "label": "timeline",
+            "icon": "diamond",
+            "type": "checkbox",
+            "checked": {
+              "key": "showTimeline",
+              "value": true
+            }
+          },
+          {
+            "action": "panel.output",
+            "label": "output",
+            "icon": "terminal",
+            "type": "checkbox",
+            "checked": {
+              "key": "showOutput",
+              "value": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "app.settings",
+        "label": "settings",
+        "icon": "settings"
+      },
+      {
+        "action": "simulation.environment",
+        "label": "physicsOptions",
+        "icon": "env",
+        "enabled": "hasSimulation"
+      }
+    ]
+  },
+  {
+    "name": "Help",
+    "label": "help",
+    "items": [
+      {
+        "action": "help.documentation",
+        "label": "documentation",
+        "icon": "file"
+      },
+      {
+        "action": "help.interaction",
+        "label": "interaction",
+        "icon": "help"
+      },
+      {
+        "type": "separator"
+      },
+      {
+        "action": "app.about",
+        "label": "about",
+        "icon": "info"
+      }
+    ]
+  }
+]

@@ -77,3 +77,32 @@ test('real engine frames map multi-joint bodies, lights and cameras without inve
   assert.throws(() => binding.apply(invalid), /incompatible/);
   assert.deepEqual(camera.position.toArray(), before);
 });
+
+
+test('asynchronous scene assembly yields and disposes a cancelled candidate only', async (t) => {
+  const engine = await MujocoBackend.load(mj, bundle);
+  t.after(() => engine.dispose());
+  const frame = await engine.frame();
+  const current = new SceneBinding(engine.source, frame);
+  const currentGeometry = current.document.nodes.find((node) => node.name === 'capsule').object.geometry;
+  let currentDisposed = false;
+  currentGeometry.addEventListener('dispose', () => { currentDisposed = true; });
+  const geom = engine.source.geometries.find((item) => item.name === 'capsule');
+  const source = { ...engine.source, geometries: Array.from({ length: 1500 }, (_, index) => ({ ...geom, id: `candidate:${index}` })) };
+  const controller = new AbortController();
+  let disposed = 0, tasks = 0;
+  const originalDispose = THREE.BufferGeometry.prototype.dispose;
+  THREE.BufferGeometry.prototype.dispose = function() { disposed++; originalDispose.call(this); };
+  t.after(() => { THREE.BufferGeometry.prototype.dispose = originalDispose; });
+  const timer = setInterval(() => { tasks++; }, 0);
+  t.after(() => clearInterval(timer));
+  await assert.rejects(SceneBinding.create(source, frame, {
+    signal: controller.signal, onProgress: (progress) => {
+      if (progress.completed > 0) controller.abort();
+    },
+  }), { name: 'AbortError' });
+  assert.ok(tasks > 0, 'The browser task queue must run during scene assembly.');
+  assert.ok(disposed > 0, 'Partially assembled geometry must be released.');
+  assert.equal(currentDisposed, false);
+  assert.equal(current.document.root.children.length > 0, true);
+});

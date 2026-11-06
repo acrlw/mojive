@@ -1,3 +1,4 @@
+import { chooseSampleScene } from './helpers/editable-scene.mjs';
 import { installPaintStyle } from './helpers/surface-style.mjs';
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -83,11 +84,7 @@ async function invokeRemembered(key) {
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }
 async function chooseScene(name = 'Scene objects') {
-  await page
-    .getByRole('navigation', { name: 'Application menu' })
-    .getByRole('button', { name: 'File', exact: true })
-    .click();
-  await page.getByRole('menuitem', { name, exact: true }).click();
+  await chooseSampleScene(page, name);
   await page.getByRole('alertdialog').waitFor();
 }
 
@@ -161,12 +158,13 @@ test('loading invalidates actions before confirmation and document replacement c
   await page.locator('.operation-notice-action').waitFor({ state: 'detached' });
   await invokeRemembered('old-document');
   assert.ok(
-    (await titles()).includes(box),
+    (await page.locator('.inspector-heading strong').textContent()) === box,
     'Busy/confirmation cannot execute the old history action',
   );
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await page.locator('.operation-notice-action').count(), 0);
   await invokeRemembered('old-document');
+  await page.locator('.activity-rail').getByRole('button', { name: 'Scene', exact: true }).click();
   assert.ok(
     (await titles()).includes(box),
     'Cancelling replacement does not revive the earlier callback',
@@ -178,6 +176,8 @@ test('loading invalidates actions before confirmation and document replacement c
     .click();
   await page.getByRole('alertdialog').waitFor({ state: 'detached' });
   await notice().waitFor({ state: 'detached' });
+  await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+  await page.locator('.activity-rail').getByRole('button', { name: 'Scene', exact: true }).click();
   const replacement = await titles();
   assert.ok(!replacement.includes(box));
   await invokeRemembered('old-document');

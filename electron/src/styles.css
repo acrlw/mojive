@@ -1099,7 +1099,7 @@ input[type='color'] {
 .menu button:hover:not(:disabled) {
   background: var(--ui-hover-overlay);
 }
-.menu button > span:not(.icon):not(.menu-icon-space) {
+.menu button:not(.workspace-menu-row) > span:not(.icon):not(.menu-icon-space) {
   flex: 1;
 }
 .menu kbd {

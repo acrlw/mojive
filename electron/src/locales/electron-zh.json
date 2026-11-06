@@ -582,5 +582,11 @@
   "Physics perturbation": "物理扰动",
   "Translation perturbation": "平移扰动",
   "Rotation perturbation": "旋转扰动",
-  "Dynamic body": "动态物体"
+  "Dynamic body": "动态物体",
+  "Reading resources": "读取资源",
+  "Checking resources": "检查资源",
+  "Starting simulation engine": "启动仿真引擎",
+  "Compiling model": "编译模型",
+  "Preparing scene data": "准备场景数据",
+  "Building scene": "构建场景"
 }

@@ -1,3 +1,4 @@
+import { chooseSampleScene } from '../tests/helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { _electron } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -88,12 +89,7 @@ try {
     if (report.states.length) {
       // Discard only this isolated profile's test recording through the normal scene flow.
       // Reloading a dirty document correctly opens the application's close confirmation.
-      await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].webContents.send(
-          'mojive:menu-action',
-          'scene.joint_gizmo',
-        ),
-      );
+      await chooseSampleScene(page, 'Joint gizmos');
       await page.getByRole('alertdialog').getByRole('button', { name: "Don't Save" }).click();
       await page.getByRole('alertdialog').waitFor({ state: 'hidden' });
       await page.waitForFunction(

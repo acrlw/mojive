@@ -48,6 +48,46 @@ test('model packages follow MuJoCo include and resource resolution', async (t) =
     } finally { model?.delete(); vfs.delete(); }
   };
 
+  await t.test('resource reads are bounded, shared, and stop reporting after cancellation', async () => {
+    const result = await page.evaluate(async () => {
+      const { loadModelBundle } = await import('/src/resources/loadModelBundle.ts');
+      const xml = '<mujoco><asset>' + Array.from({ length: 24 }, (_, i) =>
+        `<mesh name="m${i}" file="mesh${i % 12}.stl"/>`).join('') + '</asset></mujoco>';
+      let active = 0, peak = 0;
+      const reads = {}, stages = [];
+      const read = async (path) => {
+        reads[path] = (reads[path] || 0) + 1;
+        active++; peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        active--;
+        return new TextEncoder().encode(path === 'main.xml' ? xml : 'mesh');
+      };
+      const loaded = await loadModelBundle('Parallel resources', 'main.xml', read,
+        { onProgress: (progress) => stages.push(progress.stage) });
+      const controller = new AbortController();
+      const cancelledProgress = [];
+      let cancelled = false;
+      try {
+        await loadModelBundle('Cancelled resources', 'main.xml', read, {
+          signal: controller.signal, onProgress: (progress) => {
+            cancelledProgress.push(progress.stage);
+            if (progress.completed === 2) controller.abort();
+          },
+        });
+      } catch (error) { cancelled = error.name === 'AbortError'; }
+      const afterCancel = cancelledProgress.length;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { peak, files: loaded.files.length, reads: Object.values(reads), stages,
+        cancelled, quiet: afterCancel === cancelledProgress.length };
+    });
+    assert.ok(result.peak > 1 && result.peak <= 8);
+    assert.equal(result.files, 13);
+    assert.ok(result.reads.every((count) => count <= 2));
+    assert.equal(result.stages.at(-1), 'verify');
+    assert.equal(result.cancelled, true);
+    assert.equal(result.quiet, true);
+  });
+
   await t.test('included asset files resolve beside their declaring XML after a missing entry-relative path', async () => {
     const bundle = await packageFiles('models/main.xml', {
       'models/main.xml': encode('<mujoco><include file="assets/asset/meshes.xml"/><worldbody><geom type="mesh" mesh="tetra"/></worldbody></mujoco>'),

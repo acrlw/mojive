@@ -26,7 +26,7 @@ after(async () => {
 beforeEach(async () => {
   errors.length = 0;
   await page.goto(url);
-  await page.waitForFunction(() => window.cameraReview?.api.current);
+  await page.waitForFunction(() => window.cameraReview?.api?.current);
   await page.waitForTimeout(80);
   await page.evaluate(async () => {
     const f = window.cameraReview,

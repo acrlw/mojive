@@ -91,12 +91,12 @@ test('desktop preload opens local URDF, streams authorized resources, and saves 
       });
     });
     if (process.platform === 'darwin') {
-      const menuState = await app.evaluate(({ Menu }) => {
+      const menuState = await app.evaluate(({ Menu, nativeTheme }) => {
         const menu = Menu.getApplicationMenu();
         menu.getMenuItemById('app.settings').click();
         return {
           labels: menu.items.map((item) => item.label),
-          theme: menu.getMenuItemById('theme.light').checked,
+          theme: nativeTheme.themeSource,
           undo: menu.getMenuItemById('edit.undo').enabled,
           redo: menu.getMenuItemById('edit.redo').enabled,
           inspector: menu.getMenuItemById('view.toggleInspector').checked,
@@ -115,7 +115,7 @@ test('desktop preload opens local URDF, streams authorized resources, and saves 
       await page.waitForFunction(() => window.menuActions.length === 1);
       assert.deepEqual(await page.evaluate(() => window.menuActions), ['app.settings']);
       assert.ok(menuState.labels.includes('文件'));
-      assert.equal(menuState.theme, true);
+      assert.equal(menuState.theme, 'light');
       assert.equal(menuState.undo, true);
       assert.equal(menuState.redo, false);
       assert.equal(menuState.inspector, false);

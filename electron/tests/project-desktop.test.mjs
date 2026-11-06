@@ -39,15 +39,10 @@ test('actual desktop project root and platform Close Project action retain the e
     const native = process.platform === 'darwin';
     const action = async (id) => {
       if (!native) {
-        if (id === 'locale.en') {
-          return app.evaluate(({ BrowserWindow }, action) => {
-            BrowserWindow.getAllWindows()[0].webContents.send('mojive:menu-action', action);
-          }, id);
-        }
         const [group, label] = {
           'add.box': ['Add', 'Box'],
-          'file.openProject': ['File', 'Open project folder…'],
-          'file.closeProject': ['File', 'Close project folder'],
+          'file.openProject': ['File', 'Open Project Folder…'],
+          'file.closeProject': ['File', 'Close Project Folder'],
           'edit.undo': ['Edit', 'Undo'],
           'edit.redo': ['Edit', 'Redo'],
         }[id];
@@ -77,7 +72,7 @@ test('actual desktop project root and platform Close Project action retain the e
         );
       await page.locator('[data-menu="File"]').click();
       const value = await page
-        .getByRole('menuitem', { name: 'Close project folder', exact: true })
+        .getByRole('menuitem', { name: 'Close Project Folder', exact: true })
         .isEnabled();
       await page.keyboard.press('Escape');
       return value;
@@ -89,7 +84,10 @@ test('actual desktop project root and platform Close Project action retain the e
       }
       assert.equal(await enabled(), value);
     };
-    await action('locale.en');
+    await page.locator('.title-actions button:has([data-icon=settings])').click();
+    await page.getByRole('combobox', { name: '语言', exact: true }).click();
+    await page.getByRole('option', { name: 'English', exact: true }).click();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: 'Project files', exact: true }).waitFor();
     await action('add.box');
     const x = page.getByLabel('Position X', { exact: true });

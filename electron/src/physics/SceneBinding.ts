@@ -4,6 +4,8 @@ import type { PhysicsFrame, PhysicsSource, Transform } from './contracts';
 import { createGeometry } from './geometry.ts';
 import { applySurface, bindAppearance, createTexture } from './appearance.ts';
 import { validateFrame } from './frame.ts';
+import { disposeDocument } from '../scene-resources.ts';
+import { checkModelLoad, yieldModelLoad, type ModelLoadOptions } from '../resources/loading.ts';
 
 export const ENVIRONMENT_ID = 'physics:environment';
 
@@ -11,12 +13,12 @@ export const ENVIRONMENT_ID = 'physics:environment';
 export class SceneBinding {
   document: SceneDocument;
   readonly source: PhysicsSource;
-  private bodies: THREE.Object3D[];
-  private cameras: THREE.Camera[];
-  private lights: (THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight)[];
-  private jointBodies: THREE.Object3D[];
+  private bodies: THREE.Object3D[] = [];
+  private cameras: THREE.Camera[] = [];
+  private lights: (THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight)[] = [];
+  private jointBodies: THREE.Object3D[] = [];
   private deformableMeshes = new Map<string, THREE.Mesh>();
-  private readonly entities: { id: string; kind: EntityKind; parentId?: string; type: string; worldFrame: boolean }[];
+  private entities: { id: string; kind: EntityKind; parentId?: string; type: string; worldFrame: boolean }[] = [];
   private world = new THREE.Matrix4();
   private local = new THREE.Matrix4();
   private position = new THREE.Vector3();
@@ -26,7 +28,7 @@ export class SceneBinding {
   private motion = new THREE.Quaternion();
   private frame: PhysicsFrame;
 
-  constructor(source: PhysicsSource, frame: PhysicsFrame) {
+  constructor(source: PhysicsSource, frame: PhysicsFrame, defer = false) {
     this.source = source;
     this.frame = frame;
     validateFrame(source, frame);
@@ -35,6 +37,39 @@ export class SceneBinding {
     root.userData = { kind: 'scene', physicsSourceId: source.id };
     const doc: SceneDocument = { name: source.name, root, nodes: [], joints: [], files: [], warnings: source.warnings };
     this.document = doc;
+    if (!defer) for (const _ of this.build()) { /* Synchronous construction for adapter tests and callers. */ }
+  }
+
+  static async create(source: PhysicsSource, frame: PhysicsFrame, options?: ModelLoadOptions): Promise<SceneBinding> {
+    checkModelLoad(options);
+    const binding = new SceneBinding(source, frame, true);
+    let budgetStart = performance.now(), completed = 0;
+    const total = (source.textures?.length ?? 0) + source.geometries.length;
+    options?.onProgress?.({ stage: 'scene', completed, total });
+    const steps = binding.build();
+    try {
+      await yieldModelLoad(options);
+      for (const _ of steps) {
+        completed++;
+        checkModelLoad(options);
+        if (performance.now() - budgetStart >= 8) {
+          options?.onProgress?.({ stage: 'scene', completed, total });
+          await yieldModelLoad(options); budgetStart = performance.now();
+        }
+      }
+      checkModelLoad(options);
+      options?.onProgress?.({ stage: 'scene', completed: total, total });
+      return binding;
+    } catch (error) {
+      steps.return();
+      disposeDocument(binding.document);
+      throw error;
+    }
+  }
+
+  private *build(): Generator<void, void, unknown> {
+    const { source, frame, document: doc } = this;
+    const root = doc.root;
     const objects = new Map<string, THREE.Object3D>();
     const add = (id: string, name: string, kind: EntityKind, object: THREE.Object3D, parentId?: string, spatialParent = true) => {
       object.name = name;
@@ -63,77 +98,84 @@ export class SceneBinding {
       const environment = add(ENVIRONMENT_ID, 'Environment', 'environment', new THREE.Group());
       environment.properties = { Backend: source.backend, Version: source.version };
     }
-    const textures = (source.textures ?? []).map(createTexture);
-    for (const geom of source.geometries) {
-      const material = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setRGB(geom.color[0], geom.color[1], geom.color[2], THREE.SRGBColorSpace),
-        opacity: geom.color[3], transparent: geom.color[3] < 1,
-        roughness: geom.roughness, metalness: geom.metallic, side: geom.shape.type === 'plane' || geom.deformable ? THREE.DoubleSide : THREE.FrontSide,
-      });
-      const geometry = createGeometry(geom.shape);
-      applySurface(material, geometry, geom, textures);
-      const mesh = new THREE.Mesh(geometry, material);
-      if (geom.deformable) this.deformableMeshes.set(geom.id, mesh);
-      mesh.position.fromArray(geom.position); mesh.quaternion.fromArray(geom.rotation);
-      mesh.castShadow = geom.shape.type !== 'plane'; mesh.receiveShadow = true;
-      mesh.userData = { baseColor: material.color.getHex(), baseOpacity: material.opacity,
-        visualGroup: geom.group, collidable: geom.collidable, role: geom.role,
-        defaultVisible: geom.defaultVisible ?? true,
-        viewportPickable: geom.shape.type !== 'plane', fitExcluded: geom.shape.type === 'plane' };
-      const node = add(geom.id, geom.name, 'geom', mesh, geom.bodyId);
-      node.properties = { Shape: geom.shape.type, 'Visual group': geom.group };
-    }
-    for (const sourceJoint of source.joints) {
-      const object = new THREE.Group();
-      // Joint frames are engine-derived, not an invented chain for multi-joint bodies.
-      add(sourceJoint.id, sourceJoint.name, 'joint', object, sourceJoint.bodyId, false);
-      const body = source.bodies.find((item) => item.id === sourceJoint.bodyId)!;
-      const joint: Joint = { id: sourceJoint.id, name: sourceJoint.name, type: sourceJoint.type,
-        axis: new THREE.Vector3(...sourceJoint.axis), lower: sourceJoint.limits?.[0] ?? -Infinity,
-        upper: sourceJoint.limits?.[1] ?? Infinity, value: 0, object, origin: new THREE.Matrix4(),
-        parent: source.bodies.find((item) => item.id === body.parentId)?.name ?? 'World', child: body.name,
-        bodyId: body.id,
-        ...(sourceJoint.width > 1 ? { position: new THREE.Vector3(), rotation: new THREE.Quaternion() } : {}),
-        ...(sourceJoint.type === 'ball' && sourceJoint.limits ? { angularLimit: sourceJoint.limits[1] } : {}),
-      };
-      doc.joints.push(joint);
-    }
-    this.cameras = source.cameras.map((camera) => {
-      const [width, height] = camera.resolution;
-      const aspect = width / height, halfHeight = camera.fov / 2;
-      const near = source.visual?.near ?? .01, far = source.visual?.far ?? 1000;
-      const object = camera.orthographic
-        ? new THREE.OrthographicCamera(-halfHeight * aspect, halfHeight * aspect, halfHeight, -halfHeight, near, far)
-        : new THREE.PerspectiveCamera(camera.fov, aspect, near, far);
-      object.userData.camera = { resolution: [...camera.resolution], targetDistance: 5,
-        sensorWidth: 35, orthoHeight: camera.orthographic ? camera.fov : 4,
-        fov: camera.orthographic ? 45 : camera.fov };
-      add(camera.id, camera.name, 'camera', object, camera.bodyId, false);
-      return object;
-    });
-    this.lights = source.lights.map((light) => {
-      const color = new THREE.Color(...light.color);
-      const object = light.type === 'directional' ? new THREE.DirectionalLight(color, Math.PI)
-        : light.type === 'point' ? new THREE.PointLight(color, Math.PI, 0, 0)
-          : new THREE.SpotLight(color, Math.PI, 0, THREE.MathUtils.degToRad(light.cutoff), 0.2, 0);
-      object.castShadow = light.castShadow ?? true;
-      object.visible = light.active ?? true;
-      const extent = source.visual?.extent ?? 5;
-      object.shadow.mapSize.set(2048, 2048);
-      object.shadow.camera.near = Math.max(.001, extent * .001);
-      object.shadow.camera.far = extent * 10;
-      if (object instanceof THREE.DirectionalLight) {
-        Object.assign(object.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent });
-        object.shadow.camera.updateProjectionMatrix();
+    const textures: THREE.Texture[] = [];
+    try {
+      for (const texture of source.textures ?? []) { textures.push(createTexture(texture)); yield; }
+      for (const geom of source.geometries) {
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color().setRGB(geom.color[0], geom.color[1], geom.color[2], THREE.SRGBColorSpace),
+          opacity: geom.color[3], transparent: geom.color[3] < 1,
+          roughness: geom.roughness, metalness: geom.metallic, side: geom.shape.type === 'plane' || geom.deformable ? THREE.DoubleSide : THREE.FrontSide,
+        });
+        let geometry: THREE.BufferGeometry;
+        try { geometry = createGeometry(geom.shape); }
+        catch (error) { material.dispose(); throw error; }
+        const mesh = new THREE.Mesh(geometry, material);
+        try { applySurface(material, geometry, geom, textures); }
+        catch (error) { geometry.dispose(); material.dispose(); throw error; }
+        if (geom.deformable) this.deformableMeshes.set(geom.id, mesh);
+        mesh.position.fromArray(geom.position); mesh.quaternion.fromArray(geom.rotation);
+        mesh.castShadow = geom.shape.type !== 'plane'; mesh.receiveShadow = true;
+        mesh.userData = { baseColor: material.color.getHex(), baseOpacity: material.opacity,
+          visualGroup: geom.group, collidable: geom.collidable, role: geom.role,
+          defaultVisible: geom.defaultVisible ?? true,
+          viewportPickable: geom.shape.type !== 'plane', fitExcluded: geom.shape.type === 'plane' };
+        const node = add(geom.id, geom.name, 'geom', mesh, geom.bodyId);
+        node.properties = { Shape: geom.shape.type, 'Visual group': geom.group };
+        yield;
       }
-      if ('target' in object) root.add(object.target);
-      add(light.id, light.name, 'light', object, light.bodyId, false);
-      return object;
-    });
-    this.entities = doc.nodes.map((node) => ({ id: node.id, kind: node.kind, parentId: node.parentId,
-      type: node.object.type, worldFrame: node.object.userData.physicsWorldFrame }));
-    bindAppearance(root, source);
-    this.apply(frame);
+      for (const sourceJoint of source.joints) {
+        const object = new THREE.Group();
+        // Joint frames are engine-derived, not an invented chain for multi-joint bodies.
+        add(sourceJoint.id, sourceJoint.name, 'joint', object, sourceJoint.bodyId, false);
+        const body = source.bodies.find((item) => item.id === sourceJoint.bodyId)!;
+        const joint: Joint = { id: sourceJoint.id, name: sourceJoint.name, type: sourceJoint.type,
+          axis: new THREE.Vector3(...sourceJoint.axis), lower: sourceJoint.limits?.[0] ?? -Infinity,
+          upper: sourceJoint.limits?.[1] ?? Infinity, value: 0, object, origin: new THREE.Matrix4(),
+          parent: source.bodies.find((item) => item.id === body.parentId)?.name ?? 'World', child: body.name,
+          bodyId: body.id,
+          ...(sourceJoint.width > 1 ? { position: new THREE.Vector3(), rotation: new THREE.Quaternion() } : {}),
+          ...(sourceJoint.type === 'ball' && sourceJoint.limits ? { angularLimit: sourceJoint.limits[1] } : {}),
+        };
+        doc.joints.push(joint);
+      }
+      this.cameras = source.cameras.map((camera) => {
+        const [width, height] = camera.resolution;
+        const aspect = width / height, halfHeight = camera.fov / 2;
+        const near = source.visual?.near ?? .01, far = source.visual?.far ?? 1000;
+        const object = camera.orthographic
+          ? new THREE.OrthographicCamera(-halfHeight * aspect, halfHeight * aspect, halfHeight, -halfHeight, near, far)
+          : new THREE.PerspectiveCamera(camera.fov, aspect, near, far);
+        object.userData.camera = { resolution: [...camera.resolution], targetDistance: 5,
+          sensorWidth: 35, orthoHeight: camera.orthographic ? camera.fov : 4,
+          fov: camera.orthographic ? 45 : camera.fov };
+        add(camera.id, camera.name, 'camera', object, camera.bodyId, false);
+        return object;
+      });
+      this.lights = source.lights.map((light) => {
+        const color = new THREE.Color(...light.color);
+        const object = light.type === 'directional' ? new THREE.DirectionalLight(color, Math.PI)
+          : light.type === 'point' ? new THREE.PointLight(color, Math.PI, 0, 0)
+            : new THREE.SpotLight(color, Math.PI, 0, THREE.MathUtils.degToRad(light.cutoff), 0.2, 0);
+        object.castShadow = light.castShadow ?? true;
+        object.visible = light.active ?? true;
+        const extent = source.visual?.extent ?? 5;
+        object.shadow.mapSize.set(2048, 2048);
+        object.shadow.camera.near = Math.max(.001, extent * .001);
+        object.shadow.camera.far = extent * 10;
+        if (object instanceof THREE.DirectionalLight) {
+          Object.assign(object.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent });
+          object.shadow.camera.updateProjectionMatrix();
+        }
+        if ('target' in object) root.add(object.target);
+        add(light.id, light.name, 'light', object, light.bodyId, false);
+        return object;
+      });
+      this.entities = doc.nodes.map((node) => ({ id: node.id, kind: node.kind, parentId: node.parentId,
+        type: node.object.type, worldFrame: node.object.userData.physicsWorldFrame }));
+      bindAppearance(root, source);
+      this.apply(frame);
+    } finally { textures.forEach((texture) => texture.dispose()); }
   }
 
   bodyAt(entityId: string): (Transform & { id: string }) | null {

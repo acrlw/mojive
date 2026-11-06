@@ -56,6 +56,13 @@ Inspect its images and JSON results under `output/electron/verification/` from t
 | `make physics-corpus-review ARGS="/path/to/models"` | Resource resolution, compilation, scene binding, full-state restore and deterministic continuation across a model directory |
 | `make physics-render-review ARGS="/path/to/scene.xml"` | Rendered appearance and material diagnostics for explicit representative scenes |
 | `make perturbation-performance-review` | Production App model replacement, Visual/Collision perturbation timing, state-only Undo/Redo, cancellation and recording transactions |
+| `make model-loading-review ARGS="--first /path/to/first.xml --model /path/to/scene.xml"` | Native File menu loading, stage feedback, main-thread responsiveness, cancellation, retained scene on failure and successful retry |
+
+The loading review writes timings, frame gaps and production captures to
+`output/electron/model-loading/`. Compare equivalent model sequences and cache conditions;
+an engine Worker protects interaction but does not by itself shorten compilation. Compilation
+must remain indeterminate unless the engine reports measurable work. Run desktop/GPU reviews
+serially so competing viewers do not distort loading or rendering measurements.
 
 Browser harness HTML files are maintained under `tests/harness/` and served by Vite. They
 exercise production components; the production bundle starts only from `index.html`.

@@ -26,13 +26,25 @@ const runtimeFiles = [
   'preload.cjs',
   'resource-paths.cjs',
   'menu.cjs',
+  'menu-catalog.json',
   'menu-en.json',
   'menu-zh.json',
   'file-access.cjs',
 ];
+const menuCatalog = JSON.parse(await readFile(path.join(root, 'main/menu-catalog.json'), 'utf8'));
+const menuIconNames = new Set(['copy', 'paste']);
+function collectMenuIcons(entries) {
+  for (const entry of entries) {
+    if (entry.icon) menuIconNames.add(entry.icon);
+    if (entry.activeIcon) menuIconNames.add(entry.activeIcon);
+    if (entry.children) collectMenuIcons(entry.children);
+  }
+}
+for (const group of menuCatalog) collectMenuIcons(group.items);
 const requiredFiles = [
   'dist/index.html',
   'dist/menu-icons/manifest.json',
+  ...[...menuIconNames].flatMap((name) => ['', '@2x'].map((scale) => `dist/menu-icons/${name}${scale}.png`)),
   'dist/demo/atelier_arm.urdf',
   'dist/demo/joint_gizmo.xml',
   'dist/demo/physics_pendulum.xml',

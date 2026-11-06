@@ -56,7 +56,18 @@ test('source UI translation keys and menu resources have complete Chinese entrie
   const enMenu = JSON.parse(await readFile('main/menu-en.json', 'utf8'));
   const zhMenu = JSON.parse(await readFile('main/menu-zh.json', 'utf8'));
   assert.deepEqual(Object.keys(enMenu).sort(), Object.keys(zhMenu).sort());
-  for (const value of Object.values(zhMenu)) assert.match(value, /[\u3400-\u9fff]/);
+  const speedLabels = new Map([
+    ['speed0.25', '0.25×'],
+    ['speed0.5', '0.5×'],
+    ['speed1', '1×'],
+    ['speed2', '2×'],
+  ]);
+  for (const [key, value] of Object.entries(zhMenu)) {
+    if (speedLabels.has(key)) {
+      assert.equal(value, speedLabels.get(key));
+      assert.equal(value, enMenu[key]);
+    } else assert.match(value, /[\u3400-\u9fff]/);
+  }
 });
 
 test('structured messages switch languages without translating paths or interpolated user text', async () => {

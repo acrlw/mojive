@@ -22,6 +22,25 @@ test('preview generations dispose late models without adopting them', async () =
   assert.equal(releases, 2);
 });
 
+test('dismissing a preview aborts its active load and suppresses late progress', async () => {
+  const session = new PreviewSession();
+  let signal, report, finish;
+  const progress = [];
+  const pending = session.load({}, (_, options) => {
+    signal = options.signal; report = options.onProgress;
+    return new Promise((resolve, reject) => {
+      finish = reject;
+    });
+  }, { onProgress: (value) => progress.push(value.stage) });
+  report({ stage: 'resources' });
+  session.dispose();
+  assert.equal(signal.aborted, true);
+  report({ stage: 'compile' });
+  finish(signal.reason);
+  assert.equal(await pending, null);
+  assert.deepEqual(progress, ['resources']);
+});
+
 test('browser assets resolve resources, isolate preview, and run the real physics sample', async (t) => {
   const server = await createServer({ configFile: false, root: process.cwd(), logLevel: 'error',
     optimizeDeps: { noDiscovery: true, include: [] }, server: { host: '127.0.0.1', port: 0 } });

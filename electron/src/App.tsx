@@ -1,8 +1,9 @@
 import { sceneDisplayName } from './scene-labels';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type {
   EntityKind,
+  NativeMenuState,
   Frame,
   GeometryMode,
   Joint,
@@ -14,8 +15,8 @@ import type {
 import {
   authorJointTransform,
   createPrimitive,
+  canRemoveNode,
   disposeDocument,
-  loadUrdf,
   removeNode,
   setJoint,
 } from './scene';
@@ -33,10 +34,11 @@ import { SettingsDialog, useSettings } from './settings';
 import { OutputPanel } from './OutputPanel';
 import { JointPanel } from './JointPanel';
 import { ActuatorsPanel } from './ActuatorsPanel';
-import { FileDialog, type FileDialogKind } from './FileDialog';
+import { FileDialog, type FileDialogKind, type FileDialogProps } from './FileDialog';
 import { ProjectExplorer } from './ProjectExplorer';
 import { ConfirmSceneDialog } from './ConfirmSceneDialog';
 import { AppMenu } from './AppMenu';
+import { WorkspaceMenuItems, workspaceMenus, workspaceMenuLabel } from './WorkspaceMenu';
 import { commandKey, shortcut } from './platform';
 import {
   actionLabel,
@@ -85,6 +87,8 @@ import { PhysicsDocument } from './physics/PhysicsDocument';
 import { loadMujocoBackend } from './physics/WorkerBackend';
 import { loadPhysicsWorkspace, savePhysicsWorkspace } from './physics/workspace';
 import { loadModelResource } from './resources/loadModelBundle';
+import type { ModelLoadOptions } from './resources/loading';
+import { SceneLoadProgress, useSceneLoading } from './SceneLoadProgress';
 import { EnvironmentProperties } from './physics/EnvironmentProperties';
 import { SimulationToolbar } from './physics/SimulationToolbar';
 import { ENVIRONMENT_ID } from './physics/SceneBinding';
@@ -124,7 +128,7 @@ const kinds: Record<string, string> = {
   camera: 'camera',
   light: 'lightbulb',
 };
-const menus = ['File', 'Edit', 'Add', 'View', 'Help'];
+const menus = workspaceMenus.map((menu) => menu.name);
 const tools: { id: Tool; icon: string; title: string }[] = [
   { id: 'select', icon: 'select', title: 'Select' },
   { id: 'position', icon: 'move', title: 'Position' },
@@ -218,36 +222,36 @@ export default function App() {
     } = {},
   ) {
     if (fileDialog) return Promise.resolve(false);
-    return new Promise<boolean>((resolve) =>
-      setFileDialog({
+    return new Promise<boolean>((resolve) => {
+      const dialog: FileDialogProps = {
         kind,
         ...options,
         onChoose: async (path, overwrite) => {
           await action(path, overwrite);
-          setFileDialog(null);
+          setFileDialog((current) => current === dialog ? null : current);
           resolve(true);
         },
         onCancel: () => {
-          setFileDialog(null);
+          setFileDialog((current) => current === dialog ? null : current);
           resolve(false);
         },
-      }),
-    );
+      };
+      setFileDialog(dialog);
+    });
   }
   async function requestClose() {
-    await stopRecording();
-    if (fileDialog || replacePrompt || videoAbort.current) return;
-    if (dirtyRef.current) {
-      setReplaceReason('close');
-      setPlaying(false);
-      const allowed = await new Promise<boolean>((resolve) => {
-        replaceAnswer.current = resolve;
-        setReplacePrompt(true);
-      });
-      if (!allowed) return;
-    }
-    await window.mojive?.confirmClose();
+    if (closing.current) return;
+    closing.current = true;
+    try {
+      // Abort also releases the candidate's dirty prompt before opening the close prompt.
+      sceneLoading.cancel();
+      await stopRecording();
+      if (fileDialog || replaceAnswer.current || videoAbort.current) return;
+      if (dirtyRef.current && !await requestReplacement('close')) return;
+      await window.mojive?.confirmClose();
+    } finally { closing.current = false; }
   }
+  const closing = useRef(false);
   const replaceAnswer = useRef<((answer: boolean) => void) | null>(null);
   const dirtyRef = useRef(false);
   const [sceneEpoch, setSceneEpoch] = useState(0);
@@ -258,7 +262,12 @@ export default function App() {
   const historyWork = useRef<Promise<unknown>>(Promise.resolve());
   const historyBusy = useRef(false);
   const recordingStopWork = useRef<Promise<void> | null>(null);
-  useEffect(() => () => { physicsUnsubscribe.current?.(); physics.current?.dispose(); }, []);
+  useEffect(() => () => {
+    replaceAnswer.current?.(false);
+    physicsUnsubscribe.current?.();
+    physics.current?.dispose();
+    physics.current = null;
+  }, []);
   const [selected, setSelected] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [cameraPreviewEnabled, setCameraPreviewEnabled] = useState(false);
@@ -311,12 +320,11 @@ export default function App() {
   const [showBottom, setShowBottom] = useState(true);
   const [inspectorTab, setInspectorTab] = useState('Properties');
   const [help, setHelp] = useState(false);
-  const [busy, setBusy] = useState(true);
+  const sceneLoading = useSceneLoading();
+  const busy = sceneLoading.state !== null;
   const [notice, setNoticeState] = useState<OperationNoticeData | null>(null);
   const noticeId = useRef(0);
   const noticeActionEpoch = useRef(0);
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
   const [keys, setKeys] = useState<Keyframe[]>([]);
   const [timelineData, setTimelineData] = useState<WorkspaceTimeline>({
     snapshots: [],
@@ -355,7 +363,7 @@ export default function App() {
   } | null>(null);
   const seekEpoch = useRef(0);
   const seekWork = useRef<Promise<unknown>>(Promise.resolve());
-  const recordingStartPending = useRef(false);
+  const recordingStartWork = useRef<Promise<void> | null>(null);
   const state = useRef({
     doc,
     keys,
@@ -418,7 +426,7 @@ export default function App() {
             pending.current ||
             state.current.recording ||
             state.current.playing ||
-            busyRef.current ||
+            sceneLoading.isActive() ||
             stack.current.at(-1) !== expected
           )
             return;
@@ -683,10 +691,28 @@ export default function App() {
     if (old) disposeDocument(old);
   }
   function answerReplacement(answer: boolean) {
-    const resolve = replaceAnswer.current;
-    replaceAnswer.current = null;
-    setReplacePrompt(false);
-    resolve?.(answer);
+    replaceAnswer.current?.(answer);
+  }
+  function requestReplacement(reason: 'open' | 'close', signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      replaceAnswer.current?.(false);
+      const answer = (allowed: boolean) => {
+        signal?.removeEventListener('abort', abort);
+        // A superseded prompt must never clear the new prompt's owner or UI.
+        if (replaceAnswer.current === answer) {
+          replaceAnswer.current = null;
+          setReplacePrompt(false);
+        }
+        resolve(allowed);
+      };
+      const abort = () => answer(false);
+      replaceAnswer.current = answer;
+      signal?.addEventListener('abort', abort, { once: true });
+      setReplaceReason(reason);
+      setPlaying(false);
+      setReplacePrompt(true);
+    });
   }
   async function replaceDocument(
     next: SceneDocument,
@@ -694,53 +720,60 @@ export default function App() {
     nextDuration = 10,
     nextTimeline: WorkspaceTimeline = { snapshots: [], takes: [], activeTakeId: null },
     runtime: PhysicsDocument | null = null,
+    signal?: AbortSignal,
   ) {
-    await stopRecording();
-    if (dirtyRef.current) {
-      setReplaceReason('open');
-      setPlaying(false);
-      const allowed = await new Promise<boolean>((resolve) => {
-        replaceAnswer.current?.(false);
-        replaceAnswer.current = resolve;
-        setReplacePrompt(true);
-      });
-      if (!allowed) {
-        runtime?.dispose();
-        disposeDocument(next);
-        return false;
-      }
+    let installed = false;
+    try {
+      await stopRecording();
+      if (signal?.aborted) return false;
+      if (dirtyRef.current && !await requestReplacement('open', signal)) return false;
+      if (signal?.aborted) return false;
+      installDocument(next, runtime);
+      installed = true;
+      setKeys(nextKeys);
+      state.current.keys = nextKeys;
+      setDuration(nextDuration);
+      state.current.duration = nextDuration;
+      changeTimeline(nextTimeline);
+      return true;
+    } finally {
+      if (!installed) { runtime?.dispose(); disposeDocument(next); }
     }
-    installDocument(next, runtime);
-    setKeys(nextKeys);
-    state.current.keys = nextKeys;
-    setDuration(nextDuration);
-    state.current.duration = nextDuration;
-    changeTimeline(nextTimeline);
-    return true;
+  }
+  async function runSceneLoad(label: string, task: (options: ModelLoadOptions) => Promise<void>) {
+    try {
+      await sceneLoading.run(label, async (options) => {
+        await stopRecording();
+        physics.current?.session.pause();
+        setPlaying(false);
+        options.signal?.throwIfAborted();
+        await task(options);
+      });
+    } catch (error) { report(error); }
   }
   async function openSimulation() {
     setMenu(null);
     if (!window.mojive) { setNotice('Drop an MJCF model and its resources into the viewport.'); return; }
     await chooseFile('model', async (path) => {
-      const file = await window.mojive!.openModelPath(path);
-      const bundle = await loadModelResource(file.name, file.resourceBase);
-      const runtime = await PhysicsDocument.load(bundle, loadMujocoBackend);
       setFileDialog(null);
-      await replaceDocument(runtime.document, runtime.keyframes, 10, undefined, runtime);
+      await runSceneLoad(path, async (options) => {
+        const file = await window.mojive!.openModelPath(path);
+        const bundle = await loadModelResource(file.name, file.resourceBase, options);
+        const runtime = await PhysicsDocument.load(bundle, loadMujocoBackend, options);
+        await replaceDocument(runtime.document, runtime.keyframes, 10, undefined, runtime, options.signal);
+      });
     });
   }
   async function openAsset(asset: Asset) {
-    if (busyRef.current) return;
+    if (sceneLoading.isActive()) return;
     setAssetPreview(null);
-    setBusy(true);
-    try {
-      const next = await loadAsset(asset);
-      if (await replaceDocument(next.document, next.runtime?.keyframes ?? [], 10, undefined, next.runtime)) {
+    await runSceneLoad(asset.name, async (options) => {
+      const next = await loadAsset(asset, options);
+      if (await replaceDocument(next.document, next.runtime?.keyframes ?? [], 10, undefined, next.runtime, options.signal)) {
         setAssetLibrary((library) => rememberAsset(library, asset));
         setSceneId(asset.source.kind === 'sample' ? asset.source.scene : '');
       }
-    } catch (error) { report(error); }
-    finally { setBusy(false); }
+    });
   }
   function toggleFavorite(asset: Asset) {
     setAssetLibrary((library) => ({ ...library, favorites: library.favorites.some((item) => item.id === asset.id)
@@ -756,20 +789,20 @@ export default function App() {
   }
   function toggleSimulation() {
     const runtime = physics.current;
-    if (!runtime || busyRef.current || state.current.recording) return;
+    if (!runtime || sceneLoading.isActive() || state.current.recording) return;
     setPlaying(false);
     runtime.session.current.playing ? runtime.session.pause() : runtime.session.play();
   }
   function previousSimulationFrame() {
     const runtime = physics.current;
-    if (!runtime || busyRef.current || state.current.recording || runtime.session.current.playing || !runtime.session.current.previousFrames) return;
+    if (!runtime || sceneLoading.isActive() || state.current.recording || runtime.session.current.playing || !runtime.session.current.previousFrames) return;
     begin();
     void runtime.session.stepBack().catch(report);
     commit();
   }
   function stepSimulationFrame() {
     const runtime = physics.current;
-    if (!runtime || busyRef.current || state.current.recording || runtime.session.current.playing) return;
+    if (!runtime || sceneLoading.isActive() || state.current.recording || runtime.session.current.playing) return;
     simulationTransaction({ type: 'step', count: 1 });
   }
   async function openUrdf() {
@@ -779,12 +812,14 @@ export default function App() {
       return;
     }
     await chooseFile('urdf', async (path) => {
-      const r = await window.mojive!.openUrdfPath(path);
-      const next = await loadUrdf(r.content, r.resourceBase, r.files);
       setFileDialog(null);
-      await replaceDocument(next);
+      await runSceneLoad(path, async (options) => {
+        const next = await loadAsset(fileAsset(path), options);
+        await replaceDocument(next.document, [], 10, undefined, next.runtime, options.signal);
+      });
     });
   }
+
   async function openProject() {
     setMenu(null);
     if (!window.mojive) {
@@ -824,13 +859,17 @@ export default function App() {
       return;
     }
     await chooseFile('scene', async (path) => {
-      const r = await window.mojive!.openScenePath(path),
-        loaded = await loadPhysicsWorkspace(r.content, physicsBackend);
       setFileDialog(null);
-      if (await replaceDocument(loaded.doc, loaded.keys, loaded.duration, loaded.timeline, loaded.runtime))
-        log(message('Opened {{path}}', { path: r.path }));
+      await runSceneLoad(path, async (options) => {
+        const r = await window.mojive!.openScenePath(path);
+        options.signal?.throwIfAborted();
+        const loaded = await loadPhysicsWorkspace(r.content, physicsBackend, options);
+        if (await replaceDocument(loaded.doc, loaded.keys, loaded.duration, loaded.timeline, loaded.runtime, options.signal))
+          log(message('Opened {{path}}', { path: r.path }));
+      });
     });
   }
+
   function physicsBackend(id: string) {
     if (id !== 'mujoco') throw new Error(`Unsupported physics backend: ${id}`);
     return loadMujocoBackend;
@@ -894,7 +933,7 @@ export default function App() {
       setPinnedId((pinned) => (pinned === id ? null : pinned));
     });
   }
-  async function captureCamera(id: string) {
+  async function captureCamera(id?: string) {
     if (!window.mojive) {
       setNotice('Save images in the desktop app.');
       return;
@@ -906,14 +945,14 @@ export default function App() {
         atob(capture.dataUrl.slice(capture.dataUrl.indexOf(',') + 1)),
         (character) => character.charCodeAt(0),
       );
-      const name = doc?.nodes.find((node) => node.id === id)?.name ?? 'Camera';
+      const name = doc?.nodes.find((node) => node.id === id)?.name ?? doc?.name ?? 'Scene';
       await chooseFile(
         'save',
         async (path, overwrite) => {
           const saved = await window.mojive!.saveBinaryFile(path, bytes, overwrite);
           log(message('Saved {{path}}', { path: saved }));
         },
-        { extension: '.png', caption: t('Save camera image'), suggestedName: `${name}.png` },
+        { extension: '.png', caption: t(id ? 'Save camera image' : 'Save scene image'), suggestedName: `${name}.png` },
       );
     } catch (error) {
       report(error);
@@ -976,6 +1015,7 @@ export default function App() {
       );
   }
   function add(kind: EntityKind) {
+    if (sceneLoading.isActive() || closing.current || recordingStartWork.current || recordingStopWork.current) return;
     if (state.current.recording) {
       setNotice('Stop recording before changing scene structure.');
       return;
@@ -991,6 +1031,7 @@ export default function App() {
     log(message('Added {{kind}}', { kind: message(kind) }));
   }
   function remove() {
+    if (sceneLoading.isActive() || closing.current || recordingStartWork.current || recordingStopWork.current) return;
     if (state.current.recording) {
       setNotice('Stop recording before changing scene structure.');
       return;
@@ -1190,10 +1231,12 @@ export default function App() {
   }
   async function stopRecording() {
     if (recordingStopWork.current) return recordingStopWork.current;
-    if (!state.current.recording) return;
-    const runtime = physics.current;
-    runtime?.session.pause();
     const finish = async () => {
+      // Starting may be awaiting a Worker restore/capture while recording is still false.
+      await recordingStartWork.current;
+      if (!state.current.recording) return;
+      const runtime = physics.current;
+      runtime?.session.pause();
       try {
         // Pausing cancels future ticks; the last Worker step must settle before
         // the terminal frame and history entry are captured.
@@ -1203,7 +1246,7 @@ export default function App() {
         if (take?.frames.length && current.doc && clock) {
           const time = recordingTime(performance.now());
           if (time > take.frames[take.frames.length - 1].time)
-            take.frames.push({ time, ...captureSceneState(current.doc, physics.current) });
+            take.frames.push({ time, ...captureSceneState(current.doc, runtime) });
           setTime(time);
           current.time = time;
           extendDuration(time);
@@ -1224,13 +1267,13 @@ export default function App() {
     finally { recordingStopWork.current = null; }
   }
   async function toggleRecording() {
-    if (recordingStartPending.current) return;
+    if (sceneLoading.isActive() || closing.current || recordingStartWork.current || recordingStopWork.current) return;
     if (state.current.recording) {
       await stopRecording();
       return;
     }
-    const current = state.current;
-    if (!current.doc) return;
+    const current = state.current, document = current.doc, runtime = physics.current;
+    if (!document) return;
     const previous = current.timelineData.takes.find(
       (item) => item.id === current.timelineData.activeTakeId,
     );
@@ -1242,54 +1285,73 @@ export default function App() {
       null,
     );
     try {
-      if (resume) assertPoseCompatible(current.doc, resume.pose);
+      if (resume) assertPoseCompatible(document, resume.pose);
     } catch (error) {
       report(error);
       return;
     }
     begin();
     const start = resume?.time ?? current.time;
-    recordingStartPending.current = true;
-    try {
-      if (resume) await applySceneState(current.doc, resume, physics.current);
-      await physics.current?.session.capture();
-    } catch (error) { cancel(); report(error); return; }
-    finally { recordingStartPending.current = false; }
-    if (state.current.doc !== current.doc) return;
-    setTime(start);
-    state.current.time = start;
-    extendDuration(start);
-    const take = {
-      id: previous?.id ?? crypto.randomUUID(),
-      name: previous?.name ?? `${t('Take')} ${current.timelineData.takes.length + 1}`,
-      frames: [
-        ...(previous?.frames.filter((frame) => frame.time < start) ?? []),
-        { time: start, ...captureSceneState(current.doc, physics.current) },
-      ],
+    const baseline = pending.current;
+    const ownsDocument = () => state.current.doc === document && physics.current === runtime;
+    const rollbackStart = async () => {
+      if (pending.current !== baseline || !ownsDocument()) return;
+      pending.current = null;
+      await historyWork.current;
+      if (resume && baseline && ownsDocument()) await restore(baseline);
     };
-    changeTimeline({
-      ...current.timelineData,
-      takes: previous
-        ? current.timelineData.takes.map((item) => (item.id === take.id ? take : item))
-        : [...current.timelineData.takes, take],
-      activeTakeId: take.id,
-    });
-    const views = { ...current.takeViews, [take.id]: { cursor: start, range: null } };
-    current.takeViews = views;
-    setTakeViews(views);
-    recordClock.current = {
-      start: performance.now(),
-      time: start,
-      id: take.id,
-      simulationStart: physics.current?.session.current.frame?.time,
+    const startRecording = async () => {
+      try {
+        if (resume) await applySceneState(document, resume, runtime);
+        await runtime?.session.capture();
+        if (!ownsDocument() || sceneLoading.isActive() || closing.current) {
+          await rollbackStart();
+          return;
+        }
+        setTime(start);
+        state.current.time = start;
+        extendDuration(start);
+        const take = {
+          id: previous?.id ?? crypto.randomUUID(),
+          name: previous?.name ?? `${t('Take')} ${current.timelineData.takes.length + 1}`,
+          frames: [
+            ...(previous?.frames.filter((frame) => frame.time < start) ?? []),
+            { time: start, ...captureSceneState(document, runtime) },
+          ],
+        };
+        changeTimeline({
+          ...current.timelineData,
+          takes: previous
+            ? current.timelineData.takes.map((item) => (item.id === take.id ? take : item))
+            : [...current.timelineData.takes, take],
+          activeTakeId: take.id,
+        });
+        const views = { ...current.takeViews, [take.id]: { cursor: start, range: null } };
+        current.takeViews = views;
+        setTakeViews(views);
+        recordClock.current = {
+          start: performance.now(),
+          time: start,
+          id: take.id,
+          simulationStart: runtime?.session.current.frame?.time,
+        };
+        runtime?.session.play();
+        state.current.recording = true;
+        setRecording(true);
+        state.current.playing = false;
+        setPlaybackSource('take');
+        state.current.playbackSource = 'take';
+        setDirty(true);
+      } catch (error) {
+        await rollbackStart();
+        throw error;
+      }
     };
-    physics.current?.session.play();
-    state.current.recording = true;
-    setRecording(true);
-    state.current.playing = false;
-    setPlaybackSource('take');
-    state.current.playbackSource = 'take';
-    setDirty(true);
+    const work = startRecording();
+    recordingStartWork.current = work;
+    try { await work; }
+    catch (error) { report(error); }
+    finally { if (recordingStartWork.current === work) recordingStartWork.current = null; }
   }
   function loadKey(id: string) {
     const key = state.current.keys.find((key) => key.id === id),
@@ -1327,21 +1389,11 @@ export default function App() {
     });
   }
   useEffect(() => {
-    let disposed = false;
-    loadAsset(sampleAsset('joint_gizmo'))
-      .then((next) => {
-        if (disposed) {
-          next.runtime?.dispose();
-          disposeDocument(next.document);
-          return;
-        }
-        return replaceDocument(next.document, next.runtime?.keyframes ?? [], 10, undefined, next.runtime);
-      })
-      .catch((error) => { if (!disposed) report(error); })
-      .finally(() => { if (!disposed) setBusy(false); });
-    return () => {
-      disposed = true;
-    };
+    void runSceneLoad(sampleAsset('joint_gizmo').name, async (options) => {
+      const next = await loadAsset(sampleAsset('joint_gizmo'), options);
+      await replaceDocument(next.document, next.runtime?.keyframes ?? [], 10, undefined, next.runtime, options.signal);
+    });
+    return sceneLoading.cancel;
   }, []);
   useEffect(() => {
     if (playing || recording || busy) invalidateNoticeAction();
@@ -1415,7 +1467,7 @@ export default function App() {
         if (e.key === 'Escape') answerReplacement(false);
         return;
       }
-      if (settingsOpen || fileDialog || about || help || assetPreview || videoProgress !== null) return;
+      if (sceneLoading.isActive() || closing.current || recordingStartWork.current || recordingStopWork.current || settingsOpen || fileDialog || about || help || assetPreview || videoProgress !== null) return;
       const target = e.target as HTMLElement;
       if (
         target.closest(
@@ -1432,8 +1484,8 @@ export default function App() {
         setSettingsOpen(true);
       } else if (command && k === 'o') {
         e.preventDefault();
-        openUrdf();
-      } else if (command && k === 's') {
+        openSaved();
+      } else if (command && e.shiftKey && k === 's') {
         e.preventDefault();
         save();
       } else if (command && k === 'z') {
@@ -1498,80 +1550,114 @@ export default function App() {
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   });
-  useEffect(() =>
-    window.mojive?.onMenuAction((action) => {
-      if (
-        (fileDialog || replacePrompt || settingsOpen || about || help || assetPreview || videoProgress !== null) &&
-        action !== 'app.requestClose'
-      )
-        return;
-      if (action.startsWith('scene.')) {
-        loadCatalog(action.slice(6));
-        return;
-      }
-      if (action.startsWith('add.')) {
-        add(action.slice(4) as EntityKind);
-        return;
-      }
-      if (action.startsWith('theme.')) {
-        updateSettings({ appearance: action.slice(6) as 'dark' | 'light' });
-        return;
-      }
-      if (action.startsWith('locale.')) {
-        updateSettings({ language: action === 'locale.en' ? 'en' : 'zh' });
-        return;
-      }
-      const actions: Record<string, () => void> = {
-        'file.openUrdf': openUrdf,
-        'file.openSimulation': openSimulation,
-        'file.openProject': openProject,
-        'file.closeProject': closeProject,
-        'file.openScene': openSaved,
-        'file.save': save,
-        'edit.undo': () => history('undo'),
-        'edit.redo': () => history('redo'),
-        'edit.delete': remove,
-        'app.settings': () => setSettingsOpen(true),
-        'app.requestClose': requestClose,
-        'app.about': () => setAbout(true),
-        'settings.open': () => setSettingsOpen(true),
-        'help.interaction': () => setHelp(true),
-        'view.focusSelection': () => viewport.current?.focus(selected ?? undefined),
-        'view.focusAll': () => viewport.current?.focus(),
-        'view.perspective': () => {
-          setProjection('perspective');
-          viewport.current?.view('perspective');
-        },
-        'view.orthographic': () => setProjection('orthographic'),
-        'view.toggleProjection': () =>
-          setProjection((p) => (p === 'perspective' ? 'orthographic' : 'perspective')),
-        'view.toggleLeft': () => setShowLeft((v) => !v),
-        'view.toggleInspector': () => setShowInspector((v) => !v),
-        'view.toggleTimeline': () => setShowBottom((v) => !v),
-      };
-      if (actions[action]) actions[action]();
-      else if (action.startsWith('view.')) viewport.current?.view(action.slice(5));
-    }),
-  );
+  const menuBlocked = Boolean(busy || fileDialog || replacePrompt || settingsOpen || about || help || assetPreview || videoProgress !== null);
+  function dispatchMenuAction(action: string) {
+    if ((sceneLoading.isActive() || closing.current || recordingStartWork.current || recordingStopWork.current || menuBlocked) && action !== 'app.requestClose') return;
+    if (action.startsWith('scene.')) { loadCatalog(action.slice(6)); return; }
+    if (action.startsWith('add.')) { add(action.slice(4) as EntityKind); return; }
+    if (action.startsWith('tool.')) { setTool(action.slice(5) as Tool); return; }
+    if (action.startsWith('frame.')) { setFrame(action.slice(6) as Frame); return; }
+    if (action.startsWith('simulation.speed.')) {
+      physics.current?.session.setSpeed(Number(action.slice('simulation.speed.'.length)));
+      return;
+    }
+    if (action.startsWith('panel.')) {
+      const panel = action.slice(6);
+      if (panel === 'output' || panel === 'timeline') {
+        setShowBottom(bottom === panel ? !showBottom : true);
+        setBottom(panel);
+      } else { setLeft(panel); setShowLeft(true); }
+      return;
+    }
+    if (action.startsWith('theme.')) {
+      updateSettings({ appearance: action.slice(6) as 'dark' | 'light' }); return;
+    }
+    if (action.startsWith('locale.')) {
+      updateSettings({ language: action === 'locale.en' ? 'en' : 'zh' }); return;
+    }
+    const actions: Record<string, () => void> = {
+      'file.openUrdf': openUrdf,
+      'file.openSimulation': openSimulation,
+      'file.openProject': openProject,
+      'file.closeProject': closeProject,
+      'file.openScene': openSaved,
+      'file.save': save,
+      'edit.undo': () => history('undo'),
+      'edit.redo': () => history('redo'),
+      'edit.delete': remove,
+      'edit.visibility': () => {
+        const node = doc?.nodes.find((node) => node.id === selected);
+        if (!node) return;
+        transaction(message(node.visible ? 'Hid {{name}}' : 'Showed {{name}}', { name: node.name }), () => {
+          node.visible = !node.visible;
+          node.object.visible = node.visible;
+        });
+      },
+      'app.settings': () => setSettingsOpen(true),
+      'app.requestClose': requestClose,
+      'app.about': () => setAbout(true),
+      'settings.open': () => setSettingsOpen(true),
+      'help.interaction': () => setHelp(true),
+      'help.documentation': () => { window.open('https://github.com/acrlw/mojive#readme', '_blank', 'noopener,noreferrer'); },
+      'view.focusSelection': () => viewport.current?.focus(selected ?? undefined),
+      'view.focusAll': () => viewport.current?.focus(),
+      'view.captureScene': () => { void captureCamera(); },
+      'view.perspective': () => { setProjection('perspective'); viewport.current?.view('perspective'); },
+      'view.orthographic': () => setProjection('orthographic'),
+      'view.toggleProjection': () => setProjection((p) => p === 'perspective' ? 'orthographic' : 'perspective'),
+      'view.toggleLeft': () => setShowLeft((v) => !v),
+      'view.toggleInspector': () => setShowInspector((v) => !v),
+      'view.toggleTimeline': () => { setBottom('timeline'); setShowBottom(bottom === 'timeline' ? !showBottom : true); },
+      'view.toggleGizmos': () => changeLayers({ ...resolvedLayers, gizmos: !resolvedLayers.gizmos }),
+      'simulation.toggle': toggleSimulation,
+      'simulation.previous': previousSimulationFrame,
+      'simulation.step': stepSimulationFrame,
+      'simulation.reset': () => simulationTransaction({ type: 'reset' }),
+      'simulation.record': toggleRecording,
+      'simulation.environment': () => { setSelected(ENVIRONMENT_ID); setPinnedId(null); setInspectorTab('Properties'); setShowInspector(true); },
+    };
+    if (actions[action]) actions[action]();
+    else if (action.startsWith('view.')) viewport.current?.view(action.slice(5));
+  }
+  useEffect(() => window.mojive?.onMenuAction(dispatchMenuAction));
+  const removableSelection = useMemo(() => !!doc && !!selected && canRemoveNode(doc, selected), [doc, selected, revision]);
+  const structureBlocked = busy || recording || !!recordingStartWork.current || !!recordingStopWork.current || closing.current;
+  const menuState: NativeMenuState = {
+    locale: settings.language === 'zh' ? 'zh-CN' : 'en',
+    theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+    blocked: menuBlocked,
+    canUndo: undo.current.length > 0,
+    canRedo: redo.current.length > 0,
+    hasDocument: !!doc,
+    canAdd: !!doc && !structureBlocked,
+    canDelete: removableSelection && !structureBlocked,
+    hasSelection: !!selected,
+    selectionVisible: doc?.nodes.find((node) => node.id === selected)?.visible ?? false,
+    hasProject: !!project,
+    showLeft, showInspector,
+    showTimeline: showBottom && bottom === 'timeline',
+    showOutput: showBottom && bottom === 'output',
+    panel: showLeft ? left : '',
+    projection, tool, frame,
+    showGizmos: resolvedLayers.gizmos,
+    hasSimulation: !!simulation?.source,
+    simulationPlaying: !!simulation?.playing,
+    simulationRecording: recording,
+    simulationSpeed: simulation?.speed ?? 1,
+    canToggleSimulation: !!simulation?.source && !busy && !recording,
+    canSimulationPrevious: !!simulation?.source && !busy && !recording && !simulation.playing && simulation.previousFrames > 0,
+    canSimulationStep: !!simulation?.source && !busy && !recording && !simulation.playing,
+    sceneId,
+    focusKey: focusAccelerator(settings.inputBindings),
+    focusAllKey: focusAllAccelerator(settings.inputBindings),
+  };
+  const menuStateKey = JSON.stringify(menuState);
   useEffect(() => {
-    const update = () =>
-      window.mojive
-        ?.updateMenuState({
-          locale: settings.language === 'zh' ? 'zh-CN' : 'en',
-          theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
-          canUndo: undo.current.length > 0,
-          canRedo: redo.current.length > 0,
-          hasSelection: !!selected,
-          hasProject: !!project,
-          showLeft,
-          showInspector,
-          showTimeline: showBottom,
-          sceneId,
-          focusKey: focusAccelerator(settings.inputBindings),
-          focusAllKey: focusAllAccelerator(settings.inputBindings),
-          textInput: !!document.activeElement?.matches('input,textarea,[contenteditable]'),
-        })
-        .catch(report);
+    const update = () => window.mojive?.updateMenuState({
+      ...menuState,
+      textInput: !!document.activeElement?.matches('input,textarea,[contenteditable]'),
+      scopedKeyboard: !!document.activeElement?.closest('.timeline'),
+    }).catch(report);
     update();
     window.addEventListener('focusin', update);
     window.addEventListener('focusout', update);
@@ -1579,7 +1665,7 @@ export default function App() {
       window.removeEventListener('focusin', update);
       window.removeEventListener('focusout', update);
     };
-  }, [settings, historyTick, selected, project, showLeft, showInspector, showBottom, sceneId]);
+  }, [menuStateKey]);
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
       if (dirty) {
@@ -1761,31 +1847,27 @@ export default function App() {
       onDrop={async (event) => {
         if (!event.dataTransfer.files.length) return;
         event.preventDefault();
-        if (fileDialog || replacePrompt || videoAbort.current || assetPreview || busyRef.current) return;
+        if (fileDialog || replacePrompt || videoAbort.current || assetPreview || sceneLoading.isActive()) return;
         const file = event.dataTransfer.files[0];
         const resources = file.name.toLowerCase().endsWith('.json') ? null : droppedFiles(event.dataTransfer);
-        setBusy(true);
-        try {
+        await runSceneLoad(file.name, async (options) => {
           if (file.name.toLowerCase().endsWith('.json')) {
             const text = await file.text();
-            const scene = await loadPhysicsWorkspace(text, physicsBackend);
-            await replaceDocument(scene.doc, scene.keys, scene.duration, scene.timeline, scene.runtime);
+            const scene = await loadPhysicsWorkspace(text, physicsBackend, options);
+            await replaceDocument(scene.doc, scene.keys, scene.duration, scene.timeline, scene.runtime, options.signal);
           } else {
             const bundles = await browserBundles(await resources!);
+            options.signal?.throwIfAborted();
             const assets: Asset[] = bundles.map((bundle) => ({ id: `upload:${bundle.id}`, name: bundle.name,
               format: bundle.entry.toLowerCase().endsWith('.urdf') ? 'URDF' : 'MJCF', source: { kind: 'bundle', bundle } }));
             setUploadedAssets((previous) => [...new Map([...previous, ...assets].map((asset) => [asset.id, asset])).values()]);
             if (assets.length === 1) {
-              const next = await loadAsset(assets[0]);
-              if (await replaceDocument(next.document, next.runtime?.keyframes ?? [], 10, undefined, next.runtime))
+              const next = await loadAsset(assets[0], options);
+              if (await replaceDocument(next.document, next.runtime?.keyframes ?? [], 10, undefined, next.runtime, options.signal))
                 setAssetLibrary((library) => rememberAsset(library, assets[0]));
             } else { setLeft('assets'); setShowLeft(true); }
           }
-        } catch (error) {
-          report(error);
-        } finally {
-          setBusy(false);
-        }
+        });
       }}
       style={
         {
@@ -1843,7 +1925,7 @@ export default function App() {
                   }
                 }}
               >
-                {t(m)}
+                {workspaceMenuLabel(workspaceMenus.find((item) => item.name === m)!.label, menuState.locale)}
               </button>
             ))}
           </nav>
@@ -2264,12 +2346,6 @@ export default function App() {
                 onClose={() => setLayersOpen(false)}
                 translate={t}
               />
-            </div>
-          )}
-          {busy && (
-            <div className="loading-scrim">
-              <span className="spinner" />
-              {t('Loading scene…')}
             </div>
           )}
           {sceneCamera.id && (
@@ -2737,115 +2813,7 @@ export default function App() {
                 ))}
               </>
             )}
-            {menu === 'File' && (
-              <>
-                {menuItem('Open URDF…', openUrdf, 'robot', shortcut('O', ['command']))}
-                {menuItem('Open simulation model…', openSimulation, 'file')}
-                {menuItem('Open project folder…', openProject, 'folder')}
-                {menuItem('Close project folder', closeProject, 'close', undefined, !project)}
-                {menuItem('Open saved scene…', openSaved, 'scene')}
-                <hr />
-                {menuItem('Save scene…', save, 'save', shortcut('S', ['command']))}
-                <hr />
-                {SCENE_CATALOG.map((scene) => (
-                  <div key={scene.id}>
-                    {menuItem(t(scene.name), () => loadCatalog(scene.id), 'scene')}
-                  </div>
-                ))}
-              </>
-            )}
-            {menu === 'Edit' && (
-              <>
-                {menuItem(
-                  'Undo',
-                  () => history('undo'),
-                  'undo',
-                  shortcut('Z', ['command']),
-                  undo.current.length === 0,
-                )}
-                {menuItem(
-                  'Redo',
-                  () => history('redo'),
-                  'redo',
-                  shortcut('Z', ['shift', 'command']),
-                  redo.current.length === 0,
-                )}
-                <hr />
-                {menuItem('Delete selection', remove, 'delete', shortcut('Delete'), !selected)}
-                <hr />
-                {menuItem(
-                  'Settings',
-                  () => setSettingsOpen(true),
-                  'settings',
-                  shortcut(',', ['command']),
-                )}
-              </>
-            )}
-            {menu === 'Add' &&
-              additions.map((a) => (
-                <div key={a.kind}>
-                  {a.kind === 'ground' && <hr />}
-                  {menuItem(a.label, () => add(a.kind), kinds[a.kind])}
-                </div>
-              ))}
-            {menu === 'View' && (
-              <>
-                {menuItem(
-                  'Frame selection',
-                  () => viewport.current?.focus(selected ?? undefined),
-                  'target',
-                  actionLabel(settings.inputBindings, 'focus'),
-                )}
-                {menuItem(
-                  'Frame all',
-                  () => viewport.current?.focus(),
-                  'fit',
-                  focusAllAccelerator(settings.inputBindings)?.split('+').map(keyLabel).join(' + '),
-                )}
-                <hr />
-                {[
-                  'front',
-                  'back',
-                  'left',
-                  'right',
-                  'top',
-                  'bottom',
-                  'perspective',
-                  'orthographic',
-                ].map((v) => (
-                  <div key={v}>
-                    {menuItem(
-                      v[0].toUpperCase() + v.slice(1),
-                      () => {
-                        if (v === 'perspective' || v === 'orthographic') setProjection(v);
-                        viewport.current?.view(v);
-                      },
-                      v === 'perspective' || v === 'orthographic' ? v : `view-${v}`,
-                    )}
-                  </div>
-                ))}
-                <hr />
-                {menuItem(
-                  'Toggle Inspector',
-                  () => setShowInspector(!showInspector),
-                  'panel-right',
-                )}
-                {menuItem('Toggle timeline', () => setShowBottom(!showBottom), 'waveform')}
-              </>
-            )}
-            {menu === 'Help' && (
-              <>
-                {menuItem('Interaction guide', () => setHelp(true), 'keyboard')}
-                {menuItem(
-                  'Show output',
-                  () => {
-                    setBottom('output');
-                    setShowBottom(true);
-                  },
-                  'terminal',
-                )}
-              </>
-            )}
+            {menus.includes(menu) && <WorkspaceMenuItems name={menu} state={menuState} onAction={dispatchMenuAction} onClose={() => setMenu(null)} />}
             {menu === 'Object' && (
               <>
                 {menuItem(
@@ -2912,6 +2880,9 @@ export default function App() {
       {videoProgress !== null && (
         <VideoProgress progress={videoProgress} onCancel={() => videoAbort.current?.abort()} />
       )}
+      {sceneLoading.state && !replacePrompt && !fileDialog && (
+        <SceneLoadProgress state={sceneLoading.state} onCancel={sceneLoading.cancel} />
+      )}
       {fileDialog && (
         <FileDialog
           kind={fileDialog.kind}
@@ -2930,9 +2901,11 @@ export default function App() {
           onCancel={() => answerReplacement(false)}
           onDiscard={() => answerReplacement(true)}
           onSave={async () => {
+            const answer = replaceAnswer.current;
             const saved = await save();
-            if (saved) answerReplacement(true);
-            return saved;
+            const current = replaceAnswer.current === answer;
+            if (saved && current) answer?.(true);
+            return saved && current;
           }}
         />
       )}

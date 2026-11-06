@@ -18,7 +18,8 @@ test('official MuJoCo runs in a browser Worker without Electron or SharedArrayBu
     const { createModelBundle } = await import('/src/resources/modelBundle.ts');
     const xml = '<mujoco><worldbody><body pos="0 0 1"><freejoint/><geom type="sphere" size="0.1"/></body></worldbody></mujoco>';
     const bundle = await createModelBundle('Worker model', 'model.xml', [{ path: 'model.xml', bytes: new TextEncoder().encode(xml) }]);
-    const backend = await loadMujocoBackend(bundle);
+    const stages = [];
+    const backend = await loadMujocoBackend(bundle, { onProgress: (progress) => stages.push(progress.stage) });
     try {
       const first = await backend.frame();
       const frame = await backend.execute({ type: 'step', count: 6000 });
@@ -26,13 +27,23 @@ test('official MuJoCo runs in a browser Worker without Electron or SharedArrayBu
       await backend.execute({ type: 'reset' });
       await backend.execute({ type: 'restore', snapshot });
       const restored = await backend.capture();
-      return { initial: first.time, time: frame.time, sourceId: frame.sourceId,
+      const controller = new AbortController();
+      let cancelled = false;
+      try {
+        await loadMujocoBackend(bundle, { signal: controller.signal, onProgress: (progress) => {
+          if (progress.stage === 'runtime') controller.abort();
+        } });
+      } catch (error) { cancelled = error.name === 'AbortError'; }
+      return { stages, cancelled, retainedPackage: new TextDecoder().decode(bundle.files[0].bytes) === xml, initial: first.time, time: frame.time, sourceId: frame.sourceId,
         restored: JSON.stringify(restored) === JSON.stringify(snapshot),
         typed: frame.bodyTransforms instanceof Float64Array, isolated: crossOriginIsolated,
         available: typeof window.mojive !== 'undefined' };
     } finally { backend.dispose(); }
   });
   assert.equal(result.initial, 0);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.retainedPackage, true);
+  assert.deepEqual([...new Set(result.stages)], ['runtime', 'verify', 'compile', 'source']);
   assert.ok(result.time > 11.99);
   assert.equal(result.restored, true);
   assert.equal(result.typed, true);

@@ -1,3 +1,4 @@
+import { chooseSampleScene } from '../tests/helpers/editable-scene.mjs';
 import { _electron as electron } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
@@ -157,7 +158,10 @@ try {
           );
           return add.submenu.items.map(({ id, type, label }) => ({ id, type, label }));
         });
-        assert.equal(nativeAdd[4].type, 'separator');
+        const planeIndex = nativeAdd.findIndex((item) => item.id === 'add.ground');
+        assert.ok(planeIndex >= 0);
+        assert.equal(nativeAdd[planeIndex + 1].type, 'separator');
+        assert.equal(nativeAdd[planeIndex + 2].id, 'add.light');
         assert.equal(nativeAdd.find((item) => item.id === 'add.camera').label, '相机');
       } else {
         await page.locator('[data-menu=File]').click();
@@ -223,12 +227,14 @@ try {
     await capture('settings-revised-zh');
     await page.getByRole('combobox', { name: '语言', exact: true }).click();
     await page.getByRole('option', { name: 'English', exact: true }).click();
+    await page.locator('dialog[open]').getByRole('button', { name: 'Light', exact: true }).click();
     await page.locator('dialog[open]').getByRole('button', { name: 'Close', exact: true }).click();
-    await action('theme.light');
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
     assert.equal((await page.getByRole('treeitem').count()) > 0, true);
     await capture('workspace-revised-light-en');
-    await action('theme.dark');
+    await action('app.settings');
+    await page.locator('dialog[open]').getByRole('button', { name: 'Dark', exact: true }).click();
+    await page.locator('dialog[open]').getByRole('button', { name: 'Close', exact: true }).click();
   });
   await check(
     'Desktop binding capture records keys and mouse gestures with shared hints',
@@ -445,17 +451,19 @@ try {
     },
   );
   await check(
-    'Scene catalog loads distinct scenes through menu actions with unsaved replacement protection',
+    'Asset browser loads distinct scenes with unsaved replacement protection',
     async () => {
-      await action('scene.atelier_arm');
+      await chooseSampleScene(page, 'Atelier arm');
       await page.getByRole('alertdialog', { name: 'Unsaved changes' }).waitFor();
       await page.getByRole('button', { name: 'Cancel', exact: true }).click();
       assert.match(await page.locator('.document-title').innerText(), /Joint/);
-      await action('scene.atelier_arm');
+      await chooseSampleScene(page, 'Atelier arm');
       await page.getByRole('button', { name: "Don't Save", exact: true }).click();
       await page.waitForFunction(() =>
         document.querySelector('.document-title')?.textContent?.includes('Atelier'),
       );
+      await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+      await page.locator('.activity-rail').getByRole('button', { name: 'Scene', exact: true }).click();
       await selectNode('elbow');
       await page.getByRole('button', { name: 'Joint (J)', exact: true }).click();
       await capture('arm-revised');

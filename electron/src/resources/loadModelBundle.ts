@@ -1,4 +1,5 @@
 import { createModelBundle, modelPath, type ModelBundle } from './modelBundle';
+import { checkModelLoad, type ModelLoadOptions } from './loading';
 
 class ResourceReadError extends Error {}
 
@@ -7,24 +8,37 @@ export async function loadModelBundle(
   name: string,
   entry: string,
   read: (path: string) => Promise<Uint8Array>,
+  options?: ModelLoadOptions,
 ): Promise<ModelBundle> {
   const files = new Map<string, Uint8Array>();
+  const pending = new Map<string, Promise<Uint8Array>>();
   let total = 0;
   const load = async (path: string) => {
+    checkModelLoad(options);
     path = modelPath(path);
     if (files.has(path)) return files.get(path)!;
-    let bytes: Uint8Array;
-    try { bytes = await read(path); }
-    catch (error) { throw new ResourceReadError(`${path}: ${error instanceof Error ? error.message : String(error)}`); }
-    // Development servers can return the app shell with HTTP 200 for a missing asset.
-    const prefix = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart();
-    if (/^(?:<!doctype\s+html\b|<html\b)/i.test(prefix))
-      throw new ResourceReadError(`${path}: received HTML instead of a model resource`);
-    total += bytes.byteLength;
-    if (files.size >= 10000 || total > 512 * 1024 * 1024)
-      throw new Error('Model resources exceed the package limit (10,000 files or 512 MiB).');
-    files.set(path, bytes);
-    return bytes;
+    if (pending.has(path)) return pending.get(path)!;
+    const request = (async () => {
+      let bytes: Uint8Array;
+      try { bytes = await read(path); }
+      catch (error) {
+        checkModelLoad(options);
+        throw new ResourceReadError(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      checkModelLoad(options);
+      // Development servers can return the app shell with HTTP 200 for a missing asset.
+      const prefix = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart();
+      if (/^(?:<!doctype\s+html\b|<html\b)/i.test(prefix))
+        throw new ResourceReadError(`${path}: received HTML instead of a model resource`);
+      total += bytes.byteLength;
+      if (files.size >= 10000 || total > 512 * 1024 * 1024)
+        throw new Error('Model resources exceed the package limit (10,000 files or 512 MiB).');
+      files.set(path, bytes);
+      options?.onProgress?.({ stage: 'resources', completed: files.size, resource: path });
+      return bytes;
+    })();
+    pending.set(path, request);
+    try { return await request; } finally { pending.delete(path); }
   };
   const dirname = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
   const resolve = async (candidates: string[], declaration: string): Promise<string> => {
@@ -73,6 +87,8 @@ export async function loadModelBundle(
       meshDir = element.getAttribute('meshdir') ?? meshDir;
       textureDir = element.getAttribute('texturedir') ?? textureDir;
     }
+    const assets: (() => Promise<unknown>)[] = [];
+    const attachments: (() => Promise<void>)[] = [];
     for (const { element: resource, path } of elements) {
       const tag = resource.tagName;
       const resolveAsset = (file: string, directory: string, attribute = 'file') =>
@@ -87,26 +103,43 @@ export async function loadModelBundle(
           ? ['file', 'fileleft', 'fileright', 'fileup', 'filedown', 'filefront', 'fileback'] : ['file'];
         for (const attribute of attributes) {
           const file = resource.getAttribute(attribute);
-          if (file) await resolveAsset(file, directory, attribute);
+          if (file) assets.push(() => resolveAsset(file, directory, attribute));
         }
       }
       // Attached models have their own compiler directories, unlike includes.
       if (tag === 'model' && resource.parentElement?.tagName === 'asset' && resource.hasAttribute('file')) {
-        const attached = await resolveAsset(resource.getAttribute('file')!, '');
-        await dependencies(attached, new Set(visiting).add(entry));
+        attachments.push(async () => {
+          const attached = await resolveAsset(resource.getAttribute('file')!, '');
+          await dependencies(attached, new Set(visiting).add(entry));
+        });
       }
       if (tag === 'mesh' && resource.hasAttribute('filename')) {
         const file = resource.getAttribute('filename')!.replace(/^package:\/\//, '');
-        await resolveAsset(file, meshDir || assetDir, 'filename');
+        assets.push(() => resolveAsset(file, meshDir || assetDir, 'filename'));
       }
     }
+    // Preserve include/compiler resolution order, then read independent assets concurrently.
+    let next = 0, failed = false;
+    const results = await Promise.allSettled(Array.from({ length: Math.min(8, assets.length) }, async () => {
+      try {
+        while (!failed && next < assets.length) { checkModelLoad(options); await assets[next++](); }
+      } catch (error) { failed = true; throw error; }
+    }));
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    for (const attachment of attachments) await attachment();
     compiled.add(entry);
   };
+  options?.onProgress?.({ stage: 'resources', completed: 0, resource: entry });
   await dependencies(entry);
-  return createModelBundle(name, entry, [...files].map(([path, bytes]) => ({ path, bytes })));
+  options?.onProgress?.({ stage: 'resources', completed: files.size, total: files.size });
+  options?.onProgress?.({ stage: 'verify' });
+  const bundle = await createModelBundle(name, entry, [...files].map(([path, bytes]) => ({ path, bytes })));
+  checkModelLoad(options);
+  return bundle;
 }
 
-export async function loadModelResource(name: string, resourceBase: string): Promise<ModelBundle> {
+export async function loadModelResource(name: string, resourceBase: string, options?: ModelLoadOptions): Promise<ModelBundle> {
   const location = new URL(name, resourceBase);
   // Electron resources are confined to a registered project token.
   const parts = location.pathname.split('/').filter(Boolean);
@@ -114,8 +147,8 @@ export async function loadModelResource(name: string, resourceBase: string): Pro
   const entry = parts.slice(1).map(decodeURIComponent).join('/');
   return loadModelBundle(name, entry, async (path) => {
     const url = new URL(path.split('/').map(encodeURIComponent).join('/'), base);
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: options?.signal });
     if (!response.ok) throw new Error(`Cannot read model resource ${path}: ${response.status}`);
     return new Uint8Array(await response.arrayBuffer());
-  });
+  }, options);
 }

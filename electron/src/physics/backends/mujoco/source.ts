@@ -19,26 +19,29 @@ function mesh(model: MjModel, id: number): GeometryShape {
   const positions = new Float32Array(faces * 9);
   const normal = new Float32Array(faces * 9);
   const uv = coords >= 0 ? new Float32Array(faces * 6) : undefined;
+  // Embind getters create views; acquire them once instead of per vertex component.
+  const faceIndices = model.mesh_face, faceNormals = model.mesh_facenormal, faceTexcoords = model.mesh_facetexcoord;
+  const verticesData = model.mesh_vert, normalsData = model.mesh_normal, coordsData = model.mesh_texcoord;
   for (let face = 0; face < faces; face++) {
     for (let corner = 0; corner < 3; corner++) {
       const index = (faceStart + face) * 3 + corner;
-      const vertex = model.mesh_face[index] + vertices;
-      const n = model.mesh_facenormal[index] + normals;
+      const vertex = faceIndices[index] + vertices;
+      const n = faceNormals[index] + normals;
       for (let axis = 0; axis < 3; axis++) {
-        positions[face * 9 + corner * 3 + axis] = model.mesh_vert[vertex * 3 + axis];
-        normal[face * 9 + corner * 3 + axis] = model.mesh_normal[n * 3 + axis];
+        positions[face * 9 + corner * 3 + axis] = verticesData[vertex * 3 + axis];
+        normal[face * 9 + corner * 3 + axis] = normalsData[n * 3 + axis];
       }
       if (uv) {
-        const texcoord = model.mesh_facetexcoord[index] + coords;
-        uv[face * 6 + corner * 2] = model.mesh_texcoord[texcoord * 2];
-        uv[face * 6 + corner * 2 + 1] = model.mesh_texcoord[texcoord * 2 + 1];
+        const texcoord = faceTexcoords[index] + coords;
+        uv[face * 6 + corner * 2] = coordsData[texcoord * 2];
+        uv[face * 6 + corner * 2 + 1] = coordsData[texcoord * 2 + 1];
       }
     }
   }
   return { type: 'mesh', positions, normals: normal, uv };
 }
 
-function shape(mj: MainModule, model: MjModel, index: number): GeometryShape {
+function shape(mj: MainModule, model: MjModel, index: number, meshes: Map<number, GeometryShape>): GeometryShape {
   const size = v3(model.geom_size, index), type = model.geom_type[index], G = mj.mjtGeom;
   if (type === G.mjGEOM_PLANE.value) return { type: 'plane', size };
   if (type === G.mjGEOM_BOX.value) return { type: 'box', size: size.map((v) => v * 2) as Vector3 };
@@ -47,7 +50,11 @@ function shape(mj: MainModule, model: MjModel, index: number): GeometryShape {
   if (type === G.mjGEOM_CYLINDER.value || type === G.mjGEOM_CAPSULE.value)
     return { type: type === G.mjGEOM_CYLINDER.value ? 'cylinder' : 'capsule', radius: size[0], length: size[1] * 2 };
   const dataId = model.geom_dataid[index];
-  if (type === G.mjGEOM_MESH.value || type === G.mjGEOM_SDF.value) return mesh(model, dataId);
+  if (type === G.mjGEOM_MESH.value || type === G.mjGEOM_SDF.value) {
+    let geometry = meshes.get(dataId);
+    if (!geometry) { geometry = mesh(model, dataId); meshes.set(dataId, geometry); }
+    return geometry;
+  }
   if (type === G.mjGEOM_HFIELD.value) {
     const rows = model.hfield_nrow[dataId], columns = model.hfield_ncol[dataId];
     const offset = model.hfield_adr[dataId];
@@ -57,7 +64,10 @@ function shape(mj: MainModule, model: MjModel, index: number): GeometryShape {
   throw new Error(`Unsupported MuJoCo geometry type ${type} at geometry ${index}.`);
 }
 
-export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, fields: EnvironmentField[]): PhysicsSource {
+export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, fields: EnvironmentField[],
+  onGeometry?: (completed: number) => void): PhysicsSource {
+  const meshes = new Map<number, GeometryShape>();
+  let lastProgress = performance.now();
   const name = (type: number, index: number, fallback: string) => mj.mj_id2name(model, type, index) || fallback;
   const O = mj.mjtObj, J = mj.mjtJoint;
   const visual = model.vis, map = visual.map, headlight = visual.headlight, colors = visual.rgba, stats = model.stat;
@@ -89,13 +99,17 @@ export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, 
       const material = model.geom_matid[i];
       const geomColor = rgba(model.geom_rgba, i);
       const defaultColor = geomColor.every((v, k) => Math.abs(v - (k === 3 ? 1 : 0.5)) < 1e-6);
-      return { id: `physics:geom:${i}`, name: name(O.mjOBJ_GEOM.value, i, `Geometry ${i + 1}`),
+      const geometry: PhysicsSource['geometries'][number] = { id: `physics:geom:${i}`, name: name(O.mjOBJ_GEOM.value, i, `Geometry ${i + 1}`),
         bodyId: bodyId(model.geom_bodyid[i]), position: v3(model.geom_pos, i), rotation: xyzw(model.geom_quat, i * 4),
-        shape: shape(mj, model, i), color: material < 0 || !defaultColor ? geomColor : rgba(model.mat_rgba, material),
+        shape: shape(mj, model, i, meshes), color: material < 0 || !defaultColor ? geomColor : rgba(model.mat_rgba, material),
         ...readSurface(mj, model, material),
         group: model.geom_group[i], collidable: collision[i], defaultVisible: model.geom_group[i] < 3,
         role: !collision[i] ? 'visual' : model.geom_bodyid[i] === 0 || !visualBodies.has(owner(i)) ? 'both' : 'collision',
       };
+      if (i + 1 === model.ngeom || performance.now() - lastProgress >= 40) {
+        onGeometry?.(i + 1); lastProgress = performance.now();
+      }
+      return geometry;
     }),
     joints: Array.from({ length: model.njnt }, (_, i) => {
       const type = model.jnt_type[i];
