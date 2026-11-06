@@ -622,6 +622,14 @@ idle. Separate UI work, renderer work, initialization, and system pressure. Reus
 geometry and measurements with explicit invalidation and bounded caches; skip invisible ink
 without removing active native items. Do not flatten corners, change spacing, or shrink text
 as an unrequested optimization.
+Measure animation-frame intervals as well as CPU submission time: short render calls can still
+queue expensive cross-context canvas copies. Batch adjacent overlay primitives, flushing at
+Canvas2D paint-order boundaries, and copy only their painted device-pixel bounds. Preserve the
+original projection, subpixel grid, clipping and alpha composition at integral and fractional
+display densities. Reserve geometric buffer headroom so small view-angle changes do not reset
+GPU backing stores during interaction; measure the first draw and subsequent capacity growth
+separately from steady-state cost. Numeric text updates invalidate their affected rounded-control family, not
+every control in the workspace; inherited theme, scale and font changes still invalidate globally.
 For asynchronous physics edits, distinguish the requested gesture value from the last acknowledged
 scene frame. Rebase only at a real limit; a delayed frame is not a clamp. Coalesce superseded
 continuous targets before backend execution, while preserving capture, commit, cancel and undo

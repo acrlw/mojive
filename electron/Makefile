@@ -109,6 +109,7 @@ perturbation-performance-review: ensure-deps
 	node scripts/perturbation-performance-review.mjs $(ARGS)
 
 joint-performance-review: ensure-deps
+	npm run compile-menu-icons
 	node --test --test-concurrency=1 tests/simulation-targets.test.mjs tests/physics-gesture-history.test.mjs
 	node scripts/joint-performance-review.mjs $(ARGS)
 

@@ -22,7 +22,7 @@ const pending = new Set<HTMLElement>();
 const written = new WeakMap<HTMLElement, string | null>();
 let frame = 0;
 const radii = ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'] as const;
-let geometryDirty = true;
+const geometryRoots = new Set<Element>();
 const geometry = new Map<HTMLElement, SurfaceGeometry>();
 type Surface = {
   element: HTMLElement;
@@ -41,7 +41,24 @@ function measureGeometry(batch: HTMLElement[]) {
   const surfaces: Surface[] = [];
   const byElement = new Map<HTMLElement, Surface>();
   const nodes: { surface: Surface; corner: number; parent: number }[] = [];
-  const candidates = [...new Set([...owners, ...batch])];
+  const roots = new Set<Element>();
+  for (const changed of geometryRoots) {
+    if (!changed.isConnected) continue;
+    let root = changed;
+    // Corner constraints join ancestors and descendants. Rebuild that complete
+    // rounded family without measuring unrelated panels on every slider update.
+    for (let ancestor = changed.parentElement; ancestor; ancestor = ancestor.parentElement)
+      if (owners.has(ancestor)) root = ancestor;
+    roots.add(root);
+  }
+  geometryRoots.clear();
+  const rootList = [...roots];
+  const scopes = rootList.filter(
+    (root) => !rootList.some((other) => other !== root && other.contains(root)),
+  );
+  const candidates = [...new Set([...owners, ...batch])].filter((element) =>
+    scopes.some((root) => root.contains(element)),
+  );
   const markers = candidates.map((element) => element.getAttribute('data-smooth-surface'));
   for (const element of candidates) element.removeAttribute('data-smooth-surface');
   for (const element of candidates) {
@@ -284,7 +301,6 @@ function measureGeometry(batch: HTMLElement[]) {
     if (!previous || key(shape) !== key(previous)) batch.push(surface.element);
     geometry.set(surface.element, shape);
   }
-  geometryDirty = false;
 }
 
 export function setCornerSmoothing(value: number, capsuleValue = capsuleAmount) {
@@ -293,7 +309,7 @@ export function setCornerSmoothing(value: number, capsuleValue = capsuleAmount) 
   if (smoothing === rectangle && capsuleAmount === capsule) return;
   smoothing = rectangle;
   capsuleAmount = capsule;
-  geometryDirty = true;
+  geometryRoots.add(document.documentElement);
   for (const element of owners) pending.add(element);
   schedule();
 }
@@ -489,7 +505,7 @@ function flush() {
   frame = 0;
   const batch = [...pending];
   pending.clear();
-  if (geometryDirty) measureGeometry(batch);
+  if (geometryRoots.size) measureGeometry(batch);
   const unique = [...new Set(batch)];
   unique.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
   for (const element of unique) paint(element);
@@ -498,15 +514,17 @@ function schedule() {
   if (!frame) frame = requestAnimationFrame(flush);
 }
 function scan(root: Element, geometryChange = true) {
-  geometryDirty ||= geometryChange;
+  if (geometryChange) geometryRoots.add(root);
   if (root instanceof HTMLElement) pending.add(root);
   for (const element of root.querySelectorAll<HTMLElement>('*'))
     if (element instanceof HTMLElement) pending.add(element);
   schedule();
 }
 const resize = new ResizeObserver((entries) => {
-  geometryDirty = true;
-  for (const entry of entries) pending.add(entry.target as HTMLElement);
+  for (const entry of entries) {
+    geometryRoots.add(entry.target);
+    pending.add(entry.target as HTMLElement);
+  }
   schedule();
 });
 const previousInlineStyle = document.createElement('div').style;
@@ -540,7 +558,7 @@ const mutations = new MutationObserver((records) => {
   for (const record of records) {
     if (record.type === 'childList') {
       if ([...record.removedNodes].some((node) => node instanceof Element)) {
-        geometryDirty = true;
+        if (record.target instanceof Element) geometryRoots.add(record.target);
         schedule();
       }
       for (const node of record.addedNodes) if (node instanceof Element) scan(node);
@@ -559,6 +577,7 @@ const mutations = new MutationObserver((records) => {
   for (const owner of owners)
     if (!owner.isConnected) {
       owners.delete(owner);
+      geometry.delete(owner);
       resize.unobserve(owner);
     }
 });
@@ -566,7 +585,8 @@ const held = new Set<HTMLElement>();
 const heldKeys = new Map<string, Set<HTMLElement>>();
 const interaction = (event: Event) => {
   if (event.type === 'blur' && event.target !== window) return;
-  if (event.type === 'focusin' || event.type === 'focusout') geometryDirty = true;
+  if ((event.type === 'focusin' || event.type === 'focusout') && event.target instanceof Element)
+    geometryRoots.add(event.target);
   const affected = new Set<HTMLElement>();
   for (const element of event.composedPath()) {
     if (!(element instanceof HTMLElement)) continue;

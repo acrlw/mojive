@@ -1,4 +1,4 @@
-import { installPaintStyle } from './helpers/surface-style.mjs';
+import { installPaintStyle, settlePaint } from './helpers/surface-style.mjs';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -357,6 +357,7 @@ for (const theme of ['light', 'dark'])
     await page.getByLabel('Gizmo value').fill('45');
     await page.getByRole('button', { name: 'Relative', exact: true }).click();
     await page.getByLabel('Gizmo value').focus();
+    await settlePaint(page);
     const styles = await page.evaluate(() => {
       const field = document.querySelector('.precise-gizmo-number input'),
         segment = document.querySelector('.precise-gizmo-segments button.active'),

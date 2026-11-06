@@ -1,4 +1,4 @@
-import { createServer } from 'vite';
+import { build, createServer, preview } from 'vite';
 import { _electron as electron } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -14,13 +14,21 @@ const jointName = option('--joint', 'left_elbow_joint');
 const out = path.resolve(option('--output', path.join(root, '../output/electron/joint-performance')));
 const moves = Number(option('--moves', '120'));
 const repeats = Number(option('--repeat', '2'));
+const width = Number(option('--width', '2048'));
+const height = Number(option('--height', '1047'));
+const scaleFactor = Number(option('--scale-factor', '2'));
+const profileCPU = args.includes('--cpu-profile');
+const development = args.includes('--dev');
 assert.ok(Number.isInteger(moves) && moves >= 12, '--moves must be an integer of at least 12');
 assert.ok(Number.isInteger(repeats) && repeats >= 1, '--repeat must be a positive integer');
+assert.ok(Number.isInteger(width) && width >= 960, '--width must be an integer of at least 960');
+assert.ok(Number.isInteger(height) && height >= 600, '--height must be an integer of at least 600');
+assert.ok(Number.isFinite(scaleFactor) && scaleFactor >= 1 && scaleFactor <= 3, '--scale-factor must be between 1 and 3');
 await mkdir(out, { recursive: true });
 
 // Observe the production App, worker, history and renderer. Pointer input below still goes
 // through Playwright; private geometry is read only to locate the actual rendered handle.
-function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, GizmoOverlay) {
+function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, GizmoOverlay, NativeRaster) {
   localStorage.setItem('mojive.electron.settings.v1', JSON.stringify({ language: 'en', appearance: 'dark' }));
   const state = window.__jointPerformance = {
     runtime: null, overlay: null, active: false, data: null, restores: 0,
@@ -32,12 +40,24 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
     state.data = {
       requests: [], dispatched: [], acknowledgements: [], applied: [], renders: [],
       frame: [], raf: [], gizmo: [], serialize: [], clone: [], compare: [],
-      invalidations: [], pointer: [], pointerDown: [],
+      invalidations: [], pointer: [], pointerDown: [], raster: [], longTasks: [],
       pendingMax: 0, backendPendingMax: 0,
     };
     state.active = true;
   };
   state.stop = () => { state.active = false; return state.data; };
+  new PerformanceObserver(list => {
+    if (state.active) for (const task of list.getEntries())
+      state.data.longTasks.push({ at: task.startTime, ms: task.duration });
+  }).observe({ type: 'longtask', buffered: false });
+  const flush = NativeRaster.prototype.flush;
+  NativeRaster.prototype.flush = function (...args) {
+    const count = this.count, start = performance.now();
+    const result = flush.apply(this, args);
+    if (state.active && count) state.data.raster.push({ at: start, ms: performance.now() - start,
+      width: this.canvas.width, height: this.canvas.height, vertices: count / 6 });
+    return result;
+  };
   const sourceJoint = () => state.runtime?.session.current.source?.joints.find(joint => joint.name === state.jointName);
   const documentJoint = () => state.runtime?.document.joints.find(joint => joint.name === state.jointName);
   const frameValue = frame => {
@@ -203,13 +223,15 @@ import { PhysicsDocument } from '/src/physics/PhysicsDocument.ts';
 import { ViewportPipeline } from '/src/viewport/pipeline.ts';
 import { ViewportMetrics } from '/src/viewport/metrics.ts';
 import { GizmoOverlay } from '/src/viewport/gizmo.ts';
-(${observe.toString()})(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, GizmoOverlay);
+import { NativeRaster } from '/src/viewport/viewcube.ts';
+(${observe.toString()})(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, GizmoOverlay, NativeRaster);
 await import('/src/main.tsx');`;
-const server = await createServer({
-  root, configFile: false,
+const configuration = {
+  root, configFile: false, base: './',
+  build: { outDir: path.join(out, 'build'), emptyOutDir: true, target: 'esnext', chunkSizeWarningLimit: 1600 },
   plugins: [{
     name: 'production-joint-performance-observation',
-    transformIndexHtml: html => html.replace('/src/main.tsx', '/__joint_performance_bootstrap.js'),
+    transformIndexHtml: { order: 'pre', handler: html => html.replace('/src/main.tsx', '/__joint_performance_bootstrap.js') },
     resolveId: id => id === '/__joint_performance_bootstrap.js' ? '\0joint-performance-bootstrap' : null,
     load: id => id === '\0joint-performance-bootstrap' ? bootstrap : null,
     transform(code, id) {
@@ -227,7 +249,13 @@ const server = await createServer({
     },
   }],
   server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
-});
+  preview: { host: '127.0.0.1', port: 0 },
+};
+// Development React adds substantial work to every scene update. Benchmark the bundled
+// application by default; retain --dev for diagnosing development-only regressions.
+if (!development) await build(configuration);
+const server = development ? await createServer(configuration) : await preview(configuration);
+if (development) await server.listen();
 const distribution = values => {
   const sorted = values.toSorted((a, b) => a - b);
   return { count: values.length, median: sorted[Math.floor(sorted.length * 0.5)] ?? 0,
@@ -247,14 +275,18 @@ function assertLightweight(data, label) {
   assert.equal(data.compare.length, 0, `${label}: no document/timeline JSON comparison`);
 }
 let app;
-const report = { first, model, jointName, moves, repeats, results: [], errors: [] };
-await server.listen();
+const report = { first, model, jointName, moves, repeats, build: development ? 'development' : 'production', results: [], errors: [] };
 try {
   app = await electron.launch({
-    args: [root, '--hidden', '--user-data-dir=' + await mkdtemp(path.join(out, 'profile-'))],
+    args: [root, ...(args.includes('--visible') ? [] : ['--hidden']),
+      `--force-device-scale-factor=${scaleFactor}`, '--user-data-dir=' + await mkdtemp(path.join(out, 'profile-'))],
     cwd: root, env: { ...process.env, MOJIVE_DEV_URL: server.resolvedUrls.local[0] }, timeout: 45000,
   });
   const page = await app.firstWindow();
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), [width, height]);
+  const cdp = profileCPU ? await page.context().newCDPSession(page) : null;
+  if (cdp) await cdp.send('Profiler.enable');
+  report.window = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio }));
   page.setDefaultTimeout(30000);
   page.on('pageerror', error => report.errors.push(error.stack || error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });
@@ -295,9 +327,11 @@ try {
   await page.locator('.panel-header').getByRole('button', { name: 'Search', exact: true }).click();
   await page.locator('.panel-search input').fill(jointName);
   const treeJoint = page.getByRole('treeitem', { name: jointName, exact: true });
+  await page.evaluate(() => window.__jointPerformance.start('activation'));
   await treeJoint.dblclick();
   await page.locator('.tool-palette').getByRole('button', { name: /^Joint(?:\s|$)/ }).click();
   await page.waitForTimeout(700);
+  report.activation = await page.evaluate(() => window.__jointPerformance.stop());
   // Keep the arm and body visible around the selected elbow, using the same wheel input
   // as the user. Native focus intentionally frames a joint closely.
   const canvas = page.locator('[data-testid="viewport-canvas"]');
@@ -324,6 +358,7 @@ try {
     });
     const point = await page.evaluate(() => window.__jointPerformance.handlePoint());
     await page.mouse.move(point.x, point.y);
+    if (cdp) await cdp.send('Profiler.start');
     await page.evaluate(() => window.__jointPerformance.start('drag'));
     await page.mouse.down();
     const trajectory = await page.evaluate(count => window.__jointPerformance.dragPath(count), moves);
@@ -355,6 +390,10 @@ try {
         playing: state.runtime.session.current.playing };
     });
     const drag = await page.evaluate(() => window.__jointPerformance.stop());
+    if (cdp) {
+      const { profile } = await cdp.send('Profiler.stop');
+      await writeFile(path.join(out, `${label}.cpuprofile`), JSON.stringify(profile));
+    }
     const result = { label, trajectory: { linear: trajectory.linear, direction: trajectory.direction, angle: trajectory.angle },
       pointerDurationMs: released - start, captureDrainMs, orbitStartedAt, drain, drag,
       latency: { worker: distribution(drag.acknowledgements.map(ack => ack.ms)),
@@ -452,8 +491,8 @@ try {
 } catch (error) {
   report.passed = false;
   report.failure = error.stack || String(error);
-  if (app) {
-    const page = await app.firstWindow();
+  if (app?.windows().length) {
+    const page = app.windows()[0];
     report.failurePhase = await page.evaluate(() => {
       const state = window.__jointPerformance;
       if (!state) return null;
@@ -471,6 +510,7 @@ try {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(window => window.destroy())).catch(() => {});
     await app.close();
   }
-  await server.close();
+  if (development) await server.close();
+  else await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
 }
 console.log(path.join(out, 'report.json'));

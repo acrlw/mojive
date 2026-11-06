@@ -446,7 +446,14 @@ export class NativeRaster {
   private count = 0;
   private width = 90;
   private height = 90;
+  private scaleX = 1;
+  private scaleY = 1;
+  private minX = Infinity;
+  private minY = Infinity;
+  private maxX = -Infinity;
+  private maxY = -Infinity;
   constructor() {
+    this.canvas.width = this.canvas.height = 1;
     const gl = this.canvas.getContext('webgl2', {
       alpha: true,
       antialias: false,
@@ -498,15 +505,14 @@ export class NativeRaster {
   resize(width: number, height: number, dpr: number) {
     this.width = width;
     this.height = height;
-    const w = Math.round(width * dpr),
-      h = Math.round(height * dpr);
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w;
-      this.canvas.height = h;
-    }
-    this.gl.viewport(0, 0, w, h);
-    this.gl.uniform2f(this.extent, width, height);
+    this.scaleX = Math.round(width * dpr) / width;
+    this.scaleY = Math.round(height * dpr) / height;
+    this.reset();
+  }
+  private reset() {
     this.count = 0;
+    this.minX = this.minY = Infinity;
+    this.maxX = this.maxY = -Infinity;
   }
   dispose() {
     this.gl.deleteBuffer(this.buffer);
@@ -533,7 +539,17 @@ export class NativeRaster {
     ];
   }
   private vertex(point: Point, color: number[], opacity = 1) {
-    if (this.count + 6 > this.vertices.length) throw new Error('ViewCube vertex capacity exceeded');
+    if (this.count + 6 > this.vertices.length) {
+      const vertices = new Float32Array(this.vertices.length * 2);
+      vertices.set(this.vertices);
+      this.vertices = vertices;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
+      this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices.byteLength, this.gl.DYNAMIC_DRAW);
+    }
+    this.minX = Math.min(this.minX, point[0]);
+    this.minY = Math.min(this.minY, point[1]);
+    this.maxX = Math.max(this.maxX, point[0]);
+    this.maxY = Math.max(this.maxY, point[1]);
     this.vertices[this.count++] = point[0];
     this.vertices[this.count++] = point[1];
     this.vertices[this.count++] = color[0];
@@ -744,14 +760,62 @@ export class NativeRaster {
   }
   flush(context: CanvasRenderingContext2D) {
     if (!this.count) return;
+    // Keep the original device-pixel grid, but transfer only the painted region.
+    // Full-viewport WebGL-to-Canvas2D copies dominate overlay cost on Retina displays.
+    const left = Math.max(0, Math.floor(this.minX * this.scaleX) - 1),
+      top = Math.max(0, Math.floor(this.minY * this.scaleY) - 1),
+      right = Math.min(
+        Math.round(this.width * this.scaleX),
+        Math.ceil(this.maxX * this.scaleX) + 1,
+      ),
+      bottom = Math.min(
+        Math.round(this.height * this.scaleY),
+        Math.ceil(this.maxY * this.scaleY) + 1,
+      ),
+      width = right - left,
+      height = bottom - top;
+    if (width <= 0 || height <= 0) {
+      this.reset();
+      return;
+    }
+    // Reserve geometric headroom: small angle changes must not repeatedly reset
+    // the GPU backing store. Assigning even an unchanged dimension resets it too.
+    const capacityWidth = Math.max(this.canvas.width, 2 ** Math.ceil(Math.log2(width))),
+      capacityHeight = Math.max(this.canvas.height, 2 ** Math.ceil(Math.log2(height)));
+    if (this.canvas.width !== capacityWidth) this.canvas.width = capacityWidth;
+    if (this.canvas.height !== capacityHeight) this.canvas.height = capacityHeight;
     const gl = this.gl;
+    // Shift the original viewport by whole device pixels instead of changing its
+    // projection; this preserves subpixel triangle coverage at clipped edges.
+    gl.viewport(
+      -left,
+      capacityHeight - Math.round(this.height * this.scaleY) + top,
+      Math.round(this.width * this.scaleX),
+      Math.round(this.height * this.scaleY),
+    );
+    gl.uniform2f(this.extent, this.width, this.height);
+    // Clear retained capacity too: fractional Canvas2D destinations sample beyond
+    // the copied source edge, so a stale adjacent pixel would bleed into the result.
+    gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, capacityHeight - height, width, height);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.vertices.subarray(0, this.count));
     gl.drawArrays(gl.TRIANGLES, 0, this.count / 6);
-    context.drawImage(this.canvas, 0, 0, this.width, this.height);
-    this.count = 0;
+    context.drawImage(
+      this.canvas,
+      0,
+      0,
+      width,
+      height,
+      left / this.scaleX,
+      top / this.scaleY,
+      width / this.scaleX,
+      height / this.scaleY,
+    );
+    this.reset();
   }
 }
 

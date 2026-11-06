@@ -450,7 +450,6 @@ export class GizmoOverlay {
     if (path.length < 3) return;
     this.ctx.globalAlpha = 1;
     this.raster.fill(path, color, 1, true, alpha);
-    this.raster.flush(this.ctx);
   }
   private stroke(path: P[], color: string, width: number, alpha = 1, closed = false) {
     if (!path.length) return;
@@ -466,12 +465,10 @@ export class GizmoOverlay {
         width,
         alpha,
       );
-      this.raster.flush(this.ctx);
       return;
     }
     this.ctx.globalAlpha = 1;
     this.raster.strokeOpen(path, color, width, alpha);
-    this.raster.flush(this.ctx);
   }
   private circle(p: P, r: number, color: string, alpha = 1, segments = 24) {
     const points = Array.from(
@@ -483,7 +480,6 @@ export class GizmoOverlay {
     );
     this.ctx.globalAlpha = 1;
     this.raster.fill(points, color, 1, true, alpha);
-    this.raster.flush(this.ctx);
   }
   private draw() {
     const c = this.ctx,
@@ -562,6 +558,7 @@ export class GizmoOverlay {
       this.drawAxisGuide(this.origin, this.axes[2], true);
     this.drawPrecision();
     if (this.drag) this.drawDrag();
+    this.raster.flush(c);
     c.globalAlpha = 1;
   }
   private hingeAxisHit(p: P) {
@@ -616,7 +613,6 @@ export class GizmoOverlay {
   private tickStroke(a: P, b: P, color: string, width: number, alpha = 1) {
     this.ctx.globalAlpha = 1;
     this.raster.strokeLineG3(a, b, color, width, alpha);
-    this.raster.flush(this.ctx);
   }
   private drawJointProjection() {
     const p = this.jointProjection!;
@@ -626,16 +622,13 @@ export class GizmoOverlay {
     if (p.allowed.length) {
       if (p.slide) {
         this.raster.stroke(p.allowed, color, 3.5, p.alpha, false);
-        this.raster.flush(this.ctx);
       } else this.stroke(p.allowed, color, 3.5, p.alpha, p.full);
     }
     if (p.complement.length) {
       this.raster.stroke(p.complement, color, 3.5, p.alpha * (hot ? 0.26 : 0.12), false);
-      this.raster.flush(this.ctx);
     }
     for (const arrow of p.arrows) {
       this.raster.fill(arrow, color, 1, false, p.alpha);
-      this.raster.flush(this.ctx);
     }
     for (const tick of p.ticks) {
       const ink =
@@ -665,6 +658,7 @@ export class GizmoOverlay {
       x = Math.max(4, Math.min(this.width - width - 4, anchor[0] - width * 0.5)),
       y = Math.max(4, Math.min(this.height - height - 4, anchor[1] + (above ? -height - 8 : 8)));
     c.fillStyle = this.settings.readoutStyle?.surface ?? '#252a2f';
+    this.raster.flush(c);
     fillSurface(c, x, y, width, height, 4);
     this.circle(
       [x + 11, y + height * 0.5],
@@ -675,6 +669,7 @@ export class GizmoOverlay {
     c.fillStyle = this.settings.readoutStyle?.ink ?? '#e6e8eb';
     c.textAlign = 'left';
     c.textBaseline = 'middle';
+    this.raster.flush(c);
     c.fillText(text, x + 20, y + height * 0.5);
     c.textBaseline = 'alphabetic';
   }
@@ -710,9 +705,9 @@ export class GizmoOverlay {
       0.6,
       false,
     );
-    this.raster.flush(c);
     c.globalAlpha = 1;
     c.fillStyle = this.settings.readoutStyle?.surface ?? '#252a2f';
+    this.raster.flush(c);
     fillSurface(c, x0, y0, x1 - x0, y1 - y0, 4);
     if (pressed) {
       const original = this.jointEdit!.original,
@@ -743,7 +738,6 @@ export class GizmoOverlay {
             end === right[0],
           );
       }
-      this.raster.flush(c);
       this.tickStroke([reference, left[1] - 4], [reference, left[1] + 4], controls.dim, 2);
     } else {
       this.tickStroke(left, right, track, 4);
@@ -900,6 +894,7 @@ export class GizmoOverlay {
   private drawTranslationLink() {
     const d = this.drag!;
     this.dragLink ??= new DragLinkRaster();
+    this.raster.flush(this.ctx);
     this.dragLink.draw(
       this.ctx,
       this.screen(d.dragOrigin),
@@ -924,7 +919,6 @@ export class GizmoOverlay {
       this.raster.stroke(guide.segment, color, 1.6, guide.alpha, false);
     }
     for (const polygon of guide.polygons) this.raster.fill(polygon, color, 1, false, guide.alpha);
-    this.raster.flush(this.ctx);
   }
   private drawActiveReadout(anchor: P, text: string, marker?: string) {
     const c = this.ctx;
@@ -936,6 +930,7 @@ export class GizmoOverlay {
       x = Math.max(4, Math.min(this.width - width - 4, anchor[0] + 16)),
       y = Math.max(4, Math.min(this.height - height - 4, anchor[1] + 16));
     c.fillStyle = this.settings.readoutStyle?.surface ?? '#252a2f';
+    this.raster.flush(c);
     fillSurface(c, x, y, width, height, 4);
     if (marker)
       this.circle(
@@ -947,6 +942,7 @@ export class GizmoOverlay {
     c.fillStyle = this.settings.readoutStyle?.ink ?? '#e6e8eb';
     c.textAlign = 'left';
     c.textBaseline = 'middle';
+    this.raster.flush(c);
     c.fillText(text, x + 8 + prefix, y + height * 0.5);
     c.textBaseline = 'alphabetic';
   }
@@ -984,7 +980,6 @@ export class GizmoOverlay {
             tick.roundStart,
             tick.roundEnd,
           );
-        this.raster.flush(this.ctx);
       }
     }
     if (h.kind !== 'ring' && h.kind !== 'trackball' && this.tool !== 'scale') {
@@ -1019,7 +1014,6 @@ export class GizmoOverlay {
           HOVER_COLOR,
           3.5,
         );
-        this.raster.flush(this.ctx);
       }
     }
     if (h.kind === 'ring') {
@@ -1061,7 +1055,6 @@ export class GizmoOverlay {
             tick.roundStart,
             tick.roundEnd,
           );
-        this.raster.flush(this.ctx);
         if (this.jointProjection && d.snapping) this.drawJointProjection();
         if (guide.fillAlpha) this.raster.fan(guide.sector, palette.fill, guide.fillAlpha);
         if (guide.reference.length)
@@ -1072,7 +1065,6 @@ export class GizmoOverlay {
             palette.dark,
             guide.alpha,
           );
-        this.raster.flush(this.ctx);
         anchor = guide.anchor;
       }
     }
