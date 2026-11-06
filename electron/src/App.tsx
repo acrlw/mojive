@@ -124,6 +124,8 @@ const kinds: Record<string, string> = {
   sphere: 'shape-sphere',
   cylinder: 'shape-cylinder',
   capsule: 'shape-capsule',
+  cone: 'shape-cone',
+  ellipsoid: 'shape-ellipsoid',
   ground: 'shape-plane',
   camera: 'camera',
   light: 'lightbulb',
@@ -135,15 +137,6 @@ const tools: { id: Tool; icon: string; title: string }[] = [
   { id: 'rotation', icon: 'rotate', title: 'Rotation' },
   { id: 'scale', icon: 'scale', title: 'Scale' },
   { id: 'joint', icon: 'joint', title: 'Joint' },
-];
-const additions: { kind: EntityKind; label: string }[] = [
-  { kind: 'box', label: 'Box' },
-  { kind: 'sphere', label: 'Sphere' },
-  { kind: 'cylinder', label: 'Cylinder' },
-  { kind: 'capsule', label: 'Capsule' },
-  { kind: 'ground', label: 'Ground' },
-  { kind: 'light', label: 'Light source' },
-  { kind: 'camera', label: 'Camera' },
 ];
 export default function App() {
   const [settings, updateSettings] = useSettings();
@@ -1024,6 +1017,11 @@ export default function App() {
     setMenu(null);
     transaction(message('Added {{kind}}', { kind: message(kind) }), () => {
       const n = createPrimitive(kind);
+      const view = viewport.current?.getCameraView();
+      if (view && n.object instanceof THREE.Mesh) {
+        doc.root.updateWorldMatrix(true, false);
+        n.object.position.copy(doc.root.worldToLocal(new THREE.Vector3().fromArray(view.target)));
+      }
       doc.root.add(n.object);
       doc.nodes.push(n);
       setSelected(n.id);

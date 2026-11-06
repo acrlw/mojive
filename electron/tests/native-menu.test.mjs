@@ -50,14 +50,27 @@ test('native groups and semantic boundaries match the shared native-parity catal
   assert.deepEqual(Array.from(captures.at(-1), (entry) => entry.label),
     ['Mojive', 'File', 'Edit', 'Add', 'View', 'Simulate', 'Window', 'Help']);
   assert.deepEqual(Array.from(group('Add'), (entry) => entry.type === 'separator' ? 'separator' : entry.id),
-    ['add.box', 'add.sphere', 'add.cylinder', 'add.capsule', 'add.ground', 'separator', 'add.light', 'add.camera']);
+    ['add.box', 'add.sphere', 'add.cylinder', 'add.capsule', 'add.cone', 'add.ellipsoid', 'add.ground', 'separator', 'add.light', 'add.camera']);
   assert.equal(group('View')[0].id, 'view.focusAll');
   assert.deepEqual(Array.from(item('menu:projection').submenu, (entry) => entry.id),
     ['view.perspective', 'view.orthographic']);
   assert.deepEqual(Array.from(item('menu:openModel').submenu, (entry) => entry.id),
     ['file.openSimulation', 'file.openUrdf']);
-  assert.ok(!flatten(group('Simulate')).some((entry) => entry.id === 'panel.actuators'),
-    'Actuators are a panel, not a physics adapter selector');
+  assert.ok(flatten(group('Simulate')).some((entry) => entry.id === 'panel.actuators'),
+    'The native Physics adapter command opens the physics control panel');
+  assert.deepEqual(Array.from(item('menu:panels').submenu, (entry) => entry.type === 'separator' ? 'separator' : entry.id),
+    ['panel.scene', 'panel.joints', 'panel.actuators', 'panel.project', 'panel.assets',
+      'panel.cameras', 'panel.layers', 'panel.output', 'separator', 'view.toggleInspector', 'panel.timeline']);
+});
+
+test('Physics adapter opens the available physics controls and reflects panel visibility', () => {
+  const { controller, item, actions } = menuFixture();
+  controller.update({ ...state, panel: 'actuators' });
+  assert.equal(item('panel.actuators').checked, true);
+  item('panel.actuators').click();
+  assert.equal(actions.at(-1).action, 'panel.actuators');
+  controller.update({ ...state, panel: '', showLeft: false });
+  assert.equal(item('panel.actuators').checked, false);
 });
 
 test('language updates preserve native Add separators and the shared Camera term', () => {
@@ -65,7 +78,13 @@ test('language updates preserve native Add separators and the shared Camera term
   controller.update({ ...chineseState, canAdd: true });
   assert.equal(item('add.camera').label, '相机');
   assert.equal(item('add.ground').label, '平面');
-  assert.equal(group('添加')[5].type, 'separator');
+  assert.equal(item('add.cone').label, '圆锥体');
+  assert.equal(item('add.ellipsoid').label, '椭球体');
+  assert.equal(group('添加')[7].type, 'separator');
+  for (const kind of ['cone', 'ellipsoid']) {
+    item(`add.${kind}`).click();
+    assert.equal(actions.at(-1).action, `add.${kind}`);
+  }
   item('add.camera').click();
   assert.deepEqual(actions.at(-1), { channel: 'mojive:menu-action', action: 'add.camera' });
 });

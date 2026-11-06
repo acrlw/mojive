@@ -24,6 +24,8 @@
   "sphere": "球体",
   "cylinder": "圆柱体",
   "capsule": "胶囊体",
+  "cone": "圆锥体",
+  "ellipsoid": "椭球体",
   "ground": "平面",
   "light": "点光源",
   "camera": "相机",

@@ -31,7 +31,8 @@ const app = await electron.launch({
 });
 let page;
 const errors = [],
-  passed = [];
+  passed = [],
+  primitiveNames = [];
 const wait = () => page.waitForTimeout(150);
 async function action(id) {
   await app.evaluate(({ Menu, BrowserWindow }, id) => {
@@ -469,15 +470,38 @@ try {
       await capture('arm-revised');
     },
   );
+  await check('Native Add creates cone and ellipsoid entities with reversible geometry', async () => {
+    await page.locator('.panel-search input').fill('');
+    for (const [kind, x, z] of [['cone', -1.2, 0.5], ['ellipsoid', 1.2, 0.35]]) {
+      await action(`add.${kind}`);
+      const name = await page.locator('.inspector-heading strong').textContent();
+      primitiveNames.push(name);
+      assert.match(name.toLowerCase(), new RegExp(`^${kind} `));
+      assert.equal(await page.locator(`.tree-row[data-tooltip="${name}"]`).count(), 1);
+      await action('edit.undo');
+      assert.equal(await page.locator(`.tree-row[data-tooltip="${name}"]`).count(), 0);
+      await action('edit.redo');
+      await selectNode(name);
+      await typeValue('Position X', x);
+      await typeValue('Position Y', 0);
+      await typeValue('Position Z', z);
+      await page.locator('.panel-search input').fill('');
+    }
+    await action('tool.select');
+    await action('view.focusAll');
+    await page.waitForTimeout(500);
+    await capture('primitive-additions');
+  });
   await check(
     'Add primitive, inspector vector fields, undo/redo and native text input ownership',
     async () => {
       await action('add.box');
+      const initialX = Number(await page.getByLabel('Position X', { exact: true }).inputValue());
       await typeValue('Position X', 1.25);
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 1.25);
       await page.locator('.inspector-heading').click();
       await action('edit.undo');
-      assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 0);
+      assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), initialX);
       await action('edit.redo');
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 1.25);
       await page.locator('.panel-search input').fill('f');
@@ -660,6 +684,9 @@ try {
     )
       await page.getByRole('button', { name: 'Replace', exact: true }).click();
     await page.locator('.file-dialog').waitFor({ state: 'detached' });
+    const saved = JSON.parse(await readFile(path.join(out, filename), 'utf8'));
+    assert.deepEqual(saved.document.nodes.filter((node) => primitiveNames.includes(node.name))
+      .map((node) => node.kind), ['cone', 'ellipsoid']);
     await action('file.openScene');
     await page.getByRole('textbox', { name: 'Location', exact: true }).fill(out);
     await page.getByRole('textbox', { name: 'Location', exact: true }).press('Enter');
@@ -669,6 +696,15 @@ try {
     assert.equal(await page.locator('.key-lane').first().getByRole('button').count(), 2);
     assert.equal(await page.locator('.snapshot-marker').count(), 1);
     assert.ok((await page.locator('.take-frame-tick').count()) > 1);
+    for (const [index, name] of primitiveNames.entries()) {
+      await selectNode(name);
+      assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()),
+        index === 0 ? -1.2 : 1.2);
+    }
+    await page.locator('.panel-search input').fill('');
+    await action('view.focusAll');
+    await page.waitForTimeout(500);
+    await capture('primitive-roundtrip');
   });
   await check(
     'Output search, severity filters, sorting and clear are actual controls',
@@ -701,6 +737,15 @@ try {
       await page.waitForFunction(() =>
         document.querySelector('.document-title')?.textContent?.includes('test_scene'),
       );
+      await page.locator('.busy-overlay').waitFor({ state: 'detached' });
+      // The document swaps before the load transaction releases the native menu.
+      if (process.platform === 'darwin') {
+        const deadline = Date.now() + 10000;
+        while (!(await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('file.openProject')?.enabled))) {
+          assert.ok(Date.now() < deadline, 'File menu must become available after loading');
+          await page.waitForTimeout(20);
+        }
+      }
       await action('file.openProject');
       await page.getByRole('textbox', { name: 'Location', exact: true }).fill(directory);
       await page.getByRole('button', { name: 'Select folder', exact: true }).click();

@@ -221,7 +221,7 @@ for (const [theme, language, scale] of [
     await page.locator('.info-dialog').screenshot({ path: `${out}/corners-guide-${theme}.png` });
     await page.keyboard.press('Escape');
     await page.locator('[data-menu=Add]').click();
-    await page.locator('.menu-add button').nth(5).click();
+    await page.locator('.menu-add button:has([data-icon=light])').click();
     await corner(
       page,
       '.inspector .color-trigger',

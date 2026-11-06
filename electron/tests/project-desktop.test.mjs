@@ -91,6 +91,7 @@ test('actual desktop project root and platform Close Project action retain the e
     await page.getByRole('button', { name: 'Project files', exact: true }).waitFor();
     await action('add.box');
     const x = page.getByLabel('Position X', { exact: true });
+    const initialX = Number(await x.inputValue());
     await x.dblclick();
     await x.fill('2');
     await x.press('Enter');
@@ -147,7 +148,8 @@ test('actual desktop project root and platform Close Project action retain the e
     }
     await action('edit.undo');
     await page.waitForFunction(
-      () => Number(document.querySelector('input[aria-label="Position X"]')?.value) === 0,
+      (value) => Number(document.querySelector('input[aria-label="Position X"]')?.value) === value,
+      initialX,
     );
     await action('edit.redo');
     await page.waitForFunction(

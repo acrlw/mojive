@@ -239,6 +239,7 @@ test('snapshot serialization records immediate transform edits before any render
     const node = createPrimitive('box');
     doc.root.add(node.object);
     doc.nodes.push(node);
+    const initialPosition = node.object.position.toArray();
     const before = encodeDocument(doc);
     // Keep both snapshots in one JS task: no renderer/RAF may update cached matrices.
     node.object.position.set(2, 3, 4);
@@ -257,6 +258,7 @@ test('snapshot serialization records immediate transform edits before any render
       };
     };
     const output = {
+      initialPosition,
       before: transform(undo),
       after: transform(redo),
       saved: transform(saved.doc),
@@ -267,7 +269,7 @@ test('snapshot serialization records immediate transform edits before any render
     return output;
   });
   assert.ok(result.changed, 'immediate edits must form their own undo transaction');
-  assert.deepEqual(result.before.p, [0, 0, 0.25]);
+  assert.deepEqual(result.before.p, result.initialPosition);
   for (const state of [result.after, result.saved])
     for (const key of ['p', 'q', 's'])
       state[key].forEach((value, index) =>

@@ -572,17 +572,29 @@ export function createPrimitive(kind: EntityKind, name?: string): SceneNode {
   const properties: Record<string, string | number> = {};
   switch (kind) {
     case 'box':
-      object = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), mat);
-      object.position.z = 0.25;
+      object = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+      object.position.z = 0.5;
       break;
     case 'sphere':
-      object = new THREE.Mesh(new THREE.SphereGeometry(0.3, 48, 32), mat);
-      object.position.z = 0.3;
+      object = new THREE.Mesh(zUpGeometry(new THREE.SphereGeometry(0.5, 48, 32)), mat);
+      object.position.z = 0.5;
       break;
-    case 'cylinder': {
-      const geo = zUpGeometry(new THREE.CylinderGeometry(0.25, 0.25, 0.6, 48));
+    case 'ellipsoid': {
+      const geo = zUpGeometry(new THREE.SphereGeometry(1, 48, 32)).scale(0.65, 0.45, 0.35);
       object = new THREE.Mesh(geo, mat);
-      object.position.z = 0.3;
+      object.position.z = 0.35;
+      break;
+    }
+    case 'cylinder': {
+      const geo = zUpGeometry(new THREE.CylinderGeometry(0.5, 0.5, 1, 48));
+      object = new THREE.Mesh(geo, mat);
+      object.position.z = 0.5;
+      break;
+    }
+    case 'cone': {
+      const geo = zUpGeometry(new THREE.ConeGeometry(0.5, 1, 48));
+      object = new THREE.Mesh(geo, mat);
+      object.position.z = 0.5;
       break;
     }
     case 'capsule': {
@@ -593,11 +605,11 @@ export function createPrimitive(kind: EntityKind, name?: string): SceneNode {
     }
     case 'ground':
       object = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20),
+        new THREE.PlaneGeometry(8, 8),
         new THREE.MeshStandardMaterial({ color: '#40464e', roughness: 0.95, metalness: 0 }),
       );
-      properties.Width = 20;
-      properties.Length = 20;
+      properties.Width = 8;
+      properties.Length = 8;
       break;
     case 'light':
       object = new THREE.PointLight('#fff5df', 14, 20, 2);

@@ -37,6 +37,8 @@
   "Open scene": "打开场景",
   "Save scene as": "场景另存为",
   "Primitives": "基本几何体",
+  "cone": "圆锥体",
+  "ellipsoid": "椭球体",
   "Add keyframe": "添加关键帧",
   "Fit timeline": "适应时间轴",
   "Joint controls": "关节控制",

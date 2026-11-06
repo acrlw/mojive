@@ -24,6 +24,8 @@
   "sphere": "Sphere",
   "cylinder": "Cylinder",
   "capsule": "Capsule",
+  "cone": "Cone",
+  "ellipsoid": "Ellipsoid",
   "ground": "Plane",
   "light": "Point Light",
   "camera": "Camera",

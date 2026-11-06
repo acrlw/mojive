@@ -1,6 +1,6 @@
 import type { SceneNode } from './contracts';
 export function nodeCategory(node: SceneNode): string {
-  return ['box', 'sphere', 'cylinder', 'capsule', 'ground', 'geom'].includes(node.kind)
+  return ['box', 'sphere', 'ellipsoid', 'cylinder', 'cone', 'capsule', 'ground', 'geom'].includes(node.kind)
     ? 'geom'
     : node.kind;
 }

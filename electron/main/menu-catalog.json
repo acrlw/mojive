@@ -124,6 +124,18 @@
         "enabled": "canAdd"
       },
       {
+        "action": "add.cone",
+        "label": "cone",
+        "icon": "shape-cone",
+        "enabled": "canAdd"
+      },
+      {
+        "action": "add.ellipsoid",
+        "label": "ellipsoid",
+        "icon": "shape-ellipsoid",
+        "enabled": "canAdd"
+      },
+      {
         "action": "add.ground",
         "label": "ground",
         "icon": "shape-plane",
@@ -400,6 +412,16 @@
         ]
       },
       {
+        "action": "panel.actuators",
+        "label": "physicsAdapter",
+        "icon": "control",
+        "type": "checkbox",
+        "checked": {
+          "key": "panel",
+          "value": "actuators"
+        }
+      },
+      {
         "action": "simulation.environment",
         "label": "physicsOptions",
         "icon": "env",
@@ -451,26 +473,6 @@
             }
           },
           {
-            "action": "panel.project",
-            "label": "project",
-            "icon": "folder",
-            "type": "radio",
-            "checked": {
-              "key": "panel",
-              "value": "project"
-            }
-          },
-          {
-            "action": "panel.assets",
-            "label": "assets",
-            "icon": "asset-library",
-            "type": "radio",
-            "checked": {
-              "key": "panel",
-              "value": "assets"
-            }
-          },
-          {
             "action": "panel.joints",
             "label": "joints",
             "icon": "joint",
@@ -488,6 +490,26 @@
             "checked": {
               "key": "panel",
               "value": "actuators"
+            }
+          },
+          {
+            "action": "panel.project",
+            "label": "project",
+            "icon": "folder",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "project"
+            }
+          },
+          {
+            "action": "panel.assets",
+            "label": "assets",
+            "icon": "asset-library",
+            "type": "radio",
+            "checked": {
+              "key": "panel",
+              "value": "assets"
             }
           },
           {
@@ -511,6 +533,19 @@
             }
           },
           {
+            "action": "panel.output",
+            "label": "output",
+            "icon": "terminal",
+            "type": "checkbox",
+            "checked": {
+              "key": "showOutput",
+              "value": true
+            }
+          },
+          {
+            "type": "separator"
+          },
+          {
             "action": "view.toggleInspector",
             "label": "inspector",
             "icon": "inspect",
@@ -527,16 +562,6 @@
             "type": "checkbox",
             "checked": {
               "key": "showTimeline",
-              "value": true
-            }
-          },
-          {
-            "action": "panel.output",
-            "label": "output",
-            "icon": "terminal",
-            "type": "checkbox",
-            "checked": {
-              "key": "showOutput",
               "value": true
             }
           }
