@@ -31,6 +31,110 @@ after(async () => {
   await browser?.close();
   await server?.close();
 });
+test('bounded selection outline matches the full-frame shader at every density and viewport edge', async () => {
+  const result = await page.evaluate(async () => {
+    const T = await import('/node_modules/three/build/three.module.js');
+    const { ViewportPipeline } = await import('/src/viewport/pipeline.ts');
+    const renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    const scene = new T.Scene();
+    scene.background = new T.Color('#22272d');
+    scene.add(new T.AmbientLight(0xffffff, 1));
+    const root = new T.Group(),
+      selected = new T.Group();
+    scene.add(root);
+    root.add(selected);
+    const geometry = new T.BoxGeometry(0.8, 0.9, 0.5);
+    geometry.computeBoundingBox();
+    const visual = new T.Mesh(geometry, new T.MeshStandardMaterial({ color: '#748b92' }));
+    const collision = new T.Mesh(geometry, new T.MeshStandardMaterial({ color: '#6f9b55' }));
+    visual.userData.role = 'visual';
+    collision.userData.role = 'collision';
+    collision.position.x = 0.2;
+    selected.add(visual, collision);
+    const doc = { root, nodes: [{ id: 'body', kind: 'link', object: selected }], joints: [] };
+    const pipeline = new ViewportPipeline(renderer);
+    const bounded = pipeline.selectedScissor;
+    const failures = [];
+    let mismatches = 0,
+      cases = 0,
+      restricted = 0,
+      fallback = 0;
+    const gl = renderer.getContext();
+    for (const density of [1, 1.25, 2]) {
+      renderer.setPixelRatio(density);
+      renderer.setSize(160, 120);
+      const width = renderer.domElement.width,
+        height = renderer.domElement.height;
+      pipeline.resize(width, height);
+      const actual = new Uint8Array(width * height * 4),
+        reference = actual.slice();
+      const perspective = new T.PerspectiveCamera(42, 4 / 3, 0.1, 100);
+      const ortho = new T.OrthographicCamera(-2, 2, 1.5, -1.5, 0.1, 100);
+      for (const camera of [perspective, ortho]) {
+        camera.position.z = 5;
+        camera.updateMatrixWorld();
+        for (const outlineWidth of [1, 3, 8]) {
+          for (const mode of ['default', 'visual', 'collision', 'both']) {
+            // Motion also checks that old mask pixels cannot leak outside the new bounds.
+            for (const [x, y, z] of [
+              [0, 0, 0],
+              [-2, 0, 0],
+              [2, 0, 0],
+              [0, -1.5, 0],
+              [0, 1.5, 0],
+              [0, 0, 4.9],
+            ]) {
+              selected.position.set(x, y, z);
+              selected.rotation.set(0.2, 0.15, 0.4);
+              scene.updateMatrixWorld(true);
+              // Exercise composition into an existing viewport scissor as well.
+              renderer.setScissor(4, 3, 152, 114);
+              renderer.setScissorTest(false);
+              renderer.clear();
+              const clipped = cases % 2 === 1;
+              renderer.setScissorTest(clipped);
+              pipeline.selectedScissor = function (...args) {
+                const bounds = bounded.apply(this, args);
+                if (bounds && bounds.z * bounds.w < (width * height) / 2) restricted++;
+                if (!bounds) fallback++;
+                return bounds;
+              };
+              pipeline.render(scene, camera, doc, 'body', mode, { outlineWidth });
+              gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, actual);
+              const scissor = renderer.getScissor(new T.Vector4()).toArray();
+              if (scissor.join() !== '4,3,152,114' || renderer.getScissorTest() !== clipped)
+                throw new Error('Outline did not restore renderer scissor state');
+              pipeline.selectedScissor = () => null;
+              pipeline.render(scene, camera, doc, 'body', mode, { outlineWidth });
+              gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, reference);
+              let different = 0, maxDelta = 0, first;
+              for (let i = 0; i < actual.length; i++) if (actual[i] !== reference[i]) {
+                different++;
+                maxDelta = Math.max(maxDelta, Math.abs(actual[i] - reference[i]));
+                first ??= [Math.floor(i / 4) % width, Math.floor(i / 4 / width), actual[i], reference[i]];
+              }
+              mismatches += different;
+              if (different && failures.length < 12) failures.push({density, camera:camera.type, outlineWidth, mode, x,y,z,clipped,different,maxDelta,first});
+              cases++;
+            }
+          }
+        }
+      }
+    }
+    const error = gl.getError();
+    pipeline.dispose();
+    geometry.dispose();
+    visual.material.dispose();
+    collision.material.dispose();
+    renderer.dispose();
+    return { mismatches, cases, restricted, fallback, error, failures };
+  });
+  assert.equal(result.cases, 432);
+  assert.equal(result.mismatches, 0, JSON.stringify(result));
+  assert.ok(result.restricted > 0, 'Normal selections must restrict the outline draw');
+  assert.ok(result.fallback > 0, 'Near-plane intersections must use the full-frame path');
+  assert.equal(result.error, 0);
+});
 test('selection shader closes all viewport borders and preserves explicit light visibility', async () => {
   const errors = [];
   page.on('console', (m) => {

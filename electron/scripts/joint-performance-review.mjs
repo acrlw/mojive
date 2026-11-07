@@ -18,6 +18,7 @@ const width = Number(option('--width', '2048'));
 const height = Number(option('--height', '1047'));
 const scaleFactor = Number(option('--scale-factor', '2'));
 const profileCPU = args.includes('--cpu-profile');
+const traceFrames = args.includes('--trace');
 const development = args.includes('--dev');
 assert.ok(Number.isInteger(moves) && moves >= 12, '--moves must be an integer of at least 12');
 assert.ok(Number.isInteger(repeats) && repeats >= 1, '--repeat must be a positive integer');
@@ -40,7 +41,7 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
     state.data = {
       startedAt: performance.now(), timeOrigin: performance.timeOrigin,
       requests: [], dispatched: [], acknowledgements: [], applied: [], renders: [],
-      frame: [], raf: [], gizmo: [], serialize: [], clone: [], compare: [],
+      frame: [], raf: [], rafEvents: [], gizmo: [], serialize: [], clone: [], compare: [],
       invalidations: [], pointer: [], pointerDown: [], raster: [], rasterResize: [], longTasks: [],
       pendingMax: 0, backendPendingMax: 0,
     };
@@ -187,7 +188,10 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
   };
   let previous = performance.now();
   function frame(now) {
-    if (state.active) state.data.raf.push(now - previous);
+    if (state.active) {
+      state.data.raf.push(now - previous);
+      state.data.rafEvents.push({ at: now, deliveredAt: performance.now(), ms: now - previous, phase: state.phase });
+    }
     previous = now;
     requestAnimationFrame(frame);
   }
@@ -311,6 +315,12 @@ try {
     cwd: root, env: { ...process.env, MOJIVE_DEV_URL: server.resolvedUrls.local[0] }, timeout: 45000,
   });
   const page = await app.firstWindow();
+  report.gpu = await app.evaluate(({ app }) => app.getGPUInfo('complete'));
+  if (traceFrames) await app.evaluate(({ contentTracing }) => contentTracing.startRecording({
+    included_categories: ['toplevel', 'blink', 'cc', 'gpu', 'viz', 'benchmark', 'input',
+      'latencyInfo', 'renderer.scheduler', 'v8', 'devtools.timeline',
+      'disabled-by-default-devtools.timeline.frame'],
+  }));
   await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size), [width, height]);
   const cdp = profileCPU ? await page.context().newCDPSession(page) : null;
   if (cdp) await cdp.send('Profiler.enable');
@@ -546,6 +556,8 @@ try {
 } finally {
   await writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
   if (app) {
+    if (traceFrames) await app.evaluate(({ contentTracing }, destination) =>
+      contentTracing.stopRecording(destination), path.join(out, 'frames.trace.json'));
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(window => window.destroy())).catch(() => {});
     await app.close();
   }

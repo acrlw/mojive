@@ -426,3 +426,17 @@ local CPU timings do not establish whole-frame speedups.
 Use `make ui-frame-profile ARGS="--hover-gizmo --gizmo-mode rotate"` to include a scripted
 pointer sweep over the selected gizmo. The report records whether hit testing actually ran;
 pointer events stay inside the benchmark viewer and do not move the operating system cursor.
+
+For Electron, `make electron-joint-performance-review ARGS="--repeat 3 --trace"` records
+sustained joint dragging, immediate orbit after release, recovery to idle, and a Chromium frame
+trace. Compare animation-frame intervals with CPU submission time: a short `renderer.render()`
+call does not include queued GPU work or presentation waits. Use the production viewport size
+and pixel density, and isolate render passes when attributing the remaining frame cost.
+
+Selection-outline neighborhood sampling should be limited to conservative projected selection
+bounds, as in the native outline pass. Reuse cached geometry bounds and include the shader's
+pixel support; keep the selection mask clear complete. Fall back to the full-frame path when
+near-plane crossings or unbounded vertex deformation make projection unsafe. Preserve the
+existing scissor intersection and restore its exact physical-pixel edges, including at fractional
+pixel density. Compare final pixels against the unrestricted shader across projection, geometry
+display mode, outline width, clipping, and density before accepting the optimization.

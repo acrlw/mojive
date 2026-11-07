@@ -65,6 +65,57 @@ export class ViewportPipeline {
   private comparisonMaterials = new Map<THREE.Material, THREE.Material>();
   private highlighted = new Map<THREE.Material, THREE.Material>();
   private collision = new Map<THREE.Material, THREE.Material>();
+  private outlineBounds = new THREE.Vector4();
+  private previousScissor = new THREE.Vector4();
+  private outlineProjection = new THREE.Matrix4();
+  private outlineCorner = new THREE.Vector4();
+
+  private selectedScissor(camera: THREE.Camera, padding: number): THREE.Vector4 | null {
+    const { width, height } = this.targets[2];
+    let left = Infinity,
+      bottom = Infinity,
+      right = -Infinity,
+      top = -Infinity;
+    for (const mesh of this.selectedObjects) {
+      if (!mesh.visible) continue;
+      // These paths may deform vertices outside the static geometry bounds.
+      if (
+        mesh instanceof THREE.SkinnedMesh ||
+        mesh instanceof THREE.InstancedMesh ||
+        mesh.morphTargetInfluences?.length
+      )
+        return null;
+      const box = mesh.geometry.boundingBox;
+      if (!box) return null;
+      this.outlineProjection
+        .multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+        .multiply(mesh.matrixWorld);
+      for (let i = 0; i < 8; i++) {
+        const p = this.outlineCorner
+          .set(
+            i & 1 ? box.max.x : box.min.x,
+            i & 2 ? box.max.y : box.min.y,
+            i & 4 ? box.max.z : box.min.z,
+            1,
+          )
+          .applyMatrix4(this.outlineProjection);
+        // A box crossing the near/eye plane needs the full-frame reference path.
+        if (!Number.isFinite(p.x + p.y + p.z + p.w) || p.w <= 1e-6 || p.z <= -p.w) return null;
+        const x = ((p.x / p.w + 1) * width) / 2,
+          y = ((p.y / p.w + 1) * height) / 2;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        bottom = Math.min(bottom, y);
+        top = Math.max(top, y);
+      }
+    }
+    if (!Number.isFinite(left + bottom + right + top)) return null;
+    const x = Math.max(0, Math.min(width, Math.floor(left) - padding));
+    const y = Math.max(0, Math.min(height, Math.floor(bottom) - padding));
+    right = Math.max(0, Math.min(width, Math.ceil(right) + padding));
+    top = Math.max(0, Math.min(height, Math.ceil(top) + padding));
+    return this.outlineBounds.set(x, y, right - x, top - y);
+  }
   constructor(private renderer: THREE.WebGLRenderer) {
     this.quad = new THREE.Mesh(this.plane, this.outline);
     this.screen.add(this.quad);
@@ -306,7 +357,39 @@ export class ViewportPipeline {
       renderer.setRenderTarget(null);
       renderer.autoClear = false;
       this.quad.material = this.outline;
-      renderer.render(this.screen, this.camera);
+      // Match the native pass: keep the exact AA shader, but don't evaluate its
+      // neighborhood samples over millions of pixels outside the selection.
+      const scissor = this.selectedScissor(camera, outlineWidth + 2);
+      const scissorTest = renderer.getScissorTest();
+      renderer.getScissor(this.previousScissor);
+      if (scissor) {
+        const density = renderer.getPixelRatio();
+        if (scissorTest) {
+          const previous = this.previousScissor;
+          // setRenderTarget(null) floors each scissor component, while
+          // setScissor rounds. Intersect in physical pixels to preserve edges
+          // at fractional density before converting to the public API's units.
+          const x = Math.floor(previous.x * density);
+          const y = Math.floor(previous.y * density);
+          const right = Math.min(scissor.x + scissor.z, x + Math.floor(previous.z * density));
+          const top = Math.min(scissor.y + scissor.w, y + Math.floor(previous.w * density));
+          scissor.x = Math.max(scissor.x, x);
+          scissor.y = Math.max(scissor.y, y);
+          scissor.z = Math.max(0, right - scissor.x);
+          scissor.w = Math.max(0, top - scissor.y);
+        }
+        renderer.setScissor(scissor.divideScalar(density));
+        renderer.setScissorTest(true);
+      }
+      try {
+        renderer.render(this.screen, this.camera);
+      } finally {
+        if (scissor) {
+          renderer.setScissor(this.previousScissor);
+          renderer.setScissorTest(scissorTest);
+          renderer.setRenderTarget(null);
+        }
+      }
     }
     scene.background = savedBackground;
     for (const g of groups) g.o.visible = g.visible;
