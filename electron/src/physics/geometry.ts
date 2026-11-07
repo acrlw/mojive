@@ -24,6 +24,9 @@ export function createGeometry(shape: GeometryShape): THREE.BufferGeometry {
       if (shape.uv) geometry.setAttribute('uv', new THREE.BufferAttribute(shape.uv.slice(), 2));
       if (shape.indices) geometry.setIndex(new THREE.BufferAttribute(shape.indices.slice(), 1));
       if (!shape.normals) geometry.computeVertexNormals();
+      // Prepare raycast broad-phase bounds during asynchronous scene construction.
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
       return geometry;
     case 'heightfield': {
       const { rows, columns, size, heights } = shape;
@@ -37,5 +40,7 @@ export function createGeometry(shape: GeometryShape): THREE.BufferGeometry {
   }
   const buffer = new THREE.BufferGeometry().copy(geometry);
   geometry.dispose();
+  buffer.computeBoundingBox();
+  buffer.computeBoundingSphere();
   return buffer;
 }

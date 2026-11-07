@@ -38,9 +38,10 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
   state.start = (phase = '') => {
     state.phase = phase;
     state.data = {
+      startedAt: performance.now(), timeOrigin: performance.timeOrigin,
       requests: [], dispatched: [], acknowledgements: [], applied: [], renders: [],
       frame: [], raf: [], gizmo: [], serialize: [], clone: [], compare: [],
-      invalidations: [], pointer: [], pointerDown: [], raster: [], longTasks: [],
+      invalidations: [], pointer: [], pointerDown: [], raster: [], rasterResize: [], longTasks: [],
       pendingMax: 0, backendPendingMax: 0,
     };
     state.active = true;
@@ -50,13 +51,39 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
     if (state.active) for (const task of list.getEntries())
       state.data.longTasks.push({ at: task.startTime, ms: task.duration });
   }).observe({ type: 'longtask', buffered: false });
+  const resize = NativeRaster.prototype.resize;
+  NativeRaster.prototype.resize = function (...args) {
+    const before = [this.canvas.width, this.canvas.height], start = performance.now();
+    try { return resize.apply(this, args); }
+    finally {
+      const after = [this.canvas.width, this.canvas.height];
+      if (state.active && before.some((value, index) => value !== after[index]))
+        state.data.rasterResize.push({ at: start, ms: performance.now() - start, before, after });
+    }
+  };
   const flush = NativeRaster.prototype.flush;
   NativeRaster.prototype.flush = function (...args) {
     const count = this.count, start = performance.now();
-    const result = flush.apply(this, args);
-    if (state.active && count) state.data.raster.push({ at: start, ms: performance.now() - start,
-      width: this.canvas.width, height: this.canvas.height, vertices: count / 6 });
-    return result;
+    const stages = [];
+    const observeCall = (owner, name) => {
+      const method = owner[name];
+      owner[name] = function (...values) {
+        const at = performance.now();
+        try { return method.apply(this, values); }
+        finally { stages.push({ name, ms: performance.now() - at }); }
+      };
+      return () => { owner[name] = method; };
+    };
+    const restore = state.active && count ? [
+      ...['viewport', 'clear', 'bufferSubData', 'drawArrays'].map(name => observeCall(this.gl, name)),
+      observeCall(args[0], 'drawImage'),
+    ] : [];
+    try { return flush.apply(this, args); }
+    finally {
+      restore.forEach(reset => reset());
+      if (state.active && count) state.data.raster.push({ at: start, ms: performance.now() - start,
+        width: this.canvas.width, height: this.canvas.height, vertices: count / 6, stages });
+    }
   };
   const sourceJoint = () => state.runtime?.session.current.source?.joints.find(joint => joint.name === state.jointName);
   const documentJoint = () => state.runtime?.document.joints.find(joint => joint.name === state.jointName);
@@ -270,6 +297,7 @@ function assertMonotonic(values, direction, minimumSpan, label) {
       `${label} must not alternate between old and new poses at sample ${index}`);
 }
 function assertLightweight(data, label) {
+  assert.equal(data.rasterResize.length, 0, `${label}: no WebGL drawing-buffer resize during interaction`);
   assert.equal(data.serialize.length, 0, `${label}: no full scene serialization`);
   assert.equal(data.clone.length, 0, `${label}: no full document cloning`);
   assert.equal(data.compare.length, 0, `${label}: no document/timeline JSON comparison`);
@@ -327,11 +355,22 @@ try {
   await page.locator('.panel-header').getByRole('button', { name: 'Search', exact: true }).click();
   await page.locator('.panel-search input').fill(jointName);
   const treeJoint = page.getByRole('treeitem', { name: jointName, exact: true });
+  if (cdp) await cdp.send('Profiler.start');
+  if (cdp) {
+    await cdp.send('Performance.enable');
+    report.profileClock = { metrics: (await cdp.send('Performance.getMetrics')).metrics,
+      pageTime: await page.evaluate(() => performance.now()) };
+  }
   await page.evaluate(() => window.__jointPerformance.start('activation'));
   await treeJoint.dblclick();
   await page.locator('.tool-palette').getByRole('button', { name: /^Joint(?:\s|$)/ }).click();
   await page.waitForTimeout(700);
   report.activation = await page.evaluate(() => window.__jointPerformance.stop());
+  assert.equal(report.activation.rasterResize.length, 0, 'first activation must not resize the WebGL drawing buffer');
+  if (cdp) {
+    const { profile } = await cdp.send('Profiler.stop');
+    await writeFile(path.join(out, 'activation.cpuprofile'), JSON.stringify(profile));
+  }
   // Keep the arm and body visible around the selected elbow, using the same wheel input
   // as the user. Native focus intentionally frames a joint closely.
   const canvas = page.locator('[data-testid="viewport-canvas"]');

@@ -507,6 +507,12 @@ export class NativeRaster {
     this.height = height;
     this.scaleX = Math.round(width * dpr) / width;
     this.scaleY = Math.round(height * dpr) / height;
+    // Allocate with the viewport, never with the current handle's bounds. Resizing
+    // a WebGL drawing buffer can synchronously stall the GPU on first interaction.
+    const pixelWidth = Math.round(width * dpr),
+      pixelHeight = Math.round(height * dpr);
+    if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
+    if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
     this.reset();
   }
   private reset() {
@@ -778,12 +784,7 @@ export class NativeRaster {
       this.reset();
       return;
     }
-    // Reserve geometric headroom: small angle changes must not repeatedly reset
-    // the GPU backing store. Assigning even an unchanged dimension resets it too.
-    const capacityWidth = Math.max(this.canvas.width, 2 ** Math.ceil(Math.log2(width))),
-      capacityHeight = Math.max(this.canvas.height, 2 ** Math.ceil(Math.log2(height)));
-    if (this.canvas.width !== capacityWidth) this.canvas.width = capacityWidth;
-    if (this.canvas.height !== capacityHeight) this.canvas.height = capacityHeight;
+    const capacityHeight = this.canvas.height;
     const gl = this.gl;
     // Shift the original viewport by whole device pixels instead of changing its
     // projection; this preserves subpixel triangle coverage at clipped edges.

@@ -32,6 +32,56 @@ after(async () => {
   await server?.close();
 });
 
+test('first activation and changing handle bounds never resize a prepared drawing buffer', async () => {
+  const results = await page.evaluate(async () => {
+    const { NativeRaster } = await import('/src/viewport/viewcube.ts');
+    const results = [];
+    for (const dpr of [1, 1.25, 2]) {
+      const raster = new NativeRaster();
+      const writes = [];
+      for (const dimension of ['width', 'height']) {
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, dimension);
+        Object.defineProperty(raster.canvas, dimension, {
+          get() { return descriptor.get.call(this); },
+          set(value) { writes.push(dimension); descriptor.set.call(this, value); },
+        });
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(800 * dpr);
+      canvas.height = Math.round(500 * dpr);
+      const context = canvas.getContext('2d');
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      try {
+        raster.resize(800, 500, dpr);
+        const prepared = writes.length;
+        // First use, a different handle, and an edge-on ring becoming face-on
+        // cross the old scratch-buffer size thresholds without changing layout.
+        for (const radius of [20, 100, 210, 30]) {
+          raster.resize(800, 500, dpr);
+          raster.fill(Array.from({ length: 48 }, (_, i) =>
+            [400 + radius * Math.cos(i * Math.PI / 24), 250 + radius * Math.sin(i * Math.PI / 24)]), '#98bc87');
+          raster.flush(context);
+        }
+        const gesture = writes.length - prepared;
+        raster.resize(640, 480, dpr);
+        const resized = writes.length;
+        raster.resize(640, 480, dpr);
+        raster.fill([[100, 20], [500, 20], [500, 420], [100, 420]], '#98bc87');
+        raster.flush(context);
+        results.push({ dpr, prepared, gesture, resized: resized - prepared,
+          afterResize: writes.length - resized });
+      } finally { raster.dispose(); }
+    }
+    return results;
+  });
+  for (const result of results) {
+    assert.equal(result.prepared, 2, `DPR${result.dpr}: allocate during viewport preparation`);
+    assert.equal(result.gesture, 0, `DPR${result.dpr}: no drawing-buffer writes during interaction`);
+    assert.equal(result.resized, 2, `DPR${result.dpr}: follow an actual viewport resize`);
+    assert.equal(result.afterResize, 0, `DPR${result.dpr}: reuse the resized viewport`);
+  }
+});
+
 test('bounded native raster preserves alpha, clipping and Canvas2D paint order at both DPRs', async () => {
   const results = await page.evaluate(async () => {
     const { NativeRaster } = await import('/src/viewport/viewcube.ts');

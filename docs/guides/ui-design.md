@@ -626,9 +626,11 @@ Measure animation-frame intervals as well as CPU submission time: short render c
 queue expensive cross-context canvas copies. Batch adjacent overlay primitives, flushing at
 Canvas2D paint-order boundaries, and copy only their painted device-pixel bounds. Preserve the
 original projection, subpixel grid, clipping and alpha composition at integral and fractional
-display densities. Reserve geometric buffer headroom so small view-angle changes do not reset
-GPU backing stores during interaction; measure the first draw and subsequent capacity growth
-separately from steady-state cost. Numeric text updates invalidate their affected rounded-control family, not
+display densities. Prepare viewport-sized GPU backing stores before interaction; changing handle
+bounds must not resize them. Measure cold activation separately from steady-state cost. Prepare
+mesh raycast bounds during asynchronous scene construction and reuse rigid geometry bounds for
+focus, invalidating on position-attribute replacement or upload-version changes. Numeric text
+updates invalidate their affected rounded-control family, not
 every control in the workspace; inherited theme, scale and font changes still invalidate globally.
 For asynchronous physics edits, distinguish the requested gesture value from the last acknowledged
 scene frame. Rebase only at a real limit; a delayed frame is not a clamp. Coalesce superseded

@@ -14,9 +14,22 @@ function centered(box: THREE.Box3): FocusBounds | null {
   };
 }
 
+const geometryBounds = new WeakMap<THREE.BufferGeometry, {
+  positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  version: number;
+  box: THREE.Box3;
+}>();
+
 function finiteGeometryBox(mesh: THREE.Mesh): THREE.Box3 | null {
   const positions = mesh.geometry.getAttribute('position');
   if (!positions) return null;
+  const version = positions instanceof THREE.InterleavedBufferAttribute
+    ? positions.data.version : positions.version;
+  const cached = geometryBounds.get(mesh.geometry);
+  // Rigid poses only change the world transform. Vertex edits invalidate through
+  // the same attribute version used for GPU uploads, including interleaved data.
+  if (cached?.positions === positions && cached.version === version)
+    return cached.box.isEmpty() ? null : cached.box.clone();
   const box = new THREE.Box3(),
     point = new THREE.Vector3();
   for (let index = 0; index < positions.count; index++) {
@@ -24,7 +37,8 @@ function finiteGeometryBox(mesh: THREE.Mesh): THREE.Box3 | null {
     if (Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z))
       box.expandByPoint(point);
   }
-  return box.isEmpty() ? null : box;
+  geometryBounds.set(mesh.geometry, { positions, version, box });
+  return box.isEmpty() ? null : box.clone();
 }
 
 function boundsFor(

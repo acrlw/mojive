@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { CameraFocusTransition } from '../src/viewport/camera-focus.ts';
 import { cameraForTransition } from '../src/viewport/camera-transition.ts';
 import { sceneFocusBounds, sceneNodeBounds } from '../src/viewport/focus-bounds.ts';
+import { createGeometry } from '../src/physics/geometry.ts';
 
 const reference = JSON.parse(
   await readFile(new URL('./fixtures/camera-focus-native.json', import.meta.url), 'utf8'),
@@ -120,6 +121,48 @@ test('local bounds apply the combined transform once and remain finite with malf
     new THREE.Float32BufferAttribute([-1, -1, -1, 1, 1, 1, NaN, 2, 3], 3),
   );
   close(sceneNodeBounds(doc, 'body').half, [1, 1, 1], 'finite vertices');
+});
+
+test('focus reuses rigid geometry bounds and invalidates uploaded vertex edits', () => {
+  for (const interleaved of [false, true]) {
+    const { doc, own, body } = scopeFixture();
+    const geometry = new THREE.BufferGeometry();
+    const positions = interleaved
+      ? new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(new Float32Array([-1, -1, -1, 1, 1, 1]), 3), 3, 0)
+      : new THREE.Float32BufferAttribute([-1, -1, -1, 1, 1, 1], 3);
+    geometry.setAttribute('position', positions);
+    own.object.geometry = geometry;
+    let reads = 0;
+    const getX = positions.getX.bind(positions);
+    positions.getX = index => { reads++; return getX(index); };
+    close(sceneNodeBounds(doc, 'body').half, [1, 1, 1], 'initial bounds');
+    assert.equal(reads, 2);
+    body.object.position.x = 4;
+    close(sceneNodeBounds(doc, 'body').center, [4, 0, 0], 'updated world transform');
+    close(sceneNodeBounds(doc, 'body', 'local').center, [0, 0, 0], 'cached bounds remain local');
+    assert.equal(reads, 2, 'rigid motion does not rescan vertices');
+    positions.setX(1, 3);
+    if (interleaved) positions.data.needsUpdate = true;
+    else positions.needsUpdate = true;
+    close(sceneNodeBounds(doc, 'body').half, [2, 1, 1], 'uploaded vertex edit');
+    assert.equal(reads, 4);
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([-2, -2, -2, 2, 2, 2], 3));
+    close(sceneNodeBounds(doc, 'body').half, [2, 2, 2], 'replacement attribute');
+  }
+});
+
+test('physics geometry prepares raycast bounds before the first interaction', () => {
+  const source = new THREE.BoxGeometry(100, 1, 1);
+  const geometry = createGeometry({ type: 'mesh', positions: source.attributes.position.array, indices: source.index.array });
+  assert.ok(geometry.boundingBox && geometry.boundingSphere);
+  const mesh = new THREE.Mesh(geometry);
+  let reads = 0;
+  const positions = geometry.attributes.position, getX = positions.getX.bind(positions);
+  positions.getX = index => { reads++; return getX(index); };
+  const ray = new THREE.Raycaster(new THREE.Vector3(0, 5, 10), new THREE.Vector3(0, 0, -1));
+  assert.deepEqual(ray.intersectObject(mesh), []);
+  assert.equal(reads, 0, 'a broad-phase miss must not inspect triangles or build bounds');
+  geometry.dispose(); source.dispose();
 });
 
 test('geometry-free scenes use native half-unit scene fallback without arbitrary per-object cubes', () => {
