@@ -88,6 +88,84 @@ async function chooseScene(name = 'Scene objects') {
   await page.getByRole('alertdialog').waitFor();
 }
 
+async function installFileBridge() {
+  await page.evaluate(() => {
+    window.fileEvents = [];
+    window.failSave = false;
+    window.mojive = {
+      platform: 'linux', hasNativeMenu: false,
+      onMenuAction: () => () => {}, updateMenuState: async () => {},
+      browseFiles: async () => ({
+        path: '/workspace', parent: null, shortcuts: [], truncated: false,
+        entries: [{ name: 'next.urdf', path: '/workspace/next.urdf', directory: false }],
+      }),
+      openModelPath: async () => {
+        window.fileEvents.push('read');
+        return { name: 'next.urdf', resourceBase: '', files: [],
+          content: '<robot name="replacement"><link name="replacement_link"><visual><geometry><box size="1 1 1"/></geometry></visual></link></robot>' };
+      },
+      saveScenePath: async (path) => {
+        window.fileEvents.push('save');
+        if (window.failSave) throw Error('Save failed for verification');
+        return path;
+      },
+    };
+  });
+}
+async function chooseUrdf() {
+  await page.getByRole('navigation', { name: 'Application menu' })
+    .getByRole('button', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Open Model', exact: true }).hover();
+  await page.getByRole('menuitem', { name: 'URDF model…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Open URDF', exact: true });
+  await dialog.getByRole('option', { name: 'next.urdf', exact: true }).dblclick();
+  await page.getByRole('alertdialog').waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fileEvents), []);
+  assert.equal(await page.locator('.busy-overlay').count(), 0, 'Confirmation precedes loading UI');
+}
+
+test('replacement reads resources only after discard; cancelling preserves the current document', async () => {
+  const box = await add();
+  await installFileBridge();
+  await chooseUrdf();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => window.fileEvents), []);
+  assert.ok((await titles()).includes(box));
+  await chooseUrdf();
+  await page.getByRole('alertdialog').getByRole('button', { name: "Don't Save", exact: true }).click();
+  await page.getByRole('treeitem', { name: /replacement_link/ }).first().waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fileEvents), ['read']);
+  assert.ok(!(await titles()).includes(box));
+  assert.deepEqual(errors, []);
+});
+
+test('cancelled and failed saves block replacement; successful save finishes before reading the new model', async () => {
+  const box = await add();
+  await installFileBridge();
+  await chooseUrdf();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Save', exact: true }).click();
+  const saveDialog = page.getByRole('dialog', { name: 'Save scene as', exact: true });
+  await saveDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('alertdialog').waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fileEvents), []);
+  assert.ok((await titles()).includes(box));
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Save', exact: true }).click();
+  await saveDialog.locator('.file-dialog-list[aria-busy="false"]').waitFor();
+  await saveDialog.getByRole('textbox', { name: 'File name', exact: true }).fill('saved.mojive.json');
+  await page.evaluate(() => { window.failSave = true; });
+  await saveDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await saveDialog.getByText('Save failed for verification', { exact: false }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fileEvents), ['save']);
+  assert.ok((await titles()).includes(box));
+  assert.equal(await page.locator('.busy-overlay').count(), 0);
+  await page.evaluate(() => { window.failSave = false; });
+  await saveDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('treeitem', { name: /replacement_link/ }).first().waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fileEvents), ['save', 'save', 'read']);
+  assert.ok(!(await titles()).includes(box));
+  assert.deepEqual(errors, []);
+});
+
 test('committed operation notice undoes exactly that transaction and its replacement safely redoes it', async () => {
   const before = await titles(),
     name = await add();

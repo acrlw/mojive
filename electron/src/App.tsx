@@ -441,6 +441,7 @@ export default function App() {
   function changed() {
     invalidateNoticeAction();
     setRevision((r) => r + 1);
+    dirtyRef.current = true;
     setDirty(true);
   }
   function transformChanged() {
@@ -548,6 +549,7 @@ export default function App() {
         if (undo.current.length > 50) undo.current.shift();
         redo.current = [];
         setHistoryTick((tick) => tick + 1);
+        dirtyRef.current = true;
         setDirty(true);
       }).catch(report);
       return baseline;
@@ -565,6 +567,7 @@ export default function App() {
         if (undo.current.length > 50) undo.current.shift();
         redo.current = [];
         setHistoryTick((tick) => tick + 1);
+        dirtyRef.current = true;
         setDirty(true);
       }).catch(report);
       return baseline;
@@ -580,6 +583,7 @@ export default function App() {
       pending.current = null;
       redo.current = [];
       setHistoryTick((t) => t + 1);
+      dirtyRef.current = true;
       setDirty(true);
       invalidateNoticeAction();
       return committed;
@@ -615,6 +619,7 @@ export default function App() {
       await restorePhysicsHistory(s, physics.current?.session);
       setPlaying(false);
       invalidateNoticeAction();
+      dirtyRef.current = true;
       setDirty(true);
       return;
     }
@@ -792,8 +797,6 @@ export default function App() {
     try {
       await stopRecording();
       if (signal?.aborted) return false;
-      if (dirtyRef.current && !await requestReplacement('open', signal)) return false;
-      if (signal?.aborted) return false;
       installDocument(next, runtime);
       installed = true;
       setKeys(nextKeys);
@@ -808,12 +811,14 @@ export default function App() {
   }
   async function runSceneLoad(label: string, task: (options: ModelLoadOptions) => Promise<void>) {
     try {
-      await sceneLoading.run(label, async (options) => {
+      invalidateNoticeAction();
+      await sceneLoading.run(label, task, async (signal) => {
         await stopRecording();
+        await historyWork.current;
         physics.current?.session.pause();
         setPlaying(false);
-        options.signal?.throwIfAborted();
-        await task(options);
+        signal.throwIfAborted();
+        return !dirtyRef.current || await requestReplacement('open', signal);
       });
     } catch (error) { report(error); }
   }
@@ -1412,6 +1417,7 @@ export default function App() {
         state.current.playing = false;
         setPlaybackSource('take');
         state.current.playbackSource = 'take';
+        dirtyRef.current = true;
         setDirty(true);
       } catch (error) {
         await rollbackStart();
@@ -1444,6 +1450,7 @@ export default function App() {
     extendDuration(next.reduce((end, key) => Math.max(end, key.time), 0));
     setKeys(next);
     state.current.keys = next;
+    dirtyRef.current = true;
     setDirty(true);
   }
   function jointChange(joint: Joint, value: number) {

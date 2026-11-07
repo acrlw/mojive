@@ -21,12 +21,16 @@ export function useSceneLoading() {
     active.current = null;
     setState(null);
   }
-  async function run<T>(label: string, task: (options: ModelLoadOptions) => Promise<T>) {
+  async function run<T>(label: string, task: (options: ModelLoadOptions) => Promise<T>, prepare?: (signal: AbortSignal) => Promise<boolean>) {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    setState({ label, startedAt: performance.now(), progress: { stage: 'resources' } });
+    setState(null);
     try {
+      // Resolve unsaved changes before starting resources or showing load progress.
+      if (prepare && !await prepare(controller.signal)) return;
+      controller.signal.throwIfAborted();
+      setState({ label, startedAt: performance.now(), progress: { stage: 'resources' } });
       // Paint feedback before resource enumeration or model decoding starts.
       await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
       controller.signal.throwIfAborted();
