@@ -1,4 +1,4 @@
-import { createServer } from 'vite';
+import { build, createServer, preview } from 'vite';
 import { _electron as electron } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -16,6 +16,8 @@ const out = path.resolve(
 );
 const moves = Number(option('--moves', '120'));
 const repeats = Number(option('--repeat', '2'));
+const modes = option('--modes', 'Visual,Collision').split(',');
+const development = args.includes('--dev');
 await mkdir(out, { recursive: true });
 
 // Install observation around production classes before the real App mounts. In particular,
@@ -70,6 +72,12 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Pert
         pending--;
         if (data) data.commands.push({ type: command.type, ms: performance.now() - start });
       }
+    };
+    const restoreCaptured = runtime.session.restoreCaptured;
+    runtime.session.restoreCaptured = async function (captured) {
+      const frame = await restoreCaptured.call(this, captured);
+      state.restores++;
+      return frame;
     };
     return runtime;
   };
@@ -153,20 +161,25 @@ import { ViewportMetrics } from '/src/viewport/metrics.ts';
 import { PerturbationGesture } from '/src/viewport/perturbation.ts';
 (${observe.toString()})(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, PerturbationGesture);
 await import('/src/main.tsx');`;
-const server = await createServer({
+const configuration = {
   root,
   configFile: false,
+  base: './',
+  build: { outDir: path.join(out, 'build'), emptyOutDir: true, target: 'esnext', chunkSizeWarningLimit: 1600 },
   plugins: [
     {
       name: 'production-performance-observation',
-      transformIndexHtml: (html) => html.replace('/src/main.tsx', '/__performance_bootstrap.js'),
+      transformIndexHtml: { order: 'pre', handler: (html) => html.replace('/src/main.tsx', '/__performance_bootstrap.js') },
       resolveId: (id) => (id === '/__performance_bootstrap.js' ? '\0performance-bootstrap' : null),
       load: (id) => (id === '\0performance-bootstrap' ? bootstrap : null),
     },
   ],
   server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
-});
-await server.listen();
+  preview: { host: '127.0.0.1', port: 0 },
+};
+if (!development) await build(configuration);
+const server = development ? await createServer(configuration) : await preview(configuration);
+if (development) await server.listen();
 let app;
 const errors = [],
   results = [],
@@ -182,12 +195,14 @@ const distribution = (values) => {
 };
 try {
   app = await electron.launch({
-    args: [root, '--hidden', '--user-data-dir=' + (await mkdtemp(path.join(out, 'profile-')))],
+    args: [root, '--hidden', '--force-device-scale-factor=' + option('--scale-factor', '2'), '--user-data-dir=' + (await mkdtemp(path.join(out, 'profile-')))],
     cwd: root,
     env: { ...process.env, MOJIVE_DEV_URL: server.resolvedUrls.local[0] },
     timeout: 45000,
   });
   const page = await app.firstWindow();
+  await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(...size),
+    [Number(option('--width', '2048')), Number(option('--height', '1047'))]);
   page.on('pageerror', (error) => errors.push(error.stack || error.message));
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -262,7 +277,7 @@ try {
   await page.getByRole('treeitem', { name: body, exact: true }).click();
   for (let cycle = 0; cycle < repeats; cycle++)
     for (const playing of [false, true])
-      for (const mode of ['Visual', 'Collision'])
+      for (const mode of modes)
         for (const button of ['left', 'right']) {
           await page.evaluate(async () => {
             const session = window.__performanceReview.runtime.session;
@@ -330,7 +345,7 @@ try {
           results.push(result);
           await writeFile(
             path.join(out, 'results.json'),
-            JSON.stringify({ first, model, body, errors, results, checks }, null, 2),
+            JSON.stringify({ first, model, body, build: development ? 'development' : 'production', errors, results, checks }, null, 2),
           );
           console.log(JSON.stringify({ ...result, samples: undefined }));
           if (!cycle && !playing && button === 'left')
@@ -342,14 +357,14 @@ try {
               await page.evaluate(() => {
                 const state = window.__performanceReview;
                 const session = state.runtime.session;
-                state.originalExecute = session.execute;
+                state.originalRestore = session.restoreCaptured;
                 state.rejectedRestore = false;
-                session.execute = async function (command) {
-                  if (command.type === 'restore' && !state.rejectedRestore) {
+                session.restoreCaptured = async function (captured) {
+                  if (!state.rejectedRestore) {
                     state.rejectedRestore = true;
                     throw Error('Expected performance review restore rejection');
                   }
-                  return state.originalExecute.call(this, command);
+                  return state.originalRestore.call(this, captured);
                 };
               });
               await action('edit.undo');
@@ -366,7 +381,7 @@ try {
               );
               await page.evaluate(() => {
                 const state = window.__performanceReview;
-                state.runtime.session.execute = state.originalExecute;
+                state.runtime.session.restoreCaptured = state.originalRestore;
               });
               checks.push({ rejectedRestore: true, unchangedState: true });
             }
@@ -471,7 +486,7 @@ try {
   checks.push({ recording: true, undo: true, redo: true, recordedTicks });
   await writeFile(
     path.join(out, 'results.json'),
-    JSON.stringify({ first, model, body, errors, results, checks }, null, 2),
+    JSON.stringify({ first, model, body, build: development ? 'development' : 'production', errors, results, checks }, null, 2),
   );
 } finally {
   if (app) {

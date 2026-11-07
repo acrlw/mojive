@@ -99,6 +99,20 @@ Escape cancellation, rejected-restore atomicity, and one Undo/Redo transaction f
 Run this benchmark without competing CPU/GPU verification. A healthy sustained frame percentile
 does not rule out a long main-thread stall at the start or end of a gesture.
 
+`make electron-joint-performance-review ARGS="--model /path/to/scene.xml --joint joint_name --repeat 2"`
+checks continuous joint edits, per-frame pose consistency, immediate post-release orbit, idle,
+Undo/Redo and cancellation. Its cadence result counts actual viewport draws independently of
+animation callbacks; CPU submission time alone is not a frame-rate measurement.
+
+`make electron-multi-robot-review STRESS_MODEL=/path/to/unitree_g1/scene.xml STRESS_COUNT=4`
+builds a full-resolution multi-robot MJCF fixture, then runs joint and perturbation reviews in
+Visual, Collision and Both modes. Set `STRESS_JOINT` and `STRESS_BODY` for another robot.
+The generator uses the repository Python environment and shares identical immutable assets while
+retaining independent physics bodies; it does not simplify geometry. `STRESS_OUTPUT` defaults to
+`output/electron/multi-robot-review` relative to the repository root. Run larger counts separately
+and inspect the captures as well as timing results. Both mode still requires independent visual
+and collision color passes and their respective shadows.
+
 ## Packaging acceptance
 
 On macOS arm64 or x64:

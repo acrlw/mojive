@@ -31,6 +31,105 @@ after(async () => {
   await browser?.close();
   await server?.close();
 });
+test('unlit passes preserve moving shadows, selection and helper occlusion without redrawing shadow maps', async () => {
+  const result = await page.evaluate(async () => {
+    const T = await import('/node_modules/three/build/three.module.js');
+    const { ViewportPipeline } = await import('/src/viewport/pipeline.ts');
+    const renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    renderer.setSize(320, 240);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = T.PCFSoftShadowMap;
+    renderer.toneMapping = T.ACESFilmicToneMapping;
+    const scene = new T.Scene(), root = new T.Group(), selected = new T.Group();
+    scene.background = new T.Color('#22272d');
+    scene.add(root, new T.AmbientLight(0xffffff, 0.3));
+    root.add(selected);
+    const light = new T.DirectionalLight(0xffffff, 3);
+    light.position.set(2, 5, 3);
+    light.castShadow = true;
+    light.shadow.mapSize.set(256, 256);
+    scene.add(light);
+    const floor = new T.Mesh(new T.BoxGeometry(8, 0.1, 8), new T.MeshStandardMaterial({ color: '#70898a' }));
+    floor.position.y = -0.7;
+    floor.receiveShadow = true;
+    root.add(floor);
+    let shadowDraws = 0;
+    for (const [role, x] of [['visual', -0.2], ['collision', 0.2]]) {
+      const mesh = new T.Mesh(new T.BoxGeometry(0.8, 1, 0.7), new T.MeshStandardMaterial({ color: '#b79d66' }));
+      mesh.userData.role = role;
+      mesh.position.x = x;
+      mesh.castShadow = true;
+      mesh.onBeforeShadow = () => shadowDraws++;
+      selected.add(mesh);
+    }
+    const helpers = new T.Scene();
+    const line = new T.Line(new T.BufferGeometry().setFromPoints([
+      new T.Vector3(-2, 0, 0), new T.Vector3(2, 0, 0),
+    ]), new T.LineBasicMaterial({ color: '#ca8b8b', depthTest: true }));
+    helpers.add(line);
+    const camera = new T.PerspectiveCamera(42, 4 / 3, 0.1, 100);
+    camera.position.set(3, 2, 5);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    const doc = { root, nodes: [{ id: 'body', kind: 'link', object: selected }], joints: [] };
+    const pipeline = new ViewportPipeline(renderer);
+    pipeline.resize(320, 240);
+    const unlit = pipeline.renderUnlit;
+    const gl = renderer.getContext(), actual = new Uint8Array(320 * 240 * 4), reference = actual.slice();
+    const cases = [];
+    let actualPng, referencePng;
+    for (const mode of ['visual', 'collision', 'both']) for (const helper of [false, true]) {
+      for (const x of [-0.8, 0.5]) {
+        selected.position.x = x;
+        scene.updateMatrixWorld(true);
+        const renderHelpers = () => {
+          if (!helper) return;
+          renderer.autoClear = false;
+          renderer.render(helpers, camera);
+        };
+        shadowDraws = 0;
+        pipeline.renderUnlit = unlit;
+        pipeline.render(scene, camera, doc, 'body', mode, { renderHelpers: helper ? renderHelpers : undefined });
+        const optimizedShadows = shadowDraws;
+        gl.readPixels(0, 0, 320, 240, gl.RGBA, gl.UNSIGNED_BYTE, actual);
+        actualPng = renderer.domElement.toDataURL();
+        shadowDraws = 0;
+        pipeline.renderUnlit = (s, c) => renderer.render(s, c);
+        // The former caller requested union depth even when its helper draw was empty.
+        pipeline.render(scene, camera, doc, 'body', mode, { renderHelpers });
+        gl.readPixels(0, 0, 320, 240, gl.RGBA, gl.UNSIGNED_BYTE, reference);
+        referencePng = renderer.domElement.toDataURL();
+        let different = 0;
+        for (let i = 0; i < actual.length; i++) different += Number(actual[i] !== reference[i]);
+        cases.push({ mode, helper, x, different, optimizedShadows, referenceShadows: shadowDraws });
+      }
+    }
+    pipeline.renderUnlit = unlit;
+    // A manually scheduled shadow refresh must survive an unlit pass, including failure.
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
+    const render = renderer.render;
+    renderer.render = () => { throw new Error('Interrupted render'); };
+    try { pipeline.renderUnlit(scene, camera); } catch {}
+    renderer.render = render;
+    const restored = !renderer.shadowMap.autoUpdate && renderer.shadowMap.needsUpdate;
+    const error = gl.getError();
+    pipeline.dispose();
+    renderer.dispose();
+    return { cases, restored, error, actualPng, referencePng };
+  });
+  const out = path.resolve('../output/electron/shadow-pass-parity');
+  await mkdir(out, { recursive: true });
+  for (const name of ['actual', 'reference'])
+    await writeFile(path.join(out, `${name}.png`), Buffer.from(result[`${name}Png`].split(',')[1], 'base64'));
+  assert.equal(result.error, 0);
+  assert.equal(result.restored, true);
+  for (const item of result.cases) {
+    assert.equal(item.different, 0, JSON.stringify(item));
+    assert.equal(item.optimizedShadows, item.mode === 'both' ? 2 : 1);
+    assert.ok(item.referenceShadows > item.optimizedShadows, JSON.stringify(item));
+  }
+});
 test('bounded selection outline matches the full-frame shader at every density and viewport edge', async () => {
   const result = await page.evaluate(async () => {
     const T = await import('/node_modules/three/build/three.module.js');

@@ -1072,7 +1072,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         ...settings,
         geometryVisible: layers.geometry,
         renderHelpers:
-          !activeCamera && layers.helpers && layers.influence !== false
+          influence.visible
             ? () => influence.render(renderer, camera)
             : undefined,
       });

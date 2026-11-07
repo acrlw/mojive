@@ -32,6 +32,21 @@ export class ViewportPipeline {
     depthWrite: false,
     toneMapped: false,
   });
+  private renderUnlit(scene: THREE.Scene, camera: THREE.Camera) {
+    // Depth and selection masks do not sample shadows. Rebuilding the shadow
+    // atlas here repeats every caster and can overwrite the color pass's atlas.
+    const shadow = this.renderer.shadowMap;
+    const autoUpdate = shadow.autoUpdate;
+    const needsUpdate = shadow.needsUpdate;
+    shadow.autoUpdate = false;
+    shadow.needsUpdate = false;
+    try {
+      this.renderer.render(scene, camera);
+    } finally {
+      shadow.autoUpdate = autoUpdate;
+      shadow.needsUpdate = needsUpdate;
+    }
+  }
   private outline = new THREE.RawShaderMaterial({
     vertexShader: vertex,
     fragmentShader: outlineFragment,
@@ -342,7 +357,7 @@ export class ViewportPipeline {
         scene.overrideMaterial = this.depthMaterial;
         for (const helper of helpers) helper.o.visible = false;
         renderer.autoClear = false;
-        renderer.render(scene, camera);
+        this.renderUnlit(scene, camera);
         scene.overrideMaterial = previous;
       }
       options.renderHelpers();
@@ -353,7 +368,7 @@ export class ViewportPipeline {
       renderer.setClearColor(0x000000, 0);
       renderer.setRenderTarget(this.targets[2]);
       renderer.autoClear = true;
-      renderer.render(scene, camera);
+      this.renderUnlit(scene, camera);
       renderer.setRenderTarget(null);
       renderer.autoClear = false;
       this.quad.material = this.outline;

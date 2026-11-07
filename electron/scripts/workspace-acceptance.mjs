@@ -648,6 +648,13 @@ try {
       await typeValue('Position X', 3.25);
       await page.waitForTimeout(120);
       await page.getByRole('button', { name: 'Stop recording', exact: true }).click();
+      // An authored edit promotes the recording transaction without losing its starting pose.
+      await action('edit.undo');
+      await page.waitForFunction(() => document.querySelectorAll('.take-frame-tick').length === 0);
+      assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 2.25);
+      await action('edit.redo');
+      await page.waitForFunction(() => document.querySelectorAll('.take-frame-tick').length > 1);
+      assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 3.25);
       await page.getByRole('button', { name: 'Go to start', exact: true }).click();
       assert.equal(Number(await page.getByLabel('Position X', { exact: true }).inputValue()), 2.25);
       await page.getByRole('button', { name: 'Go to end', exact: true }).click();

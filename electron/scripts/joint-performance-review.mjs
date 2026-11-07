@@ -41,7 +41,7 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
     state.data = {
       startedAt: performance.now(), timeOrigin: performance.timeOrigin,
       requests: [], dispatched: [], acknowledgements: [], applied: [], renders: [],
-      frame: [], raf: [], rafEvents: [], gizmo: [], serialize: [], clone: [], compare: [],
+      frame: [], passes: [], raf: [], rafEvents: [], gizmo: [], serialize: [], clone: [], compare: [],
       invalidations: [], pointer: [], pointerDown: [], raster: [], rasterResize: [], longTasks: [],
       pendingMax: 0, backendPendingMax: 0,
     };
@@ -141,6 +141,38 @@ function observe(THREE, PhysicsDocument, ViewportPipeline, ViewportMetrics, Gizm
   };
   const render = ViewportPipeline.prototype.render;
   ViewportPipeline.prototype.render = function (...args) {
+    if (!this.renderer.__observedPasses) {
+      const renderer = this.renderer, original = renderer.render.bind(renderer);
+      const gl = renderer.getContext(), timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+      const pending = [];
+      renderer.__observedPasses = true;
+      renderer.render = (scene, camera) => {
+        for (let i = pending.length - 1; i >= 0; i--) {
+          const { query, entry } = pending[i];
+          if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) continue;
+          if (!gl.getParameter(timer.GPU_DISJOINT_EXT))
+            entry.gpuMs = gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6;
+          gl.deleteQuery(query);
+          pending.splice(i, 1);
+        }
+        if (!state.active) return original(scene, camera);
+        const target = renderer.getRenderTarget();
+        const entry = { at: performance.now(), target: this.targets.indexOf(target),
+          kind: scene === this.screen ? (this.quad.material === this.outline ? 'outline' : 'composite')
+            : scene.overrideMaterial ? 'depth' : target === this.targets[2] ? 'mask' : 'scene' };
+        const calls = renderer.info.render.calls, triangles = renderer.info.render.triangles;
+        const query = timer ? gl.createQuery() : null;
+        if (query) gl.beginQuery(timer.TIME_ELAPSED_EXT, query);
+        try { return original(scene, camera); }
+        finally {
+          if (query) { gl.endQuery(timer.TIME_ELAPSED_EXT); pending.push({ query, entry }); }
+          entry.cpuMs = performance.now() - entry.at;
+          entry.calls = renderer.info.render.calls - calls;
+          entry.triangles = renderer.info.render.triangles - triangles;
+          state.data.passes.push(entry);
+        }
+      };
+    }
     if (state.active) state.data.renders.push({
       at: performance.now(), value: documentJoint()?.value,
       frameValue: frameValue(state.runtime?.session.current.frame),
@@ -386,9 +418,11 @@ try {
   const canvas = page.locator('[data-testid="viewport-canvas"]');
   const initialBounds = await canvas.boundingBox();
   await page.mouse.move(initialBounds.x + initialBounds.width / 2, initialBounds.y + initialBounds.height / 2);
-  await page.mouse.wheel(0, 600);
+  if (args.includes('--frame-all'))
+    await page.getByRole('button', { name: 'Frame all', exact: true }).click();
+  else await page.mouse.wheel(0, 600);
   await page.waitForTimeout(400);
-  for (let cycle = 0; cycle < repeats; cycle++) for (const mode of ['Visual', 'Collision']) {
+  for (let cycle = 0; cycle < repeats; cycle++) for (const mode of option('--modes', 'Visual,Collision').split(',')) {
     const label = `${cycle + 1}-${mode.toLowerCase()}`;
     await page.evaluate(async () => {
       const state = window.__jointPerformance;
@@ -443,10 +477,15 @@ try {
       const { profile } = await cdp.send('Profiler.stop');
       await writeFile(path.join(out, `${label}.cpuprofile`), JSON.stringify(profile));
     }
+    const dragFrames = drag.frame.filter(frame => frame.at < orbitStartedAt);
+    const frameGaps = dragFrames.slice(1).map((frame, index) => frame.at - dragFrames[index].at);
     const result = { label, trajectory: { linear: trajectory.linear, direction: trajectory.direction, angle: trajectory.angle },
       pointerDurationMs: released - start, captureDrainMs, orbitStartedAt, drain, drag,
+      cadence: { frames: dragFrames.length,
+        fps: frameGaps.length ? 1000 * frameGaps.length / (dragFrames.at(-1).at - dragFrames[0].at) : 0,
+        interval: distribution(frameGaps) },
       latency: { worker: distribution(drag.acknowledgements.map(ack => ack.ms)),
-        render: distribution(drag.frame.filter(frame => frame.at < orbitStartedAt).map(frame => frame.ms)),
+        render: distribution(dragFrames.map(frame => frame.ms)),
         raf: distribution(drag.raf) } };
     report.results.push(result);
     assert.notDeepEqual(after.state, before.state, `${label}: dragging changes the simulation state`);
@@ -533,7 +572,8 @@ try {
     assertLightweight(result.cancel, `${label} cancel`);
     console.log(label, JSON.stringify({ captureDrainMs, requests: drag.requests.length,
       acknowledgements: drag.acknowledgements.length, idleRenders: result.idle.renders.length,
-      settleRenders: result.settle.renders.length, orbitLatency: result.orbit.latency, latency: result.latency }));
+      settleRenders: result.settle.renders.length, cadence: result.cadence,
+      orbitLatency: result.orbit.latency, latency: result.latency }));
   }
   assert.deepEqual(report.errors, [], 'No production browser errors');
   report.passed = true;

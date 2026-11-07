@@ -644,6 +644,15 @@ At capacity, measurement caches evict cold entries rather than clearing hot layo
 them. Repeated scene-row insertion and scrolling must preserve frequently used geometry and its
 field-read evidence. Bulk cache churn can promote short-lived layout objects into older GC
 generations even when entity and memory counts stay bounded.
+Measure actual submitted-frame cadence separately from animation callbacks and worker latency.
+An idle, on-demand viewport reports idle rather than a misleading low frame rate. Stress repeated
+model replacement and multiple full-resolution robots in every geometry mode, including immediate
+orbit after release, cancellation, recording and Undo/Redo. Depth-only and selection-mask passes
+must not rebuild light shadow maps; preserve the shadow flags across these passes and retain
+independent role-specific shadows in color passes. Require pixel comparisons with moving casters.
+Pose-only recording history stores pose, physics and timeline state without copying immutable
+mesh assets. Promote to a document transaction before an authoring edit, preserving the original
+pose baseline and asynchronous capture ordering.
 Share identical immutable field-read evidence within a frozen style instead of duplicating it
 for every row position. Interning stays bounded and must preserve argument-dependent reads;
 do not share mutable layouts or evidence across incompatible specifications.

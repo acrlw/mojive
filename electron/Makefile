@@ -117,3 +117,17 @@ model-loading-review: ensure-deps
 	npm run compile-menu-icons
 	node --test --test-concurrency=1 tests/model-resources.test.mjs tests/physics-worker.test.mjs tests/physics-scene.test.mjs tests/assets.test.mjs tests/physics-workspace.test.mjs
 	node scripts/model-loading-review.mjs $(ARGS)
+
+# Full-resolution instances share immutable assets and retain independent physics.
+STRESS_MODEL ?= ../../mujoco_menagerie/unitree_g1/scene.xml
+STRESS_COUNT ?= 4
+STRESS_JOINT ?= left_elbow_joint
+STRESS_BODY ?= left_elbow_link
+STRESS_OUTPUT ?= ../output/electron/multi-robot-review
+STRESS_PYTHON ?= ../.venv/bin/python
+.PHONY: multi-robot-review
+multi-robot-review: ensure-deps
+	$(STRESS_PYTHON) scripts/multi-robot-scene.py --model "$(STRESS_MODEL)" --count $(STRESS_COUNT) --output "$(STRESS_OUTPUT)/scene.xml"
+	npm run compile-menu-icons
+	node scripts/joint-performance-review.mjs --model "$(STRESS_OUTPUT)/scene.xml" --joint "$(STRESS_JOINT)" --frame-all --modes Visual,Collision,Both --output "$(STRESS_OUTPUT)/joint"
+	node scripts/perturbation-performance-review.mjs --model "$(STRESS_OUTPUT)/scene.xml" --body "$(STRESS_BODY)" --modes Visual,Collision,Both --output "$(STRESS_OUTPUT)/perturbation"

@@ -330,6 +330,7 @@
   "Hide object": "隐藏对象",
   "Identity": "标识",
   "Idle viewport": "视口空闲",
+  "Idle": "空闲",
   "Orbit, pan, and zoom now edit this camera.": "旋转、平移和缩放会修改此相机。",
   "Render statistics": "渲染统计",
   "Rendered frames per second": "每秒渲染帧数",

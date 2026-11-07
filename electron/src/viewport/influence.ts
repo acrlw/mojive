@@ -189,6 +189,9 @@ export function entityInfluence(
 export class SceneEntityInfluence {
   private scene = new THREE.Scene();
   private lines: LineSegments2[] = [];
+  get visible() {
+    return this.lines.some((line) => line.visible);
+  }
   update(
     node: SceneNode | undefined,
     camera: THREE.Camera,
@@ -233,7 +236,7 @@ export class SceneEntityInfluence {
     }
   }
   render(renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
-    if (!this.lines.some((line) => line.visible)) return;
+    if (!this.visible) return;
     const auto = renderer.autoClear;
     renderer.autoClear = false;
     for (const line of this.lines) {

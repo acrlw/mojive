@@ -28,7 +28,11 @@ import {
   type SceneSnapshot,
   takeFrameIndex,
   assertPoseCompatible,
+  capturePose,
+  applyPose,
+  type Pose,
 } from './editor';
+import { sameHistoryValue } from './historyValue';
 import { t, message, type LocalizedText } from './i18n';
 import { SettingsDialog, useSettings } from './settings';
 import { OutputPanel } from './OutputPanel';
@@ -103,15 +107,20 @@ import { loadAsset, loadAssetPreview } from './assets/loadAsset';
 import { browserBundles } from './resources/browserBundle';
 import { droppedFiles } from './resources/dropFiles';
 
-type DocumentSnapshot = {
-  kind: 'document';
-  document: ReturnType<typeof encodeDocument>;
+type TimelineSnapshot = {
+  kind: 'timeline';
+  pose: Pose;
   keys: Keyframe[];
   duration: number;
   timeline: WorkspaceTimeline;
   physics?: PhysicsSnapshot;
 };
-type Snapshot = DocumentSnapshot | PhysicsHistoryEntry;
+type DocumentSnapshot = Omit<TimelineSnapshot, 'kind' | 'pose'> & {
+  kind: 'document';
+  document: ReturnType<typeof encodeDocument>;
+  pose?: Pose;
+};
+type Snapshot = DocumentSnapshot | TimelineSnapshot | PhysicsHistoryEntry;
 type Log = { id: number; level: 'info' | 'warn' | 'err'; time: string; text: LocalizedText };
 const kinds: Record<string, string> = {
   environment: 'env',
@@ -438,12 +447,13 @@ export default function App() {
     if (doc && node && doc.joints.some((j) => j.id === node.id)) authorJointTransform(doc, node.id);
     changed();
   }
-  function snapshot(): DocumentSnapshot | null {
+  function snapshot(compact = false): DocumentSnapshot | TimelineSnapshot | null {
     const s = state.current;
     return s.doc
       ? {
-          kind: 'document',
-          document: encodeDocument(s.doc),
+          ...(compact
+            ? { kind: 'timeline' as const, pose: capturePose(s.doc) }
+            : { kind: 'document' as const, document: encodeDocument(s.doc) }),
           physics: physics.current?.session.current.snapshot ?? undefined,
           keys: structuredClone(s.keys),
           duration: s.duration,
@@ -451,14 +461,25 @@ export default function App() {
         }
       : null;
   }
-  function begin(pauseSimulation = true) {
+  function begin(pauseSimulation = true, compact = false) {
     invalidateNoticeAction();
     setPlaying(false);
     if (pauseSimulation && !state.current.recording) physics.current?.session.pause();
-    // A document edit (including starting a recording) needs its own authored baseline.
+    // Pose-only recording history shares scene assets. Promote before the first authored edit;
+    // its original pose still restores the start of the recording, not the moment of promotion.
+    if (!compact && pending.current?.kind === 'timeline' && state.current.doc) {
+      const baseline = pending.current;
+      const promoted: DocumentSnapshot = {
+        ...baseline, kind: 'document', document: encodeDocument(state.current.doc),
+      };
+      pending.current = promoted;
+      historyWork.current = historyWork.current.then(() => {
+        promoted.physics = baseline.physics;
+      });
+    }
     if (pending.current?.kind === 'physics') commit();
     if (!pending.current) {
-      const baseline = snapshot();
+      const baseline = snapshot(compact);
       pending.current = baseline;
       if (baseline && physics.current) {
         // Capture before subsequent commands in the session queue, including pending playback.
@@ -478,7 +499,7 @@ export default function App() {
   }
   function beginJoint() {
     if (!physics.current) {
-      begin();
+      begin(true, true);
       return;
     }
     physics.current.session.pause();
@@ -534,12 +555,12 @@ export default function App() {
     if (pending.current && physics.current) {
       const baseline = pending.current, runtime = physics.current;
       pending.current = null;
-      const current = snapshot()!;
+      const current = snapshot(baseline.kind === 'timeline')!;
       const capture = runtime.session.capture();
       historyWork.current = Promise.all([historyWork.current, capture]).then(([, value]) => {
         if (physics.current !== runtime) return;
         current.physics = value;
-        if (JSON.stringify(baseline) === JSON.stringify(current)) return;
+        if (sameSnapshot(baseline, current)) return;
         undo.current.push(baseline);
         if (undo.current.length > 50) undo.current.shift();
         redo.current = [];
@@ -549,7 +570,7 @@ export default function App() {
       return baseline;
     }
     if (pending.current) {
-      if (JSON.stringify(pending.current) === JSON.stringify(snapshot())) {
+      if (sameSnapshot(pending.current, snapshot(pending.current.kind === 'timeline')!)) {
         pending.current = null;
         return null;
       }
@@ -564,6 +585,13 @@ export default function App() {
       return committed;
     }
     return null;
+  }
+  function sameSnapshot(a: DocumentSnapshot | TimelineSnapshot, b: DocumentSnapshot | TimelineSnapshot) {
+    // Check inexpensive authored state before potentially large geometry arrays.
+    return a.kind === b.kind && a.duration === b.duration && sameHistoryValue(a.keys, b.keys) &&
+      sameHistoryValue(a.timeline, b.timeline) && sameHistoryValue(a.physics, b.physics) &&
+      sameHistoryValue(a.pose, b.pose) &&
+      (a.kind !== 'document' || b.kind !== 'document' || sameHistoryValue(a.document, b.document));
   }
   async function transaction(label: LocalizedText, fn: () => void | Promise<void>) {
     begin();
@@ -591,13 +619,19 @@ export default function App() {
       return;
     }
     const old = state.current.doc;
-    const next = decodeDocument(s.document);
+    const next = s.kind === 'timeline' ? old : decodeDocument(s.document);
+    if (!next) throw new Error('The history entry requires an active scene.');
     try {
-      if (physics.current) {
-        if (!s.physics) throw new Error('The history entry has no simulation state.');
-        await physics.current.restore(next, s.physics);
+      if (s.kind === 'timeline') {
+        await applySceneState(next, { pose: s.pose, simulation: s.physics }, physics.current);
+      } else {
+        if (s.pose) applyPose(next, s.pose);
+        if (physics.current) {
+          if (!s.physics) throw new Error('The history entry has no simulation state.');
+          await physics.current.restore(next, s.physics);
+        }
       }
-    } catch (error) { disposeDocument(next); throw error; }
+    } catch (error) { if (next !== old) disposeDocument(next); throw error; }
     setDoc(next);
     state.current.doc = next;
     setKeys(s.keys);
@@ -614,7 +648,7 @@ export default function App() {
     setSelected((id) => (next.nodes.some((n) => n.id === id) ? id : null));
     setPinnedId((id) => (next.nodes.some((n) => n.id === id) ? id : null));
     changed();
-    if (old) disposeDocument(old);
+    if (old && old !== next) disposeDocument(old);
   }
   async function history(direction: 'undo' | 'redo') {
     if (historyBusy.current) return;
@@ -628,7 +662,7 @@ export default function App() {
       const s = from.current.at(-1);
       if (!s) return;
       const current = s.kind === 'physics' && physics.current
-        ? capturePhysicsHistory(physics.current.session) : snapshot();
+        ? capturePhysicsHistory(physics.current.session) : snapshot(s.kind === 'timeline');
       if (!current) return;
       if (current.kind === 'physics') await current.captured;
       else if (physics.current) current.physics = await physics.current.session.capture();
@@ -1327,7 +1361,7 @@ export default function App() {
       report(error);
       return;
     }
-    begin();
+    begin(true, true);
     const start = resume?.time ?? current.time;
     const baseline = pending.current;
     const ownsDocument = () => state.current.doc === document && physics.current === runtime;
@@ -2802,7 +2836,7 @@ export default function App() {
             className="stat-fps"
             data-tooltip={t(stats?.idle ? 'Idle viewport' : 'Rendered frames per second')}
           >
-            {stats?.fps.toFixed(1) ?? '0.0'} FPS
+            {stats?.idle ? t('Idle') : `${stats?.fps.toFixed(1) ?? '0.0'} FPS`}
           </span>
         </div>
       </footer>
