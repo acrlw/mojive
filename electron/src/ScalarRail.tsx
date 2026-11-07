@@ -7,6 +7,7 @@ interface ScalarRailProps {
   max: number;
   label: string;
   valueText?: string;
+  referenceValue?: number;
   disabled?: boolean;
   unboundedSpan?: number;
   onBegin: () => void;
@@ -18,7 +19,7 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 
 /** One pointer/key owner, including outside release and Escape at a limit. */
 export function ScalarRail({
-  value, min: lo, max: hi, label, valueText, disabled = false, unboundedSpan = 1,
+  value, min: lo, max: hi, label, valueText, referenceValue, disabled = false, unboundedSpan = 1,
   onBegin,
   onCommit,
   onCancel,
@@ -38,6 +39,8 @@ export function ScalarRail({
   const fraction = (value: number) =>
     bounded ? clamp((value - lo) / (hi - lo || 1), 0, 1) : 0.5;
   const current = fraction(value);
+  const reference = bounded && referenceValue !== undefined && Number.isFinite(referenceValue) &&
+    referenceValue >= lo && referenceValue <= hi ? fraction(referenceValue) : null;
   const finish = (cancel = false) => {
     const state = drag.current;
     if (!state) return;
@@ -149,6 +152,8 @@ export function ScalarRail({
       <div className="joint-rail-track">
         <span className="joint-rail-background" aria-hidden="true" />
         <span className="joint-rail-fill" style={{ width: `calc(${current * 100}% + 4px)` }} />
+        {reference !== null && <span className="joint-rail-reference" aria-hidden="true"
+          data-value={referenceValue} style={{ left: `${reference * 100}%` }} />}
         <span className="joint-rail-thumb" style={{ left: `${current * 100}%` }} />
       </div>
     </div>

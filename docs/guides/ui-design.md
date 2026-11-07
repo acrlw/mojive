@@ -514,6 +514,20 @@ available, with backend-specific solver and contact settings in collapsed groups
 does not restore environment defaults; expose those as distinct actions. Capability descriptors feed
 the existing numeric, vector, selection and whole-row Boolean controls rather than engine-specific
 widget copies. Actuator inputs reuse joint-card geometry and transaction behavior.
+
+Electron joint and actuator cards place the current value beside the name and put read-only
+minimum and maximum values at the ends of the slider below. Reserve fixed-width numeric cells;
+truncate long text without rounding the stored value. Hover exposes the exact value, secondary
+click copies it, primary drag adjusts an editable value, and double-click enters text editing.
+Give hover and press distinct states. Place a known unit once, muted after the current value, or once
+beside each position/rotation group for multi-axis joints. Mark the stable model reference
+position (`qpos0` for MuJoCo joints, zero for URDF joints and actuator controls) with a small
+slider tick. Do not move it with the current value or clamp an out-of-range reference to an endpoint.
+Compact XYZ readouts retain the same axis-colored badges as expanded fields. Keep reset and
+disclosure as compact header actions, independent of the title's selection/expansion target.
+Verify both themes, narrow and wide panels,
+and fractional scale with `make -C electron actuator-review`. These are Electron card defaults;
+native panel layout migration is a separate design change.
 Simulation transport shares the viewport navigation row. Center Previous frame, Play/Pause and
 Single step as one group; keep reset and Environment separate from transport, and identify speed
 through its control hint. Show simulation time once in the status bar. Narrow layouts retain all

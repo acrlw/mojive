@@ -121,6 +121,7 @@ export function readSource(mj: MainModule, model: MjModel, bundle: ModelBundle, 
         axis: v3(model.jnt_axis, i), anchor: v3(model.jnt_pos, i),
         ...(model.jnt_limited[i] ? { limits: [model.jnt_range[2 * i], model.jnt_range[2 * i + 1]] as [number, number] } : {}),
         offset, width,
+        ...(width === 1 ? { referenceValue: model.qpos0[model.jnt_qposadr[i]] } : {}),
       };
       offset += width;
       return joint;

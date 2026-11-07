@@ -1,4 +1,5 @@
 .entity-card {
+  min-width: 0;
   --card-inset: 8px;
   --card-child-radius: max(0px, calc(var(--surface-radius) - var(--card-inset)));
   margin-bottom: 12px;
@@ -11,8 +12,13 @@
 .entity-card.selected {
   background: var(--ui-selected);
 }
+.entity-card-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
 .entity-card-heading {
-  width: 100%;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -26,8 +32,32 @@
   color: var(--text-color);
   text-align: left;
 }
-.entity-card-title {
+.entity-card-label {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
   flex: 1;
+  min-width: 0;
+}
+.entity-card-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex: none;
+}
+.entity-card-controls > .number-field {
+  width: 9ch;
+}
+.entity-card-controls > .number-field:has(.unit) {
+  width: calc(9ch + 18px);
+}
+.entity-card-controls > .button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--card-child-radius);
+}
+.entity-card-title {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -37,9 +67,11 @@
   flex: none;
   color: var(--ui-purple);
 }
+button.entity-card-disclosure:hover:not(:disabled),
 button.entity-card-heading:hover:not(:disabled) {
   background: var(--ui-hover-overlay);
 }
+button.entity-card-disclosure:active:not(:disabled),
 button.entity-card-heading:active:not(:disabled) {
   background: var(--ui-field-active);
 }
@@ -59,11 +91,19 @@ button.entity-card-heading:active:not(:disabled) {
   align-items: center;
   justify-content: center;
   color: var(--muted-color);
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--card-child-radius);
+  background: transparent;
   flex: none;
 }
 .entity-card-content {
   margin-top: 12px;
   padding: 0;
+}
+
+.entity-card-content:empty {
+  display: none;
 }

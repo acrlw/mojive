@@ -496,3 +496,16 @@ div.search-field.search-field > button > .icon {
   width: 14px !important;
   height: 14px !important;
 }
+
+/* Readouts keep the same hit box and edit states as fields, without a resting fill. */
+div.number-field.number-readout {
+  background: transparent;
+  font-size: var(--body-font-size, 14px);
+}
+.number-readout input {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.number-readout:not(.editing) input {
+  text-align: right;
+}

@@ -1,3 +1,4 @@
+import { RangeRail } from './RangeRail';
 import { useRef } from 'react';
 import { ScalarRail } from './ScalarRail';
 import * as THREE from 'three';
@@ -48,8 +49,10 @@ type JointEditorProps = {
   onCancel?: () => void;
   onChange: () => void;
   showScalarLabel?: boolean;
+  scalarPart?: 'all' | 'value' | 'rail';
+  compactPose?: boolean;
+  panel?: boolean;
 };
-
 
 export function JointEditor({
   doc,
@@ -59,6 +62,9 @@ export function JointEditor({
   onCancel,
   onChange,
   showScalarLabel = false,
+  scalarPart = 'all',
+  compactPose = false,
+  panel = false,
 }: JointEditorProps) {
   const displayedRotation = useRef(new THREE.Vector3());
   const displayedJoint = useRef(j.id);
@@ -90,9 +96,11 @@ export function JointEditor({
       distance(candidates[0]) <= distance(candidates[1]) ? candidates[0] : candidates[1];
     displayedRotation.current.fromArray(angles);
     return (
-      <div className="joint-pose-fields">
+      <div className={`joint-pose-fields ${compactPose ? 'joint-pose-summary' : ''}`}>
         {j.type === 'free' && (
           <VectorFields
+            compact={compactPose}
+            copyable={panel}
             label="Position"
             values={pose.position.toArray()}
             unit="m"
@@ -108,6 +116,8 @@ export function JointEditor({
           />
         )}
         <VectorFields
+          compact={compactPose}
+          copyable={panel}
           label="Rotation"
           values={angles}
           unit="°"
@@ -138,30 +148,49 @@ export function JointEditor({
     setJoint(doc, j.id, value);
     onChange();
   };
+  const value = (
+    <Numeric
+      value={display(j.value)}
+      label={`${j.name} value`}
+      unit={slide ? 'm' : '°'}
+      appearance={panel ? 'readout' : 'field'}
+      copyable={panel}
+      step={slide ? (bounded ? Math.min(0.01, (j.upper - j.lower) / 100) : 0.01) : 0.5}
+      min={bounded ? display(j.lower) : undefined}
+      max={bounded ? display(j.upper) : undefined}
+      disabled={!!j.mimic}
+      onBegin={onBegin}
+      onCommit={onCommit}
+      onCancel={onCancel}
+      onChange={(value) => update(slide ? value : THREE.MathUtils.degToRad(value))}
+    />
+  );
+  const Rail = panel ? RangeRail : ScalarRail;
+  const rail = bounded ? (
+    <Rail
+      value={j.value}
+      min={j.lower}
+      max={j.upper}
+      referenceValue={j.referenceValue ?? 0}
+      {...(panel ? { display } : {})}
+      label={t('{{name}} slider', { name: j.name })}
+      disabled={!!j.mimic}
+      valueText={`${display(j.value).toFixed(3)} ${slide ? 'm' : '°'}`}
+      onBegin={onBegin}
+      onCommit={onCommit}
+      onCancel={onCancel}
+      onChange={update}
+    />
+  ) : null;
+  if (scalarPart === 'value') return value;
+  if (scalarPart === 'rail') return rail;
   const fields = (
     <div
       className={`joint-scalar-fields ${j.mimic ? 'mimic' : ''} ${!bounded ? 'unbounded' : ''}`}
       data-tooltip={j.mimic ? `${t('Mimic')}: ${j.mimic.joint}` : undefined}
     >
-      {bounded && (
-        <ScalarRail value={j.value} min={j.lower} max={j.upper}
-          label={t('{{name}} slider', { name: j.name })} disabled={!!j.mimic}
-          valueText={`${display(j.value).toFixed(3)} ${slide ? 'm' : '°'}`}
-          onBegin={onBegin} onCommit={onCommit} onCancel={onCancel} onChange={update} />
-      )}
-      <Numeric
-        value={display(j.value)}
-        label={`${j.name} value`}
-        unit={slide ? 'm' : '°'}
-        step={slide ? (bounded ? Math.min(0.01, (j.upper - j.lower) / 100) : 0.01) : 0.5}
-        min={bounded ? display(j.lower) : undefined}
-        max={bounded ? display(j.upper) : undefined}
-        disabled={!!j.mimic}
-        onBegin={onBegin}
-        onCommit={onCommit}
-        onCancel={onCancel}
-        onChange={(value) => update(slide ? value : THREE.MathUtils.degToRad(value))}
-      />
+      {rail}
+      {value}
     </div>
   );
   if (!showScalarLabel) return fields;

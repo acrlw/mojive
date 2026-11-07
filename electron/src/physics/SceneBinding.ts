@@ -132,6 +132,7 @@ export class SceneBinding {
         const joint: Joint = { id: sourceJoint.id, name: sourceJoint.name, type: sourceJoint.type,
           axis: new THREE.Vector3(...sourceJoint.axis), lower: sourceJoint.limits?.[0] ?? -Infinity,
           upper: sourceJoint.limits?.[1] ?? Infinity, value: 0, object, origin: new THREE.Matrix4(),
+          referenceValue: sourceJoint.referenceValue,
           parent: source.bodies.find((item) => item.id === body.parentId)?.name ?? 'World', child: body.name,
           bodyId: body.id,
           ...(sourceJoint.width > 1 ? { position: new THREE.Vector3(), rotation: new THREE.Quaternion() } : {}),
@@ -226,6 +227,8 @@ export class SceneBinding {
     this.lights = this.source.lights.map((light) => objects.get(light.id)! as typeof this.lights[number]);
     this.deformableMeshes = new Map(this.source.geometries.filter((g) => g.deformable).map((g) => [g.id, objects.get(g.id)! as THREE.Mesh]));
     this.document = document;
+    for (const [index, joint] of document.joints.entries())
+      joint.referenceValue = this.source.joints[index].referenceValue;
     bindAppearance(document.root, this.source);
   }
 

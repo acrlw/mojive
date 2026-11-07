@@ -634,6 +634,7 @@ function validateDocument(value: unknown): void {
     const lower = physicsOwned && joint.lower === null ? -Infinity : number(joint.lower, 'joint lower limit'),
       upper = physicsOwned && joint.upper === null ? Infinity : number(joint.upper, 'joint upper limit');
     number(joint.value, 'joint position');
+    if (joint.referenceValue !== undefined) number(joint.referenceValue, 'joint reference position');
     if (lower > upper) throw Error('Reversed joint limits');
     const parent = links.get(text(joint.parent, 'joint parent')),
       child = links.get(text(joint.child, 'joint child'));

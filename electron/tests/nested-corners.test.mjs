@@ -94,14 +94,14 @@ for (const [theme, language, scale] of [
       page,
       '.entity-card:nth-child(2)',
       '.entity-card-heading',
-      ['left', 'top', 'right'],
+      ['left', 'top'],
       'joint heading',
     );
     await corner(
       page,
       '.entity-card:nth-child(2)',
       '.number-field',
-      ['right', 'bottom'],
+      ['right', 'top'],
       'joint value',
     );
     await page

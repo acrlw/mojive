@@ -1,0 +1,23 @@
+.range-rail {
+  display: grid;
+  grid-template-columns: 7ch minmax(32px, 1fr) 7ch;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.range-endpoint {
+  display: block;
+  min-width: 0;
+  padding: 4px;
+  color: var(--muted-color);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  cursor: context-menu;
+}
+.range-max {
+  text-align: right;
+}

@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import * as THREE from 'three';
-import type { Joint, SceneDocument } from './contracts';
-import { SearchField, Button, Empty, Icon } from './components';
+import type { SceneDocument } from './contracts';
+import { SearchField, Button, Empty } from './components';
 import { JointEditor, jointContext, jointIcon, jointTypeLabel } from './JointEditor';
 import { t } from './i18n';
 import { jointDisplayPose } from './joint-pose';
@@ -20,32 +19,7 @@ type Props = {
   onChange: () => void;
   showHeader?: boolean;
 };
-function PoseSummary({ joint }: { joint: Joint }) {
-  const pose = jointDisplayPose(joint);
-  const rotation = new THREE.Euler().setFromQuaternion(pose.rotation, 'ZYX');
-  const groups: [string, number[]][] =
-    joint.type === 'free' ? [['Position', pose.position.toArray()]] : [];
-  groups.push(['Rotation', [rotation.x, rotation.y, rotation.z].map(THREE.MathUtils.radToDeg)]);
-  return (
-    <div className="joint-pose-summary">
-      {groups.map(([label, values]) => (
-        <div className="joint-summary-group" key={label}>
-          <span className="joint-summary-label">
-            {t(label)} <span>({label === 'Position' ? 'm' : '°'})</span>
-          </span>
-          <div className="joint-summary-values">
-            {values.map((value, index) => (
-              <span key={index}>
-                <i className={`axis-${'xyz'[index]}`}>{'XYZ'[index]}</i>
-                <span>{(Math.abs(value) < 0.0005 ? 0 : value).toFixed(3)}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+
 export function JointPanel({
   doc,
   selectedId,
@@ -62,7 +36,7 @@ export function JointPanel({
     [search, setSearch] = useState(''),
     [sorted, setSorted] = useState(false);
   const panelId = useId(),
-    headingSelection = useRef<string | null>(null);
+    localSelection = useRef<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({}),
     [status, setStatus] = useState('');
   useEffect(() => {
@@ -72,10 +46,10 @@ export function JointPanel({
   useEffect(() => {
     const id = activeJointId || selectedId,
       joint = doc?.joints.find((j) => j.id === id);
-    // Selection echoed by this heading must not override its explicit collapse.
-    const selectedFromHeading = headingSelection.current === selectedId;
-    headingSelection.current = null;
-    if (selectedFromHeading && joint?.id === selectedId) return;
+    // Selection from a card must not expand a compact pose during an edit.
+    const selectedLocally = localSelection.current === selectedId;
+    localSelection.current = null;
+    if (selectedLocally && joint?.id === selectedId) return;
     if (joint && (joint.type === 'ball' || joint.type === 'free'))
       setExpanded((previous) => ({ ...previous, [joint.id]: true }));
   }, [activeJointId, selectedId, doc?.root.uuid]);
@@ -155,7 +129,24 @@ export function JointPanel({
               className="joint-entry"
               name={joint.name}
               icon={jointIcon(joint.type)}
-              context={jointContext(joint)}
+              context={pose ? jointContext(joint) : undefined}
+              controls={
+                !pose ? (
+                  <JointEditor
+                    doc={doc!}
+                    joint={joint}
+                    panel
+                    scalarPart="value"
+                    onBegin={() => {
+                      onSelect(joint.id);
+                      onBegin();
+                    }}
+                    onCommit={onCommit}
+                    onCancel={onCancel}
+                    onChange={onChange}
+                  />
+                ) : undefined
+              }
               selected={selected}
               expanded={pose ? open : undefined}
               contentId={`${panelId}-${joint.id}-pose`}
@@ -170,7 +161,7 @@ export function JointPanel({
                 onClick: (event) => {
                   // A double-click focuses after its first activation; it must not toggle twice.
                   if (event.detail > 1) return;
-                  if (selectedId !== joint.id) headingSelection.current = joint.id;
+                  if (selectedId !== joint.id) localSelection.current = joint.id;
                   onSelect(joint.id);
                   if (pose) setExpanded((previous) => ({ ...previous, [joint.id]: !open }));
                 },
@@ -190,21 +181,21 @@ export function JointPanel({
                 },
               }}
             >
-              {pose && !open ? (
-                <PoseSummary joint={joint} />
-              ) : (
-                <JointEditor
-                  doc={doc!}
-                  joint={joint}
-                  onBegin={() => {
-                    onSelect(joint.id);
-                    onBegin();
-                  }}
-                  onCommit={onCommit}
-                  onCancel={onCancel}
-                  onChange={onChange}
-                />
-              )}
+              <JointEditor
+                panel
+                compactPose={pose && !open}
+                scalarPart={pose ? 'all' : 'rail'}
+                doc={doc!}
+                joint={joint}
+                onBegin={() => {
+                  if (selectedId !== joint.id) localSelection.current = joint.id;
+                  onSelect(joint.id);
+                  onBegin();
+                }}
+                onCommit={onCommit}
+                onCancel={onCancel}
+                onChange={onChange}
+              />
             </EntityCard>
           );
         })}

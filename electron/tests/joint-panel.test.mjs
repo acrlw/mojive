@@ -29,7 +29,7 @@ after(async () => {
   await browser?.close();
   await server?.close();
 });
-test('joint panel uses limit headings, localized types, collapsible 3/6 DoF pose and native toolbar', async () => {
+test('joint panel uses current-value headings, endpoint limits and collapsible 3/6 DoF pose', async () => {
   await settlePaint(page);
   assert.equal(await page.locator('.joint-entry').count(), 9);
   assert.equal(await page.getByRole('slider').count(), 7);
@@ -69,7 +69,19 @@ test('joint panel uses limit headings, localized types, collapsible 3/6 DoF pose
   assert.equal(geometry.cardRadius, '12px');
   assert.equal(geometry.inset, '8px');
   assert.equal(geometry.fieldRadius, '4px');
-  assert.match(await page.locator('.joint-entry').first().innerText(), /−120…120°/);
+  assert.equal(
+    await page.locator('.joint-entry').first().locator('.entity-card-controls .unit').innerText(),
+    '°',
+  );
+  assert.equal(
+    await page.locator('.joint-entry').first().locator('.range-min').innerText(),
+    '−120',
+  );
+  assert.equal(await page.locator('.joint-entry').first().locator('.range-max').innerText(), '120');
+  assert.equal(
+    await page.locator('.joint-entry').first().locator('.entity-card-controls input').inputValue(),
+    '0.000',
+  );
   assert.equal(await page.locator('.joint-pose-summary').count(), 2);
   await page.getByRole('button', { name: 'Search joints', exact: true }).click();
   await page.getByRole('textbox', { name: 'Search joints', exact: true }).fill('Ball joint');
@@ -174,7 +186,7 @@ test('expanded ball/free fields edit real configuration and remain readable in l
     document.getElementById('joint-pane').style.zoom = '1.25';
   });
   const bounds = await page
-    .locator('.joint-scalar-fields')
+    .locator('.range-rail')
     .first()
     .evaluate((el) => ({ width: el.clientWidth, scroll: el.scrollWidth }));
   assert.ok(bounds.scroll <= bounds.width);
@@ -190,27 +202,40 @@ test('joint scalar and vector gesture cancellation reaches the transaction owner
       `http://127.0.0.1:${server.httpServer.address().port}/tests/harness/joint-panel-review.html?cancel`,
     );
     await cancelPage.locator('.joint-entry').first().waitFor();
-    const value = () => cancelPage.evaluate(() => ({
-      scalar: window.jointReview.doc.joints.find((joint) => joint.name === '06_precision_hinge_y').value,
-      position: window.jointReview.doc.joints.find((joint) => joint.name === '04_free_6dof').position.toArray(),
-      begins: window.jointReview.begins,
-      commits: window.jointReview.commits,
-      cancels: window.jointReview.cancels,
-    }));
+    const value = () =>
+      cancelPage.evaluate(() => ({
+        scalar: window.jointReview.doc.joints.find((joint) => joint.name === '06_precision_hinge_y')
+          .value,
+        position: window.jointReview.doc.joints
+          .find((joint) => joint.name === '04_free_6dof')
+          .position.toArray(),
+        begins: window.jointReview.begins,
+        commits: window.jointReview.commits,
+        cancels: window.jointReview.cancels,
+      }));
     const before = await value();
     const scrub = async (element) => {
       await element.scrollIntoViewIfNeeded();
       const bounds = await element.boundingBox();
       await cancelPage.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
       await cancelPage.mouse.down();
-      await cancelPage.mouse.move(bounds.x + bounds.width / 2 + 45, bounds.y + bounds.height / 2, { steps: 3 });
+      await cancelPage.mouse.move(bounds.x + bounds.width / 2 + 45, bounds.y + bounds.height / 2, {
+        steps: 3,
+      });
     };
-    const slider = cancelPage.getByRole('slider', { name: '06_precision_hinge_y slider', exact: true });
-    await slider.evaluate((element) => element.addEventListener('pointerdown', (event) => {
-      element.dataset.reviewPointerId = String(event.pointerId);
-    }));
-    const hasCapture = () => slider.evaluate((element) =>
-      element.hasPointerCapture(Number(element.dataset.reviewPointerId)));
+    const slider = cancelPage.getByRole('slider', {
+      name: '06_precision_hinge_y slider',
+      exact: true,
+    });
+    await slider.evaluate((element) =>
+      element.addEventListener('pointerdown', (event) => {
+        element.dataset.reviewPointerId = String(event.pointerId);
+      }),
+    );
+    const hasCapture = () =>
+      slider.evaluate((element) =>
+        element.hasPointerCapture(Number(element.dataset.reviewPointerId)),
+      );
     await scrub(slider);
     assert.notEqual((await value()).scalar, before.scalar);
     assert.equal(await hasCapture(), true);
@@ -247,13 +272,23 @@ test('joint scalar and vector gesture cancellation reaches the transaction owner
 
     await scrub(slider);
     assert.notEqual((await value()).scalar, before.scalar);
-    await slider.evaluate((element) => element.releasePointerCapture(Number(element.dataset.reviewPointerId)));
+    await slider.evaluate((element) =>
+      element.releasePointerCapture(Number(element.dataset.reviewPointerId)),
+    );
     await cancelPage.mouse.move(1, 1);
     await cancelPage.mouse.up();
     const captureCanceled = await value();
-    assert.equal(captureCanceled.scalar, before.scalar, 'Unexpected lost capture restores the baseline.');
+    assert.equal(
+      captureCanceled.scalar,
+      before.scalar,
+      'Unexpected lost capture restores the baseline.',
+    );
     assert.equal(captureCanceled.commits, 0);
-    assert.equal(captureCanceled.cancels, 4, 'Lost capture and pointerup cannot finish the gesture twice.');
+    assert.equal(
+      captureCanceled.cancels,
+      4,
+      'Lost capture and pointerup cannot finish the gesture twice.',
+    );
 
     await scrub(slider);
     await cancelPage.mouse.up();

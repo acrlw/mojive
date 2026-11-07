@@ -17,6 +17,10 @@
       import { createCatalogScene } from '/src/SceneCatalog.ts';
       import { applySettings, normalizeSettings } from '/src/settings.tsx';
       const doc = await createCatalogScene('joint_gizmo');
+      if (new URLSearchParams(location.search).has('reference')) {
+        doc.joints.find((joint) => joint.name === '01_revolute_y').referenceValue = Math.PI / 6;
+        doc.joints.find((joint) => joint.name === '02_prismatic_x').referenceValue = 2;
+      }
       window.jointReview = { doc, begins: 0, commits: 0, cancels: 0, copied: '', errors: [] };
       const cancelGestures = new URLSearchParams(location.search).has('cancel');
       window.mojive = {

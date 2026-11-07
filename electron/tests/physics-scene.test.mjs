@@ -106,3 +106,24 @@ test('asynchronous scene assembly yields and disposes a cancelled candidate only
   assert.equal(currentDisposed, false);
   assert.equal(current.document.root.children.length > 0, true);
 });
+
+
+test('nonzero MuJoCo qpos0 remains the joint reference after pose edits', async (t) => {
+  const referenceBundle = await createModelBundle('Reference pose', 'model.xml', [{
+    path: 'model.xml', bytes: new TextEncoder().encode(`<mujoco><option gravity="0 0 0"/>
+      <worldbody><body><joint name="slide" type="slide" ref=".2" range="-1 1"/>
+      <joint name="hinge" ref="30" range="-90 90"/><geom size=".1"/></body></worldbody></mujoco>`),
+  }]);
+  const engine = await MujocoBackend.load(mj, referenceBundle);
+  t.after(() => engine.dispose());
+  const binding = new SceneBinding(engine.source, await engine.frame());
+  for (const [name, reference] of [['slide', .2], ['hinge', Math.PI / 6]]) {
+    const sourceJoint = engine.source.joints.find((joint) => joint.name === name);
+    const joint = binding.document.joints.find((joint) => joint.name === name);
+    assert.ok(Math.abs(sourceJoint.referenceValue - reference) < 1e-12);
+    assert.ok(Math.abs(joint.referenceValue - reference) < 1e-12);
+    binding.apply(await engine.execute({ type: 'jointPose', id: joint.id, position: [.4] }));
+    assert.ok(Math.abs(joint.value - .4) < 1e-12);
+    assert.ok(Math.abs(joint.referenceValue - reference) < 1e-12);
+  }
+});

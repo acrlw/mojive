@@ -1,4 +1,4 @@
-import { openSampleScene } from '../tests/helpers/editable-scene.mjs';
+import { chooseSampleScene } from '../tests/helpers/editable-scene.mjs';
 import assert from 'node:assert/strict';
 import { _electron } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -10,6 +10,19 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const out = path.join(root, '../output/electron/verification');
 await mkdir(out, { recursive: true });
 const profile = await mkdtemp(path.join(out, 'actuator-review-profile-'));
+const modelName = 'card-controls-review.xml';
+const modelPath = path.join(out, modelName);
+const source = await readFile(path.join(root, '../assets/joint_gizmo.xml'), 'utf8');
+await writeFile(
+  modelPath,
+  source.replace(
+    '</mujoco>',
+    `<actuator>
+  <motor name="hinge_control" joint="01_revolute_y" ctrllimited="true" ctrlrange="-0.05 0.05"/>
+  <motor name="slide_control_with_a_long_name" joint="02_prismatic_x" ctrllimited="true" ctrlrange="-1000000.123456789 1000000.123456789"/>
+</actuator></mujoco>`,
+  ),
+);
 const env = { ...process.env };
 delete env.MOJIVE_DEV_URL;
 const report = {
@@ -23,7 +36,7 @@ const report = {
 let app, page;
 try {
   app = await _electron.launch({
-    args: [root, '--hidden', '--user-data-dir=' + profile],
+    args: [root, '--user-data-dir=' + profile],
     cwd: root,
     env,
     timeout: 45000,
@@ -48,22 +61,29 @@ try {
   const rail = (icon) => page.locator(`.activity-rail > button:has([data-icon=${icon}])`);
   const card = () => page.locator('.actuator-entry').first();
   const heading = () => card().locator('.entity-card-heading');
-  const color = (locator) => locator.evaluate((node) => getComputedStyle(node).backgroundColor);
+  const color = (locator) =>
+    locator.evaluate((node) =>
+      node.dataset.smoothPaint
+        ? JSON.parse(node.dataset.smoothPaint).backgroundColor
+        : getComputedStyle(node).backgroundColor,
+    );
   const geometry = (locator) =>
     locator.evaluate((node) => {
       const style = getComputedStyle(node),
+        paint = node.dataset.smoothPaint ? JSON.parse(node.dataset.smoothPaint) : style,
         heading = node.querySelector('.entity-card-heading'),
-        hs = getComputedStyle(heading);
+        hs = getComputedStyle(heading),
+        headingPaint = heading.dataset.smoothPaint ? JSON.parse(heading.dataset.smoothPaint) : hs;
       const icon = heading.querySelector('.icon'),
         list = node.closest('.joint-panel-list');
       return {
-        radius: style.borderRadius,
+        radius: paint.borderRadius,
         inset: style.padding,
-        shadow: style.boxShadow,
+        shadow: paint.boxShadow,
         border: style.borderBottomWidth,
-        background: style.backgroundColor,
+        background: paint.backgroundColor,
         headingHeight: hs.height,
-        headingRadius: hs.borderRadius,
+        headingRadius: headingPaint.borderRadius,
         headingInset: hs.padding,
         headingWeight: hs.fontWeight,
         icon: [getComputedStyle(icon).width, getComputedStyle(icon).height],
@@ -94,7 +114,48 @@ try {
     await page.reload();
     await page.locator('.tree-row').first().waitFor();
     await page.evaluate(() => document.fonts.ready);
-    await openSampleScene(page, 'Atelier arm', language === 'zh-CN');
+    // Exercise the shared cards through the production MuJoCo session and command path.
+    await action('file.openSimulation');
+    const pathInput = page.locator('.file-dialog form input');
+    await pathInput.fill(out);
+    await pathInput.press('Enter');
+    await page.getByRole('option', { name: modelName, exact: true }).dblclick();
+    await page.locator('.file-dialog').waitFor({ state: 'detached' });
+    await page.locator('.scene-loading-overlay').waitFor({ state: 'detached' });
+    await rail('control').click();
+    const liveCard = page.locator('[data-actuator-name="hinge_control"]');
+    await liveCard.waitFor();
+    const liveValue = liveCard.locator('.number-readout input');
+    await liveValue.dblclick();
+    await liveValue.fill('0.025');
+    await liveValue.press('Enter');
+    await page.waitForFunction(
+      () => document.querySelector('[data-actuator-name="hinge_control"] input')?.value === '0.025',
+    );
+    await liveValue.click({ button: 'right' });
+    assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), '0.025');
+    assert.deepEqual(
+      await liveCard
+        .locator('.range-endpoint')
+        .evaluateAll((nodes) => nodes.map((node) => node.dataset.value)),
+      ['-0.05', '0.05'],
+    );
+    const liveGeometry = await geometry(liveCard);
+    assert.equal(liveGeometry.overflow, false);
+    await page.mouse.move(20, 20);
+    await page.screenshot({ path: path.join(out, name + '-live-controls.png') });
+    await liveCard.locator('button:has([data-icon=reset])').click();
+    await page.waitForFunction(
+      () => document.querySelector('[data-actuator-name="hinge_control"] input')?.value === '0.000',
+    );
+    await rail('pose').click();
+    await page.locator('.joint-entry').first().waitFor();
+    await page.screenshot({ path: path.join(out, name + '-live-joints.png') });
+    await chooseSampleScene(page, 'Atelier arm', language === 'zh');
+    await page
+      .getByRole('alertdialog')
+      .getByRole('button', { name: language === 'zh' ? '不保存' : "Don't Save", exact: true })
+      .click();
     await page.waitForFunction(() =>
       document.querySelector('.document-title')?.textContent.includes('Atelier'),
     );
@@ -106,8 +167,24 @@ try {
     assert.deepEqual(ratios, ['120', '100', '60']);
     const normal = await color(heading());
     await heading().hover();
+    // Rounded controls paint through a surface layer in production.
+    await page.waitForFunction((before) => {
+      const node = document.querySelector('.actuator-entry .entity-card-heading');
+      if (!node) return false;
+      const paint = node.dataset.smoothPaint
+        ? JSON.parse(node.dataset.smoothPaint)
+        : getComputedStyle(node);
+      return paint.backgroundColor !== before;
+    }, normal);
     const hover = await color(heading());
     await page.mouse.down();
+    await page.waitForFunction((before) => {
+      const node = document.querySelector('.actuator-entry .entity-card-heading');
+      const paint = node.dataset.smoothPaint
+        ? JSON.parse(node.dataset.smoothPaint)
+        : getComputedStyle(node);
+      return paint.backgroundColor !== before;
+    }, hover);
     const held = await color(heading());
     assert.notEqual(normal, hover);
     assert.notEqual(hover, held);
@@ -166,6 +243,7 @@ try {
       details,
       actuatorGeometry,
       jointGeometry,
+      liveGeometry,
     });
     console.log(`PASS ${name}`);
   }

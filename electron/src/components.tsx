@@ -1,3 +1,4 @@
+import { useNumberClipboard } from './numberClipboard';
 import {
   useEffect,
   useLayoutEffect,
@@ -260,6 +261,8 @@ export function Numeric({
   unit,
   precision = 3,
   formatValue,
+  appearance = 'field',
+  copyable = false,
   min = -Infinity,
   max = Infinity,
   integer = false,
@@ -275,10 +278,13 @@ export function Numeric({
   unit?: string;
   precision?: number;
   formatValue?: (value: number) => string;
+  appearance?: 'field' | 'readout';
+  copyable?: boolean;
   min?: number;
   max?: number;
   integer?: boolean;
 }) {
+  const clipboard = useNumberClipboard();
   const input = useRef<HTMLInputElement>(null),
     frame = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<string | null>(null),
@@ -369,8 +375,24 @@ export function Numeric({
     <div
       ref={frame}
       tabIndex={-1}
-      className={`number-field ${pressed ? 'pressed' : ''} ${dragging ? 'scrubbing' : ''} ${draft !== null ? 'editing' : ''}`}
+      className={`number-field number-${appearance} ${pressed ? 'pressed' : ''} ${dragging ? 'scrubbing' : ''} ${draft !== null ? 'editing' : ''}`}
+      data-tooltip={
+        copyable && draft === null
+          ? `${String(value)}${unit ? ` ${unit}` : ''}
+${clipboard.status || t('Right-click to copy exact value')}`
+          : undefined
+      }
+      onContextMenu={(event) => {
+        if (!copyable || draft !== null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void clipboard.copy(value);
+      }}
       onPointerDown={(event) => {
+        if (event.button === 2 && copyable && draft === null) {
+          event.preventDefault();
+          return;
+        }
         if (event.button !== 0 || disabled || draft !== null) return;
         event.preventDefault();
         frame.current?.focus({ preventScroll: true });
@@ -505,6 +527,8 @@ export function VectorFields({
   onCommit,
   unit,
   resetValues,
+  compact = false,
+  copyable = false,
   step,
   onCancel,
 }: {
@@ -515,6 +539,8 @@ export function VectorFields({
   onCommit: () => void;
   unit?: string;
   resetValues?: readonly number[];
+  compact?: boolean;
+  copyable?: boolean;
   step?: number;
   onCancel?: () => void;
 }) {
@@ -528,25 +554,40 @@ export function VectorFields({
       input = element.querySelector('input')!,
       context = document.createElement('canvas').getContext('2d')!;
     const measure = () => {
-      const style = getComputedStyle(input), scale = element.getBoundingClientRect().width / element.offsetWidth;
+      const style = getComputedStyle(input),
+        scale = element.getBoundingClientRect().width / element.offsetWidth;
       context.font = `${style.fontSize} ${style.fontFamily}`;
-      const fieldsWidth = 3 * (context.measureText('-999.999').width +
-        parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + axis.getBoundingClientRect().width / scale) + 8;
+      const fieldsWidth =
+        3 *
+          (context.measureText('-999.999').width +
+            parseFloat(style.paddingLeft) +
+            parseFloat(style.paddingRight) +
+            axis.getBoundingClientRect().width / scale) +
+        8;
       const range = document.createRange();
       range.selectNodeContents(labelElement);
       const labelWidth = range.getBoundingClientRect().width / scale;
-      element.dataset.vectorLayout = element.clientWidth >= labelWidth + 12 + fieldsWidth
-        ? 'inline' : element.clientWidth >= fieldsWidth ? 'above' : 'stack';
+      element.dataset.vectorLayout =
+        element.clientWidth >= labelWidth + 12 + fieldsWidth
+          ? 'inline'
+          : element.clientWidth >= fieldsWidth
+            ? 'above'
+            : 'stack';
       element.style.setProperty('--vector-label-width', `${labelWidth}px`);
     };
     const observer = new ResizeObserver(measure);
-    observer.observe(element); observer.observe(axis); observer.observe(labelElement);
+    observer.observe(element);
+    observer.observe(axis);
+    observer.observe(labelElement);
     document.fonts.addEventListener('loadingdone', measure);
     measure();
-    return () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', measure); };
+    return () => {
+      observer.disconnect();
+      document.fonts.removeEventListener('loadingdone', measure);
+    };
   }, [label, unit]);
   return (
-    <div className="vector-group" ref={group}>
+    <div className={`vector-group ${compact ? 'vector-compact' : ''}`} ref={group}>
       <label>
         {t(label)}
         {unit && <span className="vector-unit">({unit})</span>}
@@ -556,6 +597,8 @@ export function VectorFields({
           <NumericChannel
             key={axis}
             badge={axis}
+            appearance={compact ? 'readout' : 'field'}
+            copyable={copyable}
             tone={['x', 'y', 'z'][i] as 'x' | 'y' | 'z'}
             label={t('{{label}} {{axis}}', { label: message(label), axis })}
             value={values[i]}

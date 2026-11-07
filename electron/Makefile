@@ -31,7 +31,7 @@ design:
 	node scripts/sync-design.mjs
 actuator-review:
 	npm run build
-	node --test --test-concurrency=1 tests/joint-heading.test.mjs tests/joint-panel.test.mjs tests/panel-responsive.test.mjs
+	node --test --test-concurrency=1 tests/joint-heading.test.mjs tests/joint-panel.test.mjs tests/card-readouts.test.mjs tests/panel-responsive.test.mjs
 	node scripts/actuator-cards-review.mjs
 viewcube-review:
 	node scripts/review-viewcube.mjs

@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <base href="/" />
+    <meta charset="UTF-8" />
+    <title>Actuator readout verification</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useState } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import '/src/design-tokens.css';
+      import '/src/styles.css';
+      import '/src/workspace.css';
+      import '/src/joint-panel.css';
+      import { ActuatorControls } from '/src/physics/ActuatorControls.tsx';
+      import { applySettings, normalizeSettings } from '/src/settings.tsx';
+      const actuators = [
+        { id: 'red', name: 'red', jointId: 'joint-red', range: [-0.05, 0.05] },
+        {
+          id: 'precision',
+          name: 'precision_actuator_with_a_long_name',
+          jointId: 'joint-precision',
+          range: [-123456789.12345, 123456789.12345],
+        },
+        { id: 'unbounded', name: 'unbounded_control' },
+      ];
+      window.cardReview = {
+        values: new Float64Array([0.025, 123456789.12345, -0.125]),
+        begins: 0,
+        commits: 0,
+        copied: '',
+      };
+      window.mojive = {
+        writeClipboardText: async (text) => {
+          window.cardReview.copied = text;
+        },
+      };
+      window.reviewTheme = (appearance) =>
+        applySettings(normalizeSettings({ language: 'en', appearance }));
+      window.reviewTheme('dark');
+      function Review() {
+        const [, refresh] = useState(0),
+          [selectedId, onSelect] = useState(null);
+        return React.createElement(
+          'div',
+          {
+            id: 'actuator-pane',
+            style: {
+              width: 356,
+              padding: 12,
+              background: 'var(--panel-color)',
+              display: 'grid',
+              gap: 12,
+            },
+          },
+          React.createElement(ActuatorControls, {
+            actuators,
+            values: window.cardReview.values,
+            selectedId,
+            onSelect,
+            onFocus: (id) => {
+              window.cardReview.focus = id;
+            },
+            onBegin: () => {
+              window.cardReview.begins++;
+            },
+            onCommit: () => {
+              window.cardReview.commits++;
+            },
+            onChange: (id, value) => {
+              window.cardReview.values[actuators.findIndex((actuator) => actuator.id === id)] =
+                value;
+              refresh((version) => version + 1);
+            },
+          }),
+        );
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Review));
+    </script>
+  </body>
+</html>

@@ -85,6 +85,16 @@
   border-radius: 2px;
   background: var(--ui-primary-dim);
 }
+.joint-rail-reference {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--muted-color);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
 .joint-rail-thumb {
   position: absolute;
   top: -4px;
@@ -131,42 +141,27 @@
   font-size: var(--body-font-size, 14px);
   color: var(--muted-color);
 }
-.joint-pose-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.joint-summary-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.joint-summary-label {
-  font-size: var(--body-font-size, 14px);
-  color: var(--muted-color);
-}
-.joint-summary-values {
-  display: grid;
+/* Compact poses retain three channels; exact values remain available on hover/copy. */
+.joint-pose-summary .vector-group > .vector-fields {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
 }
-.joint-summary-values > span {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
+.joint-panel .vector-group .vector-unit {
+  font-size: 12px;
+  margin-left: 4px;
+}
+.joint-pose-summary .axis-field {
   align-items: center;
-  font-family: var(--font-numeric, var(--font-mono));
-  font-size: 14px;
+  gap: 4px;
 }
-.joint-summary-values i {
-  font: 12px var(--font-mono);
+.joint-pose-summary .axis-field > .axis {
   width: 18px;
-  flex: none;
-  text-align: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 12px;
 }
-.joint-summary-values > span > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.joint-pose-summary .axis-field > .number-field {
+  border-radius: var(--card-child-radius);
 }
 .joint-panel-status {
   color: var(--amber-color);

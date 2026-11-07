@@ -27,8 +27,16 @@ case to one screenshot.
 
 ## Typography, layout, and numeric stability
 
+For Electron joint/actuator cards, check the name/current-value header and min/slider/max row
+at narrow and wide widths. Numeric cells must stay fixed, ellipsize without losing precision,
+expose exact values on hover and copy, and enter text editing only on double-click or keyboard
+focus. Units occur once per scalar or pose group; compact XYZ badges retain axis colors.
+Reset stays beside the value and disclosure, with an independent hit target. Verify real
+MuJoCo controls as well as descriptor-only URDF cards using `make -C electron actuator-review`.
+
 | Failure pattern | Review criterion | Focused evidence |
 |---|---|---|
+| Joint/actuator readouts repeat units, lose precision, or hide the reference pose. | Keep fixed-width current values beside titles and limits beside sliders. Put the muted unit after the value, preserve exact copy/edit values, and show a stable in-range reference tick. Compact XYZ retains axis badges; reset stays in the header. | `electron/tests/card-readouts.test.mjs`; `electron/tests/physics-scene.test.mjs`; `make -C electron actuator-review` |
 | Mode segments feel cramped despite readable body text. | Retain the captions and body size; show redundant icons only when each combined item has full horizontal insets. Test both languages, narrow panels and fractional scale. | `make ui-menu-review` |
 | Every menu item has an icon, including repeated or ambiguous symbols. | Group recognizable action/type icons separately from plain-text settings. Omit the icon gutter only for text-only groups; keep state and trailing columns stable. | `tests/test_menu_columns.py`; `make ui-menu-review` |
 | Plain menu labels feel cramped after removing their icon column. | Keep the row's horizontal text insets independently of optional glyph columns and the shell inset. Inspect both plain and icon groups at the same font size. | `tests/test_menu_columns.py`; `make ui-menu-review` |

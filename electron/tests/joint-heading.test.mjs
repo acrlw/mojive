@@ -72,7 +72,10 @@ const ball = '03_ball_xyz',
   free = '04_free_6dof';
 async function assertOpen(name, open) {
   assert.equal(await heading(name).getAttribute('aria-expanded'), String(open));
-  assert.equal(await card(name).locator('.joint-pose-fields').count(), open ? 1 : 0);
+  assert.equal(
+    await card(name).locator('.joint-pose-fields:not(.joint-pose-summary)').count(),
+    open ? 1 : 0,
+  );
 }
 
 test('the complete ball/free header toggles exactly once and selection cannot reopen an explicit collapse', async () => {
@@ -81,7 +84,7 @@ test('the complete ball/free header toggles exactly once and selection cannot re
     assert.equal(
       await heading(name).locator('button,[role=button]').count(),
       0,
-      'Chevron is only a visual state indicator',
+      'Heading does not contain nested controls',
     );
     await card(name).locator('.entity-card-title').click();
     await assertOpen(name, true);
@@ -168,7 +171,7 @@ test('whole-header hover and keyboard focus keep derived corners in dark/light a
     await heading(ball).hover();
     const geometry = await heading(ball).evaluate((el) => {
       const s = window.paintStyle(el),
-        h = el.getBoundingClientRect(),
+        h = el.closest('.entity-card-header').getBoundingClientRect(),
         card = el.closest('.joint-entry').getBoundingClientRect();
       return {
         radius: s.borderRadius,

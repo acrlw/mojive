@@ -35,6 +35,8 @@ export interface Joint {
   lower: number;
   upper: number;
   value: number;
+  /** Scalar reference pose, independent of the current frame. */
+  referenceValue?: number;
   object: THREE.Object3D;
   origin: THREE.Matrix4;
   parent: string;

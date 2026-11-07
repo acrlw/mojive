@@ -113,7 +113,7 @@ for (const scale of [1, 1.25])
           radius: style.borderRadius,
           inset: style.padding,
           left: name.left - r.left,
-          right: r.right - card.querySelector('.entity-card-heading').getBoundingClientRect().right,
+          right: r.right - card.querySelector('.entity-card-header').getBoundingClientRect().right,
           inner: window.paintStyle(card.querySelector('.axis-field')).borderRadius,
           textWidths,
         };

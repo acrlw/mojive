@@ -6,6 +6,7 @@ type Props = HTMLAttributes<HTMLDivElement> & {
   name: string;
   icon: string;
   context?: ReactNode;
+  controls?: ReactNode;
   selected?: boolean;
   expanded?: boolean;
   heading: ButtonHTMLAttributes<HTMLButtonElement>;
@@ -18,6 +19,7 @@ export function EntityCard({
   name,
   icon,
   context,
+  controls,
   selected,
   expanded,
   heading,
@@ -36,28 +38,37 @@ export function EntityCard({
       className={`entity-card ${selected ? 'selected' : ''} ${className}`}
       {...props}
     >
-      <button
-        type="button"
-        className="entity-card-heading"
-        aria-expanded={expanded}
-        aria-controls={expanded === undefined ? undefined : bodyId}
-        {...headingProps}
-        data-tooltip={title ?? name}
-        data-tooltip-overflow=".entity-card-title"
-      >
-        <Icon name={icon} size={20} />
-        <span className="entity-card-title">{name}</span>
-        {context !== undefined && <span className="entity-card-context">{context}</span>}
+      <div className="entity-card-header">
+        <button
+          type="button"
+          className="entity-card-heading"
+          aria-expanded={expanded}
+          aria-controls={expanded === undefined ? undefined : bodyId}
+          {...headingProps}
+          data-tooltip={title ?? name}
+          data-tooltip-overflow=".entity-card-title"
+        >
+          <Icon name={icon} size={20} />
+          <span className="entity-card-label">
+            <span className="entity-card-title">{name}</span>
+          </span>
+          {context !== undefined && <span className="entity-card-context">{context}</span>}
+        </button>
+        {controls && <div className="entity-card-controls">{controls}</div>}
         {expanded !== undefined && (
-          <span
+          <button
+            type="button"
             className="entity-card-disclosure"
-            aria-hidden="true"
+            {...headingProps}
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            aria-label={disclosureTitle}
             data-tooltip={disclosureTitle}
           >
             <Icon name={expanded ? 'down' : 'right'} size={20} />
-          </span>
+          </button>
         )}
-      </button>
+      </div>
       <div className="entity-card-content" id={bodyId}>
         {children}
       </div>

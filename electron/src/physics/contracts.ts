@@ -55,6 +55,8 @@ export interface PhysicsJoint {
   axis: Vector3;
   anchor: Vector3;
   limits?: [number, number];
+  /** Scalar reference pose in engine units (MuJoCo qpos0). */
+  referenceValue?: number;
   /** Offset in frame.jointPositions; scalar, xyzw, or xyz + xyzw. */
   offset: number;
   width: 1 | 4 | 7;

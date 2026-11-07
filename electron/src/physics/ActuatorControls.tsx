@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button, Numeric } from '../components';
 import { EntityCard } from '../EntityCard';
-import { ScalarRail } from '../ScalarRail';
+import { RangeRail } from '../RangeRail';
 import { t } from '../i18n';
 import type { PhysicsActuator } from './contracts';
 
@@ -25,38 +25,84 @@ export function ActuatorControls(props: ActuatorControlsProps) {
     const bounded = Number.isFinite(min) && Number.isFinite(max) && max > min;
     const value = values[index];
     const open = expanded[actuator.id] ?? false;
-    return <EntityCard key={actuator.id} name={actuator.name} icon="control"
-      data-actuator-name={actuator.name} selected={!!actuator.jointId && actuator.jointId === selectedId}
-      expanded={open} context={bounded ? `${min}…${max}` : t('Unbounded')}
-      heading={{ onClick: (event) => {
-        if (event.detail > 1) return;
-        if (actuator.jointId) onSelect(actuator.jointId);
-        setExpanded((previous) => ({ ...previous, [actuator.id]: !open }));
-      }, onDoubleClick: () => { if (actuator.jointId) onFocus(actuator.jointId); },
-      onKeyDown: (event) => {
-        if (event.key === ' ' || event.key === 'Enter') {
-          event.stopPropagation();
-          if (event.repeat) event.preventDefault();
+    return (
+      <EntityCard
+        key={actuator.id}
+        name={actuator.name}
+        icon="control"
+        data-actuator-name={actuator.name}
+        selected={!!actuator.jointId && actuator.jointId === selectedId}
+        expanded={open}
+        disclosureTitle={t(open ? 'Collapse actuator details' : 'Expand actuator details')}
+        controls={
+          <>
+            <Numeric
+              label={t('{{name}} input', { name: actuator.name })}
+              value={value}
+              appearance="readout"
+              copyable
+              min={bounded ? min : undefined}
+              max={bounded ? max : undefined}
+              step={bounded ? (max - min) / 200 : 0.01}
+              onBegin={onBegin}
+              onCommit={onCommit}
+              onChange={(next) => onChange(actuator.id, next)}
+            />
+            <Button
+              icon="reset"
+              title="Clear control input"
+              onClick={() => {
+                onBegin();
+                onChange(actuator.id, Math.max(min, Math.min(max, 0)));
+                onCommit();
+              }}
+            />
+          </>
         }
-      }, onKeyUp: (event) => {
-        if (event.key === ' ' || event.key === 'Enter') event.stopPropagation();
-      } }}>
-      <div className={`joint-scalar-fields ${bounded ? '' : 'unbounded'}`}>
-        {bounded && <ScalarRail value={value} min={min} max={max}
-          label={t('{{name}} control', { name: actuator.name })}
-          onBegin={onBegin} onCommit={onCommit} onChange={(next) => onChange(actuator.id, next)} />}
-        <Numeric label={t('{{name}} input', { name: actuator.name })} value={value}
-          min={bounded ? min : undefined} max={bounded ? max : undefined}
-          step={bounded ? (max - min) / 200 : 0.01}
-          onBegin={onBegin} onCommit={onCommit} onChange={(next) => onChange(actuator.id, next)} />
-      </div>
-      {open && <div className="actuator-summary actuator-control-actions">
-        <Button icon="joint" disabled={!actuator.jointId}
-          onClick={() => actuator.jointId && onSelect(actuator.jointId)}>{t('Inspect joint')}</Button>
-        <Button icon="reset" title="Clear control input" onClick={() => {
-          onBegin(); onChange(actuator.id, Math.max(min, Math.min(max, 0))); onCommit();
-        }} />
-      </div>}
-    </EntityCard>;
+        heading={{
+          onClick: (event) => {
+            if (event.detail > 1) return;
+            if (actuator.jointId) onSelect(actuator.jointId);
+            setExpanded((previous) => ({ ...previous, [actuator.id]: !open }));
+          },
+          onDoubleClick: () => {
+            if (actuator.jointId) onFocus(actuator.jointId);
+          },
+          onKeyDown: (event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.stopPropagation();
+              if (event.repeat) event.preventDefault();
+            }
+          },
+          onKeyUp: (event) => {
+            if (event.key === ' ' || event.key === 'Enter') event.stopPropagation();
+          },
+        }}
+      >
+        {bounded && (
+          <RangeRail
+            value={value}
+            min={min}
+            max={max}
+            referenceValue={0}
+            label={t('{{name}} control', { name: actuator.name })}
+            onBegin={onBegin}
+            onCommit={onCommit}
+            onChange={(next) => onChange(actuator.id, next)}
+          />
+        )}
+        {open && (
+          <div className="actuator-summary actuator-control-actions">
+            <Button
+              icon="joint"
+              disabled={!actuator.jointId}
+              onClick={() => actuator.jointId && onSelect(actuator.jointId)}
+            >
+              {t('Inspect joint')}
+            </Button>
+          </div>
+        )}
+      </EntityCard>
+    );
   });
 }
