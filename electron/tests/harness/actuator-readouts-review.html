@@ -15,6 +15,7 @@
       import '/src/workspace.css';
       import '/src/joint-panel.css';
       import { ActuatorControls } from '/src/physics/ActuatorControls.tsx';
+      import { NumericStatusHints } from '/src/NumericStatusHints.tsx';
       import { applySettings, normalizeSettings } from '/src/settings.tsx';
       const actuators = [
         { id: 'red', name: 'red', jointId: 'joint-red', range: [-0.05, 0.05] },
@@ -43,7 +44,7 @@
       function Review() {
         const [, refresh] = useState(0),
           [selectedId, onSelect] = useState(null);
-        return React.createElement(
+        const pane = React.createElement(
           'div',
           {
             id: 'actuator-pane',
@@ -75,6 +76,20 @@
               refresh((version) => version + 1);
             },
           }),
+        );
+        return React.createElement(
+          React.Fragment,
+          null,
+          pane,
+          React.createElement(
+            'footer',
+            { className: 'statusbar', id: 'status-review' },
+            React.createElement(
+              NumericStatusHints,
+              null,
+              React.createElement('span', { className: 'status-hint' }, 'Orbit'),
+            ),
+          ),
         );
       }
       createRoot(document.getElementById('root')).render(React.createElement(Review));

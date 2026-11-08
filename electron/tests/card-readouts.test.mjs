@@ -34,7 +34,7 @@ test('actuator readouts preserve exact numbers, fixed widths, and input transact
   const precise = page.locator('[data-actuator-name="precision_actuator_with_a_long_name"]');
   const numeric = precise.locator('.number-readout');
   const beforeWidth = (await numeric.boundingBox()).width;
-  assert.match(await numeric.getAttribute('data-tooltip'), /^123456789\.12345\n/);
+  assert.equal(await numeric.getAttribute('data-tooltip'), '123456789.12345');
   await numeric.click({ button: 'right' });
   assert.equal(await page.evaluate(() => window.cardReview.copied), '123456789.12345');
   await precise.locator('.range-min').click({ button: 'right' });
@@ -48,10 +48,7 @@ test('actuator readouts preserve exact numbers, fixed widths, and input transact
   await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(() => window.cardReview.values[1]), 0.123456789);
   assert.equal((await numeric.boundingBox()).width, beforeWidth);
-  assert.equal(
-    await precise.locator('.entity-card-heading').getAttribute('aria-expanded'),
-    'false',
-  );
+  assert.equal(await precise.locator('.entity-card-heading').getAttribute('aria-expanded'), null);
   const readout = card.locator('.number-readout');
   await readout.dblclick();
   await readout.locator('input').fill('42');
@@ -66,11 +63,41 @@ test('actuator readouts preserve exact numbers, fixed widths, and input transact
     counts.map((v) => v + 1),
   );
   assert.equal(await page.evaluate(() => window.cardReview.values[0]), 0);
-  assert.equal(await card.locator('.entity-card-heading').getAttribute('aria-expanded'), 'false');
+  assert.equal(await card.locator('.entity-card-heading').getAttribute('aria-expanded'), null);
   assert.equal(
     await page.locator('[data-actuator-name="unbounded_control"] [role="slider"]').count(),
     0,
   );
+});
+
+test('numeric actions use contextual status hints without duplicating joint navigation', async () => {
+  const card = await actuators();
+  const status = page.locator('#status-review');
+  const readout = card.locator('.number-readout');
+  const endpoint = card.locator('.range-min');
+  await card.locator('.entity-card-heading').click();
+  assert.ok(await card.evaluate((el) => el.classList.contains('selected')));
+  assert.equal(await card.getByRole('button', { name: 'View joint' }).count(), 0);
+  await readout.hover();
+  assert.match(await status.innerText(), /Adjust value/);
+  assert.match(await status.innerText(), /Enter value/);
+  assert.match(await status.innerText(), /Copy value/);
+  await endpoint.hover();
+  assert.equal((await status.innerText()).trim(), 'Copy value');
+  assert.equal(await endpoint.getAttribute('data-tooltip'), '-0.05');
+  await endpoint.click({ button: 'right' });
+  await page.waitForFunction(() =>
+    document.querySelector('#status-review').textContent.includes('Copied'),
+  );
+  await page.mouse.move(650, 800);
+  assert.equal((await status.innerText()).trim(), 'Orbit');
+  await readout.dblclick();
+  await page.mouse.move(650, 800);
+  assert.match(await status.innerText(), /Apply/);
+  assert.match(await status.innerText(), /Cancel/);
+  assert.doesNotMatch(await status.innerText(), /Copy value/);
+  await page.keyboard.press('Escape');
+  assert.equal((await status.innerText()).trim(), 'Orbit');
 });
 
 test('readouts have distinct idle, hover and pressed states in both themes; drag remains primary', async () => {
@@ -165,7 +192,6 @@ test('joint and actuator cards fit narrow and wide panes without changing numeri
   }
 });
 
-
 test('joint units follow the value and reference ticks stay fixed during edits', async () => {
   await page.goto(`${base}joint-panel-review.html?reference`);
   const card = page.locator('.joint-entry').filter({
@@ -191,5 +217,8 @@ test('joint units follow the value and reference ticks stay fixed during edits',
   assert.equal(await slide.locator('.number-readout .unit').textContent(), 'm');
   const actuator = await actuators();
   assert.equal(await actuator.locator('.joint-rail-reference').getAttribute('data-value'), '0');
-  assert.equal(await actuator.locator('.joint-rail-reference').evaluate((el) => el.style.left), '50%');
+  assert.equal(
+    await actuator.locator('.joint-rail-reference').evaluate((el) => el.style.left),
+    '50%',
+  );
 });

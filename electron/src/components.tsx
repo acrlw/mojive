@@ -1,4 +1,5 @@
-import { useNumberClipboard } from './numberClipboard';
+import { copyNumber } from './numberClipboard';
+import { useNumericHint } from './numericHints';
 import {
   useEffect,
   useLayoutEffect,
@@ -284,12 +285,22 @@ export function Numeric({
   max?: number;
   integer?: boolean;
 }) {
-  const clipboard = useNumberClipboard();
   const input = useRef<HTMLInputElement>(null),
     frame = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<string | null>(null),
     [dragging, setDragging] = useState(false),
     [pressed, setPressed] = useState(false);
+  const hint = useNumericHint(
+    draft !== null
+      ? 'edit'
+      : disabled
+        ? copyable
+          ? 'copy'
+          : null
+        : copyable
+          ? 'adjust-copy'
+          : 'adjust',
+  );
   const edit = useRef<{
     initial: number;
     current: number;
@@ -375,18 +386,16 @@ export function Numeric({
     <div
       ref={frame}
       tabIndex={-1}
+      {...hint}
       className={`number-field number-${appearance} ${pressed ? 'pressed' : ''} ${dragging ? 'scrubbing' : ''} ${draft !== null ? 'editing' : ''}`}
       data-tooltip={
-        copyable && draft === null
-          ? `${String(value)}${unit ? ` ${unit}` : ''}
-${clipboard.status || t('Right-click to copy exact value')}`
-          : undefined
+        copyable && draft === null ? `${String(value)}${unit ? ` ${unit}` : ''}` : undefined
       }
       onContextMenu={(event) => {
         if (!copyable || draft !== null) return;
         event.preventDefault();
         event.stopPropagation();
-        void clipboard.copy(value);
+        void copyNumber(value);
       }}
       onPointerDown={(event) => {
         if (event.button === 2 && copyable && draft === null) {

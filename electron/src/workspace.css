@@ -471,7 +471,7 @@ body.resizing-y {
   font-size: var(--body-font-size);
 }
 @media (max-width: 1100px) {
-  .status-hint:nth-of-type(5) {
+  .status-hint-zoom {
     display: none;
   }
   .document-title {
@@ -872,7 +872,7 @@ body.resizing-y {
   .render-stats .renderer-name {
     display: none;
   }
-  .status-hint:nth-of-type(5) {
+  .status-hint-zoom {
     display: none;
   }
 }

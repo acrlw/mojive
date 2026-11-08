@@ -144,6 +144,9 @@ try {
     assert.equal(liveGeometry.overflow, false);
     await page.mouse.move(20, 20);
     await page.screenshot({ path: path.join(out, name + '-live-controls.png') });
+    await liveCard.locator('.range-endpoint').first().hover();
+    assert.match(await page.locator('.statusbar').innerText(), /Copy value|复制数值/);
+    await page.screenshot({ path: path.join(out, name + '-numeric-status.png') });
     await liveCard.locator('button:has([data-icon=reset])').click();
     await page.waitForFunction(
       () => document.querySelector('[data-actuator-name="hinge_control"] input')?.value === '0.000',
@@ -205,8 +208,8 @@ try {
     await heading().dblclick();
     assert.equal(await heading().getAttribute('aria-expanded'), 'true');
     await page.waitForTimeout(450);
-    await card().locator('.actuator-summary > button').click();
-    assert.equal(await heading().getAttribute('aria-expanded'), 'true');
+    assert.equal(await card().locator('.actuator-joint').innerText(), 'shoulder');
+    assert.equal(await card().locator('.actuator-summary button').count(), 0);
     const actuatorGeometry = await geometry(card());
     assert.equal(actuatorGeometry.shadow, 'none');
     assert.equal(actuatorGeometry.border, '0px');

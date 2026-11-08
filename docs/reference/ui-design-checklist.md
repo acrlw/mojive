@@ -33,6 +33,10 @@ expose exact values on hover and copy, and enter text editing only on double-cli
 focus. Units occur once per scalar or pose group; compact XYZ badges retain axis colors.
 Reset stays beside the value and disclosure, with an independent hit target. Verify real
 MuJoCo controls as well as descriptor-only URDF cards using `make -C electron actuator-review`.
+Check the shared 8 px inset, 12/4 px outer/inner radii, and 4 px header-to-control gap. Actuator
+titles select the associated joint without a duplicate footer action. Exact-value tooltips do not
+repeat instructions: status hints show copy, drag, or double-click as applicable, yield to text
+editing, and restore viewport guidance after leaving the control.
 
 | Failure pattern | Review criterion | Focused evidence |
 |---|---|---|

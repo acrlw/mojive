@@ -4,13 +4,17 @@
   gap: 12px;
   min-width: 0;
 }
-.actuator-summary > .button {
-  justify-content: flex-start;
+.actuator-joint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  height: 28px;
   flex: 1;
   min-width: 0;
-  border-radius: 4px;
+  color: var(--muted-color);
 }
-.actuator-summary > .button > span:last-child {
+.actuator-joint > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -41,7 +45,4 @@
 .actuator-details dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-.actuator-control-actions {
-  margin-top: 8px;
 }

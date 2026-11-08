@@ -100,7 +100,7 @@ button.entity-card-heading:active:not(:disabled) {
   flex: none;
 }
 .entity-card-content {
-  margin-top: 12px;
+  margin-top: 4px;
   padding: 0;
 }
 

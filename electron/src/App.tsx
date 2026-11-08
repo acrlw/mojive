@@ -55,6 +55,7 @@ import {
   type InputAction,
 } from './input-bindings';
 import { PointerHint } from './InputHints';
+import { NumericStatusHints } from './NumericStatusHints';
 import { InteractionGuide } from './InteractionGuide';
 import { TooltipHost } from './Tooltip';
 import { InfoDialog } from './InfoDialog';
@@ -2801,34 +2802,36 @@ export default function App() {
           {t(busy ? 'Loading' : playing || simulation?.playing ? 'Playing' : 'Ready')}
         </span>
         <span className="status-divider" />
-        <span className="status-hint">
-          <PointerHint
-            chord={settings.inputBindings.pointer.orbit[0]}
-            bindings={settings.inputBindings}
-            size={20}
-          />
-          {t('Orbit')}
-        </span>
-        <span className="status-hint">
-          <PointerHint
-            chord={settings.inputBindings.pointer.pan[0]}
-            bindings={settings.inputBindings}
-            size={20}
-          />
-          {t('Pan')}
-        </span>
-        <span className="status-hint">
-          <PointerHint
-            chord={settings.inputBindings.pointer.zoom[0]}
-            bindings={settings.inputBindings}
-            size={20}
-          />
-          {t('Zoom')}
-        </span>
-        <span className="status-hint">
-          <kbd>{actionLabel(settings.inputBindings, 'focus') || t('Unbound')}</kbd>
-          {t('Focus')}
-        </span>
+        <NumericStatusHints>
+          <span className="status-hint">
+            <PointerHint
+              chord={settings.inputBindings.pointer.orbit[0]}
+              bindings={settings.inputBindings}
+              size={20}
+            />
+            {t('Orbit')}
+          </span>
+          <span className="status-hint">
+            <PointerHint
+              chord={settings.inputBindings.pointer.pan[0]}
+              bindings={settings.inputBindings}
+              size={20}
+            />
+            {t('Pan')}
+          </span>
+          <span className="status-hint status-hint-zoom">
+            <PointerHint
+              chord={settings.inputBindings.pointer.zoom[0]}
+              bindings={settings.inputBindings}
+              size={20}
+            />
+            {t('Zoom')}
+          </span>
+          <span className="status-hint status-hint-focus">
+            <kbd>{actionLabel(settings.inputBindings, 'focus') || t('Unbound')}</kbd>
+            {t('Focus')}
+          </span>
+        </NumericStatusHints>
         <span className="flex-spacer" />
         <div className="render-stats" aria-label={t('Render statistics')}>
           <span className="renderer-name" data-tooltip={stats?.backend ?? 'Three.js · WebGL 2'}>

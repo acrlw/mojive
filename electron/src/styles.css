@@ -1175,7 +1175,7 @@ input[type='color'] {
   .statusbar {
     gap: 8px;
   }
-  .statusbar > span:nth-last-child(3) {
+  .status-hint-focus {
     display: none;
   }
   .timeline-toolbar {

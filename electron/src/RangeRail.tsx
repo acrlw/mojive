@@ -1,20 +1,22 @@
 import type { ComponentProps } from 'react';
 import { ScalarRail } from './ScalarRail';
-import { useNumberClipboard } from './numberClipboard';
-import { t } from './i18n';
+import { copyNumber } from './numberClipboard';
+import { useNumericHint } from './numericHints';
 import './range-rail.css';
 
 function RangeEndpoint({ value, side }: { value: number; side: 'min' | 'max' }) {
-  const { copy, status } = useNumberClipboard();
+  const hint = useNumericHint('copy');
   return (
     <span
       className={`range-endpoint range-${side}`}
+      tabIndex={0}
+      {...hint}
       data-value={String(value)}
-      data-tooltip={`${String(value)}\n${status || t('Right-click to copy exact value')}`}
+      data-tooltip={String(value)}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        void copy(value);
+        void copyNumber(value);
       }}
     >
       {Number(value.toPrecision(12)).toString().replace('-', '−')}

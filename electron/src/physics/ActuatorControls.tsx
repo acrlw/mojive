@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Button, Numeric } from '../components';
 import { EntityCard } from '../EntityCard';
 import { RangeRail } from '../RangeRail';
@@ -19,12 +18,10 @@ export interface ActuatorControlsProps {
 /** Control signals retain backend units; actuator transmission determines their meaning. */
 export function ActuatorControls(props: ActuatorControlsProps) {
   const { actuators, values, selectedId, onSelect, onFocus, onBegin, onCommit, onChange } = props;
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   return actuators.map((actuator, index) => {
     const [min, max] = actuator.range ?? [-Infinity, Infinity];
     const bounded = Number.isFinite(min) && Number.isFinite(max) && max > min;
     const value = values[index];
-    const open = expanded[actuator.id] ?? false;
     return (
       <EntityCard
         key={actuator.id}
@@ -32,8 +29,6 @@ export function ActuatorControls(props: ActuatorControlsProps) {
         icon="control"
         data-actuator-name={actuator.name}
         selected={!!actuator.jointId && actuator.jointId === selectedId}
-        expanded={open}
-        disclosureTitle={t(open ? 'Collapse actuator details' : 'Expand actuator details')}
         controls={
           <>
             <Numeric
@@ -63,7 +58,6 @@ export function ActuatorControls(props: ActuatorControlsProps) {
           onClick: (event) => {
             if (event.detail > 1) return;
             if (actuator.jointId) onSelect(actuator.jointId);
-            setExpanded((previous) => ({ ...previous, [actuator.id]: !open }));
           },
           onDoubleClick: () => {
             if (actuator.jointId) onFocus(actuator.jointId);
@@ -90,17 +84,6 @@ export function ActuatorControls(props: ActuatorControlsProps) {
             onCommit={onCommit}
             onChange={(next) => onChange(actuator.id, next)}
           />
-        )}
-        {open && (
-          <div className="actuator-summary actuator-control-actions">
-            <Button
-              icon="joint"
-              disabled={!actuator.jointId}
-              onClick={() => actuator.jointId && onSelect(actuator.jointId)}
-            >
-              {t('Inspect joint')}
-            </Button>
-          </div>
         )}
       </EntityCard>
     );

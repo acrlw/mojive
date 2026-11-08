@@ -525,6 +525,14 @@ position (`qpos0` for MuJoCo joints, zero for URDF joints and actuator controls)
 slider tick. Do not move it with the current value or clamp an out-of-range reference to an endpoint.
 Compact XYZ readouts retain the same axis-colored badges as expanded fields. Keep reset and
 disclosure as compact header actions, independent of the title's selection/expansion target.
+An actuator title already selects its associated joint; do not repeat that navigation as a footer
+action or add a disclosure solely to expose it. Retain disclosure only for additional metadata.
+Cards use an 8 px surface inset, 12 px outer radius, and derived 4 px inner radius, with a 4 px
+gap between the 28 px heading and the control row. Keep these metrics shared across both panels.
+Numeric tooltips show the exact value only. Show available mouse actions in the contextual status
+bar: secondary-click copy for limits, plus drag and double-click entry for editable values. Restore
+viewport hints on exit; active text editing instead shows Apply/Cancel. Hover must not rerender
+the scene, and clipboard feedback must not outlive its originating context.
 Verify both themes, narrow and wide panels,
 and fractional scale with `make -C electron actuator-review`. These are Electron card defaults;
 native panel layout migration is a separate design change.
