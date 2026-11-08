@@ -47,13 +47,16 @@ class WorkspaceShell:
         self.header_actions = {name: set() for name in LEFT_PANELS}
         self.header_actions.update(
             Scene={"search", "frame", "add"},
-            Control={"reset"},
+            Control={"search", "sort", "reset"},
             Pose={"search", "sort", "copy"},
-            Cameras={"frame"},
+            Cameras={"search", "sort", "add"},
             Layers={"gizmos"},
         )
         self.search_visible = False
         self.control_search_visible = False
+        self.camera_search_visible = False
+        self.camera_query = ""
+        self.camera_sorted = False
         self.header_add_pending = False
         self._numeric_edit = None
         self.pending = None
@@ -63,6 +66,7 @@ class WorkspaceShell:
         self.show_viewport_tab = False
         self.query, self.filter = "", "All"
         self.inspector_tab = "Properties"
+        self.inspector_camera = None
         self.pinned = None
         self.material = 0
         self.timeline_panel = None

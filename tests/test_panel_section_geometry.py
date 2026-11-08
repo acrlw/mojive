@@ -80,9 +80,9 @@ def test_actual_layers_disclosure_hover_has_real_text_and_chevron_padding(appear
     assert row["hovered"] and row["backgroundRect"] == list(row["hit"])
     _inside(row["labelRect"], row["hit"])
     _inside(row["iconRect"], row["hit"])
-    assert row["labelRect"][0] - x == pytest.approx(6 * ui.s)
+    assert row["labelRect"][0] - x == pytest.approx(8 * ui.s)
     icon = row["iconRect"]
-    assert x + w - icon[0] - icon[2] == pytest.approx(6 * ui.s)
+    assert x + w - icon[0] - icon[2] == pytest.approx(8 * ui.s)
     label = row["labelRect"]
     assert icon[0] - label[0] - label[2] == pytest.approx(row["gap"])
     for section in (row for row in runtime.observed if row["kind"] == "section_header"):

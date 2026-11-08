@@ -217,7 +217,7 @@ def test_production_view_update_bounds_wheel_recovers_legacy_state_and_uses_take
 @pytest.mark.parametrize(
     "mode,fraction", (("locked", 0.05), ("locked", 0.15), ("locked", 0.95), ("page", 0.08))
 )
-def test_follow_then_wheel_keeps_the_playhead_fraction_at_the_zoom_limit(mode, fraction):
+def test_follow_and_wheel_respect_zero_before_the_preferred_playhead_fraction(mode, fraction):
     editor = TimelineEditor()
     editor.view_needs_fit = False
     editor.view_model_id = editor.model_id
@@ -255,14 +255,14 @@ def test_follow_then_wheel_keeps_the_playhead_fraction_at_the_zoom_limit(mode, f
 
     keys = (KeyframeInfo(0, "start", 0), KeyframeInfo(1, "end", 0.15))
     _update_timeline_view(editor, ctx, layout, inputs(0), keys, ())
-    assert (editor.playhead - editor.view_start) / (
-        editor.view_end - editor.view_start
-    ) == pytest.approx(fraction)
+    assert editor.view_start == 0
     for wheel in (-100000, 1, -1, 0, -100000):
         before = editor.view_end - editor.view_start
         _update_timeline_view(editor, ctx, layout, inputs(wheel), keys, ())
         span = editor.view_end - editor.view_start
-        assert (editor.playhead - editor.view_start) / span == pytest.approx(fraction)
+        assert editor.view_start >= 0
+        if mode == "locked":
+            assert editor.view_start <= editor.playhead <= editor.view_end
         assert span <= 60 + 1e-9
         if wheel > 0:
             assert span < before

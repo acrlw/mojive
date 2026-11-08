@@ -83,7 +83,8 @@
     "parts": {
       "panel_header": "标题栏",
       "panel_body": "内容区",
-      "section_header": "分节标题"
+      "section_header": "分节标题",
+      "switch": "Visibility switch"
     }
   },
   "Inspector": {

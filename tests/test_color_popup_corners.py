@@ -173,7 +173,7 @@ def test_default_production_color_popup_has_exact_native_insets_and_compact_corn
     previous_rounding = imgui.get_style().popup_rounding
     state.open_popup(entry)
     window, header, done, insets, epsilon = _actual_geometry(state)
-    assert insets == pytest.approx((native_unit(8 * ui.s),) * 4, abs=epsilon)
+    assert insets == pytest.approx((native_unit(4 * ui.s),) * 4, abs=epsilon)
     assert window.window_rounding == pytest.approx(4 * ui.s + insets[0], abs=epsilon)
     container = next(r for r in reversed(state.runtime.observed) if r["kind"] == "color_popup")
     assert container["radiusDerived"] is True and container["radiusAuthored"] is False
@@ -206,7 +206,7 @@ def test_color_entries_keep_numeric_typography_and_hint_text_alignment(productio
     field = next(
         r for r in reversed(ui.design.primitives.observed) if r["key"] == state.key + "-hex"
     )
-    assert field["fontSize"] == 16
+    assert field["fontSize"] == 14
     if entry == "menu":
         hint = next(r for r in state.runtime.observed if r["key"] == "color-cancel-hint")
         assert hint["hit"][0] == pytest.approx(field["content"][0])
@@ -220,7 +220,7 @@ def test_color_entries_keep_numeric_typography_and_hint_text_alignment(productio
             if r["key"] in {state.key + axis for axis in "RGBA"}
         ]
         assert len(channels) >= 4
-        assert all(field["fontSize"] == 16 for field in channels)
+        assert all(field["fontSize"] == 12 for field in channels)
 
 
 @pytest.mark.parametrize("entry", ("field", "inspector", "menu"))

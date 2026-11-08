@@ -226,6 +226,8 @@ def patch(source: Path) -> None:
         .def(nb::init<std::vector<ImVec2>, std::vector<unsigned int>, std::vector<bool>>(),
              nb::arg("positions"), nb::arg("indices"), nb::arg("opaque"))
         .def("draw", &mojive::imguiBridge::DrawMesh::draw,
+             nb::arg("draw_list"), nb::arg("origin"), nb::arg("color"))
+        .def("draw_behind", &mojive::imguiBridge::DrawMesh::drawBehind,
              nb::arg("draw_list"), nb::arg("origin"), nb::arg("color"));
     auto pyClassImDrawList =""",
     )
@@ -236,6 +238,7 @@ def patch(source: Path) -> None:
         """class DrawMesh:
     def __init__(self, positions: List[ImVec2Like], indices: List[int], opaque: List[bool]) -> None: ...
     def draw(self, draw_list: ImDrawList, origin: ImVec2Like, color: ImU32) -> None: ...
+    def draw_behind(self, draw_list: ImDrawList, origin: ImVec2Like, color: ImU32) -> None: ...
 
 class ImDrawList:""",
     )
@@ -315,6 +318,29 @@ class ImDrawCmd:
         '        """Append an outward AA ring around an already solid polygon."""\n'
         "        pass\n"
         "    def add_concave_poly_filled(self, points: List[ImVec2Like], col: ImU32) -> None:",
+    )
+    change(
+        imgui + "imgui.cpp",
+        "        window->DrawList->AddRect(window->Pos, window->Pos + window->Size, border_col, window->WindowRounding, window->WindowBorderSize);",
+        """    {
+        // AddRect adds a half-point inset. Derive the stroke centerline from the
+        // filled surface so its outer contour does not expose a background halo.
+        const float inset = border_size * 0.5f;
+        const ImVec2 offset(inset - 0.5f, inset - 0.5f);
+        window->DrawList->AddRect(window->Pos + offset, window->Pos + window->Size - offset, border_col, ImMax(0.0f, window->WindowRounding - inset), border_size);
+    }""",
+    )
+    change(
+        imgui + "imgui_draw.cpp",
+        """        PathArcToFast(ImVec2(a.x + rounding_tl, a.y + rounding_tl), rounding_tl, 6, 9);
+        PathArcToFast(ImVec2(b.x - rounding_tr, a.y + rounding_tr), rounding_tr, 9, 12);
+        PathArcToFast(ImVec2(b.x - rounding_br, b.y - rounding_br), rounding_br, 0, 3);
+        PathArcToFast(ImVec2(a.x + rounding_bl, b.y - rounding_bl), rounding_bl, 3, 6);""",
+        """        // Honor the error budget beyond the fixed fast-arc lookup table as well.
+        PathArcTo(ImVec2(a.x + rounding_tl, a.y + rounding_tl), rounding_tl, IM_PI, IM_PI * 1.5f);
+        PathArcTo(ImVec2(b.x - rounding_tr, a.y + rounding_tr), rounding_tr, IM_PI * 1.5f, IM_PI * 2.0f);
+        PathArcTo(ImVec2(b.x - rounding_br, b.y - rounding_br), rounding_br, 0.0f, IM_PI * 0.5f);
+        PathArcTo(ImVec2(a.x + rounding_bl, b.y - rounding_bl), rounding_bl, IM_PI * 0.5f, IM_PI);""",
     )
     # Keep native resize input and dock splitter colors, without painting a
     # filled corner wedge across the window's nested content inset.

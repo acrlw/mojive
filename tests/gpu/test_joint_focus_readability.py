@@ -5,17 +5,147 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from imgui_bundle import imgui
 from PIL import Image
 
 from mojive import commands as cmd
 from mojive.app.composition import build_workspace
 from mojive.config import LayoutConfig, ViewerConfig
-from mojive.interaction.gizmo import screen_polygon_distance
+from mojive.interaction.gizmo import (
+    RING_RADIUS,
+    SIZE_PT,
+    GizmoHandle,
+    project,
+    screen_polygon_distance,
+)
 from mojive.scene.assets import resolve
+from mojive.tools.native_ui_review import _NativeInput
 from mojive.types import CameraView
 from mojive.ui.gizmo import JOINT_RANGE_WIDTH_PT, _basis_from_z
+from mojive.ui.gizmo.projection import _RotationDialProjector
+from mojive.ui.gizmo.state import joint_slide_arrow_targets
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
+
+
+@pytest.mark.parametrize("orthographic", [False, True])
+@pytest.mark.parametrize("joint_name", ("01_revolute_y", "02_prismatic_x"))
+def test_joint_tick_projection_during_shift_drag_and_cancel(
+    tmp_path, monkeypatch, backend_name, orthographic, joint_name
+):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1.25")
+    output = Path("output/joint-tick-perspective") / backend_name
+    output.mkdir(parents=True, exist_ok=True)
+    projection = "orthographic" if orthographic else "perspective"
+    with (
+        build_workspace(
+            resolve("joint_gizmo"),
+            paused=True,
+            vsync=False,
+            show_window=False,
+            width=1400,
+            height=900,
+            config=ViewerConfig(layout=LayoutConfig(persistence=False)),
+        ) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        joint = next(j for j in viewer.session.joints if j.name == joint_name)
+        node = next(n for n in viewer.session.nodes if n.joint_index == joint.joint_id)
+        assert viewer.session.submit(cmd.SelectNode(node.node_id))
+        viewer.set_gizmo_mode("rotate")
+        inputs.sync(10)
+        gizmo = viewer.app.gizmo
+        origin, basis = gizmo._frame.position.copy(), gizmo._frame.rotation.copy()
+        viewer.set_camera(
+            CameraView(
+                eye=origin + (basis[:, 0] * 0.8 + basis[:, 2] * 0.6) * 0.8,
+                target=origin.copy(),
+                up=basis[:, 1],
+                orthographic=orthographic,
+                ortho_height=0.8,
+            )
+        )
+        inputs.sync()
+        view, rect = viewer.app._camera_view(), viewer.app._viewport_rect
+        scale = viewer.window.style_scale
+        dial = _RotationDialProjector(view, rect, origin, basis[:, 2], basis[:, 0], SIZE_PT * scale)
+        center = project(view, (origin,), rect)[0, :2]
+
+        def capture(state):
+            pixels = viewer.capture_array(surface="window")
+            density = viewer.window.pixel_scale
+            radius = 180 * scale
+            box = tuple(
+                round(v * density)
+                for v in (
+                    center[0] - radius,
+                    center[1] - radius,
+                    center[0] + radius,
+                    center[1] + radius,
+                )
+            )
+            Image.fromarray(pixels).crop(box).save(
+                output / f"{joint.type}-{projection}-{state}.png"
+            )
+
+        inputs.move((0, 0))
+        capture("idle")
+        if joint.type == "hinge":
+            for angle in np.linspace(-1.5, 1.5, 32):
+                cursor = dial.points(RING_RADIUS, angle)[0, :2]
+                gizmo.update_hover(viewer.session, view, rect, tuple(cursor), style_scale=scale)
+                if (
+                    gizmo.hovered_handle is GizmoHandle.ROTATE_Z
+                    and gizmo.hovered_joint_limit is None
+                ):
+                    break
+            else:
+                pytest.fail("No visible hinge ring segment can begin the drag")
+            path = [
+                dial.points(RING_RADIUS, angle + delta)[0, :2]
+                for delta in np.linspace(0, np.deg2rad(25), 12)
+            ]
+        else:
+            slide = gizmo._slide_range_projection(
+                view, rect, scale, gizmo._joint_range, origin, basis
+            )
+            assert slide is not None
+            cursor = joint_slide_arrow_targets(slide.current, slide.tangent, scale)[0]
+            path = [cursor + slide.tangent * delta for delta in np.linspace(0, 70 * scale, 12)]
+            gizmo.translation_snap_m = 0.01
+        before = viewer.session.frame.qpos.copy()
+        inputs.move(cursor)
+        inputs.event("add_mouse_button_event", 0, True)
+        assert gizmo.using
+        inputs.event("add_key_event", imgui.Key.left_shift, True)
+        for point in path:
+            inputs.move(point, frames=1)
+        assert gizmo.snapping
+        assert not np.allclose(viewer.session.frame.qpos, before)
+        capture("shift")
+        inputs.escape()
+        inputs.event("add_mouse_button_event", 0, False)
+        inputs.event("add_key_event", imgui.Key.left_shift, False)
+        inputs.sync()
+        assert not gizmo.using
+        np.testing.assert_allclose(viewer.session.frame.qpos, before)
+        assert viewer.session.selected_node.node_id == node.node_id
+        assert not viewer.session.editing and not viewer.session.can_undo
+        # Cancellation consumes the held press; a fresh gesture can commit once.
+        inputs.move(cursor)
+        inputs.event("add_mouse_button_event", 0, True)
+        for point in path:
+            inputs.move(point, frames=1)
+        assert gizmo.using
+        capture("drag")
+        inputs.event("add_mouse_button_event", 0, False)
+        inputs.sync()
+        assert viewer.session.can_undo
+        assert viewer.session.submit(cmd.Undo()).ok
+        inputs.sync()
+        np.testing.assert_allclose(viewer.session.frame.qpos, before)
+        assert not viewer.session.can_undo
 
 
 @pytest.mark.parametrize("scale", [1.0, 1.2])

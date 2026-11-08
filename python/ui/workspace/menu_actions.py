@@ -105,6 +105,8 @@ def dispatch(menu, action):
         webbrowser.open("https://github.com/acrlw/mojive#readme")
     elif action == "play":
         app._toggle_playback()
+    elif action == "simulate":
+        app._toggle_playback(source="simulation")
     elif action == "record":
         app._toggle_state_take_recording()
     elif action == "start":

@@ -194,11 +194,17 @@ def capture_take_editing(viewer, output: Path) -> None:
     assert session.state_take_playing and 10 < panel.editor.playhead < 15
     _save_window_crop(viewer, "Keyframes", output / "gap-playback.png", padding=0)
     assert session.submit(cmd.PauseStateTake())
-    _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
-    _click(
-        viewer,
-        _item_center(viewer, "selectable", viewer.app.localizer.text("New Take") + "##new-take"),
-    )
+    workspace = getattr(viewer.app, "workspace", None)
+    if workspace is not None:
+        _click(viewer, _item_center(viewer, "invisible_button", "timeline-new-take"))
+    else:
+        _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
+        _click(
+            viewer,
+            _item_center(
+                viewer, "selectable", viewer.app.localizer.text("New Take") + "##new-take"
+            ),
+        )
     second_id = session.active_state_take_id
     _click(viewer, _item_center(viewer, "invisible_button", "##take-record"))
     for _ in range(8):
@@ -540,22 +546,44 @@ def capture_instability_recovery(viewer, output: Path) -> None:
         viewer.sync()
     assert not session.state_take_times
     assert tuple(session.keyframes) == keys
-    _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
-    _click(
-        viewer,
-        _item_center(viewer, "selectable", viewer.app.localizer.text("New Take") + "##new-take"),
-    )
+    workspace = getattr(viewer.app, "workspace", None)
+    if workspace is not None:
+        _click(viewer, _item_center(viewer, "invisible_button", "timeline-new-take"))
+    else:
+        _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
+        _click(
+            viewer,
+            _item_center(
+                viewer, "selectable", viewer.app.localizer.text("New Take") + "##new-take"
+            ),
+        )
     assert session.active_state_take_id != first_id
     _click(viewer, _item_center(viewer, "invisible_button", "##take-record"))
     for _ in range(4):
         viewer.sync()
     _click(viewer, _item_center(viewer, "invisible_button", "##take-record"))
     assert session.state_take_times
-    _click(viewer, _item_center(viewer, "begin_combo", "##timeline-take"))
-    _click(viewer, _item_center(viewer, "invisible_button", f"##remove-take-{first_id}"))
+    take_selector = "timeline-take" if workspace is not None else "##timeline-take"
+    _click(viewer, _item_center(viewer, "begin_combo", take_selector))
+    if workspace is not None:
+
+        def click_hit(key):
+            _click(viewer, _item_center(viewer, "invisible_button", key))
+
+        click_hit(f"timeline-take-choice-{first_id}")
+        assert session.active_state_take_id == first_id
+        _click(viewer, _item_center(viewer, "begin_combo", take_selector))
+        click_hit(f"timeline-take-choice-{first_id}-remove")
+        imgui.get_io().add_key_event(imgui.Key.escape, True)
+        viewer.sync()
+        imgui.get_io().add_key_event(imgui.Key.escape, False)
+        viewer.sync()
+    else:
+        _click(viewer, _item_center(viewer, "invisible_button", f"##remove-take-{first_id}"))
     assert len(session.state_takes) == 1
     for _ in range(3):
         viewer.sync()
+    _click(viewer, _item_center(viewer, "begin_combo", take_selector))
     _save_active_popup_crop(viewer, output / "recovered-new-take.png", padding=3)
 
 

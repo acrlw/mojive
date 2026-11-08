@@ -261,6 +261,28 @@ def native_draw():
     imgui.destroy_context(context)
 
 
+@pytest.mark.parametrize("density", (1, 1.5, 2, 3))
+@pytest.mark.parametrize("radius", (8, 10, 24, 30, 60, 120))
+def test_native_rectangle_arcs_respect_physical_chord_error(native_draw, density, radius):
+    from imgui_bundle import imgui
+
+    shared = imgui.get_draw_list_shared_data()
+    shared.set_circle_tessellation_max_error(0.125 / density)
+    native_draw._dl.flags = 0  # Read the actual contour, independently of the AA fringe.
+    native_draw._dl.add_rect_filled((0, 0), (400, 300), 0xFFFFFFFF, radius)
+    quarter = np.array(
+        [
+            (v.pos.x, v.pos.y)
+            for v in native_draw._dl.vtx_buffer
+            if v.pos.x >= 400 - radius - 1e-4 and v.pos.y <= radius + 1e-4
+        ]
+    )
+    midpoints = (quarter[:-1] + quarter[1:]) / 2
+    error = radius - np.linalg.norm(midpoints - (400 - radius, radius), axis=1)
+    assert len(error) > 1
+    assert error.max() * density <= 0.125 + 1e-4
+
+
 @pytest.mark.parametrize(
     "name", ("tool-rotate", "tool-snap", "key-next", "key-follow-locked", "status-info")
 )
@@ -904,3 +926,22 @@ def test_floating_shadow_reuses_native_geometry_when_moved(native_draw):
         assert len(native_draw._dl.cmd_buffer) == 1
     finally:
         _shadow_meshes.cache_clear()
+
+
+@pytest.mark.parametrize("split", (False, True))
+def test_retained_underlay_precedes_existing_geometry_and_preserves_next_draw(native_draw, split):
+    from imgui_bundle import imgui
+
+    draw = native_draw._dl
+    mesh = imgui.DrawMesh([(0, 0), (10, 0), (0, 10)], [0, 1, 2], [True] * 3)
+    if split:
+        draw.channels_split(2)
+        draw.channels_set_current(1)
+    mesh.draw(draw, (0, 0), 0xFF000001)
+    mesh.draw_behind(draw, (0, 0), 0xFF000002)
+    mesh.draw(draw, (0, 0), 0xFF000003)
+    if split:
+        draw.channels_merge()
+    inks = [draw.vtx_buffer[index].col for index in draw.idx_buffer]
+    assert inks == [0xFF000002] * 3 + [0xFF000001] * 3 + [0xFF000003] * 3
+    assert sum(cmd.elem_count for cmd in draw.cmd_buffer) == len(draw.idx_buffer)

@@ -7567,7 +7567,13 @@ static void ImGui::RenderWindowOuterBorders(ImGuiWindow* window)
     const float border_size = window->WindowBorderSize;
     const ImU32 border_col = GetColorU32(ImGuiCol_Border);
     if (border_size > 0.0f && (window->Flags & ImGuiWindowFlags_NoBackground) == 0)
-        window->DrawList->AddRect(window->Pos, window->Pos + window->Size, border_col, window->WindowRounding, window->WindowBorderSize);
+    {
+        // AddRect adds a half-point inset. Derive the stroke centerline from the
+        // filled surface so its outer contour does not expose a background halo.
+        const float inset = border_size * 0.5f;
+        const ImVec2 offset(inset - 0.5f, inset - 0.5f);
+        window->DrawList->AddRect(window->Pos + offset, window->Pos + window->Size - offset, border_col, ImMax(0.0f, window->WindowRounding - inset), border_size);
+    }
     else if (border_size > 0.0f)
     {
         if (window->ChildFlags & ImGuiChildFlags_ResizeX) // Similar code as 'resize_border_mask' computation in UpdateWindowManualResize() but we specifically only always draw explicit child resize border.

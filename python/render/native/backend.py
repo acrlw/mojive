@@ -247,6 +247,7 @@ class NativeBackend:
         self._flags = dict.fromkeys(
             (
                 RenderFlag.STATIC,
+                RenderFlag.SCENE_GEOMETRY,
                 RenderFlag.SKIN,
                 RenderFlag.FLEXSKIN,
                 RenderFlag.FLEXEDGE,
@@ -811,6 +812,7 @@ class NativeBackend:
         if self._source is not None:
             self._builder.set_visual_options(
                 static=self.get_flag(RenderFlag.STATIC),
+                scene_geometry=self.get_flag(RenderFlag.SCENE_GEOMETRY),
                 skin=self.get_flag(RenderFlag.SKIN),
                 flex_face=self.get_flag(RenderFlag.FLEXFACE),
                 flex_skin=self.get_flag(RenderFlag.FLEXSKIN),

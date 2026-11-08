@@ -20,7 +20,7 @@ from mojive.ui.workspace.window_chrome import draw_floating_shadow, surface_ink
 @independent_corner_scope()
 def color_popup_geometry(ui):
     style = ui.component_style("color_editor")
-    padding = native_edges(style, "padding", ui.s, (8, 8, 8, 8))
+    padding = native_edges(style, "padding", ui.s, (4, 4, 4, 4))
     heights = [28 * ui.s]
     for key, label, icon in (("color-popup-done", "Done", None), ("color-popup-copy", "", "copy")):
         size = control_size(ui, key, 80 if label else 28, 28, label=label, icon=icon)
@@ -554,6 +554,7 @@ class ColorEditor:
                     flags=imgui.InputTextFlags_.enter_returns_true
                     | imgui.InputTextFlags_.auto_select_all,
                     mono=True,
+                    parts=("input_text", "input_number"),
                 )
             submitted |= imgui.is_item_deactivated_after_edit()
             lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()

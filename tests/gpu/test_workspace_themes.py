@@ -146,19 +146,9 @@ def test_light_button_hierarchy(backend_name, monkeypatch, tmp_path, scale):
         inspect("toolbar-search", "header-Scene-search", "ghost")
         node = next(n for n in session.nodes if n.name == "01_revolute_anchor")
         session.submit(cmd.SelectNode(node.node_id))
-        w.activate("Assets")
-        inputs.sync(5)
-        inspect("apply-material", "apply-material", "primary")
-        assert session.submit(cmd.Select(0)).ok
-        inputs.sync()
-        disabled = save("apply-material-disabled", "apply-material")
-        assert not disabled["enabled"]
-        inputs.click("apply-material")
-        assert session.selected_node is None
-        session.submit(cmd.SelectNode(node.node_id))
         w.activate("Camera")
         inputs.sync(5)
-        inspect("camera-frame", "camera-frame", "secondary")
+        inspect("camera-frame", "camera-frame", "ghost")
 
         w.activate("Scene")
         w.inspector_tab = "Material"
@@ -175,6 +165,9 @@ def test_light_button_hierarchy(backend_name, monkeypatch, tmp_path, scale):
         with model_edit_scope(session, app._intercept_model_edit):
             app._add_model_primitive("capsule", "capsule")
         inputs.sync(3)
+        # Image compression can outlast a transient notice's normal lifetime.
+        status = app.output._status
+        app.output._status = replace(status, expires_at=None)
         inspect("pending-apply", "apply-model-edits", "primary")
         inspect("pending-discard", "discard-model-edits", "secondary")
         inspect("notice-undo", "notice-undo", "secondary")
@@ -689,13 +682,10 @@ def test_theme_overlays_and_projection_transition(backend_name, monkeypatch, tmp
             inputs.move(((x0 + x1) / 2, (y0 + y1) / 2), frames=45)
             save("status-tooltip")
 
-            workspace.activate("Assets")
+            workspace.activate("Timeline")
             inputs.sync()
-            if "##asset-type" not in ui.hits:
-                inputs.click("section-" + app.localizer.text("Model assets"))
-            assert "##asset-type" in ui.hits, sorted(ui.hits)
-            _reveal(inputs, "##asset-type", "Panel content")
-            inputs.click("##asset-type")
+            inputs.click("timeline-new-take")
+            inputs.click("timeline-take")
             save("dropdown")
             inputs.escape()
             node = next(n for n in session.nodes if n.name == "geom1")
@@ -736,7 +726,9 @@ def test_theme_overlays_and_projection_transition(backend_name, monkeypatch, tmp
                 assert observed["rail_theme"] is ui.control_theme()
                 label = next(item for item in inputs.emitted if item["text"] == gizmo.value_label)
                 style = ui.component_style("input_number")
-                assert label["fontPixels"] == pytest.approx(style.get("fontSize", 16) * scale)
+                assert label["fontPixels"] == pytest.approx(
+                    round(style.get("fontSize", 16) * scale)
+                )
                 assert label["color"] == pytest.approx(tuple(v / 255 for v in ui.palette("text")))
                 save(f"{name}-drag")
                 density = imgui.get_io().display_framebuffer_scale

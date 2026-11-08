@@ -160,31 +160,21 @@ class Menus:
 
     @part_scope("menu_bar")
     def bar_button(self, name, position, frame):
-        # Match BeginMenu's menu-set hover exception without granting the rest
-        # of the application input through an open popup.
-        imgui.push_item_flag(
-            imgui.internal.ItemFlagsPrivate_.no_window_hoverable_check, self._bar_menu_open
+        from .popup_style import menu_trigger
+
+        clicked = menu_trigger(
+            self.ui,
+            "menu-" + name,
+            position.x,
+            position.y,
+            *frame,
+            popup=name,
+            menu_set_open=self._bar_menu_open,
+            label=name,
+            align="center",
+            width_limit=frame[0] * self.s,
         )
-        try:
-            clicked = self.ui.button(
-                "menu-" + name,
-                position.x,
-                position.y,
-                *frame,
-                label=name,
-                active=imgui.is_popup_open(name),
-                align="center",
-                width_limit=frame[0] * self.s,
-            )
-            hovered = imgui.is_item_hovered()
-        finally:
-            imgui.pop_item_flag()
-        if clicked and imgui.is_popup_open(name):
-            imgui.internal.close_popup_to_level(0, True)
-            self._bar_menu_open = False
-            clicked = False
-        elif self._bar_menu_open and hovered and not imgui.is_popup_open(name):
-            imgui.open_popup(name)
+        self._bar_menu_open = any(imgui.is_popup_open(menu) for menu in (*TOP_MENUS, "More"))
         self.menu_rects[name] = self.ui.hits["menu-" + name]
         return clicked
 
@@ -365,7 +355,18 @@ class Menus:
             self._last_row_bottom = previous_bottom
             self._local_rows, self._local_measurements = previous_rows, previous_measurements
 
-    def item(self, row, path, record, *, dispatch=True, key=None, width=None, minimum_height=0):
+    def item(
+        self,
+        row,
+        path,
+        record,
+        *,
+        dispatch=True,
+        key=None,
+        width=None,
+        minimum_height=0,
+        on_remove=None,
+    ):
         from mojive.ui.workspace.menu_rows import advance_menu_row, paint_menu_row
 
         self._begin_local_row()
@@ -390,6 +391,7 @@ class Menus:
             minimum_height=minimum_height,
             part="select_option" if getattr(self, "_choice_rows", False) else "menu_item",
             columns=getattr(self, "_columns", None),
+            removable=on_remove is not None,
         )
         if self._local_measurements is not None:
             self._local_measurements.append(result.minimum_width)
@@ -405,6 +407,8 @@ class Menus:
             self.ui, result, part="select_popup" if getattr(self, "_choice_rows", False) else "menu"
         )
         self._last_row_bottom = result.box.outer.bottom
+        if result.removed:
+            on_remove()
         return result.activated
 
     def local_separator(self):
@@ -478,6 +482,7 @@ class Menus:
         width=None,
         minimum_height=0,
         checkable=False,
+        on_remove=None,
     ):
         """Return native item signals without routing an application command."""
         path = getattr(self, "_local_path", None) or (
@@ -499,6 +504,7 @@ class Menus:
             key=key,
             width=width,
             minimum_height=minimum_height,
+            on_remove=on_remove,
         )
         return clicked, bool(checked) != clicked
 

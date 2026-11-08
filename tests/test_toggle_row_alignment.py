@@ -10,7 +10,47 @@ from mojive.design.groups import group_scope
 from mojive.design.native.geometry import Rect
 from mojive.ui.workspace.property_style import property_toggle, switch_form_layout
 from mojive.ui.workspace.scene_panels import layers_panel
+from mojive.ui.workspace.section_columns import section_column
 from tests.test_component_appearance import appearance as appearance
+
+
+def test_property_table_keeps_switch_padding_visible_and_clickable(appearance):
+    ui, runtime, _update, frame = appearance
+    runtime.observe_components = True
+    value = [False]
+
+    def draw():
+        ui.design.begin_frame()
+        imgui.set_cursor_screen_pos((40 * ui.s, 40 * ui.s))
+        with section_column(ui):
+            assert imgui.begin_table(
+                "switch-properties",
+                1,
+                imgui.TableFlags_.no_pad_inner_x | imgui.TableFlags_.no_pad_outer_x,
+            )
+            imgui.table_next_row()
+            imgui.table_next_column()
+            window = imgui.internal.get_current_window()
+            clip = (window.clip_rect.min.x, window.clip_rect.max.x)
+            value[0] = property_toggle(ui, "padded-switch", "Enabled", value[0])
+            assert (window.clip_rect.min.x, window.clip_rect.max.x) == clip
+            imgui.end_table()
+        return next(row for row in ui.design.primitives.observed if row["key"] == "padded-switch")
+
+    for _ in range(3):
+        row = frame(draw)
+    x, y, _width, height = ui.hits["padded-switch"]
+    label_x = row["labelRect"][0]
+    assert label_x - x == pytest.approx(8 * ui.s)
+    io = imgui.get_io()
+    # The inset belongs to the row, even outside the table's text-column clip.
+    io.add_mouse_pos_event(x + 2 * ui.s, y + height / 2)
+    frame(draw)
+    io.add_mouse_button_event(0, True)
+    frame(draw)
+    io.add_mouse_button_event(0, False)
+    frame(draw)
+    assert value[0]
 
 
 @pytest.mark.parametrize("width", (150, 420))
@@ -62,13 +102,12 @@ def test_real_rows_align_switches_and_preserve_label_clicks(appearance, width, c
         assert h == pytest.approx((28 if custom else 24) * ui.s)
         track_x = [vx for vx, vy, _color in vertices[index] if y <= vy <= y + h]
         assert track_x and right - ui.s <= max(track_x) <= right + ui.s
-        if row["textPresent"]:
-            lx, ly, lw, lh = row["labelRect"]
+        lx, ly, lw, lh = row["labelRect"]
+        if ly + lh > y:
             assert lx + lw <= x - row["gap"] + 1e-4
             assert ly + lh >= y
             target = (lx + min(lw / 2, 20 * ui.s), ly + lh / 2)
         else:
-            lx, ly, lw, lh = ui.hits[f"row-{index}-label-text"]
             assert ly + lh <= y
             target = (lx + min(lw / 2, 20 * ui.s), ly + lh / 2)
         io = imgui.get_io()
@@ -180,8 +219,8 @@ def test_wrapped_switch_row_retains_its_description_tooltip(appearance, monkeypa
         return ui.design.primitives.observed[-1]
 
     row = frame(draw)
-    assert not row["textPresent"]
-    x, y, w, h = ui.hits["wrapped-label-text"] if target == "label" else row["switchRect"]
+    assert row["textPresent"]
+    x, y, w, h = row["labelRect"] if target == "label" else row["switchRect"]
     io = imgui.get_io()
     io.delta_time = 1
     io.add_mouse_pos_event(x + w / 2, y + h / 2)

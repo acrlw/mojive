@@ -3,6 +3,16 @@
 from mojive.ui.localization import Language
 
 _ZH_CN = {
+    "Recorded playback speed": "录制回放速度",
+    "Scene Camera": "场景相机",
+    "Search resources": "搜索资源",
+    "No matching resources": "没有匹配的资源",
+    "No file resources in this scene": "当前场景没有文件资源",
+    "Create camera from view": "从当前视图创建相机",
+    "Run simulation": "运行仿真",
+    "Reset simulation": "重置仿真",
+    "Physics settings...": "物理设置…",
+    "Mass and inertia": "质量与惯量",
     "Interaction guide": "交互指南",
     "Drag an empty area": "拖动空白处",
     "Middle mouse drag": "按中键拖动",
@@ -19,6 +29,7 @@ _ZH_CN = {
     "Render Backend": "渲染后端",
     "Passes": "渲染阶段",
     "Removed keyframe": "已删除关键帧",
+    "Removed take": "已删除片段",
 }
 
 _ZH_PREFIXES = (

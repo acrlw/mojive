@@ -173,8 +173,8 @@ row heights, gaps and separators together before allocating the window. Do not p
 rounding remainder into one edge. Adjacent nested corners share one native geometry budget:
 `inner_radius = max(0, outer_radius - actual_inset)`. The parent corner constrains its local
 children without mutating generic control styles. Uniform corner insets are resolved before
-radii; do not independently round the two radii. At scale 1, ordinary floats and form/color
-popups use a 14-point outer corner, 8-point inset and 6-point control corner. Timeline and
+radii; do not independently round the two radii. At scale 1, temporary non-modal popups use
+the menu's 8-point outer corner, 4-point inset and 4-point control corner. Timeline and
 Settings use a 14-point host, 6-point inset, 8-point body, 4-point inset and 4-point contained
 controls. Square corners remain square when an offset consumes the radius; spacing is retained. The navigation
 rail's OS-facing radius uses native window points, including authored fractional values,

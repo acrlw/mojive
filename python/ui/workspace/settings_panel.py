@@ -18,24 +18,12 @@ from mojive.ui.workspace.widgets import NumericEditState
 
 CATEGORIES = ("General", "Camera", "Interaction", "Rendering", "Recording", "MuJoCo Visuals")
 CATEGORY_ICONS = ("general", "camera", "mouse", "shading", "video", "mujoco-visuals")
-_CHECKBOX_PROPERTIES = (
-    "Inspector",
-    "Copy to clipboard",
-    "Run simulation when recording starts",
-    "Movable capsules",
-    "Keep mode/unit",
-    "Camera & light icons",
-    "Selected frustum / light range",
-    "Show contact points",
-    "Use model color",
-)
 
 
 class WorkspaceSettings(SettingsPanel):
     def __init__(self, workspace):
         super().__init__()
         self.workspace = workspace
-        self._checkbox_labels = frozenset()
         self.fields = NativePropertyPresentation(workspace.ui, prefix="settings", fit_labels=True)
         self.choices = ChoicePopup(workspace.ui)
         self._number_origin = None
@@ -103,6 +91,10 @@ class WorkspaceSettings(SettingsPanel):
     def _checkbox(self, key, value, theme=None):
         return self.fields.checkbox(key, value, theme)
 
+    def _toggle_property(self, key, label, value, theme=None):
+        self._control_padding()
+        return self.fields.toggle_property(key, label, value)
+
     def _button(self, label):
         return self.fields.button(label)
 
@@ -110,8 +102,6 @@ class WorkspaceSettings(SettingsPanel):
         return self.fields.segmented(key, labels, index, theme=theme, icons=icons)
 
     def _property(self, label, *, control_part="input_number"):
-        if control_part == "input_number" and label in self._checkbox_labels:
-            control_part = "checkbox"
         self._control_padding()
         self.fields.row(label, control_part=control_part)
         if control_part == "checkbox":
@@ -386,10 +376,8 @@ class WorkspaceSettings(SettingsPanel):
                 workspace.collapse_bottom()
             else:
                 workspace.activate(chosen)
-        self._property(ctx.tr("Inspector"), control_part="checkbox")
-        self._control_padding(checkbox=True)
-        changed, opened = self._checkbox(
-            "##settings_inspector", workspace.open["Inspector"], ctx.theme
+        changed, opened = self._toggle_property(
+            "##settings_inspector", ctx.tr("Inspector"), workspace.open["Inspector"], ctx.theme
         )
         self._record_control("settings-inspector")
         if changed:

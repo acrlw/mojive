@@ -76,6 +76,12 @@ def test_svg_diagnostics_have_distinct_frames_and_open_marker_surrounds():
         assert any(signed_polygon_area(path) < 0 for path in icon.shapes[0].contours)
 
 
+@pytest.mark.parametrize("button", ("left", "right", "wheel"))
+def test_mouse_export_retains_the_lighter_canonical_antialias_budget(button):
+    icon = parse_svg(export_icon("status-mouse-" + button))
+    assert all(shape.fringe_width == 0.5 for shape in icon.shapes)
+
+
 @pytest.mark.parametrize("name", ("tool-scale", "tool-snap"))
 def test_tool_exports_keep_canonical_placement_without_per_icon_fitting(name):
     icon = parse_svg(export_icon(name))

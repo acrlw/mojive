@@ -8,11 +8,11 @@ from dataclasses import dataclass
 
 from imgui_bundle import imgui
 
+from mojive import commands as cmd
 from mojive.design.native.geometry import Rect, part_scope
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.keyframe_editor.controls import _format_tick
-from mojive.ui.keyframe_editor.toolbar import add_model_keyframe
-from mojive.ui.keyframe_editor.track import TimelineLayout, draw_selection_menu
+from mojive.ui.keyframe_editor.track import TimelineLayout
 from mojive.ui.theme import with_alpha
 from mojive.ui.timeline import (
     nearest_take_frame,
@@ -21,10 +21,9 @@ from mojive.ui.timeline import (
     timeline_time_to_x,
     timeline_x_to_time,
 )
-from mojive.ui.workspace.component_layout import control_frame_size
 from mojive.ui.workspace.design import CONTROL_RADIUS, DESIGN
 from mojive.ui.workspace.timeline_header import model_header_layout
-from mojive.ui.workspace.widgets import BODY_SIZE
+from mojive.ui.workspace.widgets import BODY_SIZE, MUTED
 
 
 @dataclass(frozen=True)
@@ -209,39 +208,147 @@ def measure_layout(editor, ctx, origin, available, *, ui=None):
 class NativeTimelineTrack:
     """Paint quiet lanes, named keys and sample coverage without replacing editing."""
 
-    def __init__(self, workspace):
+    def __init__(self, workspace, *, toolbar=None):
         self.workspace = workspace
+        self.toolbar = toolbar
         self.snapshot_source = None
         self.snapshot_by_id = {}
 
     def draw_selection_menu(self, editor, ctx, editable):
-        draw_selection_menu(editor, ctx, editable, menus=self.workspace.menus)
+        menus = self.workspace.menus
+        busy = ctx.session.state_take_recording or ctx.take_video_active
+        take = ctx.session.active_state_take_id >= 0 and bool(ctx.session.state_takes)
+        times = ctx.session.state_take_times
+
+        def submit(command):
+            result = ctx.submit(command)
+            editor.error = "" if result.ok else result.message
+
+        with menus.local_popup("timeline-selection-menu") as opened:
+            if not opened:
+                return
+            if editor.edit_lane in ("model", "take"):
+                if menus.local_item(
+                    "Select all",
+                    key="timeline-select-all",
+                    enabled=bool(times)
+                    if editor.edit_lane == "take"
+                    else bool(editor.keyframe_by_id),
+                )[0]:
+                    if editor.edit_lane == "take":
+                        editor.take_selection = (0, len(times) - 1)
+                    else:
+                        editor.selected_keyframes = set(editor.keyframe_by_id)
+                        editor.selected_id = (
+                            next(iter(editor.selected_keyframes))
+                            if len(editor.selected_keyframes) == 1
+                            else -1
+                        )
+                if menus.local_item(
+                    "Delete selection",
+                    "Delete",
+                    key="timeline-delete-selection",
+                    icon="delete",
+                    enabled=not busy
+                    and bool(editor.selection_count())
+                    and (editable or editor.edit_lane == "take"),
+                )[0]:
+                    editor.delete_selection(ctx, editable)
+            elif editor.selected_snapshot >= 0:
+                if menus.local_item(
+                    "Delete snapshot",
+                    key="timeline-delete-snapshot",
+                    icon="delete",
+                    enabled=not busy,
+                )[0]:
+                    submit(cmd.RemoveSceneSnapshot(editor.selected_snapshot))
+            if editor.edit_lane == "take":
+                selection = editor.take_selection
+                if menus.local_item(
+                    "Loop selected frames",
+                    key="timeline-loop-selection",
+                    icon="loop",
+                    enabled=not busy and selection is not None and selection[0] < selection[1],
+                )[0]:
+                    submit(cmd.SetStateTakeLoop(*selection))
+            if (
+                ctx.session.state_take_range is not None
+                and menus.local_item(
+                    "Clear loop range", key="timeline-clear-loop", enabled=not busy
+                )[0]
+            ):
+                submit(cmd.SetStateTakeRange(None, None))
+            menus.local_separator()
+            if ctx.session.adapter.caps.state_snapshots:
+                if menus.local_item(
+                    "New Take", key="timeline-context-new-take", icon="plus", enabled=not busy
+                )[0]:
+                    submit(cmd.CreateStateTake())
+                if take:
+                    if menus.local_item(
+                        "Clear take",
+                        key="timeline-clear-take",
+                        icon="delete",
+                        enabled=not busy and bool(times),
+                    )[0]:
+                        submit(cmd.ClearStateTake())
+                    if menus.local_item(
+                        "Delete take", key="timeline-delete-take", icon="delete", enabled=not busy
+                    )[0]:
+                        submit(cmd.RemoveStateTake(ctx.session.active_state_take_id))
+            menus.local_separator()
+            if menus.local_item("Fit timeline", key="timeline-context-fit", icon="fit")[0]:
+                editor.view_needs_fit = True
 
     @part_scope("timeline_model_group")
     def draw_header(self, editor, ctx, layout, models, editable, icon_drawer):
         ui, scale = self.workspace.ui, ctx.style_scale
-        box, group = model_header_layout(ui, *layout.lo, layout.channel_width, observe=True)
-        selector, add = group.rectangles
-        ui.hits["timeline-model-group"] = box.outer.tuple()
-        imgui.set_cursor_screen_pos((selector.x, selector.y))
-        imgui.begin_disabled(not models)
-        changed, slot = self._model_selector(editor, ctx, models, selector.width)
-        imgui.end_disabled()
-        model_ids = tuple(model.model_id for model in models)
-        if changed:
-            editor.set_model(model_ids[slot])
-        frame = control_frame_size(ui, "timeline-add-key", add.width, add.height, icon="plus")
-        if ui.button(
-            "timeline-add-key",
-            add.x,
-            add.y,
-            *frame,
-            icon="plus",
-            enabled=editable and editor.model_id >= 0,
-            tooltip="Add Keyframe",
-            width_limit=frame[0] * scale,
-        ):
-            add_model_keyframe(editor, ctx)
+        box = ui.component_box(
+            "timeline_model_group",
+            *layout.lo,
+            layout.channel_width,
+            layout.header_height,
+            key="timeline-model-group",
+            observe=False,
+        )
+        ui.record_component_box("timeline_model_group", box, key="timeline-model-group")
+        model = next((model for model in models if model.model_id == editor.model_id), None)
+        if len(models) > 1:
+            imgui.set_cursor_screen_pos((box.content.x, box.content.y))
+            changed, slot = self._model_selector(editor, ctx, models, box.content.width)
+            if changed:
+                editor.set_model(models[slot].model_id)
+        else:
+            label = model.name if model is not None else ctx.tr("Scene")
+            caption = box.content.inset(8 * scale, 0, 8 * scale, 0)
+            ui.component_text("timeline_ruler", caption, label, MUTED, translate=False)
+            ui.hits["timeline-model"] = box.frame.tuple()
+            ui.hits["timeline-model-caption"] = caption.tuple()
+        if self.toolbar is not None:
+            top = layout.lane_y(1) - 14 * scale
+            right = layout.channel_right - 6 * scale
+            if ui.button(
+                "timeline-new-take",
+                right - 24 * scale,
+                top,
+                24,
+                28,
+                icon="plus",
+                icon_size=18,
+                tooltip="New Take",
+                enabled=not (ctx.session.state_take_recording or ctx.take_video_active),
+            ):
+                result = ctx.submit(cmd.CreateStateTake())
+                editor.error = "" if result.ok else result.message
+            if ctx.session.state_takes:
+                left = layout.lo[0] + 30 * scale
+                self.toolbar._draw_take_selector(
+                    editor,
+                    ctx,
+                    left,
+                    top,
+                    max(1, (right - 28 * scale - left) / scale),
+                )
 
     def _model_selector(self, editor, ctx, models, width):
         ui, menus = self.workspace.ui, self.workspace.menus
@@ -361,7 +468,7 @@ class NativeTimelineTrack:
                     ui.rect(
                         *label_box.frame.tuple(),
                         tuple(round(v * 255) for v in with_alpha(color, 0.09)),
-                        label_style.get("radius", CONTROL_RADIUS),
+                        0,
                     )
                 extent = label_style.get("iconSize", 14) * scale
                 gap = (
@@ -374,7 +481,7 @@ class NativeTimelineTrack:
                 text_rect = Rect(
                     label_box.content.x + extent + gap,
                     label_box.content.y,
-                    max(0, label_box.content.width - extent - gap),
+                    max(0, label_box.content.width - extent - gap - 28 * scale),
                     label_box.content.height,
                 )
                 ui.record_component_box(
@@ -394,21 +501,33 @@ class NativeTimelineTrack:
                     tuple(round(value * 255) for value in color),
                     style=label_style,
                 )
+                if lane != "take" or self.toolbar is None or not ctx.session.state_takes:
+                    ui.component_text(
+                        "lane_label",
+                        text_rect,
+                        label,
+                        tuple(round(v * 255) for v in theme.text),
+                    )
+            if lane != "take":
+                count = len(keyframes) if lane == "model" else len(ctx.session.scene_snapshots)
                 ui.component_text(
-                    "lane_label",
-                    text_rect,
-                    label,
-                    tuple(round(v * 255) for v in theme.text),
+                    "timeline_ruler",
+                    Rect(layout.channel_right - 32 * scale, top, 24 * scale, layout.row_height),
+                    str(count),
+                    MUTED,
+                    mono=True,
+                    align="end",
+                    translate=False,
                 )
             if index:
                 draw.line(
-                    (track_left, top),
+                    (layout.lo[0], top),
                     (layout.hi[0], top),
                     with_alpha(theme.text, 0.045),
                     0.5 * scale,
                 )
         draw.line(
-            (track_left, layout.ruler_bottom),
+            (layout.lo[0], layout.ruler_bottom),
             (layout.hi[0], layout.ruler_bottom),
             with_alpha(theme.text, 0.08),
             0.5 * scale,
@@ -500,6 +619,9 @@ class NativeTimelineTrack:
                     0.5 * scale,
                 )
                 caption = _format_tick(tick, step)
+                if "." not in caption:
+                    caption += ".0"
+                caption += " " + ctx.tr("seconds")
                 ruler = ui.component_style("timeline_ruler")
                 caption_width = ui.measure(
                     caption,

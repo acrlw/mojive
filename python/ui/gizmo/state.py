@@ -264,6 +264,8 @@ class _SlideRangeProjection:
     tangent: np.ndarray
     normal: np.ndarray
     alpha: float
+    lower_tick_scale: float = 1.0
+    upper_tick_scale: float = 1.0
 
 
 @dataclass(frozen=True)

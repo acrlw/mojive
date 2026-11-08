@@ -35,6 +35,7 @@ class RenderFlag(enum.StrEnum):
     CULL_FACE = "cull_face"
 
     CONVEXHULL = "convexhull"
+    SCENE_GEOMETRY = "scene_geometry"
     VISUAL_GEOMETRY = "visual_geometry"
     COLLISION_GEOMETRY = "collision_geometry"
     TEXTURE = "texture"

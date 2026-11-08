@@ -29,7 +29,7 @@ bundled assets. Use `mojive assets --quick` and `mojive backends` to inspect the
 `--enable-render FLAG` is repeatable on `view`, `attach`, `replay-joints`, `canvas`, `capture`, `record`, and `keyframes`.
 Accepted values are `shadow`, `wireframe`, `reflection`, `additive`, `skybox`, `fog`, `haze`,
 `cull_face`, `convexhull`, `texture`, `joint`, `actuator`, `activation`, `camera`, `light`,
-`rangefinder`, `constraint`, `static`, `skin`, `flex_face`, `flex_skin`, `flex_vertex`,
+`rangefinder`, `constraint`, `scene_geometry`, `static`, `skin`, `flex_face`, `flex_skin`, `flex_vertex`,
 `flex_edge`, `contactpoint`, `contactforce`, `contactsplit`, `island`, `autoconnect`, `tendon`,
 `transparent`, `com`, `inertia`, `scaled_inertia`, `body_bvh`, `mesh_bvh`, `outline`, `tonemap`,
 `msaa`, `mesh_lod`, `visual_geometry`, and `collision_geometry`.

@@ -295,7 +295,7 @@ class ViewportOverlayConfig:
 
 @dataclass(frozen=True)
 class ViewportLayers:
-    """Visibility of viewport overlays, shared by viewing, capture, and recording."""
+    """Visibility of scene geometry and editor layers in the viewport."""
 
     viewport_ui: bool = True
     gizmos: bool = True
@@ -305,6 +305,8 @@ class ViewportLayers:
     debug_3d: bool = True
     debug_2d: bool = True
     hidden_debug_layers: tuple[str, ...] = ()
+    geometry: bool = True
+    view_cube: bool = True
 
     @classmethod
     def from_mapping(cls, value: object) -> ViewportLayers:
@@ -321,6 +323,8 @@ class ViewportLayers:
                     "perturbation",
                     "debug_3d",
                     "debug_2d",
+                    "geometry",
+                    "view_cube",
                 )
             },
             hidden_debug_layers=tuple(

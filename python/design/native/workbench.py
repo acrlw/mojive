@@ -86,6 +86,7 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
             "input_text": "设置",
             "checkbox": "设置",
             "input_shell": "相机",
+            "input_number": "相机",
             "badge": "场景",
             "sensor": "传感器",
             "material": "材质库",
@@ -165,7 +166,10 @@ class NativeWorkbench(EditorChrome, EditorControls, EditorPages):
                     workspace.app.camera_preview.set_enabled(True)
                 workspace.activate("Cameras")
         elif area == "相机":
+            from mojive.ui.workspace.camera_panel import select_scene_camera
+
             workspace.activate("Cameras")
+            select_scene_camera(workspace)
         elif area == "姿态":
             self.select_sample_body(
                 workspace, "free_body" if part == "vector_heading" else "hinge_body"

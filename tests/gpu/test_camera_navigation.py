@@ -2,7 +2,6 @@
 
 import json
 import os
-import time
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +13,6 @@ from mojive.tools.keyframe_timeline import show_settings
 from mojive.tools.ui_runtime import (
     _click,
     _item_center,
-    _item_rect,
     _park_cursor,
     _save_window_crop,
 )
@@ -37,25 +35,30 @@ def test_explicit_camera_before_startup_survives_first_sync(tmp_path, monkeypatc
         assert viewer.session.camera.far == view.far
 
 
-def _enter_number(viewer, name, value):
-    point = _item_center(viewer, "drag_float", f"##camera_{name}")
-    io = imgui.get_io()
-    # A new double-click must not become the third/fourth click of the previous edit.
-    time.sleep(io.mouse_double_click_time + 0.01)
-    _click(viewer, point)
-    _click(viewer, point)
-    modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
-    io.add_key_event(modifier, True)
-    io.add_key_event(imgui.Key.a, True)
-    viewer.sync()
-    io.add_key_event(imgui.Key.a, False)
-    io.add_key_event(modifier, False)
-    io.add_input_characters_utf8(str(value))
-    viewer.sync()
-    io.add_key_event(imgui.Key.enter, True)
-    viewer.sync()
-    io.add_key_event(imgui.Key.enter, False)
-    viewer.sync()
+def _enter_number(viewer, name, value, *, key=None):
+    from mojive.tools.native_ui_review import _NativeInput
+
+    with _NativeInput(viewer) as inputs:
+        inputs.sync(4)
+        point = _item_center(viewer, "drag_float", key or f"##camera_{name}")
+        inputs.move(point)
+        inputs.sync(24)
+        for _ in range(2):
+            inputs.event("add_mouse_button_event", 0, True)
+            inputs.event("add_mouse_button_event", 0, False)
+            # Let native text deactivation retire between distinct presses while
+            # retaining the real double-click interval.
+            inputs.sync(2)
+        io = imgui.get_io()
+        modifier = imgui.Key.mod_super if io.config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        inputs.event("add_key_event", modifier, True)
+        inputs.event("add_key_event", imgui.Key.a, True)
+        inputs.event("add_key_event", imgui.Key.a, False)
+        inputs.event("add_key_event", modifier, False)
+        inputs.event("add_input_characters_utf8", str(value))
+        inputs.event("add_key_event", imgui.Key.enter, True)
+        inputs.event("add_key_event", imgui.Key.enter, False)
+        inputs.sync(4)
 
 
 @pytest.mark.parametrize("scale,language", [(1, "en"), (1.5, "zh_CN")])
@@ -104,13 +107,12 @@ def test_navigation_settings_edit_save_restore_and_override(
         camera_window = viewer.panels.get("Camera").name
         imgui.internal.focus_window(imgui.internal.find_window_by_name(camera_window))
         viewer.sync()
-        low, high = _item_rect(viewer, "slider_float", "##camera-distance")
-        # Clicking the existing grab preserves its offset; acquire away from it first.
-        _click(viewer, (low[0] + (high[0] - low[0]) * 0.1, (low[1] + high[1]) * 0.5))
-        _click(viewer, ((low[0] + high[0]) * 0.5, (low[1] + high[1]) * 0.5))
-        assert viewer.app.camera.distance == pytest.approx(
-            np.sqrt(expected.min_distance * expected.max_distance), rel=0.08
-        )
+        ui = viewer.app.workspace.ui
+        x, y, w, h = ui.hits["camera-scene"]
+        _click(viewer, (x + w / 2, y + h / 2))
+        distance = float(np.sqrt(expected.min_distance * expected.max_distance))
+        _enter_number(viewer, "distance", distance, key="##camera-distance-value")
+        assert viewer.app.camera.distance == pytest.approx(distance, rel=0.001)
         _park_cursor(viewer)
         for _ in range(3):
             viewer.sync()

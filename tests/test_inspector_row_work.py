@@ -64,11 +64,9 @@ def test_toggle_rows_only_plan_the_shared_anchor_and_final_switch(appearance, mo
         snapshot = frame(lambda: _paint_row(ui, runtime, presenter, toggle=True, table=table))
     assert snapshot[0] == (False, True)
     assert "effort-value" in snapshot[1]
-    assert len(requests) == (2 if table == "joint_properties_table" else 1)
+    assert len(requests) == 1
     assert requests[-1][1]["field_part"] == "switch"
     assert "field_minimum" in requests[-1][1]
-    if table == "joint_properties_table":
-        assert requests[0][1] == {"axis": True, "minimum": 0}
 
 
 def test_scalar_row_does_not_resolve_or_consume_unrelated_switch_geometry(appearance, monkeypatch):

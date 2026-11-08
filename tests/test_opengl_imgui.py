@@ -121,12 +121,19 @@ def test_frame_prepares_renderer_before_imgui_but_keeps_native_window_optional(
     monkeypatch, has_renderer
 ):
     events = []
+    io = SimpleNamespace(display_framebuffer_scale=(1.0, 1.0))
+    style = SimpleNamespace(circle_tessellation_max_error=0.3)
+
+    def process_inputs():
+        events.append("input")
+        io.display_framebuffer_scale = (2.0, 2.0)
+
     owner = window.Window.__new__(window.Window)
     owner._imgui_context = SimpleNamespace(open_popup_stack=[])
     owner.make_current = lambda: events.append("context")
     owner._refresh_scales = lambda: None
     owner._sync_style_scale = lambda: None
-    owner._input = SimpleNamespace(process_inputs=lambda: events.append("input"))
+    owner._input = SimpleNamespace(process_inputs=process_inputs)
     owner._layout_reset_pending = False
     if has_renderer:
         owner._renderer_new_frame = lambda: events.append("renderer")
@@ -136,11 +143,14 @@ def test_frame_prepares_renderer_before_imgui_but_keeps_native_window_optional(
         "imgui",
         SimpleNamespace(
             set_current_context=lambda _context: None,
+            get_io=lambda: io,
+            get_style=lambda: style,
             new_frame=lambda: events.append("imgui"),
         ),
     )
     owner.begin_frame()
     assert events == ["context", "poll", "input", *(["renderer"] if has_renderer else []), "imgui"]
+    assert style.circle_tessellation_max_error * max(io.display_framebuffer_scale) == 0.125
 
 
 @pytest.mark.parametrize("other_windows", (0, 1))

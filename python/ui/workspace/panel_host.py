@@ -11,6 +11,7 @@ from mojive import commands as cmd
 from mojive.design.groups import group_scope
 from mojive.design.native.geometry import part_scope
 from mojive.design.native.presentation import PANEL_FAMILIES
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.constants import BOTTOM_PANELS, LEFT_PANELS
 from mojive.ui.workspace.design import DESIGN, TITLE_SIZE, current_design, use_design
@@ -23,6 +24,7 @@ from mojive.ui.workspace.window_chrome import (
     fit_native_content_width,
     floating_dock_root,
     native_child_extent,
+    native_chrome,
     native_window_geometry,
     panel_content_corners,
     panel_surface,
@@ -111,6 +113,8 @@ def _panel(workspace, name, ctx):
         wc.dock_node_flags_override_set |= imgui.internal.DockNodeFlagsPrivate_.no_tab_bar
     imgui.set_next_window_class(wc)
     title = ctx.tr(name) + "###" + name if ctx.tr(name) != name else name
+    if name in BOTTOM_PANELS:
+        title = "      " + ctx.tr(name) + "###" + name
     flags = (
         imgui.WindowFlags_.no_title_bar if name in (*LEFT_PANELS, "Inspector", "Settings") else 0
     )
@@ -126,6 +130,7 @@ def _panel(workspace, name, ctx):
     docked = _requested_docked(name, window, dock_request)
     with (
         family,
+        native_chrome(u, "dock_tabs") if name in BOTTOM_PANELS else nullcontext(),
         panel_surface(
             u,
             name=name,
@@ -267,20 +272,30 @@ def _draw_content(workspace, name, ctx, rect):
         x, y, w, h = body.content.tuple()
         imgui.set_cursor_screen_pos((x, y))
         imgui.push_style_var(imgui.StyleVar_.window_padding, (0, 0))
-        # A stable gutter prevents numeric reflow from changing its own
-        # available width when the new row count removes vertical overflow.
-        flags = (
-            imgui.WindowFlags_.always_vertical_scrollbar
-            if name in ("Pose", "Control", "Cameras")
-            else 0
-        )
+        # Keep long card lists stable, placing their narrow scrollbar in the
+        # panel's existing right inset instead of subtracting a second gutter.
+        card_list = name in ("Pose", "Control")
+        gutter = 8 * workspace.s if card_list else 0
+        if card_list:
+            imgui.push_style_var(imgui.StyleVar_.scrollbar_size, gutter)
+            imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, 2 * workspace.s)
         imgui.begin_child(
             "Panel content",
-            (w, max(workspace.s, native_child_extent(y, h))),
-            window_flags=flags | imgui.WindowFlags_.no_background,
+            (w + gutter, max(workspace.s, native_child_extent(y, h))),
+            window_flags=imgui.WindowFlags_.no_background,
         )
-        imgui.pop_style_var()
+        imgui.pop_style_var(3 if card_list else 1)
         viewport_right = fit_native_content_width(imgui.internal.get_current_window())
+        if card_list:
+            # The gutter lives in the panel inset, even when scrolling is not
+            # needed. Keep card widths stable as native scrollbars appear.
+            window = imgui.internal.get_current_window()
+            for native_rect in (
+                window.work_rect,
+                window.parent_work_rect,
+                window.content_region_rect,
+            ):
+                native_rect.max.x = min(native_rect.max.x, x + w)
         p = imgui.get_cursor_screen_pos()
         size = imgui.get_content_region_avail()
         x, y, w, h = p.x, p.y, size.x, size.y
@@ -296,9 +311,7 @@ def _draw_content(workspace, name, ctx, rect):
     }.get(name)
     body_style = u.component_style("panel_body")
     dimensions = replace(current_design(), row_gap=body_style.get("rowGap", DESIGN.row_gap))
-    column_scope = (
-        section_column(u) if name in ("Control", "Assets", "Cameras", "Layers") else nullcontext()
-    )
+    column_scope = section_column(u) if name in ("Assets", "Cameras", "Layers") else nullcontext()
     with (
         use_design(lambda _: dimensions),
         u.component_scope("panel_body"),
@@ -350,7 +363,7 @@ def _draw_content(workspace, name, ctx, rect):
                 scrollY=window.scroll.y,
                 scrollMaxY=window.scroll_max.y,
             )
-        imgui.end_child()
+        end_content_child()
     workspace.app.apply_document_edits()
 
 
@@ -381,7 +394,11 @@ def panel_header(workspace, name, x, y, w):
             ("sort", "sort", "Sort by name"),
             ("copy", "copy", "Copy state"),
         ),
-        "Cameras": (("frame", "frame", "Frame all"),),
+        "Cameras": (
+            ("search", "search", "Search cameras"),
+            ("sort", "sort", "Sort by name"),
+            ("add", "plus", "Create camera from view"),
+        ),
         "Layers": (("gizmos", "move", "Transform handles"),),
     }.get(name, ())
     if name == "Pose" and not hasattr(workspace, "navigation"):
@@ -553,6 +570,10 @@ def panel_header(workspace, name, x, y, w):
 
 
 def header_action_active(workspace, name, key):
+    if name == "Cameras":
+        from .camera_panel import camera_action_active
+
+        return camera_action_active(workspace, key)
     if name == "Pose":
         return workspace.navigation.pose_action_active(key)
     if name == "Control":
@@ -565,6 +586,8 @@ def header_action_active(workspace, name, key):
 
 
 def header_action_enabled(workspace, name, key):
+    if name == "Cameras" and key == "add":
+        return workspace.app.session.adapter.caps.scene_authoring
     if name == "Control":
         from mojive.ui.workspace.scene_panels import control_action_enabled
 
@@ -573,6 +596,11 @@ def header_action_enabled(workspace, name, key):
 
 
 def header_action(workspace, name, key):
+    if name == "Cameras":
+        from .camera_panel import camera_action
+
+        camera_action(workspace, key)
+        return
     if name == "Pose":
         workspace.navigation.pose_action(key)
     elif name == "Control":

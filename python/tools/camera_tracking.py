@@ -40,7 +40,8 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     viewer.session.submit(cmd.SelectNode(node_id))
     for _ in range(5):
         viewer.sync()
-    camera_name = viewer.panels.get("camera").name
+    click(viewer, _item_center(viewer, "button", "camera-scene"))
+    camera_name = "Inspector"
     window = imgui.internal.find_window_by_name(camera_name)
     imgui.internal.focus_window(window)
     # Tracking is below the view/lens groups; exercise it at the same scroll
@@ -60,7 +61,7 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
     viewer.sync()
     click(viewer, _item_center(viewer, "begin_combo", "##tracking-target"))
     node = viewer.session.node(node_id)
-    label = viewer.app.localizer.text("Use selection") + f": {node.name}##track-selected"
+    label = f"{node.name}##tracking-{node_id}"
     click(viewer, _item_center(viewer, "selectable", label))
     assert viewer.tracking_node_id == node_id
     assert viewer.app.camera_tracker.config.axes == "xy"
@@ -72,10 +73,20 @@ def exercise_controls(viewer, node_id: int, output: Path | None = None) -> None:
         _save_window_crop(viewer, camera_name, output / "camera-tracking-xyz.png", padding=0)
     click(viewer, _item_center(viewer, "button", "tracking-axes-0"))
     assert viewer.app.camera_tracker.config.axes == "xy"
-    lo, hi = _item_rect(viewer, "slider_float", "##tracking-smoothing")
-    click(viewer, (lo[0] + (hi[0] - lo[0]) * 0.75, (lo[1] + hi[1]) * 0.5))
-    assert viewer.app.camera_tracker.config.smoothing > 1
+    lo, hi = _item_rect(viewer, "drag_float", "##tracking-smoothing-value", reveal=True)
+    point = ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
     io = imgui.get_io()
+    io.add_mouse_pos_event(*point)
+    viewer.sync()
+    io.add_mouse_button_event(0, True)
+    viewer.sync()
+    io.add_mouse_pos_event(point[0] + 150 * viewer.app.workspace.s, point[1])
+    viewer.sync()
+    io.add_mouse_button_event(0, False)
+    viewer.sync()
+    assert viewer.app.camera_tracker.config.smoothing > 1
+    io.add_mouse_pos_event(*point)
+    viewer.sync()
     io.add_mouse_button_event(1, True)
     viewer.sync()
     io.add_mouse_button_event(1, False)

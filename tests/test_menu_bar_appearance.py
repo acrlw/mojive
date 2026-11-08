@@ -110,7 +110,7 @@ def test_production_menu_titles_use_body_size_and_keep_local_authoring(
             imgui.end()
             imgui.pop_style_var()
             imgui.render()
-        assert ui.component_style("button").get("fontSize") == 12
+        assert ui.component_style("button").get("fontSize") == 14
         assert painted["File"][1] == floor((local_trigger_size or 14) * scale + 0.5)
         assert painted["Menu action"][1] == floor(14 * scale + 0.5)
         assert painted["File"][0] == painted["Menu action"][0]

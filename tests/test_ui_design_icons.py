@@ -444,6 +444,9 @@ def test_status_pointer_family_preserves_canvas_and_overlaps_fills_with_the_shel
         divider = np.asarray(strokes[-1]["points"])[-2:]
         center = 11.5 if button == "left" else 12.5
         assert divider[:, 0] == pytest.approx([center, center])
+        # Attach at the shell centerline so the round cap stays inside its ink.
+        # A short divider leaves acute hole corners whose inward AA strips fold.
+        assert divider[:, 1] == pytest.approx([2, 11])
         # The divider's visible edge belongs to the pressed half and ends at the midline.
         assert center + (0.5 if button == "left" else -0.5) == 12
 

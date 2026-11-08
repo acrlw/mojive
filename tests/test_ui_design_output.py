@@ -103,6 +103,7 @@ def test_multiline_rows_and_auto_scroll_use_the_shared_renderer(monkeypatch):
         set_scroll_here_y=scroll.append,
     )
     monkeypatch.setattr(shared_output, "imgui", gui)
+    monkeypatch.setattr(shared_output, "end_content_child", gui.end_child)
     monkeypatch.setattr(shared_output, "ImguiDraw2D", lambda: None)
     monkeypatch.setattr(shared_output, "text_line_y", lambda _draw, center: center - 7)
     monkeypatch.setattr(panel, "_draw_entry", lambda *args: rows.append(args))

@@ -18,7 +18,7 @@ from tests.test_menu_corner_offsets import _corner_point, _paint_covers
 GROUPS = {
     "toolbox": ("viewport-toolbox", "tool-select", "snap"),
     "viewport_toolbar": ("viewport-toolbar", "projection-button", "viewport-layers"),
-    "transport": ("viewport-transport", "previous", "playback-options"),
+    "transport": ("viewport-transport", "previous", "record"),
     "pending_edits": ("pending-model-edits", "apply-model-edits", "discard-model-edits"),
     "file_receipt": ("file-receipt", "receipt-open-folder", "receipt-copy-path"),
 }
@@ -49,7 +49,7 @@ def _workspace(ui):
         playing=False,
         snap=False,
         space="World",
-        menus=SimpleNamespace(popup=lambda *args: None),
+        menus=SimpleNamespace(popup=lambda *args: None, shading="Solid"),
         activate=lambda name: None,
     )
     app.workspace = workspace
@@ -305,6 +305,8 @@ def test_compact_and_stacked_action_consumers_use_their_actual_adjacent_corner_g
         runtime.observed.clear()
         frame(draw)
     key, first, last = GROUPS[part]
+    if layout == "transport-compact":
+        last = "go-start"
     plate = next(record for record in runtime.observed if record["key"] == key)
     x, y, width, height = plate["hit"]
     inset = max(plate["padding"])

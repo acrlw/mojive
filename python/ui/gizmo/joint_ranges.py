@@ -555,6 +555,8 @@ class _JointRanges:
         tangent = direction / length
         normal = np.array((-tangent[1], tangent[0]))
         offset = normal * JOINT_RANGE_OFFSET_PT * style_scale
+        # Tick lengths share a world size at the current joint position; their
+        # screen-facing transverse direction retains perspective along the rail.
         return _SlideRangeProjection(
             lower + offset,
             current + offset,
@@ -562,6 +564,8 @@ class _JointRanges:
             tangent,
             normal,
             alpha,
+            float(projected[1, 2] / projected[0, 2]),
+            float(projected[1, 2] / projected[2, 2]),
         )
 
     def _draw_slide_range(
@@ -620,7 +624,10 @@ class _JointRanges:
                 (
                     state.lower,
                     _joint_limit_label("MIN", state.lower, "slide"),
-                    (lower - normal * half_tick, lower + normal * half_tick),
+                    (
+                        lower - normal * half_tick * slide.lower_tick_scale,
+                        lower + normal * half_tick * slide.lower_tick_scale,
+                    ),
                     lower,
                     JOINT_LOWER_LIMIT_COLOR,
                     True,
@@ -629,7 +636,10 @@ class _JointRanges:
                 (
                     state.upper,
                     _joint_limit_label("MAX", state.upper, "slide"),
-                    (upper - normal * half_tick, upper + normal * half_tick),
+                    (
+                        upper - normal * half_tick * slide.upper_tick_scale,
+                        upper + normal * half_tick * slide.upper_tick_scale,
+                    ),
                     upper,
                     JOINT_UPPER_LIMIT_COLOR,
                     False,

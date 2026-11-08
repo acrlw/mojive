@@ -145,7 +145,7 @@ def test_keycap_group_padding_does_not_resize_generic_badges_or_telemetry(status
     )
     runtime.update_spec(spec)
     after = frame(measure)
-    assert after[0][0] - before[0][0] == pytest.approx(18 * ui.s)
+    assert after[0][0] - before[0][0] == pytest.approx(22 * ui.s)
     assert after[0][1] - before[0][1] == pytest.approx(8 * ui.s)
     assert after[1:] == before[1:]
 

@@ -87,7 +87,6 @@ def test_owned_children_keep_fields_inside_own_clip_without_ancestor_reflow(
                 panel,
                 SimpleNamespace(tr=str, language="en"),
                 Rect(30 * ui.s, 30 * ui.s, width * ui.s, 240 * ui.s),
-                (),
             )
 
         owner = "Settings/General"

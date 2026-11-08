@@ -35,6 +35,11 @@ class _Playback:
     """Private playback methods of Session; state belongs to its owner."""
 
     @property
+    def state_take_speed(self) -> float:
+        """Return the recorded-take replay multiplier, independent of live simulation."""
+        return self._state_take_speed
+
+    @property
     def state_takes(self) -> tuple[StateTakeInfo, ...]:
         """Return recordings in creation order, including empty takes."""
         return tuple(take.info for take in self._state_takes.values())
@@ -385,7 +390,7 @@ class _Playback:
             offsets[cursor] + self._state_take_elapsed
             if first <= cursor <= last
             else offsets[min(last, max(first, cursor))]
-        ) + dt * self._speed
+        ) + dt * self._state_take_speed
         if looping:
             # Include the last selected frame for one recorded interval, then
             # wrap excess time in one operation even after a long display stall.

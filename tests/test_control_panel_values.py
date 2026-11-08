@@ -78,7 +78,7 @@ def controls(request, monkeypatch, tmp_path):
         text=[],
         fonts={},
         force_edit=False,
-        header=False,
+        header=True,
         workspace=workspace,
     )
     original_rail, original_text = ui.rail, ui.component_text
@@ -147,35 +147,31 @@ def test_unavailable_control_components_never_paint_a_fabricated_numeric_value(c
     )
     assert [key for key, *_ in state.rails] == ["##ctrl-" + str(i) for i in available]
     assert state.text.count("Control value unavailable") == 3 - len(available)
-    state.click("reset-actuators")
+    state.click("header-Control-reset")
     assert state.calls == []
-    state.click("open-pose")
-    assert state.calls == ["Pose"]
 
 
-def test_target_and_range_metadata_use_declared_units_and_fit_before_values(controls):
+def test_scalar_headers_and_limits_keep_units_and_numeric_input_separate(controls):
     state = controls
-    assert "hinge_axis · -0.2 … 0.5" in state.text
-    assert "Target not specified · Unbounded" in state.text
+    assert "-0.2" in state.text and "0.5" in state.text
     assert state.rails[0][3]["unit"] == ""
     assert state.rails[2][3]["unit"] == "rad"
     for address in range(3):
-        hx, hy, hw, hh = state.ui.hits["control-target-" + str(address)]
-        mx, my, mw, mh = state.ui.hits["control-meta-" + str(address)]
-        vx, vy, vw, _vh = state.ui.hits["##ctrl-" + str(address)]
-        assert my >= hy + hh
-        assert vy > my + mh
-        assert hx <= mx and mx + mw <= hx + hw
-        assert hx <= vx and vx + vw <= hx + hw
-    reset, pose = (state.ui.hits[key] for key in ("reset-actuators", "open-pose"))
-    assert reset[1] == pose[1]
-    assert reset[0] + reset[2] < pose[0]
+        hx, hy, hw, _hh = state.ui.hits["control-target-" + str(address)]
+        vx, vy, _vw, vh = state.ui.hits["##ctrl-" + str(address) + "-value"]
+        assert hy == pytest.approx(vy)
+        assert hx + hw <= vx
+        if address < 2:
+            tx, ty, tw, _th = state.ui.hits["##ctrl-" + str(address) + "-track"]
+            assert ty >= vy + vh
+            assert tx > hx and tw > 0
+    assert "reset-actuators" not in state.ui.hits
 
 
 @pytest.mark.parametrize("part", ("control_metadata", "control_panel_body"))
 def test_metadata_defaults_to_secondary_type_and_honors_local_font_edits(controls, part):
     state = controls
-    detail = "hinge_axis · -0.2 … 0.5"
+    detail = "-0.2"
     assert state.fonts[detail] == 12
     runtime = state.ui.design.runtime
     spec = deepcopy(runtime.spec)
@@ -198,7 +194,7 @@ def test_read_only_source_explains_why_and_blocks_commands(controls, external):
     )
     assert reason in state.text
     assert len(state.rails) == 3
-    state.click("reset-actuators")
+    state.click("header-Control-reset")
     assert state.calls == []
 
 
@@ -208,7 +204,6 @@ def test_invalid_declared_limits_are_not_presented_as_writable_unbounded_control
     state.session.actuators[0].ctrl_range = limits
     state.force_edit = True
     state.paint()
-    assert "hinge_axis · Invalid control range" in state.text
     assert all(row[2] is None for row in state.rails[:2])
     assert len(state.calls) == 1
     assert isinstance(state.calls[0], cmd.SetCtrl)
@@ -223,7 +218,7 @@ def test_writable_rows_keep_the_existing_command_address_boundary(controls):
     assert all(isinstance(command, cmd.SetCtrl) for command in state.calls)
     state.force_edit = False
     state.calls.clear()
-    state.click("reset-actuators")
+    state.click("header-Control-reset")
     assert len(state.calls) == 1 and isinstance(state.calls[0], cmd.SetCtrlVector)
     assert np.array_equal(state.calls[0].values, np.zeros(3))
 
@@ -270,7 +265,7 @@ def test_native_control_search_filters_actual_rows_and_clears_when_hidden(contro
     state.io.add_input_characters_utf8(" missing")
     state.paint()
     assert not state.rails
-    assert "No matching actuators" in state.fonts
+    assert "control-empty" in state.ui.hits
     _control_menu(state, "search")
     assert not state.panel._search and "##control-search" not in state.ui.hits
     assert [row[0] for row in state.rails] == ["##ctrl-0", "##ctrl-1", "##ctrl-2"]

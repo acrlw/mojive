@@ -9,26 +9,65 @@ from .inspector_style import NativeInspectorPresentation
 from .property_style import property_controls
 
 
+def inspector_tabs(session, entity):
+    """Offer only domains with content for the inspected entity, including pinned ones."""
+    if entity is None:
+        return ()
+    node = session.node(entity["node_id"])
+    tabs = ["Properties"]
+    if node is None:
+        return tuple(tabs)
+    physics = (
+        (
+            node.type in (NodeType.LINK, NodeType.ROBOT)
+            and session.body_properties(node.node_id) is not None
+        )
+        or (
+            node.type is NodeType.GEOM
+            and (
+                session.geometry_properties(node.node_id) is not None
+                or session.geometry_advanced_properties(node.node_id) is not None
+            )
+        )
+        or (
+            node.type is NodeType.ENVIRONMENT
+            and (
+                session.adapter.caps.simulation or session.adapter.caps.supports("physics.options")
+            )
+        )
+    )
+    if physics:
+        tabs.append("Physics")
+    if entity["colorable"]:
+        tabs.append("Material")
+    if node.type is NodeType.JOINT or (
+        node.type in (NodeType.LINK, NodeType.ROBOT, NodeType.GEOM)
+        and session.joints_for_body(node.body_index)
+    ):
+        tabs.append("Joint")
+    return tuple(tabs)
+
+
 def _empty(ctx):
     imgui.text_disabled(ctx.tr("No properties for this selection."))
 
 
-def _physics(panel, ctx, node):
+def _physics(panel, ctx, node, *, compact=True):
     session = ctx.session
     if node.type in (NodeType.LINK, NodeType.ROBOT):
         if session.body_properties(node.node_id) is not None:
             imgui.set_next_item_open(True, imgui.Cond_.once)
-            panel._body_properties(ctx, node)
+            panel._body_properties(ctx, node, compact=compact)
             return
     elif node.type is NodeType.GEOM:
         drawn = False
         if session.geometry_properties(node.node_id) is not None:
             imgui.set_next_item_open(True, imgui.Cond_.once)
-            panel._geometry_contact_properties(ctx, node.node_id)
+            panel._geometry_contact_properties(ctx, node.node_id, compact=compact)
             drawn = True
         if session.geometry_advanced_properties(node.node_id) is not None:
             imgui.set_next_item_open(True, imgui.Cond_.once)
-            panel._geometry_advanced_properties(ctx, node.node_id)
+            panel._geometry_advanced_properties(ctx, node.node_id, compact=compact)
             drawn = True
         if drawn:
             return
@@ -111,7 +150,10 @@ def _draw_component(workspace, ctx, entity, tab):
         return False
     if tab == "Properties":
         if node.type is NodeType.CAMERA:
-            panel._camera(ctx, node)
+            from .camera_panel import camera_entity_actions
+
+            camera_entity_actions(workspace, node)
+            panel._camera(ctx, node, compact=True)
         elif node.type is NodeType.LIGHT:
             panel._light(ctx, node)
         elif node.type is NodeType.MODEL:
@@ -129,7 +171,7 @@ def _draw_component(workspace, ctx, entity, tab):
         elif node.type is NodeType.ENVIRONMENT:
             panel._environment_rendering(ctx)
         elif node.type is NodeType.JOINT:
-            panel._joint(ctx, node)
+            panel._joint(ctx, node, compact=True)
         elif node.type is NodeType.SITE:
             panel._transform(ctx, node)
             if ctx.session.site_properties(node.node_id) is not None:
@@ -154,8 +196,5 @@ def _draw_component(workspace, ctx, entity, tab):
         workspace.pose_panel(
             position.x, position.y, imgui.get_content_region_avail().x, node_id=node.node_id
         )
-        if node.type is NodeType.JOINT:
-            imgui.spacing()
-            panel._joint(ctx, node)
         return True
     return False

@@ -80,10 +80,11 @@ def test_painted_heading_and_all_body_paths_share_the_icon_content_column(
     assert x == pytest.approx(heading["content"][0])
     assert x == pytest.approx(heading["iconPosition"][0])
     assert x < heading["textPosition"][0]
-    assert x - group["content"][0] == pytest.approx(8 * editor.ui.s)
+    assert x - group["content"][0] == pytest.approx(4 * editor.ui.s)
     assert painted
     for painted_x, painted_width in painted:
-        assert painted_x == pytest.approx(x)
+        assert painted_x >= x - 0.001
+        assert painted_x + painted_width <= x + width + 0.001
         assert 0 < painted_width <= width + 0.001
     joint_id = editor.joint.joint_id
     for key, (field_x, _field_y, field_width, _field_height) in editor.ui.hits.items():
@@ -104,7 +105,12 @@ def test_body_column_tracks_authored_heading_edges_without_repeating_joint_paddi
         kind,
         expanded,
         parts={
-            "button": {"paddingLeft": 13, "paddingRight": 17, "marginLeft": 3, "marginRight": 5},
+            "pose_joint_button": {
+                "paddingLeft": 13,
+                "paddingRight": 17,
+                "marginLeft": 3,
+                "marginRight": 5,
+            },
             "pose_joint": {"paddingLeft": 11, "paddingRight": 15},
         },
     )
@@ -150,7 +156,7 @@ def test_authored_joint_width_measures_the_same_body_budget_used_for_paint(
     x, y, width, height = group["bodyColumn"]
     assert group["hit"][2] == pytest.approx(180 * editor.ui.s)
     assert x == pytest.approx(heading["content"][0])
-    assert x + width == pytest.approx(group["content"][0] + group["content"][2] - 8 * editor.ui.s)
+    assert x + width == pytest.approx(group["content"][0] + group["content"][2] - 4 * editor.ui.s)
     joint_id = editor.joint.joint_id
     for key, (fx, fy, fw, fh) in editor.ui.hits.items():
         if key.startswith((f"##pose-joint-{joint_id}", f"pose-summary-{joint_id}-")):

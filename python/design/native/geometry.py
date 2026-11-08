@@ -40,7 +40,9 @@ INHERITED_TEXT_FIELDS = (
     "lineHeightMode",
     "lineHeight",
 )
-PRECISE_TEXT_PARENTS = frozenset(("joint", "timeline_details", "section_body", "select_popup"))
+PRECISE_TEXT_PARENTS = frozenset(
+    ("joint", "vector_row", "rgba", "timeline_details", "section_body", "select_popup")
+)
 
 
 @contextmanager
@@ -392,6 +394,7 @@ class NativePartStyle:
             or inherited
             or mode_activated
             or token_changed
+            or (key == "fontSize" and token == "mono_font_size")
             or parent_explicit
         )
         alias = (

@@ -15,6 +15,8 @@ from mojive.ui.workspace.component_layout import (
 )
 from mojive.ui.workspace.constants import VIEWPORT_TOOLS
 from mojive.ui.workspace.group_corners import action_corner_scope, action_corners, inset_action_box
+from mojive.ui.workspace.layers_popup import POPUP_ID as LAYERS_POPUP
+from mojive.ui.workspace.popup_style import menu_trigger
 from mojive.ui.workspace.tooltips import ShortcutHint
 from mojive.ui.workspace.widgets import DIM, color
 
@@ -84,6 +86,7 @@ def toolbox_layout(ui, *, horizontal=False, wrapped=False, extent=None):
 @action_corner_scope("viewport_toolbar", (4,) * 4)
 def camera_controls(workspace, rect, overlay):
     ui, scale = workspace.ui, workspace.s
+    menu_set_open = any(imgui.is_popup_open(name) for name in ("Camera", "Shading", LAYERS_POPUP))
     x, y, width, _ = rect
     style = ui.component_style("viewport_toolbar")
     compact = width < 240 * scale
@@ -102,7 +105,13 @@ def camera_controls(workspace, rect, overlay):
             icon=projection_icon,
             icon_role="toolbar",
         ),
-        control_size(ui, "shading", 28, 28, icon="shading"),
+        control_size(
+            ui,
+            "shading",
+            28,
+            28,
+            icon="sphere" if workspace.menus.shading == "Wireframe" else "shading",
+        ),
     ]
     if width >= 300 * scale:
         sizes.append(control_size(ui, "viewport-layers", 28, 28, icon="layers"))
@@ -138,7 +147,8 @@ def camera_controls(workspace, rect, overlay):
     frame = control_frame_size(
         ui, "projection-button", p.width, p.height, icon=projection_icon, label=label
     )
-    camera_clicked = ui.button(
+    camera_clicked = menu_trigger(
+        ui,
         "projection-button",
         p.x,
         p.y,
@@ -147,7 +157,8 @@ def camera_controls(workspace, rect, overlay):
         icon_role="toolbar",
         label="" if compact else "Ortho" if workspace.app.camera.orthographic else "Persp",
         tooltip="Projection" if compact else None,
-        active=imgui.is_popup_open("Camera"),
+        popup="Camera",
+        menu_set_open=menu_set_open,
         align="left",
         width_limit=frame[0] * scale,
     )
@@ -155,31 +166,37 @@ def camera_controls(workspace, rect, overlay):
         ui.role_icon("down", p.right - 19 * scale, p.y, 12 * scale, p.height, role="inline", c=DIM)
     workspace.menus.popup("Camera", ui.hits["projection-button"], camera_clicked)
     p = layout.rectangles[1]
-    frame = control_frame_size(ui, "shading", p.width, p.height, icon="shading")
-    clicked = ui.button(
+    shading_icon = "sphere" if workspace.menus.shading == "Wireframe" else "shading"
+    frame = control_frame_size(ui, "shading", p.width, p.height, icon=shading_icon)
+    clicked = menu_trigger(
+        ui,
         "shading",
         p.x,
         p.y,
         *frame,
-        icon="shading",
+        icon=shading_icon,
         tooltip="Shading",
-        active=imgui.is_popup_open("Shading"),
+        popup="Shading",
+        menu_set_open=menu_set_open,
         width_limit=frame[0] * scale,
     )
     workspace.menus.popup("Shading", ui.hits["shading"], clicked)
     if len(layout.rectangles) > 2:
         p = layout.rectangles[2]
         frame = control_frame_size(ui, "viewport-layers", p.width, p.height, icon="layers")
-        if ui.button(
+        if menu_trigger(
+            ui,
             "viewport-layers",
             p.x,
             p.y,
             *frame,
             icon="layers",
+            popup=LAYERS_POPUP,
+            menu_set_open=menu_set_open,
             tooltip="Viewport layers",
             width_limit=frame[0] * scale,
         ):
-            workspace.activate("Layers")
+            workspace.layers_popup_requested = True
 
 
 @part_scope("toolbox")

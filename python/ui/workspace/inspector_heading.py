@@ -9,8 +9,13 @@ from mojive.ui.workspace.widget_style import ACCENT, MUTED, TEXT
 
 
 def draw_heading(workspace, entity, x, y, width):
+    from .inspector_components import inspector_tabs
+
+    labels = inspector_tabs(workspace.app.session, entity)
+    if workspace.inspector_tab not in labels:
+        workspace.inspector_tab = "Properties"
     bottom = _draw_heading(workspace, entity, x, y, width)
-    return bottom if entity is None else draw_tabs(workspace, x, bottom, width)
+    return bottom if len(labels) < 2 else draw_tabs(workspace, x, bottom, width, labels=labels)
 
 
 @part_scope("inspector_header", inherit=False)
@@ -104,7 +109,7 @@ def _draw_heading(workspace, entity, x, y, width):
         icon_role="subtle",
         width_limit=pin_frame[0] * s,
         active=bool(workspace.pinned),
-        enabled=entity is not None,
+        enabled=entity is not None and entity["identity"] is not None,
         tooltip="Pin Inspector",
     ):
         workspace.pinned = None if workspace.pinned else entity["identity"]
@@ -138,12 +143,12 @@ def _draw_heading(workspace, entity, x, y, width):
 
 
 @part_scope("tabs", inherit=False)
-def draw_tabs(workspace, x, y, width):
+def draw_tabs(workspace, x, y, width, *, labels=("Properties", "Physics", "Material", "Joint")):
     ui, s = workspace.ui, workspace.s
     style = ui.component_style("tabs")
     tab_style = ui.component_style(("button", "tab"))
-    labels = ("Properties", "Physics", "Material", "Joint")
-    icons = ("inspect", "body", "shading", "joint")
+    icons = {"Properties": "inspect", "Physics": "body", "Material": "shading", "Joint": "joint"}
+    count = len(labels)
     font = tab_style.get("fontSize", DESIGN.body_size)
     gap = style.get("columnGap", style.get("gap", 0)) * s
     pads = style.edges("padding", s)
@@ -156,13 +161,13 @@ def draw_tabs(workspace, x, y, width):
     )
     content = box.content
     minima = [ui.measure(label, font, font_resolved=True) + 12 * s for label in labels]
-    compact = content.width < sum(minima) + gap * 3
+    compact = content.width < sum(minima) + gap * (count - 1)
     if compact:
-        widths = [max(s, (content.width - 3 * gap) / 4)] * 4
+        widths = [max(s, (content.width - (count - 1) * gap) / count)] * count
     elif style.explicit("align") or tab_style.explicit("width"):
         widths = [tab_style.box(0, 0, w, height, scale=s).outer.width for w in minima]
     else:
-        extra = max(0, content.width - sum(minima) - gap * 3) / 4
+        extra = max(0, content.width - sum(minima) - gap * (count - 1)) / count
         widths = [w + extra for w in minima]
     from mojive.ui.workspace.component_layout import component_flow, control_frame_size
 
@@ -170,7 +175,7 @@ def draw_tabs(workspace, x, y, width):
     if tab_style.explicit("width") and tab_style.get("widthMode", "auto") == "fixed":
         widths = [
             min(content.width, tab_style.get("width", 70) * s + tab_margin[0] + tab_margin[2])
-        ] * 4
+        ] * count
     available = max(s, content.width)
     widths = [min(available, w) for w in widths]
     box, flow = component_flow(
@@ -185,7 +190,8 @@ def draw_tabs(workspace, x, y, width):
         row_gap=gap / s,
     )
     positions = flow.rectangles
-    for label, icon, rect in zip(labels, icons, positions, strict=True):
+    for label, rect in zip(labels, positions, strict=True):
+        icon = icons[label]
         with ui.component_scope("tabs"):
             if ui.button(
                 "tab-" + label,

@@ -11,6 +11,7 @@ from imgui_bundle import imgui
 from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds, NodeType, SceneNode
 from mojive.geometry2d.curves import CORNER_SMOOTHING, smooth_polygon_corners
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.geometry_view import draw_geometry_view
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.panels import (
@@ -190,7 +191,7 @@ class HierarchyPanel(Panel):
 
         imgui.separator()
         if not imgui.begin_child("tree"):
-            imgui.end_child()
+            end_content_child()
             return
 
         table_flags = imgui.TableFlags_.sizing_stretch_prop | imgui.TableFlags_.pad_outer_x
@@ -205,7 +206,7 @@ class HierarchyPanel(Panel):
         )
         if not imgui.begin_table("hierarchy_rows", column_count, table_flags):
             imgui.pop_style_var()
-            imgui.end_child()
+            end_content_child()
             return
         imgui.table_setup_column("node", imgui.TableColumnFlags_.width_stretch, 1.0)
         imgui.table_setup_column(
@@ -239,7 +240,7 @@ class HierarchyPanel(Panel):
         imgui.pop_style_var()
         if self._rows_drawn:
             publish_focus_item_hint(ctx)
-        imgui.end_child()
+        end_content_child()
 
     def _draw_type_filters(self, ctx: PanelContext) -> None:
         items = tuple(

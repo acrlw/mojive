@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from math import degrees, isfinite
+from math import isfinite
 
 import numpy as np
 from imgui_bundle import imgui
@@ -18,8 +18,8 @@ from mojive.ui.panels import (
     publish_focus_item_hint,
 )
 from mojive.ui.pointer_bindings import PointerAction
-from mojive.ui.workspace.component_layout import component_flow, control_frame_size, control_size
-from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.component_layout import control_frame_size, control_size
+from mojive.ui.workspace.design import DESIGN
 from mojive.ui.workspace.property_style import (
     NativePropertyPresentation,
     advance,
@@ -42,61 +42,6 @@ def scene_panel(workspace, x, y, w, h):
     workspace.navigation.draw_scene(workspace._panel_context, x, y, w, h)
 
 
-@part_scope("button_row")
-def _control_actions(workspace, x, y, width, enabled):
-    ui, scale = workspace.ui, workspace.s
-    style = ui.component_style("button_row")
-    padding, margin = style.edges("padding", scale), style.edges("margin", scale)
-    available = max(scale, width - padding[0] - padding[2] - margin[0] - margin[2])
-    actions = (
-        ("reset-actuators", "Reset controls", "reset", "Reset controls"),
-        ("open-pose", "Pose", "pose", "Open pose editor"),
-    )
-    sizes = [
-        control_size(
-            ui,
-            key,
-            min(available / scale, ui.measure(label) / scale + 40),
-            28,
-            label=label,
-            icon=icon,
-        )
-        for key, label, icon, _tooltip in actions
-    ]
-    box, flow = component_flow(
-        ui,
-        "button_row",
-        x,
-        y,
-        width,
-        sizes,
-        key="control-actions",
-        column_gap=DESIGN.item_spacing_x,
-        row_gap=DESIGN.row_gap,
-    )
-    for (key, label, icon, tooltip), rect in zip(actions, flow.rectangles, strict=True):
-        frame = control_frame_size(ui, key, rect.width, rect.height, label=label, icon=icon)
-        if ui.button(
-            key,
-            rect.x,
-            rect.y,
-            *frame,
-            label=label,
-            icon=icon,
-            width_limit=frame[0] * scale,
-            filled=key == "reset-actuators",
-            tooltip=tooltip,
-            enabled=enabled if key == "reset-actuators" else True,
-        ):
-            if key == "reset-actuators" and enabled:
-                workspace.app.session.submit(
-                    cmd.SetCtrlVector(np.zeros_like(workspace.app.session.frame.ctrl))
-                )
-            elif key == "open-pose":
-                workspace.activate("Pose")
-    return box.outer.bottom
-
-
 def _control_detail(ui, key, x, y, width, text, *, unavailable=False):
     """Use one measured caption row for metadata, availability and read-only reasons."""
     part = "input_number" if unavailable else "control_metadata"
@@ -111,7 +56,9 @@ def _control_detail(ui, key, x, y, width, text, *, unavailable=False):
     imgui.set_cursor_screen_pos((box.frame.x, box.frame.y))
     imgui.invisible_button(key, (max(scale, box.frame.width), max(scale, box.frame.height)))
     ui.hits[key] = box.frame.tuple()
-    if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+    if ui.measure(
+        text, font_size, translate=False, style=style
+    ) > box.content.width and imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
         ui.tooltip(text, translate=False)
     return box.outer.bottom
 
@@ -132,6 +79,21 @@ def control_action_enabled(workspace, key):
         return session.frame.ctrl is not None
     if key == "copy-act":
         return session.adapter.caps.state_snapshots
+    if key == "reset":
+        values = session.frame.ctrl
+        return (
+            bool(session.actuators)
+            and session.adapter.caps.write_ctrl
+            and values is not None
+            and all(
+                actuator.ctrl_address >= 0
+                and actuator.ctrl_address + actuator.ctrl_count <= len(values)
+                and np.isfinite(
+                    values[actuator.ctrl_address : actuator.ctrl_address + actuator.ctrl_count]
+                ).all()
+                for actuator in session.actuators
+            )
+        )
     return True
 
 
@@ -174,7 +136,10 @@ def _control_search(workspace, panel, x, y, width):
     return imgui.get_item_rect_max().y + tools.get("rowGap", tools.get("gap", 10)) * ui.s
 
 
+@part_scope("entity_card")
 def control_panel(workspace, x, y, w):
+    from .scalar_card import scalar_card, scalar_value_width
+
     u, s = workspace.ui, workspace.s
     session = workspace.app.session
     ctx = workspace._panel_context
@@ -190,28 +155,27 @@ def control_panel(workspace, x, y, w):
     joint_nodes = panel._joint_nodes
     values = session.frame.ctrl
     enabled = session.adapter.caps.write_ctrl
-    complete = values is not None and all(
-        actuator.ctrl_address >= 0
-        and actuator.ctrl_address + actuator.ctrl_count <= len(values)
-        and np.isfinite(
-            values[actuator.ctrl_address : actuator.ctrl_address + actuator.ctrl_count]
-        ).all()
-        for actuator in session.actuators
-    )
-    row = 0
     imgui.set_cursor_screen_pos((x, y))
-    expanded = property_section(
-        u, ctx.tr("actuators"), imgui.TreeNodeFlags_.default_open, divider=False
-    )
-    yy = imgui.get_cursor_screen_pos().y
-    if session.actuators and expanded and not enabled:
+    yy = y
+    if session.actuators and not enabled:
         reason = (
             "Read only · external control"
             if session.adapter.caps.external_clock
             else "Read only · control writes unavailable"
         )
         yy = _control_detail(u, "control-read-only", x, yy, w, ctx.tr(reason)) + DESIGN.row_gap * s
-    for actuator, component in rows if expanded else ():
+    from mojive.design.native.geometry import Rect
+
+    from .entity_cards import card_controls, card_surface
+
+    outer_x, outer_width = x, w
+    card_style = u.component_style("entity_card")
+    pads = card_style.edges("padding", s, (8, 8, 8, 8))
+    card_gap = card_style.get("gap", 12) * s
+    x, w = x + pads[0], w - pads[0] - pads[2]
+    for actuator, component in rows:
+        card_top = yy
+        yy += pads[1]
         bounds = _control_range(actuator)
         address = actuator.ctrl_address + component
         suffix = f"[{component}]" if actuator.ctrl_count > 1 else ""
@@ -219,119 +183,112 @@ def control_panel(workspace, x, y, w):
         label = (actuator.name or f"act{actuator.actuator_id}") + suffix
         key = "control-target-" + str(address)
         _, heading_height = control_size(u, key, w / s, DESIGN.control_height, label=label)
-        button_width, button_height = control_frame_size(u, key, w, heading_height, label=label)
-        pressed = u.button(
-            key,
-            x,
-            yy,
-            button_width,
-            button_height,
-            width_limit=button_width * s,
-            label=label,
-            text_color=ACCENT if panel._selected_address == address else TEXT,
-            active=panel._selected_address == address,
-            translate=False,
-            align="left",
+        card_height = u.rail_height(unit=bool(actuator.unit)) * (2 if bounds else 1) + (
+            4 * s if bounds else 0
         )
-        hovered = imgui.is_item_hovered()
-        focused = hovered and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
-        if hovered and target is not None:
-            publish_focus_item_hint(ctx)
-        if target is not None and (pressed or focused):
-            ctx.submit(cmd.SelectNode(target.node_id))
-            if focused:
-                joint = next(
-                    (item for item in session.joints if item.joint_id == target.joint_index),
-                    None,
-                )
-                activate_edit_gizmo(ctx, target, joint)
-                if joint is not None and ctx.focus_joint is not None:
-                    ctx.focus_joint(joint.joint_id)
-                elif ctx.focus_node is not None:
-                    ctx.focus_node(target.node_id)
-        if pressed or focused:
-            panel._selection_revision = session.selection_revision
-            panel._selected_address = address
-        target_name = target.name if target is not None else ctx.tr("Target not specified")
-        if bounds is not None:
-            shown = (
-                tuple(degrees(v) for v in bounds)
-                if actuator.unit == "rad" and panel._angular_degrees
-                else bounds
+        card_surface(
+            u,
+            Rect(outer_x, card_top, outer_width, card_height + pads[1] + pads[3]),
+            selected=panel._selected_address == address,
+        )
+        with card_controls(u, pads):
+            button_width, button_height = control_frame_size(
+                u, key, max(s, w - scalar_value_width(u, w) - 8 * s), heading_height, label=label
             )
-            unit = "°" if actuator.unit == "rad" and panel._angular_degrees else actuator.unit
-            limits = f"{shown[0]:.4g} … {shown[1]:.4g}" + (f" {unit}" if unit else "")
-        else:
-            limits = ctx.tr("Invalid control range" if actuator.ctrl_limited else "Unbounded")
-        detail = target_name + " · " + limits
-        value_y = (
-            _control_detail(
-                u,
-                "control-meta-" + str(address),
+            pressed = u.button(
+                key,
                 x,
-                yy + heading_height,
-                w,
-                detail,
+                yy,
+                button_width,
+                button_height,
+                width_limit=button_width * s,
+                label=label,
+                text_color=ACCENT if panel._selected_address == address else TEXT,
+                active=False,
+                translate=False,
+                align="left",
+                tooltip="Invalid control range"
+                if actuator.ctrl_limited and bounds is None
+                else (target.name if target is not None else ""),
             )
-            + DESIGN.numeric_gap * s
-        )
-        available = (
-            values is not None and 0 <= address < len(values) and isfinite(float(values[address]))
-        )
-        row += 1
-        if not available:
-            yy = (
-                _control_detail(
-                    u,
-                    "##ctrl-" + str(address),
-                    x,
-                    value_y,
-                    w,
-                    ctx.tr("Control value unavailable"),
-                    unavailable=True,
+            hovered = imgui.is_item_hovered()
+            focused = hovered and pointer_pressed(ctx, PointerAction.PANEL_FOCUS)
+            if hovered and target is not None:
+                publish_focus_item_hint(ctx)
+            if target is not None and (pressed or focused):
+                ctx.submit(cmd.SelectNode(target.node_id))
+                if focused:
+                    joint = next(
+                        (item for item in session.joints if item.joint_id == target.joint_index),
+                        None,
+                    )
+                    activate_edit_gizmo(ctx, target, joint)
+                    if joint is not None and ctx.focus_joint is not None:
+                        ctx.focus_joint(joint.joint_id)
+                    elif ctx.focus_node is not None:
+                        ctx.focus_node(target.node_id)
+            if pressed or focused:
+                panel._selection_revision = session.selection_revision
+                panel._selected_address = address
+            value_y = yy
+            available = (
+                values is not None
+                and 0 <= address < len(values)
+                and isfinite(float(values[address]))
+            )
+            if not available:
+                yy = (
+                    _control_detail(
+                        u,
+                        "##ctrl-" + str(address),
+                        x,
+                        value_y + heading_height + 4 * s,
+                        w,
+                        ctx.tr("Control value unavailable"),
+                        unavailable=True,
+                    )
+                    + DESIGN.row_gap * s
                 )
-                + DESIGN.row_gap * s
+                continue
+            current = float(values[address])
+            editable = enabled and (not actuator.ctrl_limited or bounds is not None)
+            imgui.begin_disabled(not editable)
+            edit = scalar_card(
+                u,
+                "##ctrl-" + str(address),
+                x,
+                value_y,
+                w,
+                current,
+                bounds,
+                initial=float(panel._initial_ctrl[address])
+                if 0 <= address < len(panel._initial_ctrl)
+                and isfinite(float(panel._initial_ctrl[address]))
+                else current,
+                unit=actuator.unit,
+                angular_degrees=panel._angular_degrees,
+                toggle_unit=panel._toggle_angle_unit,
             )
-            continue
-        current = float(values[address])
-        editable = enabled and (not actuator.ctrl_limited or bounds is not None)
-        imgui.begin_disabled(not editable)
-        edit = u.rail(
-            "##ctrl-" + str(address),
-            x,
-            value_y,
-            w,
-            current,
-            bounds,
-            initial=float(panel._initial_ctrl[address])
-            if 0 <= address < len(panel._initial_ctrl)
-            and isfinite(float(panel._initial_ctrl[address]))
-            else current,
-            fmt="%.3f",
-            show_reset=False,
-            unit=actuator.unit,
-            angular_degrees=panel._angular_degrees,
-            toggle_unit=panel._toggle_angle_unit,
-        )
-        imgui.end_disabled()
-        if edit.changed and editable:
-            session.submit(cmd.SetCtrl(address, edit.value))
-        yy = (
-            u.hits["##ctrl-" + str(address)][1]
-            + u.hits["##ctrl-" + str(address)][3]
-            + DESIGN.row_gap * s
-        )
-    if not session.actuators or (expanded and not rows):
-        u.text(
-            x,
-            yy + DESIGN.control_padding_y(BODY_SIZE) * s,
+            imgui.end_disabled()
+            if edit.changed and editable:
+                session.submit(cmd.SetCtrl(address, edit.value))
+            yy = (
+                u.hits["##ctrl-" + str(address)][1]
+                + u.hits["##ctrl-" + str(address)][3]
+                + pads[3]
+                + card_gap
+            )
+    if not rows:
+        from .property_style import panel_empty
+
+        yy = panel_empty(
+            u,
+            "control-empty",
             "No matching actuators" if session.actuators else "No actuators in this scene",
-            MUTED,
-            BODY_SIZE,
+            outer_x,
+            yy,
+            outer_width,
         )
-        u.hits["control-empty"] = (x, yy, w, DESIGN.control_height * s)
-        yy += (DESIGN.control_height + DESIGN.row_gap) * s
-    yy = _control_actions(workspace, x, yy, w, enabled and complete and row > 0)
     advance(u, x, yy + DESIGN.row_gap * s)
     if session.equality_constraints and property_section(
         u, ctx.tr("equality"), imgui.TreeNodeFlags_.default_open
@@ -340,23 +297,9 @@ def control_panel(workspace, x, y, w):
 
 
 def assets_panel(workspace, x, y, w):
-    u = workspace.ui
-    from mojive.ui.workspace.material_library import draw_material_library
+    from mojive.ui.workspace.resource_panel import resource_panel
 
-    draw_material_library(workspace, x, y, w)
-    # The palette is a native shortcut; the registered panel retains model asset
-    # inventory, import, assignment, and lifecycle ownership.
-    panel = workspace.app.panels.get("assets")
-    ctx = workspace._panel_context
-    if panel._selected is not None and panel._selected != getattr(
-        workspace, "_focused_asset", None
-    ):
-        imgui.set_next_item_open(True, imgui.Cond_.always)
-    workspace._focused_asset = panel._selected
-    if panel.presentation is None:
-        panel.presentation = NativePropertyPresentation(u, prefix="assets", fit_labels=True)
-    if property_section(u, ctx.tr("Model assets"), 0):
-        panel.draw(ctx)
+    resource_panel(workspace, x, y, w)
 
 
 def pose_panel(workspace, x, y, w, *, node_id=None):

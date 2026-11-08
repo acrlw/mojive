@@ -100,7 +100,7 @@ def test_form_actual_four_insets_and_compact_radius_match_at_every_scale(form, r
     state.frame()
     r, window, scale = state.record, state.window, state.ui.s
     rows = r["rows"]
-    pad = native_unit(8 * scale)
+    pad = native_unit(4 * scale)
     assert rows[0][0] - window.pos.x == pad
     assert rows[0][1] - window.pos.y == pad
     assert window.pos.x + window.size.x - rows[-1][0] - rows[-1][2] == pad
@@ -182,6 +182,22 @@ def test_real_recording_drag_cancels_and_video_disables_the_pause_switch(form):
     event("add_mouse_button_event", 0, True)
     event("add_mouse_button_event", 0, False)
     assert state.ctx.session.state_take_pause_at_end is before
+
+
+def test_switch_and_numeric_captions_share_the_rendered_leading_column(form, monkeypatch):
+    captions = []
+    paint = form.ui.component_text
+
+    def observe(part, rect, text, color, **options):
+        if part == "form_label":
+            captions.append((rect.x, form.ui.hits["##timeline-pause-label"][0]))
+        return paint(part, rect, text, color, **options)
+
+    monkeypatch.setattr(form.ui, "component_text", observe)
+    form.frame()
+    assert captions
+    for numeric_x, switch_x in captions:
+        assert numeric_x == pytest.approx(switch_x)
 
 
 def test_authored_form_radius_fits_the_actual_numeric_frame(form):

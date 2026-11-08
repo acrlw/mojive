@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 
 from imgui_bundle import imgui
@@ -17,6 +18,7 @@ from mojive.design.native.geometry import (
     part_scope,
     scoped_corner_radius,
 )
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.design_palette import rgba8
 from mojive.ui.panels import (
     activate_edit_gizmo,
@@ -299,7 +301,7 @@ class Navigation:
             else:
                 imgui.text_disabled(ctx.tr("no match"))
         finally:
-            imgui.end_child()
+            end_content_child()
 
     def _scene_row_geometry(self):
         from mojive.ui.workspace.component_layout import control_frame_size, control_size
@@ -662,20 +664,21 @@ class Navigation:
         joints = self.pose_joints(ctx, node_id)
         inspected = ctx.session.node(node_id) if node_id is not None else None
         show_identity = inspected is None or inspected.type is not NodeType.JOINT
-        return self.pose_editor.draw(
-            ctx,
-            x,
-            y,
-            w,
-            joints=joints,
-            select_joint=self.select_joint,
-            initial_qpos=self.joints._initial_qpos,
-            show_names=show_identity or len(joints) > 1,
-            show_types=inspected is not None and inspected.type is not NodeType.JOINT,
-            show_context=node_id is None,
-            joint_color=node_accent(ctx.theme, "joint"),
-            collapsible_poses=node_id is None,
-        )
+        with part_scope("entity_card") if show_identity else nullcontext():
+            return self.pose_editor.draw(
+                ctx,
+                x,
+                y,
+                w,
+                joints=joints,
+                select_joint=self.select_joint,
+                initial_qpos=self.joints._initial_qpos,
+                show_names=show_identity or len(joints) > 1,
+                show_types=False,
+                show_context=False,
+                joint_color=node_accent(ctx.theme, "joint"),
+                compact_poses=node_id is None,
+            )
 
     def pose_action(self, key):
         if key == "search":

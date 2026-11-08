@@ -60,25 +60,11 @@ def test_geometry_captions_and_semantic_menu_groups(backend_name, monkeypatch, t
                         json.dumps(rows, indent=2, ensure_ascii=False)
                     )
                     if menu == "Simulate":
-                        speed = next(r for r in rows if r.get("label") == "Playback speed")
-                        play = next(r for r in rows if r.get("label") == "Play simulation")
-                        assert speed["iconSlotRect"][2] == 0
+                        assert not any(r.get("label") == "Playback speed" for r in rows)
+                        settings = next(r for r in rows if r.get("label") == "Physics settings...")
+                        play = next(r for r in rows if r.get("label") == "Run simulation")
+                        assert settings["iconSlotRect"][2] == 0
                         assert play["iconSlotRect"][2] > 0
-                        measured = {
-                            r["label"]: r
-                            for r in _records(viewer)
-                            if "labelRect" in r and r.get("label")
-                        }
-                        assert (
-                            measured["Playback speed"]["labelRect"][0]
-                            < measured["Play simulation"]["labelRect"][0]
-                        )
-                        inputs.click("menu-item-Simulate/Playback speed")
-                        inputs.sync()
-                        capture(viewer, output / f"{language}-speed.png")
-                        inputs.click("menu-item-Simulate/Playback speed/0.5× speed")
-                        assert workspace.speed == 0.5
-                        workspace.speed = 1
                     inputs.escape()
                     inputs.move((0, 0))
     finally:

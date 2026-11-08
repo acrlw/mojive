@@ -196,6 +196,7 @@ class ComponentSpecimens:
             "table": 150,
             "material": 300,
             "material_list": 300,
+            "entity_card": 80,
             "sensor": 160,
             "component_list": 160,
             "component_path": 160,
@@ -210,6 +211,7 @@ class ComponentSpecimens:
             "toolbox": 200,
             "panel": 260,
             "panel_body": 160,
+            "layers_popup": 108,
             "dialog": 320,
             "dialog_body": 160,
             "settings_layout": 320,
@@ -290,6 +292,15 @@ class ComponentSpecimens:
         key = "reference-" + part
         self.runtime.paint_context.paint_depth += 1
         try:
+            if part == "entity_card":
+                from mojive.ui.workspace.entity_cards import card_surface
+
+                box = style.box(*bounds.tuple(), scale=s)
+                card_surface(ui, box.frame)
+                result = engine.button(
+                    key + "-name", box.content, label="camera", icon="camera", parts="button"
+                )
+                return self._record(part, box, engine, [result.box.frame.tuple()])
             if part == "form_popup":
                 from mojive.design.native.specimen_forms import paint_form_reference
 

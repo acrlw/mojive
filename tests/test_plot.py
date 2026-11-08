@@ -444,7 +444,7 @@ def test_plot_current_ink_matches_body_and_axes_remain_secondary(plotted_panel, 
     monkeypatch.setattr(plot.ImguiDraw2D, "text", axis)
     frame(700)
     assert current[0][0] == panel.ui.numeric_font.font_id
-    assert current[0][1] == pytest.approx(18 * ctx.style_scale)
+    assert current[0][1] == pytest.approx(14 * ctx.style_scale)
     assert axes == pytest.approx([12 * ctx.style_scale])
     body = panel.ui.body.get_font_baked(14 * ctx.style_scale, 1).find_glyph(ord("0"))
     assert 0.90 <= current[0][2] / (body.y1 - body.y0) <= 1.05

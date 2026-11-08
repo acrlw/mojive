@@ -121,6 +121,7 @@ def value_rail(
     initial,
     fmt="%.4f",
     show_reset=True,
+    show_track=True,
     unit="",
     angular_degrees=False,
     toggle_unit=None,
@@ -133,6 +134,8 @@ def value_rail(
     track_height=None,
     align_items="center",
     integer=False,
+    entry_rect=None,
+    track_rect=None,
 ):
     """Thin bounded rail plus numeric entry; unbounded values use only numeric entry.
 
@@ -171,9 +174,15 @@ def value_rail(
     alignment = 0.5 if align_items == "center" else 1 if align_items == "end" else 0
     row_height = max(entry_height, rail_height)
     imgui.push_id(label)
-    if bounds is not None:
+    if bounds is not None and show_track:
         lo, hi = bounds
-        rail_width = width if stacked else max(1.0, width - number_width - reset_space - gap)
+        rail_width = (
+            track_rect[2]
+            if track_rect
+            else width
+            if stacked
+            else max(1.0, width - number_width - reset_space - gap)
+        )
         for slot in (
             imgui.Col_.frame_bg,
             imgui.Col_.frame_bg_hovered,
@@ -187,7 +196,11 @@ def value_rail(
             imgui.StyleVar_.frame_padding,
             (style.frame_padding.x, max(0, (rail_height - imgui.get_font_size()) / 2)),
         )
-        imgui.set_cursor_screen_pos((origin.x, origin.y + (row_height - rail_height) * alignment))
+        imgui.set_cursor_screen_pos(
+            track_rect[:2]
+            if track_rect
+            else (origin.x, origin.y + (row_height - rail_height) * alignment)
+        )
         imgui.set_next_item_width(rail_width)
         flags = imgui.SliderFlags_.no_input
         if logarithmic:
@@ -237,7 +250,14 @@ def value_rail(
             )
         else:
             imgui.set_cursor_screen_pos((origin.x, origin.y + row_height + style.item_spacing.y))
-    entry_width = max(1.0, width - reset_space) if stacked or bounds is None else number_width
+    entry_width = (
+        max(1.0, width - reset_space)
+        if stacked or bounds is None or not show_track
+        else number_width
+    )
+    if entry_rect is not None:
+        imgui.set_cursor_screen_pos(entry_rect[:2])
+        entry_width = entry_rect[2]
     numeric = (entry_painter or _value_entry)(
         ctx,
         label,
@@ -264,6 +284,8 @@ def value_rail(
             result.changed, result.value = True, float(initial)
         imgui.set_item_tooltip(ctx.tr("Restore initial value"))
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        if hit_bounds is not None:
+            hit_bounds[label + "-reset"] = (a.x, a.y, b.x - a.x, b.y - a.y)
         draw_reset_glyph(
             ImguiDraw2D(),
             ((a.x + b.x) * 0.5, (a.y + b.y) * 0.5),

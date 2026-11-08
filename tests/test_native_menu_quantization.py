@@ -123,10 +123,19 @@ def test_actual_camera_header_actions_submenu_owns_its_text_width_and_insets(
     workspace = SimpleNamespace(
         ui=ui,
         s=ui.s,
-        app=SimpleNamespace(gizmos=True),
+        app=SimpleNamespace(
+            gizmos=True,
+            session=SimpleNamespace(
+                adapter=SimpleNamespace(
+                    caps=SimpleNamespace(scene_authoring=False, supports=lambda _: False)
+                )
+            ),
+        ),
         open={"Cameras": True},
-        header_actions={"Cameras": {"frame"}},
+        header_actions={"Cameras": {"search"}},
         header_add_pending=False,
+        camera_search_visible=False,
+        camera_sorted=False,
         header_action=lambda *_args: None,
     )
     workspace.menus = menus = Menus(workspace, ())
@@ -158,23 +167,27 @@ def test_actual_camera_header_actions_submenu_owns_its_text_width_and_insets(
     move("header-menu-Cameras-actions")
     for _ in range(40):
         frame(draw)
-    move("header-action-Cameras-frame")
+    move("header-action-Cameras-search")
     for _ in range(4):
         frame(draw)
     key = "header-menu-Cameras-actions"
     popup = menus.observed[key]
-    assert len(popup["rows"]) == 1
+    assert len(popup["rows"]) == 3
     assert_popup(popup["rows"], popup, ui.s)
     row = popup["rows"][0]
     assert row["checked"] and row["checkable"] and row["hovered"]
-    assert "显示整个场景" in painted
+    assert "搜索相机" in painted
     assert not any("…" in text for text in painted)
-    assert [item.label for item in menus._popup_rows[key]] == ["Frame all"]
+    assert [item.label for item in menus._popup_rows[key]] == [
+        "Search cameras",
+        "Sort by name",
+        "Create camera from view",
+    ]
     assert all(
-        item.label != "Frame all" or not item.checkable
+        item.label != "Search cameras" or item.checkable
         for item in menus._popup_rows["Panel actions###Cameras"]
     )
-    actual = next(row for row in runtime.observed if row["key"] == "header-action-Cameras-frame")
+    actual = next(row for row in runtime.observed if row["key"] == "header-action-Cameras-search")
     x, y, w, h = actual["backgroundRect"]
     assert x >= actual["clip"][0] and y >= actual["clip"][1]
     assert x + w <= actual["clip"][2] and y + h <= actual["clip"][3]

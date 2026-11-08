@@ -31,7 +31,7 @@ def _assert_default_layout(viewer):
         scene, viewport, inspector = (windows[name].dock_node for name in windows)
         root = imgui.internal.dock_builder_get_node(viewer.window.dockspace_id)
         scale = viewer.window.style_scale
-        assert scene.size.x == pytest.approx(min(252 * scale, root.size.x * 0.26), abs=3)
+        assert scene.size.x == pytest.approx(min(280 * scale, root.size.x * 0.26), abs=3)
         assert inspector.size.x == pytest.approx(min(320 * scale, root.size.x * 0.30), abs=3)
         assert scene.pos.y == viewport.pos.y == inspector.pos.y
         assert scene.size.y == viewport.size.y == inspector.size.y

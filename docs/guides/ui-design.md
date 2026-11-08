@@ -44,6 +44,105 @@ today, but a reported defect in that code is not a design requirement.
 implementation; it does not mean that bgfx is required. OpenGL remains the default renderer.
 The runnable command catalog and workbench details are in `examples/ui_design/README.md`.
 
+## Focused native workspace
+
+Resources lists the files and assets referenced by the loaded models. Prototype material
+palettes and asset-authoring forms are not native workspace features. Keep source/resource
+inspection separate from the selected entity's appearance controls.
+Material-card and former panel-action groups remain available as design-reference specimens
+for existing specifications; their presence in the catalog does not restore production entry points.
+
+Inspector tabs represent populated domains for the inspected entity, including pinned
+entities. Hide unavailable domains and omit the strip when only Properties remains. Bodies
+show mass and inertia; geometry exposes everyday contact and mass settings. Solver internals,
+surface velocity, adhesion and fluid tuning remain available through the model/API instead
+of occupying the ordinary Inspector. Preserve their values when applying the compact form.
+
+The Cameras panel lists camera entities and a permanent Editor Camera. Selection opens
+properties in Inspector; the eye action controls the viewport. Editor Camera is local editor
+state and cannot be deleted. Camera settings must work without physics capabilities. Keep camera search, sorting, creation,
+entity cards and view presets in the browser, with optical settings and View/Pilot/Align/Capture
+operations in Inspector. View retains the independent editor camera. Pilot edits any available
+scene camera through `SetSceneCamera`, including model cameras, with one transaction per pointer
+gesture; Escape cancels it. The command owns adapter write-back or viewer-local overrides;
+model ownership alone must not disable Pilot or Align. Keep deletion gated independently.
+Show only metadata provided by the
+camera contract; never invent an output resolution.
+
+Viewport layers open a content-measured anchored native popup with a 4-point inset, 28-point rows
+and compact 36 × 20-point switches. Scene display, editing aids and selection feedback keep
+one common left/right column. Measure the longest localized label with the production switch
+font, then add the label-to-track gap, track width and both shell/row insets; do not reserve
+a fixed browser-panel width. Geometry visibility filters render instances without editing
+entity visibility. Layer controls must not introduce additional scene geometry or a coplanar
+reference grid over an authored floor. Influence uses the existing
+helper setting, and view-cube visibility gates both paint and pointer ownership. Publisher
+diagnostics appear only when present. Toggling a layer must not switch the active browser
+panel; Escape and outside click dismiss the popup.
+Output search shares the top action row when it fits and moves above it at narrow widths.
+
+Body and numeric text share a nominal em contract: adapt each font's ascent/descent metrics
+before requesting an ImGui font size. Equal point sizes must have comparable visible letter
+heights; do not compensate for a font-metric mismatch by increasing only the numeric token.
+Measure captions after the metric correction, including signs, units and percentage escapes.
+
+Scalar joints and actuators put name and numeric entry on the first row, with fixed
+limit slots beside the rail below. Use meaningful joint-motion icons; do not repeat a generic
+actuator glyph in every row or infer actuator type from its name. Keep exact numeric values
+available through entry and hover even when displayed limits are shortened. Actuators retain
+a trailing reset action; joint fields retain their numeric reset gesture without a repeated
+reset button. Cards own one 8-point content inset. Scalar entry frames use the same top and trailing inset; text padding must not become a second frame inset. Heading controls add 4 points of text padding inside that surface; align the XYZ body with their text edge and derive the inner radius from the 8-point surface inset.
+Long card lists place a narrow scrollbar in the panel’s existing right inset; short camera
+lists do not reserve an empty scrollbar column. Ball/free joint cards expose editable XYZ
+rows directly, without a redundant DoF caption or disclosure. Their native numeric fields
+retain drag, double-click entry, axis-badge reset, cancellation and one-gesture Undo.
+Compact XYZ cards use matching 12-point badge and value text, equal-height visible frames,
+and a 4-point gap between the badge and numeric frame. Hover, active and text-entry backgrounds
+belong to the numeric frame alone; never paint a shared hover surface underneath the badge.
+Editor-camera properties use the same compact form
+rows as entity properties: keep labels and fields inline when their measured widths fit.
+Inspector joint poses use the joined transform fields rather than the browser's flat card
+fields. Related Inspector controls share one leading column and trailing edge, independent of
+precision or units. Scalar inputs fill that column; ranges divide it into equal fields, and
+XYZ groups use the same complete span. Do not cap scalar fields to their current text width.
+Joined axis/channel fields use 12-point numeric text with 2-point horizontal padding. Bounded vectors may
+declare a stable domain sample for measurement. Do not reserve unrelated large values for a
+normalized direction. View presets align icon/caption pairs to the leading edge of each cell.
+
+A labeled switch has one native input owner spanning its label, whitespace and track.
+Hover and press paint the whole row with the shared rounded field surface; release inside
+toggles once, release outside cancels, and disabled rows do not respond. Keep keyboard focus
+and description tooltips on that same owner, including rows whose labels wrap above the track.
+Keep the feedback frame outside the label content edge by using the section’s existing inset.
+Property tables and standalone popup rows share the same box owner. In floating forms,
+feedback stays inside the shell's content bounds, with a separate 8-point horizontal inset
+for its label and track. The adopted 8-point shell and 4-point outer gutter therefore produce
+a 4-point feedback corner. Check equal side and bottom clearances on the final row, not only
+middle rows. Viewport layers and Timeline options must preserve this geometry through hover
+and press; expanding the row into the shell gutter breaks its nested corners.
+Do not implement a second label click handler beside the switch.
+
+Viewport transport contains frequent simulation actions without a duplicate More menu.
+Recorded playback speed belongs to Timeline and must not change the live simulation clock.
+Timeline uses compact 20-point glyphs in 28-point controls and quiet icon tabs with a selected
+underline. Use one row when space permits; at narrower widths, wrap complete semantic groups
+using the shared toolbar layout. Keep both View endpoints adjacent, preserve every control,
+and derive toolbar height from the occupied rows without a reserved empty row or clipped
+numeric fields. The scene title is plain text for a single
+model. Lane headers retain icons and counts; an empty Take row offers a direct plus action
+instead of an empty selector. Populated takes use a name-only selector; creation, deletion,
+frame selection and loop actions belong in the contextual menu. Menu actions reflect the
+selected lane and available commands. Keep ruler labels localized with explicit seconds.
+Editor navigation stops at zero; zoom preserves the requested span at that boundary instead
+of introducing negative time. This navigation constraint does not rewrite recorded timestamps.
+The two View endpoints remain adjacent and always edit the visible range; recorded loop
+selection is independent. Zoom and range previews restore the prior view on Escape,
+with the selected take in its lane header. Verify held edits, cancel, reset and one-step Undo
+as well as light/dark captures through `make ui-focused-review`.
+Take choices expose a trailing close action on row hover or keyboard focus. Selection and
+deletion have disjoint native hit regions; the close action deletes that row's take, including
+an inactive take, without first selecting it. Keep the context-menu action as an alternate route.
+
 ## References and how to use them
 
 The following are references for specific design questions. They do not replace Mojive's
@@ -95,7 +194,7 @@ examples when changing the corresponding factory defaults.
 
 | Role | Factory token/value |
 |---|---|
-| Body / title / numeric size | `body_font_size=14`, `title_font_size=16`, `mono_font_size=16` |
+| Body / title / numeric size | `body_font_size=14`, `title_font_size=16`, `mono_font_size=14` |
 | Control height / panel insets | `control_height=28`; horizontal `12`, vertical `10` |
 | Application menu bar height | `application_height=36`; existing 28-point triggers centered vertically |
 | Ordinary control radius / menu and choice row height | `control_radius=4`; `28` |
@@ -159,13 +258,18 @@ Frequent, recognizable actions can use icons with a short delayed tooltip. Unfam
 still need an understandable label. Do not repeat a fully visible caption in a hover hint;
 keep hints for hidden or clipped captions, shortcuts, unavailable-action reasons, and additional
 meaning. This applies equally to buttons, switches, and checkboxes. Tool names should stay brief.
+Inspector metadata follows the same rule: repeat type, address or DoF information in a hint
+only when its visible text is clipped.
 Close and search glyphs do not need repeated action-name tooltips. Entity names in trees,
 card headings and Inspector titles reveal their full value only when the visible label is
 actually clipped. Check the label bounds, not the whole row containing trailing actions.
 Keep useful shortcut, unavailable-action and additional-context hints separate from these
 name-only hints.
-Shortcut hints use the shared 14-point monospace key badges; axis/channel labels retain their
-separate 12-point role.
+Status hints use 10-point monospace key legends with 4-point horizontal and 2-point vertical
+insets, beside 12-point auxiliary captions and 18-point pointer glyphs. Body text and normal
+numeric fields use 14 points; panel titles use 16 points. Axis/channel labels retain their
+separate 12-point role. Match visible letter heights after font metric conversion; do not
+restore oversized numerals to compensate for a different font’s ascender/descent metrics.
 Interaction Guide reuses the status hint descriptors, key badges and canonical mouse glyphs.
 Resolve configurable gestures from the current input bindings. Keep action names and useful
 context alongside the indicators; wrap complete badges and prose instead of shrinking input
@@ -178,8 +282,8 @@ text origins with component-aligned text or add invisible caption gaps to unlabe
 
 ## Spacing, alignment, and corners
 
-Use a 4-point layout grid and 8-point group spacing as the starting scale; dense controls
-may use 2-point increments. Choose layout sizes and clearances from that scale before deriving
+Use a 2-point base grid, with 4/8/12/16-point spacing and a 10/12/14/16-point type hierarchy.
+Choose layout sizes and clearances from that scale before deriving
 nested radii. This does not quantize stroke widths, icon paths, font metrics or scaled output
 to even pixels. Retain an established component-specific exception only with its owning rule.
 
@@ -288,10 +392,12 @@ A generic tinted-selection rule must not replace that fill when the pointer ente
 real popup footers, pending-edit actions, panel actions and toolbar buttons in idle, hover,
 held and disabled states.
 
-Plain help and status tooltips resolve the active control radius rather than an
+Plain help and status tooltips resolve the active menu radius rather than an
 import-time geometry constant. They own a separate surface, so a caller's nested
 corner constraint must not leak into them. Shortcut hints retain the corner budget
-derived from their keycap and inset. Form and color popups use an 8-point inset;
+derived from their keycap and inset. Native temporary non-modal surfaces share the menu's
+8-point default shell: choices, forms, Layers, color editors and tooltips. Forms, choices,
+color editors and shortcut tags use a 4-point inset and derived 4-point child corners;
 modals use 12 points, deriving their outer corners from the controls inside.
 Electron uses the shared themed tooltip owner instead of browser `title` bubbles. Its interaction
 guide reuses native mouse glyphs and separate keycaps; wrap complete input gestures together.
@@ -320,12 +426,36 @@ silhouette. Do not combine a rounded frame background, rounded child fills and a
 rounded overflow clip. Check a uniform-fill raster against one rounded reference surface
 to detect repeated edge coverage that radius measurements alone cannot expose.
 
-Floating menus, choices, color editors and modals have one neutral native border. Their
-shadow has a broad, continuous Gaussian-like falloff outside that border, slightly heavier
+Native circular corners use a 0.125-physical-pixel chord-error budget at the current framebuffer
+density. They adapt beyond the fixed arc lookup table; increased application zoom must not
+expose polygonal popup corners or switch tracks. Circle thumbs and capsule tracks need
+comparable contour quality even when their drawing entry points differ.
+
+Floating menus, choices, form popups, color editors and modals have one neutral native border.
+That edge separates the surface from the scene; it never encodes keyboard focus or selection.
+Keyboard navigation uses one inset accent contour on the focused control. Component-owned
+focus painting suppresses the native default cursor without disabling native navigation.
+Mouse activation clears that keyboard indicator; hovering alone does not change keyboard focus.
+Viewport projection, shading and Layers are one sibling menu set: hover switches an open set,
+clicking its active trigger closes it, and unrelated popups retain input ownership.
+Layers uses a centered 32-point heading row and a compact 28-point reset action. The reset
+frame has equal 6-point top/right gutters and a derived child radius; label inset is separate.
+Content/scroll child windows retain native navigation and scrolling without a control-like
+focus border around the whole region. Focus contours belong to actionable items.
+Use switches for independent Boolean settings that apply immediately, with one full-row
+label/control hit target. Keep checkboxes for sets of selectable items, flags and visual-group
+membership. Choose the semantic control explicitly; never infer it from translated captions
+or the number of currently visible options.
+Floating surfaces have a broad, continuous Gaussian-like shadow falloff beneath that border, slightly heavier
 below the surface. Reuse local native gradient meshes when moving or repainting a window;
 do not rebuild blur textures every frame. Avoid narrow linear fringes that read as another
 border, stepped outline rings, or an accent halo around an entire popup. Each popup owner
-paints its shadow once; the renderer needs no extra blur pass. Electron resolves one subtle
+paints its shadow once, before its native background and edge; the renderer needs no extra blur
+pass. Continue shadow coverage under the whole fill. A hollow shadow painted afterward exposes
+an independently tessellated hard inner edge through the fill's antialiasing, producing dirty
+corner seams even when both radii agree. Use the retained mesh underlay path, preserving native
+clipping and compositing order, and compare actual pixels with background-first compositing in
+`make ui-popup-review` on both backends. Electron resolves one subtle
 neutral edge and a broad shadow from the active palette; avoid overlapping dark outline rings
 or tight secondary shadows that make the edge appear dirty.
 
@@ -350,7 +480,7 @@ hint to the input text inset, while footer buttons align to the control frames.
 Measure native font quantization before deriving field padding so fractional scale
 does not introduce a scrollbar and change popup width on alternating frames.
 Axis/channel badges have their own `badgeFontSize=12` role and a 20-point strip;
-they do not inherit the 16-point numeric role. Keep the label and value centered on the
+they do not inherit the numeric role. Keep the label and value centered on the
 same row, leaving visible space on both sides of the badge glyph. Computed typography
 must survive the production authored-default resolver. Verify emitted native font sizes,
 not only the specification or isolated specimen; changing font size alone must not
@@ -462,6 +592,7 @@ as selects and numeric fields; reflow only when the measured content cannot fit.
 | Tooltips and notices | Use shared surfaces and typography. Keep complete corners and centered content within the clip. File-action buttons align right when wrapped below text. Text-only captions beside action buttons need their own text inset in addition to the shell-to-button clearance. Avoid duplicate status messages or competing tooltip implementations. |
 | Operation Undo | Bind the notice action to the exact committed history revision or latest pending-operation checkpoint. Retain earlier drafts when reverting one pending operation; invalidate the token on a later write, clear, apply or incompatible document. Mixed direct/draft writes must not expose a partial undo. Preserve the undo identity when a command interceptor forwards an already published result. Recheck eligibility on click. Translate built-in command and transaction captions at presentation, including Create, Apply and Undo, while preserving user names. |
 | Gizmo value feedback | Transform drags, joint precision rails, and range endpoints share `workspace/gizmo_readout.py`: the numeric field’s resolved font, height, padding and radius on the floating surface. Center text by cap height, retain semantic axis dots, and scale viewport-edge clearance with the UI. Precision rails paint the track first, full-height limit ticks centered across it second, and the round thumb last. Inset the painted track by its cap radius so it cannot protrude past the ticks; preserve full-range hit and value mapping. During a gesture, a shorter tick marks the starting value on the rail and a distinct darker segment spans the start and current values in either direction. The change segment has flat caps at the reference boundary so no rounded bulge protrudes beneath the origin tick. The thumb covers the origin tick when they coincide. |
+| Spatial gizmo ticks | Hinge limits, current values and Shift snap ticks project both endpoints from the same joint plane as the ring. Preserve foreshortening and near/far size differences instead of normalizing the projected radial to a fixed pixel length. Slide limits, drag-origin ticks and Shift rulers share a world length calibrated at the current position, with depth-scaled transverse marks. Keep readable stroke widths and use the painted endpoints for picking. The explicit screen-rotation ring and floating precision rails remain screen-space controls. Inspect perspective and orthographic views, ordinary and Shift drags, limit picking and cancellation with `make joint-gizmo-review`. |
 | Floating forms | Reuse `ui/workspace/floating.py` and the shared popup geometry. Closing a chooser preserves the selected joint; double-click focus can dismiss the chooser while retaining the gizmo. |
 | Inspector | Properties owns geometry shape/dimensions; Physics owns contact/mass; Material owns appearance. A presentation refactor must not hide or duplicate these capabilities. |
 | Output | Align severity glyphs with the first line’s visible text metrics, including localized fallback fonts. Scale the complete glyph with output typography and retain first-line alignment for multiline messages. Preserve selection, context-menu copying, search, severity filters, multiline messages, and clearing. Distinguish empty history from unmatched filters. Avoid a repeated copy button on every row. |
@@ -515,7 +646,7 @@ does not restore environment defaults; expose those as distinct actions. Capabil
 the existing numeric, vector, selection and whole-row Boolean controls rather than engine-specific
 widget copies. Actuator inputs reuse joint-card geometry and transaction behavior.
 
-Electron joint and actuator cards place the current value beside the name and put read-only
+Joint and actuator cards place the current value beside the name and put read-only
 minimum and maximum values at the ends of the slider below. Reserve fixed-width numeric cells;
 truncate long text without rounding the stored value. Hover exposes the exact value, secondary
 click copies it, primary drag adjusts an editable value, and double-click enters text editing.
@@ -523,19 +654,17 @@ Give hover and press distinct states. Place a known unit once, muted after the c
 beside each position/rotation group for multi-axis joints. Mark the stable model reference
 position (`qpos0` for MuJoCo joints, zero for URDF joints and actuator controls) with a small
 slider tick. Do not move it with the current value or clamp an out-of-range reference to an endpoint.
-Compact XYZ readouts retain the same axis-colored badges as expanded fields. Keep reset and
-disclosure as compact header actions, independent of the title's selection/expansion target.
+Compact XYZ readouts retain axis-colored reset badges and directly editable values. Joint cards have no redundant disclosure or DoF label.
 An actuator title already selects its associated joint; do not repeat that navigation as a footer
 action or add a disclosure solely to expose it. Retain disclosure only for additional metadata.
 Cards use an 8 px surface inset, 12 px outer radius, and derived 4 px inner radius, with a 4 px
 gap between the 28 px heading and the control row. Keep these metrics shared across both panels.
-Numeric tooltips show the exact value only. Show available mouse actions in the contextual status
+Numeric tooltips show the exact value only when the displayed representation is shortened. Show available mouse actions in the contextual status
 bar: secondary-click copy for limits, plus drag and double-click entry for editable values. Restore
 viewport hints on exit; active text editing instead shows Apply/Cancel. Hover must not rerender
 the scene, and clipboard feedback must not outlive its originating context.
 Verify both themes, narrow and wide panels,
-and fractional scale with `make -C electron actuator-review`. These are Electron card defaults;
-native panel layout migration is a separate design change.
+and fractional scale with `make -C electron actuator-review` and native `make ui-focused-review`.
 Simulation transport shares the viewport navigation row. Center Previous frame, Play/Pause and
 Single step as one group; keep reset and Environment separate from transport, and identify speed
 through its control hint. Show simulation time once in the status bar. Narrow layouts retain all
@@ -697,3 +826,17 @@ Timeline and Output panel controls belong together in the activity navigation.
 Camera cards use primary ink for the name and secondary ink for projection/resolution. Wrap
 metadata from its actual available width instead of a fixed card-width threshold. Joint and
 actuator metadata follows the same hierarchy without shrinking normal body text.
+
+Section dividers span the same frame as their title hover surface. The parent owns the
+content inset; the separator does not add another horizontal inset. Verify saved desktop
+profiles as well as factory defaults when revising density: old explicit values remain
+authoritative until intentionally migrated. Back up a profile before changing its relevant
+fields, and preserve unrelated choices.
+
+Empty panel content shares one muted body-text presenter with an 8-point vertical inset and
+no additional horizontal indentation. Inspector and navigation joint cards use the same
+presenter and interaction contract. Scalar Inspector fields reserve a stable format budget
+rather than stretching across the whole panel; labels share a measured column. Camera view
+actions animate through the existing eased camera transition, while capture uses the final view.
+The take selector keeps selection and deletion together; the lane's adjacent plus creates a take.
+Deleting the active take selects a remaining take, and deleting the last restores the empty lane.

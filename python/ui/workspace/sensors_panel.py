@@ -11,7 +11,7 @@ from mojive.ui.panels import copy_state_vector
 from mojive.ui.panels.sensors import SensorsPanel, sensor_component_label
 from mojive.ui.workspace.component_layout import component_flow, control_frame_size, control_size
 from mojive.ui.workspace.design import DESIGN, current_design, use_design
-from mojive.ui.workspace.property_style import NativePropertyPresentation, advance
+from mojive.ui.workspace.property_style import NativePropertyPresentation, advance, panel_empty
 from mojive.ui.workspace.widgets import INPUT, MUTED, TEXT
 
 
@@ -251,17 +251,8 @@ class WorkspaceSensors(SensorsPanel):
 
     def _notice(self, text):
         ui = self.workspace.ui
-        style = ui.component_style("sensor")
-        size = style.get("detailSize", 12)
-        imgui.push_font(ui.resolve_font(style), size * ui.s)
-        imgui.push_style_color(imgui.Col_.text, tuple(channel / 255 for channel in MUTED))
-        imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + self._width())
-        try:
-            imgui.text_unformatted(text)
-        finally:
-            imgui.pop_text_wrap_pos()
-            imgui.pop_style_color()
-            imgui.pop_font()
+        p = imgui.get_cursor_screen_pos()
+        panel_empty(ui, "sensor-empty", text, p.x, p.y, self._width(), translate=False)
 
     @part_scope("sensor")
     def draw(self, ctx):

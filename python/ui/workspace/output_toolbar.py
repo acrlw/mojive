@@ -192,6 +192,40 @@ def draw_output_toolbar(output, ctx, entries, newest):
         for index in range(len(severity), len(placements)):
             placements[index] = replace(placements[index], x=placements[index].x + remaining)
     fields = []
+    search_rect = None
+    if output.show_search:
+        search_height = (
+            ui.design.primitives.field_height(("input_text", "search")) if ui.design else 28
+        ) * scale
+        left = placements[len(severity) - 1].right + gap if severity else box.content.x
+        right = placements[len(severity)].x - gap
+        if right - left >= 160 * scale:
+            search_rect = Rect(left, box.content.y, right - left, search_height)
+        else:
+            search_rect = Rect(box.content.x, box.content.y, box.content.width, search_height)
+            placements = [replace(rect, y=rect.y + search_height + row_gap) for rect in placements]
+            box = ui.component_box(
+                "output_toolbar",
+                origin.x,
+                origin.y,
+                width,
+                box.outer.height + search_height + row_gap,
+                observe=False,
+            )
+        if output._focus_search:
+            imgui.set_keyboard_focus_here()
+            output._focus_search = False
+        changed, output._filter_text = ui.search(
+            "##output-filter",
+            search_rect.x,
+            search_rect.y,
+            search_rect.width,
+            output._filter_text,
+            hint=ctx.tr("Search output"),
+        )
+        fields.append(list(ui.hits["##output-filter"]))
+        if changed:
+            output._last_sequence = 0
     for (key, icon, label, options), allocated, (_w, h) in zip(
         controls, placements, actual_sizes, strict=True
     ):
@@ -229,49 +263,6 @@ def draw_output_toolbar(output, ctx, entries, newest):
         elif key == "collapse-output":
             output.workspace.collapse_bottom()
     entries, newest = _popup(output, ctx, levels, labels, visible, entries, newest)
-    if output.show_search:
-        search_parts = ("input_text", "search")
-        search_style = ui.component_style(search_parts)
-        search_margin = search_style.edges("margin", scale)
-        search_height = (
-            (ui.design.primitives.field_height(search_parts) if ui.design is not None else 28)
-            * scale
-            + search_margin[1]
-            + search_margin[3]
-        )
-        search_y = box.content.y + flow.height + row_gap
-        search_row_height = search_height
-        search_rect = Rect(
-            box.content.x,
-            search_y,
-            box.content.width,
-            search_row_height,
-        )
-        search_at = style.align_rect(
-            search_rect, search_rect.width, search_height, horizontal="start"
-        )
-        if output._focus_search:
-            imgui.set_keyboard_focus_here()
-            output._focus_search = False
-        changed, output._filter_text = ui.search(
-            "##output-filter",
-            search_at.x,
-            search_at.y,
-            search_at.width,
-            output._filter_text,
-            hint=ctx.tr("Search output"),
-        )
-        fields.append(list(ui.hits["##output-filter"]))
-        if changed:
-            output._last_sequence = 0
-        box = ui.component_box(
-            "output_toolbar",
-            origin.x,
-            origin.y,
-            width,
-            box.outer.height + row_gap + search_row_height,
-            observe=False,
-        )
     ui.record_component_box(
         "output_toolbar",
         box,

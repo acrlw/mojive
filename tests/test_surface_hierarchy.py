@@ -448,7 +448,7 @@ def test_settings_navigation_and_page_children_preserve_parent_background(surfac
         imgui.begin("Settings surface", flags=imgui.WindowFlags_.no_title_bar)
     p = imgui.get_cursor_screen_pos()
     draw_navigation(panel, ctx, Rect(p.x, p.y, 800 * ui.s, 500 * ui.s), False)
-    _draw_page(panel, ctx, Rect(p.x + 240 * ui.s, p.y, 540 * ui.s, 500 * ui.s), ())
+    _draw_page(panel, ctx, Rect(p.x + 240 * ui.s, p.y, 540 * ui.s, 500 * ui.s))
     imgui.end()
     imgui.render()
     children = [

@@ -95,8 +95,8 @@ def test_color_channels_keep_one_complete_row_or_one_channel_per_row(
         assert row_count == count
     window = imgui.get_current_context().open_popup_stack[0].window
     for x, _y, width, _height in rows:
-        assert x >= window.pos.x + native_unit(8 * ui.s) - 1
-        assert x + width <= window.pos.x + window.size.x - native_unit(8 * ui.s) + 1
+        assert x >= window.pos.x + native_unit(4 * ui.s) - 1
+        assert x + width <= window.pos.x + window.size.x - native_unit(4 * ui.s) + 1
     before = rows.copy()
     state.values = [0.999, 0.001, 0.333, 1][:count]
     state.frame()

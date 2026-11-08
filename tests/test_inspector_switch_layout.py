@@ -52,8 +52,12 @@ def test_body_mocap_switch_shares_a_row_when_caption_and_switch_fit(
     ui, scale = state.study.ui, state.study.s
     body, runtime = _body_physics(state, tmp_path, width, inertia_mode)
     row = _switch_row(runtime)
-    label = ui.hits["property-label-mocap body"]
-    switch = ui.hits["##body-mocap"]
+    label = row["labelRect"]
+    switch = next(
+        item["switchRect"]
+        for item in reversed(runtime.observed)
+        if item["key"] == "##body-mocap/label-row"
+    )
     shown = ctx.tr("mocap body")
     shown = shown[:1].upper() + shown[1:]
     assert shown in state.rendered

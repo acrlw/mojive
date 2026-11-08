@@ -52,12 +52,12 @@ def test_floating_surface_balances_actual_inset_and_painted_field_corners(
     inner = window.window_rounding - inset
     assert 0 <= inner <= field[3] / 2 - 1
     if radius is None:
-        assert inset == native_unit((12 if modal else 8) * ui.s)
+        assert inset == native_unit((12 if modal else 4) * ui.s)
         assert inner == pytest.approx(4 * ui.s)
     else:
         assert window.window_rounding == pytest.approx(radius * ui.s)
-        if radius < 12:
-            assert inset < native_unit(8 * ui.s)
+        if radius < 8:
+            assert inset < native_unit(4 * ui.s)
             assert inner < 4 * ui.s
     ink = color(rgba8("field"))
     diagonal = inner * (1 - sqrt(0.5))

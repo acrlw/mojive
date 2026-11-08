@@ -49,9 +49,11 @@ def test_empty_workspace_switches_language_without_stale_text(
                 if language == "zh_CN"
                 else "Open a scene or add an object to begin."
             )
-            assert expected in painted
+            assert any(expected in value for value in painted)
             if language == "zh_CN":
-                assert "Open a scene or add an object to begin." not in painted
+                assert not any(
+                    "Open a scene or add an object to begin." in value for value in painted
+                )
             OUTPUT.mkdir(parents=True, exist_ok=True)
             pixels = viewer.window.read_frame()
             assert pixels is not None

@@ -7,12 +7,32 @@ from dataclasses import dataclass, replace
 from imgui_bundle import imgui
 
 from mojive.design.groups import scoped_parts
-from mojive.design.native.geometry import Rect
+from mojive.design.native.geometry import Box, Rect
 from mojive.ui.controls import clearable_combo, search_presentation
 from mojive.ui.workspace.choice_popup import ChoicePopup
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN, rail_style
 from mojive.ui.workspace.property_groups import PropertyGroups
 from mojive.ui.workspace.widgets import MUTED, TEXT
+
+
+def panel_empty(ui, key, text, x, y, width, *, translate=True):
+    """Use one quiet, wrapped body-text treatment for empty panel content."""
+    style, scale = ui.component_style("form_label"), ui.s
+    imgui.set_cursor_screen_pos((x, y + 8 * scale))
+    imgui.push_font(ui.resolve_font(style), style.get("fontSize", BODY_SIZE) * scale)
+    imgui.push_style_color(imgui.Col_.text, tuple(c / 255 for c in ui.ink(MUTED)))
+    imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + max(scale, width))
+    try:
+        imgui.text_unformatted(ui.translate(text) if translate else text)
+        lo, hi = imgui.get_item_rect_min(), imgui.get_item_rect_max()
+        ui.hits[key] = (lo.x, lo.y, hi.x - lo.x, hi.y - lo.y)
+        bottom = hi.y + 8 * scale
+    finally:
+        imgui.pop_text_wrap_pos()
+        imgui.pop_style_color()
+        imgui.pop_font()
+    advance(ui, x, bottom)
+    return bottom
 
 
 @contextmanager
@@ -200,7 +220,85 @@ def switch_form_layout(ui, width, label, *, label_width=None, label_above=None):
     )
 
 
-def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_width=None):
+def popup_row_box(ui, frame, *, margin=(0, 0, 0, 0)):
+    """Keep feedback inside the floating shell and pad its label and track."""
+    inset = ui.component_style("section_header").edges("padding", ui.s, (8, 0, 8, 0))
+    padding = (inset[0], 0, inset[2], 0)
+    return Box(frame, frame, frame.inset(*padding), padding, margin)
+
+
+def switch_row_box(ui, content, *, margin=(0, 0, 0, 0)):
+    """Pad labeled feedback within the parent's inset without moving its content column."""
+    # Labels retain the section's content column. Feedback extends into its
+    # existing inset, so the row has padding without shifting sibling captions.
+    window = imgui.internal.get_current_window()
+    inset = ui.component_style("section_header").edges("padding", ui.s, (8, 0, 8, 0))
+    if window.flags & imgui.WindowFlags_.popup:
+        # A floating shell already reserves its concentric outer gutter. Keep
+        # feedback inside it and give the label/track their own internal padding.
+        return popup_row_box(ui, content, margin=margin)
+    clip = window.inner_clip_rect
+    left = min(inset[0], max(0, content.x - clip.min.x))
+    right = min(inset[2], max(0, clip.max.x - content.right))
+    frame = Rect(content.x - left, content.y, content.width + left + right, content.height)
+    return Box(frame, frame, content, (left, 0, right, 0), margin)
+
+
+def draw_toggle_row(ui, key, label, value, x, y, width, layout, *, tooltip=""):
+    """One native item owns the caption, intervening space and Boolean control."""
+    painter = ui.design.primitives
+    painter.family = ui.design.family()
+    style = painter.style("switch")
+    outer = Rect(x, y, width, layout.height)
+    box = switch_row_box(ui, outer.inset(*layout.row_margin), margin=layout.row_margin)
+    frame = box.frame
+    dx, dy, fw, fh = layout.fields[0]
+    control = painter.field_box(style, Rect(x + dx, y + dy, fw, fh), (0, 0, 0, 0))
+    # One-column property tables clip at the text column. Include the owned
+    # row padding in both native hit testing and paint, retaining vertical scroll clipping.
+    window = imgui.internal.get_current_window()
+    current, clip = window.clip_rect, window.inner_clip_rect
+    imgui.push_clip_rect(
+        (max(clip.min.x, min(current.min.x, frame.x)), current.min.y),
+        (min(clip.max.x, max(current.max.x, frame.right)), current.max.y),
+        False,
+    )
+    try:
+        result = painter.switch(
+            key,
+            frame,
+            value,
+            label=label,
+            tooltip=tooltip,
+            layout_box=box,
+            label_style=painter.style(("switch", "form_label")),
+            label_rect=Rect(
+                x + layout.label_x, y + layout.label_y, layout.label_width, layout.label_height
+            ),
+            control_rect=control.content,
+        )
+    finally:
+        imgui.pop_clip_rect()
+    if ui.design.runtime.observes(scoped_parts("switch")):
+        ui.design.record(
+            key + "/label-row",
+            ("switch",),
+            outer.tuple(),
+            "switch_row",
+            labelRect=[
+                x + layout.label_x,
+                y + layout.label_y,
+                layout.label_width,
+                layout.label_height,
+            ],
+            switchRect=list(control.frame.tuple()),
+        )
+    return result.value
+
+
+def property_toggle(
+    ui, key, label, value, *, width=None, tooltip="", label_width=None, trailing_gap=None
+):
     """Draw a complete switch row with shared label bounds and row spacing."""
     pos = imgui.get_cursor_screen_pos()
     width = imgui.get_content_region_avail().x if width is None else width
@@ -208,88 +306,12 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
     if tooltip and (tooltip in (label, shown) or ui.translate(tooltip) == shown):
         tooltip = ""
     layout = switch_form_layout(ui, width, label, label_width=label_width)
-    control_x = pos.x + layout.fields[0][0]
-    if layout.label_above:
-        property_label(
-            ui,
-            key + "-label-text",
-            shown,
-            pos.x + layout.label_x,
-            pos.y + layout.label_y,
-            layout.label_width,
-            above=True,
-            row_height=layout.label_height / ui.s,
-            parent="switch",
-        )
-        imgui.set_cursor_screen_pos((pos.x + layout.label_x, pos.y + layout.label_y))
-        clicked = imgui.invisible_button(
-            key + "-label", (max(1, layout.label_width), layout.label_height)
-        )
-        if tooltip and imgui.is_item_hovered(
-            imgui.HoveredFlags_.delay_normal | imgui.HoveredFlags_.allow_when_disabled
-        ):
-            ui.tooltip(tooltip, translate=False)
-        value = not value if clicked else value
-        if ui.design is not None:
-            painter = ui.design.primitives
-            painter.family = ui.design.family()
-            style = painter.style("switch")
-            margin = style.edges("margin", ui.s)
-            _, field_y, field_width, field_height = layout.fields[0]
-            box = painter.field_box(
-                style,
-                Rect(control_x, pos.y + field_y, field_width, field_height + margin[1] + margin[3]),
-                (0, 0, 0, 0),
-            )
-            value = painter.switch(
-                key,
-                box.frame,
-                value,
-                layout_box=box,
-                tooltip=tooltip,
-                control_x=box.content.right
-                - style.get("switchWidth", DESIGN.switch_track_width) * ui.s,
-            ).value
-        else:
-            value = ui.switch(key, control_x, pos.y + layout.fields[0][1], value)
-        advance(ui, pos.x, pos.y + layout.height + DESIGN.row_gap * ui.s)
-        return value
+    gap = DESIGN.row_gap if trailing_gap is None else trailing_gap
     if ui.design is not None:
-        painter = ui.design.primitives
-        painter.family = ui.design.family()
-        style = painter.style("switch")
-        label_style = painter.style(("switch", "form_label"))
-        margin = style.edges("margin", ui.s)
-        row_height = toggle_row_height(ui, label_style)
-        height = row_height - margin[1] - margin[3]
-        box = painter.field_box(
-            style,
-            Rect(
-                pos.x + layout.row_margin[0],
-                pos.y + layout.row_margin[1],
-                max(0, width - layout.row_margin[0] - layout.row_margin[2]),
-                row_height,
-            ),
-            (0, 0, 0, 0),
-            minimum_height=height / ui.s,
-        )
-        result = painter.switch(
-            key,
-            box.frame,
-            value,
-            label=label,
-            label_style=label_style,
-            layout_box=box,
-            tooltip=tooltip,
-            control_x=box.content.right
-            - style.get("switchWidth", DESIGN.switch_track_width) * ui.s,
-        )
-        advance(
-            ui,
-            pos.x,
-            box.outer.bottom + layout.row_margin[3] + DESIGN.row_gap * ui.s,
-        )
-        return result.value
+        value = draw_toggle_row(ui, key, label, value, pos.x, pos.y, width, layout, tooltip=tooltip)
+        advance(ui, pos.x, pos.y + layout.height + gap * ui.s)
+        return value
+    control_x = pos.x + layout.fields[0][0]
     shown = ui.translate(label)
     hint = ui.translate(tooltip) if tooltip else ""
     if label and hint == shown:
@@ -298,7 +320,7 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
         key + "-label",
         pos.x,
         pos.y,
-        max(1, layout.label_width / ui.s),
+        max(1, (control_x - pos.x) / ui.s),
         DESIGN.control_height,
         tooltip=hint or (shown if ui.measure(shown, translate=False) > layout.label_width else ""),
     )
@@ -313,12 +335,12 @@ def property_toggle(ui, key, label, value, *, width=None, tooltip="", label_widt
         parent="switch",
     )
     edited = ui.switch(key, control_x, pos.y, value)
-    advance(ui, pos.x, pos.y + (DESIGN.control_height + DESIGN.row_gap) * ui.s)
+    advance(ui, pos.x, pos.y + (DESIGN.control_height + gap) * ui.s)
     return not value if clicked else edited
 
 
 class NativePropertyPresentation:
-    def __init__(self, ui, *, prefix="property", fit_labels=False):
+    def __init__(self, ui, *, prefix="property", fit_labels=False, show_tracks=True):
         self.ui = ui
         self.prefix = prefix
         self._colors = {}
@@ -326,6 +348,7 @@ class NativePropertyPresentation:
         self.groups = PropertyGroups(ui)
         self._control_width = None
         self.fit_labels = fit_labels
+        self.show_tracks = show_tracks
         self._table_labels = {}
         self._label_groups = {}
         self._label_group = None
@@ -451,6 +474,7 @@ class NativePropertyPresentation:
         readonly_text=None,
     ):
         ui, scale = self.ui, self.ui.s
+        rail = rail and self.show_tracks
         imgui.table_next_row()
         imgui.table_next_column()
         pos = imgui.get_cursor_screen_pos()
@@ -461,6 +485,7 @@ class NativePropertyPresentation:
         if label_width is None and self._label_width is not None:
             label_width = max(
                 self._label_width,
+                DESIGN.label_minimum * scale,
                 ui.measure(label, ui.metric("form_label", "fontSize", BODY_SIZE), translate=False),
             )
         style = rail_style()
@@ -584,7 +609,10 @@ class NativePropertyPresentation:
 
     def value_rail(self, item_id, value, bounds, **options):
         pos = imgui.get_cursor_screen_pos()
-        return self.ui.rail(item_id, pos.x, pos.y, self._field_width(), value, bounds, **options)
+        width = self._field_width()
+        if not self.show_tracks:
+            options["show_track"] = False
+        return self.ui.rail(item_id, pos.x, pos.y, width, value, bounds, **options)
 
     def segmented(self, item_id, labels, selected, *, icons=None, theme=None):
         pos = imgui.get_cursor_screen_pos()
@@ -756,6 +784,21 @@ class NativePropertyPresentation:
         if width is None and self._control_width is not None:
             width = self._control_width
         return property_toggle(self.ui, key, label, value, width=width)
+
+    def toggle_property(self, key, label, value):
+        """Allocate a Boolean property using the same full-row switch as Inspector."""
+        imgui.table_next_row()
+        imgui.table_next_column()
+        pos = imgui.get_cursor_screen_pos()
+        x, y, width = self.groups.row(pos.x, pos.y, imgui.get_content_region_avail().x)
+        self._labels.append(label)
+        imgui.set_cursor_screen_pos((x, y))
+        imgui.begin_group()
+        updated = property_toggle(
+            self.ui, key, label, value, width=width, label_width=self._label_width, trailing_gap=0
+        )
+        imgui.end_group()
+        return updated != value, updated
 
     def toggles(self, items):
         """Fit complete switch/label pairs into equal columns, then wrap rows."""

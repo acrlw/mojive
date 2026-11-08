@@ -17,6 +17,7 @@ from mojive.ui.numeric_text import fit_numeric_text, numeric_edit_format, numeri
         (255.0, "%.0f", "255"),
         (0.00288568, "%.6g", "0.00288568"),
         (10, "%d px", "10 px"),
+        (100, "%.0f %%", "100 %"),
     ),
 )
 def test_numeric_caption_keeps_units_and_normalizes_zero(value, format, expected):
@@ -58,3 +59,8 @@ def test_exact_zero_remains_readable_when_its_authored_precision_cannot_fit():
     assert fit_numeric_text(-0.0, "%.3f", 5, measure) == "0.000"
     assert fit_numeric_text(0.0, "%.3f", 3, measure) == "0.0"
     assert fit_numeric_text(0.0, "%.3f", 1, measure) == "0"
+
+
+def test_compacted_percentage_unescapes_the_unit_once():
+    shown = fit_numeric_text(123456789, "%.0f %%", 8, lambda text: (len(text), 1))
+    assert shown == "1e8 %"

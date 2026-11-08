@@ -61,9 +61,11 @@ def contact_style(panel, ctx: PanelContext) -> None:
                 ctx.backend.set_contact_style(style)
         return
     if panel._begin_properties("contact_style_properties"):
-        panel._property(t("Show contact points"), control_part="checkbox")
-        changed, enabled = panel._checkbox(
-            "##contact_enabled", ctx.backend.get_flag(RenderFlag.CONTACTPOINT), ctx.theme
+        changed, enabled = panel._toggle_property(
+            "##contact_enabled",
+            t("Show contact points"),
+            ctx.backend.get_flag(RenderFlag.CONTACTPOINT),
+            ctx.theme,
         )
         if changed:
             ctx.backend.set_flag(RenderFlag.CONTACTPOINT, enabled)
@@ -77,9 +79,8 @@ def contact_style(panel, ctx: PanelContext) -> None:
         if changed:
             style = replace(style, shape=shapes[selected])
             committed = True
-        panel._property(t("Use model color"), control_part="checkbox")
-        changed, use_model_color = panel._checkbox(
-            "##contact_model_color", style.use_model_color, ctx.theme
+        changed, use_model_color = panel._toggle_property(
+            "##contact_model_color", t("Use model color"), style.use_model_color, ctx.theme
         )
         if changed:
             style = replace(style, use_model_color=use_model_color)

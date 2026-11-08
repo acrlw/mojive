@@ -192,6 +192,7 @@ def test_camera_directions_include_iso_and_call_the_existing_preset(width, langu
         ui.body = ui.bold = ui.mono = io.fonts.add_font_default()
         presets = []
         app = SimpleNamespace(
+            _leave_model_camera=lambda: None,
             camera=SimpleNamespace(set_preset=presets.append),
             _frame_scene=lambda **kwargs: presets.append("frame"),
         )

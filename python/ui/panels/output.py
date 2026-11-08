@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from imgui_bundle import imgui
 
 from mojive.adapters.base import FrameNeeds
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.files import message_path, reveal_path
 from mojive.ui.imgui_draw import ImguiDraw2D
 from mojive.ui.messages import OutputMessage
@@ -403,7 +404,7 @@ class OutputPanel(Panel):
         if self.auto_scroll and newest_visible > self._last_sequence:
             imgui.set_scroll_here_y(1.0)
         self._last_sequence = newest_visible
-        imgui.end_child()
+        end_content_child()
 
     @contextmanager
     def _context_popup(self, key):

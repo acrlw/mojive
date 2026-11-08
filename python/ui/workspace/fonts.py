@@ -67,6 +67,8 @@ def font_em_ratio(source: FontSource) -> float:
         return 2400 / 2048
     if name.startswith("MiSans-"):
         return 1326 / 1000
+    if name.startswith("JetBrainsMono-"):
+        return 1320 / 1000
     return 1.0
 
 
@@ -123,9 +125,6 @@ def resolve_fonts(*, portable=False, cjk=None, numeric=None):
     for source in sources:
         if not Path(source.path).is_file():
             raise FileNotFoundError(f"Design workspace font is unavailable: {source.path}")
-    # ImGui FreeType requests REAL_DIM, not nominal em height. Keep numeric
-    # metrics compact while making body and heading sizes match their labels.
-    return tuple(
-        (source, font_em_ratio(source) if index < 2 else 1.0)
-        for index, source in enumerate(sources)
-    )
+    # FreeType REAL_DIM uses ascender/descent height. Convert every family to
+    # nominal em units so equal body and numeric sizes have comparable ink.
+    return tuple((source, font_em_ratio(source)) for source in sources)

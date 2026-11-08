@@ -15,7 +15,6 @@ from mojive.commands import (
 )
 from mojive.interaction.gizmo import (
     RING_SEGMENTS,
-    SIZE_PT,
     prepare_projection,
     project,
     rotation_dial,
@@ -51,6 +50,7 @@ class _RotationDialProjector:
         self._center = np.asarray(center, np.float64)
         self._axis = np.asarray(axis, np.float64)
         self._start_direction = np.asarray(start_direction, np.float64)
+        self._size_px = float(size_px)
         self._world_scale = world_scale(
             cam,
             center,
@@ -81,14 +81,15 @@ class _RotationDialProjector:
         angle: float,
         length_px: float,
     ) -> tuple[np.ndarray, np.ndarray] | None:
-        points = self.points((radius, radius + 1.0 / SIZE_PT), (angle, angle))
+        # Length is authored at the dial center, then both endpoints follow the
+        # same world-plane projection as its ring. Screen-normalizing the radial
+        # direction makes oblique and distant ticks look like pasted-on UI marks.
+        points = self.points((radius, radius + length_px / self._size_px), (angle, angle))
         direction = points[1, :2] - points[0, :2]
         projected_length = float(np.linalg.norm(direction))
         if np.any(points[:, 2] <= 0.0) or projected_length < 1e-6:
             return None
-        radial = direction / projected_length
-        start = points[0, :2]
-        return start, start + radial * float(length_px)
+        return points[0, :2], points[1, :2]
 
 
 class _ScreenRotationDialProjector:
@@ -424,7 +425,7 @@ def _project_rotation_tick(
     angle: float,
     length_px: float,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Project one radial tick and keep its displayed length in pixels."""
+    """Project one radial world-plane tick through the dial's shared mapping."""
     return _RotationDialProjector(
         cam,
         rect,

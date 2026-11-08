@@ -39,6 +39,8 @@ def menu():
         session=SimpleNamespace(
             adapter=SimpleNamespace(caps=AdapterCaps()),
             paused=True,
+            can_step_back=False,
+            replay_info=None,
             state_take_playing=False,
             state_take_recording=False,
         ),
@@ -92,7 +94,8 @@ def test_shortcut_labels_follow_remapping_and_omit_unbound_actions(menu):
             next(row.shortcut for row in items(menu, name) if row and row.action == "frame") == "K"
         )
     assert (
-        next(row.shortcut for row in items(menu, "Simulate") if row and row.action == "play") == "P"
+        next(row.shortcut for row in items(menu, "Simulate") if row and row.action == "simulate")
+        == "P"
     )
 
 

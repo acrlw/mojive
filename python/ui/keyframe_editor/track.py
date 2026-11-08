@@ -261,7 +261,7 @@ def _update_timeline_view(
         editor.view_start, editor.view_end = fitted_timeline_range(bounds, editor.playhead)
         editor.view_model_id = editor.model_id
         editor.view_needs_fit = False
-    limits = timeline_navigation_limits(bounds, editor.manual_view_range)
+    limits = timeline_navigation_limits(bounds, editor.manual_view_range, zero_based=True)
     editor.view_start, editor.view_end = clamp_timeline_range(
         editor.view_start, editor.view_end, limits
     )
@@ -328,6 +328,9 @@ def _update_timeline_view(
             editor.playhead,
             editor.follow_mode,
             editor.locked_fraction,
+        )
+        editor.view_start, editor.view_end = clamp_timeline_range(
+            editor.view_start, editor.view_end, limits
         )
     editor.last_followed_playhead = editor.playhead
 

@@ -205,6 +205,18 @@ class _Input:
                 keyboard_claimed=self._input_claim.keyboard,
             )
 
+        if (
+            (self.gizmo.using or self.gizmo.keyboard_using)
+            and not self._input_claim.claims_key("escape")
+            and imgui.is_key_pressed(imgui.Key.escape, False)
+        ):
+            self.gizmo.cancel()
+            self.router.abort()
+            self._consume_scene_pointer_until_release = any(
+                imgui.is_mouse_down(button) for button in range(3)
+            )
+            return Keys()
+
         clear_selection = bool(
             self.interactions.selection.clear_with_escape
             and not self._input_claim.claims_key("escape")
@@ -303,6 +315,7 @@ class _Input:
             and self._model_camera_id < 0
             and self.interactions.camera.view_cube
             and self.viewport_layers.viewport_ui
+            and self.viewport_layers.view_cube
             and not self._input_claim.pointer,
         )
         self.gizmo.update_hover(

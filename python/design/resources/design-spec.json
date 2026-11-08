@@ -4,7 +4,7 @@
   "tokens": {
     "body_font_size": 14.0,
     "title_font_size": 16,
-    "mono_font_size": 16,
+    "mono_font_size": 14,
     "font_family": "portable",
     "control_height": 28,
     "panel_padding": 12,
@@ -60,7 +60,7 @@
   "layout": {
     "application_height": 36,
     "sidebar_width": 48,
-    "scene_width": 252,
+    "scene_width": 280,
     "inspector_width": 320,
     "bottom_height": 268
   },
@@ -84,7 +84,9 @@
     },
     "timeline_toolbar": {
       "paddingX": 0,
-      "marginRight": 0
+      "marginRight": 0,
+      "columnGap": 4,
+      "rowGap": 4
     },
     "lane_label": {
       "lineHeightMode": "fixed",
@@ -95,7 +97,7 @@
       "fontSize": 12
     },
     "timeline_lane": {
-      "fontSize": 12,
+      "fontSize": 14,
       "height": 36,
       "marginRight": 0
     },
@@ -110,7 +112,11 @@
       "right": 0
     },
     "timeline_sheet": {
-      "rowGap": 2
+      "rowGap": 0,
+      "columnGap": 0,
+      "headerGap": 0,
+      "labelWidth": 160,
+      "radius": 0
     },
     "menu_item": {
       "iconSize": 16,
@@ -137,7 +143,7 @@
       "paddingX": 4
     },
     "axis_input": {
-      "paddingX": 4,
+      "paddingX": 2,
       "axisWidth": 20
     },
     "statusbar": {
@@ -148,13 +154,13 @@
       "iconSize": 8
     },
     "status_hints": {
-      "iconSize": 22
+      "iconSize": 18
     },
     "form_label": {
       "fontSize": 14
     },
     "button": {
-      "fontSize": 12
+      "fontSize": 14
     },
     "icon_button": {
       "iconSize": 20,
@@ -183,7 +189,7 @@
       "paddingY": 4
     },
     "separator": {
-      "margin": 4
+      "margin": 0
     },
     "tree_row": {
       "rowGap": 0,
@@ -248,34 +254,39 @@
       "rowGap": 0
     },
     "status_hints_badge": {
-      "fontFamily": "mono",
-      "fontSize": 14
+      "fontSize": 10,
+      "paddingX": 4,
+      "paddingY": 2,
+      "radius": 4,
+      "fontFamily": "mono"
     },
     "section_header": {
-      "paddingX": 6
+      "paddingX": 8
     },
     "menu_bar": {
       "fontSize": 14
     },
     "color_editor_axis_input": {
       "axisWidth": 20,
-      "paddingX": 3
+      "paddingX": 2
     },
     "color_editor": {
       "fontSize": 12
     },
     "status_separator": {
-      "marginTop": 5,
-      "marginBottom": 5
+      "marginTop": 4,
+      "marginBottom": 4
     },
     "timeline_body": {
       "paddingX": 4,
       "paddingY": 4
     },
     "pose_joint": {
-      "gap": 20,
-      "rowGap": 12,
-      "columnGap": 8
+      "gap": 12,
+      "rowGap": 4,
+      "columnGap": 4,
+      "paddingX": 8,
+      "paddingY": 8
     },
     "pending_edits": {
       "paddingX": 6,
@@ -286,6 +297,44 @@
       "paddingY": 4,
       "radius": 8,
       "columnGap": 16
+    },
+    "range_bounds": {
+      "columnGap": 4
+    },
+    "timeline_toolbar_button": {
+      "iconSize": 20,
+      "height": 28
+    },
+    "entity_card": {
+      "paddingX": 8,
+      "paddingY": 8,
+      "radius": 12,
+      "gap": 12,
+      "rowGap": 4
+    },
+    "sensor": {
+      "valueSize": 14
+    },
+    "layers_popup": {
+      "paddingX": 4,
+      "paddingY": 4,
+      "fontSize": 14
+    },
+    "layers_switch": {
+      "switchWidth": 36,
+      "switchHeight": 20,
+      "switchThumb": 16,
+      "height": 28
+    },
+    "pose_joint_button": {
+      "paddingX": 4,
+      "paddingY": 0,
+      "iconSize": 20,
+      "gap": 8,
+      "radius": 4
+    },
+    "entity_card_axis_input": {
+      "paddingX": 2
     }
   }
 }

@@ -35,12 +35,16 @@ def valid_timeline_range(start: float, end: float) -> bool:
 
 
 def timeline_navigation_limits(
-    times: Sequence[float], manual_range: tuple[float, float] | None = None
+    times: Sequence[float], manual_range: tuple[float, float] | None = None, *, zero_based=False
 ) -> TimelineViewLimits:
     """Keep scrolling near content while retaining explicitly entered long ranges."""
-    finite = [value for value in times if math.isfinite(value)]
+    finite = [value for value in times if math.isfinite(value) and (not zero_based or value >= 0)]
     minimum = MIN_INTERACTIVE_TIMELINE_SPAN
-    if manual_range is not None and valid_timeline_range(*manual_range):
+    if (
+        manual_range is not None
+        and valid_timeline_range(*manual_range)
+        and (not zero_based or manual_range[0] >= 0)
+    ):
         finite.extend(manual_range)
         minimum = min(minimum, manual_range[1] - manual_range[0])
     lo, hi = (min(finite), max(finite)) if finite else (0.0, 0.0)
@@ -50,7 +54,7 @@ def timeline_navigation_limits(
     # of context on each side so a later wheel gesture preserves that fraction.
     margin = maximum
     return TimelineViewLimits(
-        max(-sys.float_info.max, lo - margin),
+        0.0 if zero_based else max(-sys.float_info.max, lo - margin),
         min(sys.float_info.max, hi + margin),
         maximum,
         minimum,

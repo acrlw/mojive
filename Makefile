@@ -461,6 +461,11 @@ ui-svg-icons:
 ui-svg-icons-gallery:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_svg_icons.py
 
+## Inspect production mouse hints, half-alpha shells and exported silhouettes.
+.PHONY: ui-mouse-raster
+ui-mouse-raster:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_static_viewer.py::test_mouse_shell_corners_do_not_accumulate_alpha tests/gpu/test_svg_icons.py::test_svg_and_production_silhouettes_at_actual_sizes tests/gpu/test_status_mouse_hints.py $(ARGS)
+
 .PHONY: ui-components ui-components-gallery ui-optical ui-optical-gallery
 ui-components:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --interactive --page components --width 1100 --height 760 $(ARGS)
@@ -557,6 +562,10 @@ recording-benchmark:
 .PHONY: joint-gizmo-profile
 joint-gizmo-profile:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.joint_gizmo_profile $(ARGS)
+
+.PHONY: joint-gizmo-review
+joint-gizmo-review:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_joint_focus_readability.py $(ARGS)
 
 ui-gallery:
 	MOJIVE_RENDERER=$(BACKEND) $(PY) -m mojive.tools.ui_feasibility --page workspace -o output/ui-workspace.png
@@ -1363,6 +1372,16 @@ ui-design-check: ui-design-native-check
 ## Capture Inspector tabs and verify distinct geometry, physics and material controls.
 ui-inspector-tabs:
 	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_native_workspace.py -k inspector_tabs_keep
+
+.PHONY: ui-focused-review
+.PHONY: ui-popup-review
+## Compare native edge compositing and capture production popup interactions.
+ui-popup-review:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_popup_edges.py $(ARGS)
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_focused_workspace.py::test_focused_workspace tests/gpu/test_focused_workspace.py::test_reference_scene_density_and_layer_operations $(ARGS)
+## Verify contextual Inspector, resources, cameras, controls and timeline in both themes.
+ui-focused-review:
+	MOJIVE_RENDERER=$(BACKEND) $(PYTEST) -q -m gpu tests/gpu/test_focused_workspace.py $(ARGS)
 
 ## Capture floating forms and verify selection, focus, closing, dragging and edits.
 ui-floating:

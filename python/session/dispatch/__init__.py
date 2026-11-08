@@ -29,6 +29,7 @@ _HANDLERS = {
     cmd.PlayStateTake: playback.play_state_take,
     cmd.SetStateTakePauseAtEnd: playback.set_state_take_pause_at_end,
     cmd.PauseStateTake: playback.pause_state_take,
+    cmd.SetStateTakeSpeed: playback.set_state_take_speed,
     cmd.SeekStateTake: playback.seek_state_take,
     cmd.SetStateTakeLoop: playback.set_state_take_loop,
     cmd.SetStateTakeRange: playback.set_state_take_range,

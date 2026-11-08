@@ -3288,9 +3288,7 @@
         "min": 8,
         "max": 48,
         "step": 1,
-        "default": {
-          "token": "mono_font_size"
-        },
+        "default": 12,
         "css": [
           "font-size"
         ]
@@ -9714,7 +9712,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 4,
         "css": [
           "padding-left",
           "padding-right"
@@ -9726,7 +9724,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 4,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -9799,7 +9797,7 @@
         "min": 0,
         "max": 80,
         "step": 1,
-        "default": 14,
+        "default": 8,
         "css": [
           "border-radius"
         ]
@@ -13481,6 +13479,17 @@
         "step": 1,
         "default": 12,
         "group": "边距与间距"
+      },
+      "radius": {
+        "label": "圆角",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 0.1,
+        "default": 12,
+        "css": [
+          "border-radius"
+        ]
       }
     },
     "sample": {
@@ -20112,7 +20121,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 4,
         "css": [
           "padding-left",
           "padding-right"
@@ -20124,7 +20133,7 @@
         "min": 0,
         "max": 100,
         "step": 1,
-        "default": 8,
+        "default": 4,
         "css": [
           "padding-top",
           "padding-bottom"
@@ -20188,7 +20197,7 @@
         "min": 0,
         "max": 80,
         "step": 0.1,
-        "default": 12,
+        "default": 8,
         "css": [
           "border-radius"
         ]
@@ -20226,5 +20235,379 @@
       "text"
     ],
     "previewArea": "时间轴"
+  },
+  {
+    "id": "entity_card",
+    "label": "Entity card",
+    "category": "表单与分组",
+    "selectors": [],
+    "fields": {
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 1,
+        "default": 14,
+        "css": [
+          "font-size"
+        ]
+      },
+      "paddingX": {
+        "label": "左右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "padding-left",
+          "padding-right"
+        ]
+      },
+      "paddingY": {
+        "label": "上下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "padding-top",
+          "padding-bottom"
+        ]
+      },
+      "gap": {
+        "label": "内容间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 8,
+        "css": [
+          "gap"
+        ]
+      },
+      "marginBottom": {
+        "label": "组后间距",
+        "type": "number",
+        "min": 0,
+        "max": 60,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-bottom"
+        ]
+      },
+      "paddingLeft": {
+        "label": "左内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-left"
+        ]
+      },
+      "paddingRight": {
+        "label": "右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-right"
+        ]
+      },
+      "paddingTop": {
+        "label": "上内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-top"
+        ]
+      },
+      "paddingBottom": {
+        "label": "下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-bottom"
+        ]
+      },
+      "marginLeft": {
+        "label": "左外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-left"
+        ]
+      },
+      "marginRight": {
+        "label": "右外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-right"
+        ]
+      },
+      "marginTop": {
+        "label": "上外边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 0,
+        "css": [
+          "margin-top"
+        ]
+      },
+      "lineHeightMode": {
+        "label": "行高方式",
+        "type": "select",
+        "default": "auto",
+        "choices": [
+          "auto",
+          "fixed"
+        ],
+        "choiceLabels": {
+          "auto": "随字体",
+          "fixed": "固定"
+        },
+        "special": "lineHeightMode"
+      },
+      "lineHeight": {
+        "label": "固定行高",
+        "type": "number",
+        "min": 8,
+        "max": 100,
+        "step": 1,
+        "default": 18,
+        "css": [
+          "line-height"
+        ],
+        "condition": {
+          "field": "lineHeightMode",
+          "value": "fixed"
+        }
+      },
+      "rowGap": {
+        "label": "纵向等间距（行距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 8,
+        "css": [
+          "row-gap"
+        ],
+        "group": "边距与间距"
+      },
+      "columnGap": {
+        "label": "横向等间距（列距）",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "gap"
+        },
+        "css": [
+          "column-gap"
+        ],
+        "group": "边距与间距"
+      },
+      "radius": {
+        "label": "圆角",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 0.1,
+        "default": 12,
+        "css": [
+          "border-radius"
+        ]
+      }
+    },
+    "sample": {
+      "source": "pose",
+      "selector": ".native-joint-control"
+    },
+    "layoutSpacing": {
+      "kind": "column"
+    },
+    "appearance": [
+      "text",
+      "icon"
+    ],
+    "controlKinds": [
+      "button",
+      "input_number",
+      "axis_input"
+    ],
+    "helpPart": "joint"
+  },
+  {
+    "id": "layers_popup",
+    "label": "Viewport layers",
+    "category": "菜单与对话框",
+    "selectors": [],
+    "fields": {
+      "fontSize": {
+        "label": "文字大小",
+        "type": "number",
+        "min": 8,
+        "max": 48,
+        "step": 1,
+        "default": {
+          "token": "body_font_size"
+        },
+        "css": [
+          "font-size"
+        ]
+      },
+      "paddingX": {
+        "label": "左右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 4,
+        "css": [
+          "padding-left",
+          "padding-right"
+        ]
+      },
+      "paddingY": {
+        "label": "上下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 4,
+        "css": [
+          "padding-top",
+          "padding-bottom"
+        ]
+      },
+      "paddingLeft": {
+        "label": "左内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-left"
+        ]
+      },
+      "paddingRight": {
+        "label": "右内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingX"
+        },
+        "css": [
+          "padding-right"
+        ]
+      },
+      "paddingTop": {
+        "label": "上内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-top"
+        ]
+      },
+      "paddingBottom": {
+        "label": "下内边距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": {
+          "field": "paddingY"
+        },
+        "css": [
+          "padding-bottom"
+        ]
+      },
+      "radius": {
+        "label": "圆角",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 0.1,
+        "default": 8,
+        "css": [
+          "border-radius"
+        ]
+      },
+      "rowGap": {
+        "label": "行距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 6
+      },
+      "columnGap": {
+        "label": "标签与字段间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 12
+      },
+      "groupGap": {
+        "label": "组间距",
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "default": 12
+      }
+    },
+    "sample": {
+      "source": "timeline",
+      "selector": ".native-form-popup"
+    },
+    "appearance": [
+      "text"
+    ],
+    "previewArea": "时间轴",
+    "helpPart": "form_popup"
   }
 ]

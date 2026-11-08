@@ -140,8 +140,8 @@ def test_panel_local_groups_and_backend_readout_are_directly_pickable(workbench,
     viewer, bench, runtime, _store = workbench
     shell = viewer.app.workspace
     for part, key in (
-        ("cameras_button_row", "camera-Front"),
-        ("control_button_row", "reset-actuators"),
+        ("cameras_panel_header", "header-Cameras-search"),
+        ("control_panel_header", "header-Control-reset"),
         ("inspector_tabs", "tab-Properties"),
         ("scene_type_filters", "scene-filter-all"),
         ("status_backend", None),
@@ -165,8 +165,6 @@ def test_panel_local_groups_and_backend_readout_are_directly_pickable(workbench,
         viewer.frame(3)
         expected = {
             "inspector_tabs": "inspector_tabs_tab",
-            "cameras_button_row": "cameras_button_row_button",
-            "control_button_row": "control_button_row_button",
             "scene_type_filters": "scene_type_filters_filter",
         }.get(part, part)
         assert bench.part == expected
@@ -210,7 +208,7 @@ def test_native_parameter_input_reset_and_shared_production_instances(workbench)
     ]
     assert {item["styleFamily"] for item in numbers} >= {"inspector", "timeline"}
     assert {item["key"] for item in numbers} >= {
-        "##body-gravity-compensation",
+        "##camera-distance-value",
         "##timeline-range-start",
         "##timeline-range-end",
     }
@@ -1138,6 +1136,10 @@ def test_preview_release_activates_its_context_after_a_detached_editor(
 
 def test_alt_pick_model_group_and_full_popup_caption(workbench):
     viewer, bench, runtime, _ = workbench
+    from mojive import commands as cmd
+
+    assert viewer.session.submit(cmd.AddSceneModel(resolve("joint_types"))).ok
+    viewer.frame(8)
     bench.part = "timeline_model_group"
     bench.navigate(viewer.app.workspace)
     viewer.frame(4)
@@ -1153,11 +1155,6 @@ def test_alt_pick_model_group_and_full_popup_caption(workbench):
     viewer.event("add_key_event", imgui.Key.escape, True)
     viewer.event("add_key_event", imgui.Key.escape, False)
     viewer.frame()
-    bench.field_search = "列距"
-    viewer.frame()
-    viewer.click("label/parts/timeline_model_group/columnGap")
-    assert bench.field_highlights
-    assert all(r["rect"][2] == pytest.approx(8 * ui.s) for r in bench.field_highlights)
     x, y, w, h = ui.hits["timeline-model"]
     viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
     viewer.event("add_mouse_button_event", 0, True)
@@ -1170,7 +1167,7 @@ def test_alt_pick_model_group_and_full_popup_caption(workbench):
     ]
     assert choices
     assert all(not r["clippedLabel"] for r in choices), choices
-    assert any(r.get("label") == "joint_types" for r in choices)
+    assert len(choices) == 2
 
 
 def test_alt_pick_owns_button_press_through_release(workbench):
@@ -1582,16 +1579,16 @@ def test_scene_count_glyphs_survive_live_monospace_switch(workbench, backend_nam
     Image.fromarray(viewer.window.read_frame()[::-1]).save(directory / "scene-counts.png")
 
 
-def test_material_spacing_and_toolbar_dividers_are_group_local(workbench, backend_name):
+def test_joint_card_spacing_and_toolbar_dividers_are_group_local(workbench, backend_name):
     from pathlib import Path
 
     import numpy as np
 
     viewer, bench, runtime, store = workbench
     shell, scale = viewer.app.workspace, viewer.window.style_scale
-    bench.part, bench.show_bounds = "assets_material", False
+    bench.part, bench.show_bounds = "pose_joint", False
     bench.navigate(shell)
-    viewer.app.selected = "free_box"
+    viewer.app.selected = "hinge_body"
     viewer.frame(4)
     directory = Path("output/ui-polish") / backend_name / f"{scale:g}x"
     directory.mkdir(parents=True, exist_ok=True)
@@ -1600,29 +1597,20 @@ def test_material_spacing_and_toolbar_dividers_are_group_local(workbench, backen
         return {row["key"]: row for row in runtime.observed}
 
     baseline = records()
-    assert "parent/assets_material_list" in bench.hits
     for index in range(4):
-        card = baseline[f"material-card-{index}"]
-        assert card["content"][0] - card["hit"][0] == pytest.approx(12 * scale)
+        card = baseline[f"joint-card-{viewer.session.joints[index].joint_id}"]
+        assert card["content"][0] - card["hit"][0] == pytest.approx(8 * scale)
         assert card["content"][1] - card["hit"][1] == pytest.approx(8 * scale)
     assert baseline["viewport-toolbox"]["separators"]
     assert baseline["viewport-transport"]["separators"]
-    Image.fromarray(viewer.window.read_frame()[::-1]).save(directory / "materials-default.png")
+    Image.fromarray(viewer.window.read_frame()[::-1]).save(directory / "joint-cards-default.png")
     edits = {
-        "assets_material": {
+        "pose_joint": {
             "paddingLeft": 20,
             "paddingRight": 20,
             "paddingTop": 10,
             "paddingBottom": 10,
-            "columnGap": 16,
-        },
-        "assets_material_list": {
-            "paddingLeft": 8,
-            "paddingRight": 8,
-            "paddingTop": 4,
-            "paddingBottom": 4,
-            "rowGap": 12,
-            "actionGap": 16,
+            "gap": 12,
         },
         "toolbox": {
             "separatorThickness": 2,
@@ -1641,17 +1629,16 @@ def test_material_spacing_and_toolbar_dividers_are_group_local(workbench, backen
         changed["viewport-transport"]["separators"] == baseline["viewport-transport"]["separators"]
     )
     for index in range(4):
-        card = changed[f"material-card-{index}"]
+        card = changed[f"joint-card-{viewer.session.joints[index].joint_id}"]
         assert card["content"][0] - card["hit"][0] == pytest.approx(20 * scale)
         assert card["content"][1] - card["hit"][1] == pytest.approx(10 * scale)
         if index:
-            previous = changed[f"material-card-{index - 1}"]["hit"]
+            previous = changed[f"joint-card-{viewer.session.joints[index - 1].joint_id}"]["hit"]
             assert card["hit"][1] - previous[1] - previous[3] == pytest.approx(12 * scale)
-    bench.part = "assets_material_list"
+    bench.part = "pose_joint"
     viewer.event("add_mouse_pos_event", 0, 0)
     viewer.frame(3)
-    assert "parent/assets_material" in bench.hits
-    Image.fromarray(viewer.window.read_frame()[::-1]).save(directory / "materials-spacing.png")
+    Image.fromarray(viewer.window.read_frame()[::-1]).save(directory / "joint-cards-spacing.png")
     tool_divider = changed["viewport-toolbox"]["separators"]
     bench.part, bench.field_group = "transport", "分隔线"
     for field, value in {
@@ -1679,7 +1666,7 @@ def test_material_spacing_and_toolbar_dividers_are_group_local(workbench, backen
     bench.editor.save()
     saved = read_spec(store.saved_path)
     assert saved["parts"]["toolbox"]["separatorColor"].lower() == "#e62132"
-    assert saved["parts"]["assets_material_list"]["actionGap"] == 16
+    assert saved["parts"]["pose_joint"]["paddingLeft"] == 20
     for part in ("toolbox", "transport"):
         bench.editor.change(("parts", part, "separatorThickness"), 0)
     runtime.poll(force=True)

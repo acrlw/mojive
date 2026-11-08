@@ -64,6 +64,8 @@ def render_flag_label(flag: RenderFlag, translate, *, localized: bool) -> str:
 
     if flag == RenderFlag.MESH_LOD:
         return translate("Mesh LOD")
+    if flag == RenderFlag.SCENE_GEOMETRY:
+        return translate("Scene geometry")
     return translate(flag.value) if localized else flag.value
 
 

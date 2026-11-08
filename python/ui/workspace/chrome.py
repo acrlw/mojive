@@ -331,16 +331,19 @@ def _activity_rail(workspace):
                     icon_role="activity",
                 )
                 for name, icon in zip(PANELS, ICONS, strict=True)
+                if name != "Layers"
             )
             stride = max(v[1] for v in child_sizes) + gap * scale
-            occupied_height = len(PANELS) * stride - gap * scale
+            occupied_height = len(child_sizes) * stride - gap * scale
             compact = box.content.height < occupied_height
             rail_children = []
-            for n, (name, icon) in enumerate(zip(PANELS, ICONS, strict=True)):
+            for n, (name, icon) in enumerate(
+                pair for pair in zip(PANELS, ICONS, strict=True) if pair[0] != "Layers"
+            ):
                 yy = (
                     box.content.y + n * stride - imgui.get_scroll_y()
-                    if compact or n < 7
-                    else box.content.bottom - (len(PANELS) - n) * stride + gap * scale
+                    if compact or name in LEFT_PANELS
+                    else box.content.bottom - (len(child_sizes) - n) * stride + gap * scale
                 )
                 frame = control_frame_size(
                     u,

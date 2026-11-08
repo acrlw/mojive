@@ -86,7 +86,7 @@ def _geometry_shape_rows(
 
 
 def _contact_collision_rows(
-    ctx: PanelContext, properties: GeometryProperties
+    ctx: PanelContext, properties: GeometryProperties, *, compact=False
 ) -> GeometryProperties:
     edited = properties
     _property_control_row(ctx, "friction (slide spin roll)", components=3)
@@ -127,6 +127,8 @@ def _contact_collision_rows(
     _property_tooltip(ctx, ctx.tr("Decimal MuJoCo conaffinity bitmask"))
     if changed:
         edited = replace(edited, collision_affinity_mask=int(affinity_mask))
+    if compact:
+        return edited
     _property_control_row(ctx, "contact priority")
     changed, priority = _property_integer(
         ctx, "##contact_priority", properties.contact_priority, 1.0, 0, 2147483647, "%d"
@@ -661,7 +663,9 @@ class _Geometry:
             if _property_button(ctx, f"{ctx.tr('Copy error')}##geometry-shape"):
                 imgui.set_clipboard_text(self._geometry_shape_error)
 
-    def _geometry_contact_properties(self, ctx: PanelContext, node_id: int) -> None:
+    def _geometry_contact_properties(
+        self, ctx: PanelContext, node_id: int, *, compact=False
+    ) -> None:
         properties = ctx.session.geometry_properties(node_id)
         if properties is None or not _property_section(ctx, "contact properties", 0):
             return
@@ -676,9 +680,10 @@ class _Geometry:
         if not editable:
             imgui.begin_disabled()
         if _begin_property_table("insp_geometry_contact", ctx=ctx):
-            edited = _contact_collision_rows(ctx, edited)
-            edited = _contact_solver_rows(ctx, edited)
-            edited = _contact_surface_rows(ctx, node, edited, editable=editable)
+            edited = _contact_collision_rows(ctx, edited, compact=compact)
+            if not compact:
+                edited = _contact_solver_rows(ctx, edited)
+                edited = _contact_surface_rows(ctx, node, edited, editable=editable)
             _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()
@@ -708,7 +713,9 @@ class _Geometry:
                 ),
             )
 
-    def _geometry_advanced_properties(self, ctx: PanelContext, node_id: int) -> None:
+    def _geometry_advanced_properties(
+        self, ctx: PanelContext, node_id: int, *, compact=False
+    ) -> None:
         current = ctx.session.geometry_advanced_properties(node_id)
         if current is None:
             return
@@ -723,7 +730,8 @@ class _Geometry:
             self._geometry_advanced_edit = current
             self._geometry_advanced_error = ""
         properties = self._geometry_advanced_edit
-        if properties is None or not _property_section(ctx, "mass, group, and fluid", 0):
+        title = "Mass" if compact else "mass, group, and fluid"
+        if properties is None or not _property_section(ctx, title, 0):
             return
         editable = bool(
             ctx.session.adapter.caps.model_properties
@@ -733,7 +741,7 @@ class _Geometry:
             imgui.begin_disabled()
         if _begin_property_table("insp_geometry_advanced", ctx=ctx):
             edited = _geometry_mass_rows(ctx, properties)
-            self._geometry_advanced_edit = _geometry_fluid_rows(ctx, edited)
+            self._geometry_advanced_edit = edited if compact else _geometry_fluid_rows(ctx, edited)
             _end_property_table(ctx)
         if not editable:
             imgui.end_disabled()

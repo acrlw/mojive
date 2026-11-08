@@ -555,6 +555,11 @@ class Window:
         self._refresh_scales()
         self._sync_style_scale()
         self._input.process_inputs()
+        # Bound arc chord error in physical pixels, including Retina and monitor
+        # changes. Application zoom changes radii, not the raster error budget.
+        imgui.get_style().circle_tessellation_max_error = 0.125 / max(
+            imgui.get_io().display_framebuffer_scale
+        )
         if self._layout_reset_pending:
             imgui.load_ini_settings_from_memory("")
             self._ini_existed = False

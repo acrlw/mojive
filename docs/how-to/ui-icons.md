@@ -37,7 +37,10 @@ neutral ink independent of that weight. Extend left/right button fills beneath t
 and stop their visible state at the x=12 midline. A centered divider would extend the solid
 pressed region by half a stroke into the empty half. Place that divider entirely inside the
 pressed half: x=11.5 for left and x=12.5 for right at the 1-unit weight. The two inner button
-openings then share the same width and the states remain mirrored. Retain opaque fills;
+openings then share the same width and the states remain mirrored. Attach each divider to
+the shell centerline at y=2, keeping its round cap inside the shell's ink. Stopping short
+creates acute interior corners whose inward AA strips overlap. Check the isolated shell
+at half alpha as well as the fully painted hint. Retain opaque fills;
 opacity is not a substitute for equal geometry. Use the authored width for AA fringe limits. Do not make a dark heavy
 stroke appear lighter by fading it or imposing a display-pixel stroke floor.
 The mouse family shell retains complete G3 curvature ramps at its straight-edge joins, with
@@ -81,6 +84,8 @@ keyframe diamonds, preset flags and the performance gauge. Its caption and toolt
 the saved scene state and its restore action.
 Image capture uses a framed landscape; scene, viewport and window captures share that action
 symbol. Projection controls display the current projection frame rather than a camera object.
+Shading choices use distinct existing masters: Solid uses the half-filled `shading` circle;
+Wireframe uses the open `sphere` mesh. The viewport trigger displays the active mode's master.
 Primitive creation uses distinct box, sphere, cylinder, capsule, cone, ellipsoid and plane
 silhouettes. Round tangent seams meet the shell centerline so their terminal cap is contained
 in the shell's existing round join. Offsetting these terminals inward exposes a cap lobe inside
@@ -122,6 +127,13 @@ A pressed mouse button fill overlaps the shell and stays under its state-owned d
 Insetting it to the inner shell edge leaves
 an antialias seam between independently painted paths, especially at fractional browser scale.
 Retain the same exterior bounds, stroke weight and mirrored left/right geometry.
+
+Vector export and native painting share the master's AA budget, including the lighter
+1-unit mouse family. A fixed 0.75-unit export fringe incorrectly thickens its 0.5-unit ramp.
+`make ui-mouse-raster BACKEND=opengl` (or `bgfx`) captures actual-size SVG/runtime pairs,
+half-alpha shells and production status hints under `output/svg-icons/validation/` and
+`output/status-mouse-clarity/`. Inspect small and enlarged forms at fractional scales;
+retain the silhouette overlap and single-alpha coverage thresholds.
 
 ### Construct and inspect the final silhouette
 

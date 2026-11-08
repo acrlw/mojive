@@ -69,6 +69,7 @@ class MenuRowResult:
     visible: bool
     minimum_width: float
     observation: dict
+    removed: bool = False
 
 
 def menu_row_size(ui, row, *, part="menu_item", columns=None):
@@ -128,6 +129,7 @@ def paint_menu_row(
     minimum_height=0,
     part="menu_item",
     columns=None,
+    removable=False,
 ):
     """Paint one row; the caller retains popup lifetime and command ownership."""
     style, scale = ui.component_style(part), ui.s
@@ -162,6 +164,10 @@ def paint_menu_row(
         )
     )
     font = style.get("fontSize", BODY_SIZE)
+    action_width = min(box.frame.height, box.frame.width) if removable else 0
+    row_hovered = imgui.is_window_hovered() and imgui.is_mouse_hovering_rect(
+        (box.frame.x, box.frame.y), (box.frame.right, box.frame.bottom)
+    )
     window = imgui.get_current_context().current_window
     draw = imgui.get_window_draw_list()
     imgui.set_cursor_screen_pos((box.frame.x, box.frame.y))
@@ -193,7 +199,7 @@ def paint_menu_row(
                 row.label + "###" + key,
                 row.checked,
                 flags,
-                (max(1, box.frame.width), max(1, box.frame.height)),
+                (max(1, box.frame.width - action_width), max(1, box.frame.height)),
             )
         visible = imgui.is_item_visible()
         hovered = imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled)
@@ -208,12 +214,15 @@ def paint_menu_row(
     metadata = {"windowId": window.id_, "drawListSource": "window"}
     ui.hits[key] = box.frame.tuple()
     paint = ItemPaint.capture(imgui)
+    focused = imgui.is_item_focused()
     enabled = enabled and not paint.disabled
-    highlighted = enabled and (paint.hovered or paint.active or (choice and row.checked))
+    highlighted = enabled and (
+        row_hovered or paint.hovered or paint.active or (choice and row.checked)
+    )
     if visible and highlighted:
         tint = (
             rgba8("field_active" if paint.active else "field_hovered")
-            if choice and (paint.hovered or paint.active)
+            if choice and (row_hovered or paint.hovered or paint.active)
             else rgba8("primary", 24)
             if choice
             else (255, 255, 255, 18 if paint.active else 13)
@@ -264,7 +273,7 @@ def paint_menu_row(
     check_x = box.content.x
     icon_x = check_x + (extent + check_gap if has_check else 0)
     prefix = (extent + check_gap if has_check else 0) + (extent + gap if has_icon else 0)
-    tail_width = extent + gap if has_arrow else 0
+    tail_width = action_width if removable else extent + gap if has_arrow else 0
     shortcut_end = box.content.right - tail_width
     shortcut_column = columns.shortcut_width if columns is not None else shortcut_width
     shortcut_column = min(shortcut_column, max(0, shortcut_end - box.content.x - prefix))
@@ -428,6 +437,37 @@ def paint_menu_row(
                 ui.translate(row.label) + ("  " + row.shortcut if row.shortcut else ""),
                 translate=False,
             )
+    removed = False
+    if removable:
+        action = Rect(box.frame.right - action_width, box.frame.y, action_width, box.frame.height)
+        imgui.set_cursor_screen_pos((action.x, action.y))
+        imgui.begin_disabled(not enabled)
+        removed = imgui.invisible_button(
+            key + "-remove", (action.width, action.height), imgui.ButtonFlags_.enable_nav
+        )
+        action_paint = ItemPaint.capture(imgui)
+        ui.hits[key + "-remove"] = action.tuple()
+        if (
+            row_hovered
+            or (imgui.get_io().nav_visible and (focused or imgui.is_item_focused()))
+            or action_paint.active
+        ):
+            if not action_paint.disabled and (action_paint.hovered or action_paint.active):
+                ui.rect(
+                    *action.tuple(),
+                    rgba8("field_active" if action_paint.active else "field_hovered"),
+                    r=style.get("radius", 4),
+                )
+            ui.icon(
+                "close",
+                action.x + (action.width - glyph_extent) / 2,
+                action.y + (action.height - glyph_extent) / 2,
+                glyph_extent / scale,
+                foreground,
+            )
+        if imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
+            ui.tooltip("Delete")
+        imgui.end_disabled()
     return MenuRowResult(
         bool(activated),
         box,
@@ -462,6 +502,7 @@ def paint_menu_row(
             "nativeEpsilon": epsilon,
             "backgroundRect": list(box.frame.tuple()) if visible and highlighted else None,
         },
+        removed=bool(removed),
     )
 
 

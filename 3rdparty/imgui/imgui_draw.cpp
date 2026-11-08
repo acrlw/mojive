@@ -1474,10 +1474,11 @@ void ImDrawList::PathRect(const ImVec2& a, const ImVec2& b, float rounding, ImDr
         const float rounding_tr = (flags & ImDrawFlags_RoundCornersTopRight)    ? rounding : 0.0f;
         const float rounding_br = (flags & ImDrawFlags_RoundCornersBottomRight) ? rounding : 0.0f;
         const float rounding_bl = (flags & ImDrawFlags_RoundCornersBottomLeft)  ? rounding : 0.0f;
-        PathArcToFast(ImVec2(a.x + rounding_tl, a.y + rounding_tl), rounding_tl, 6, 9);
-        PathArcToFast(ImVec2(b.x - rounding_tr, a.y + rounding_tr), rounding_tr, 9, 12);
-        PathArcToFast(ImVec2(b.x - rounding_br, b.y - rounding_br), rounding_br, 0, 3);
-        PathArcToFast(ImVec2(a.x + rounding_bl, b.y - rounding_bl), rounding_bl, 3, 6);
+        // Honor the error budget beyond the fixed fast-arc lookup table as well.
+        PathArcTo(ImVec2(a.x + rounding_tl, a.y + rounding_tl), rounding_tl, IM_PI, IM_PI * 1.5f);
+        PathArcTo(ImVec2(b.x - rounding_tr, a.y + rounding_tr), rounding_tr, IM_PI * 1.5f, IM_PI * 2.0f);
+        PathArcTo(ImVec2(b.x - rounding_br, b.y - rounding_br), rounding_br, 0.0f, IM_PI * 0.5f);
+        PathArcTo(ImVec2(a.x + rounding_bl, b.y - rounding_bl), rounding_bl, IM_PI * 0.5f, IM_PI);
     }
 }
 

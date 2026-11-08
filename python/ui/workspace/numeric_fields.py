@@ -99,6 +99,7 @@ class _NumericFields:
         reset_value=0.0,
         integer=False,
         flags=0,
+        flat=False,
     ):
         """Draw a native drag field; callers own command transactions and cancellation."""
         s = self.s
@@ -117,6 +118,7 @@ class _NumericFields:
                 reset_value=reset_value,
                 integer=integer,
                 flags=flags,
+                background=not flat,
             )
             return result.changed, result.value
         badge = min(18 * s, max(0, w * 0.35)) if axis else 0
@@ -359,10 +361,14 @@ class _NumericFields:
         )
         return self._numeric_sample_width(samples, axis=axis)
 
-    def _numeric_sample_width(self, samples, *, axis=True):
+    def _numeric_sample_width(self, samples, *, axis=True, flat=False):
         """Measure one static domain with the numeric painter's font and insets."""
         s = self.s
         style = self.component_style(("input_number", "axis_input") if axis else "input_number")
+        if axis and flat:
+            style = style.with_overrides(
+                {"fontSize": (style.get("badgeFontSize", 12), "axis_badge")}
+            )
         font_size = style.get("fontSize", DESIGN.mono_size)
         font = self.resolve_font(style, mono=True)
         font_key = (
@@ -388,11 +394,14 @@ class _NumericFields:
         padding = style.edges(
             "padding", s, (3, 0, 3, 0) if axis and self.design is not None else (8, 0, 8, 0)
         )
+        badge = style.get("axisWidth", 18) if axis else 0
+        if axis and flat:
+            badge = max(badge, font_size + 8) + 4
         return (
             text_width
             + padding[0]
             + padding[2]
-            + (style.get("axisWidth", 18) * s if axis else 0)
+            + badge * s
             # Native item edges are stored as float32. Keep the measured text
             # inside after fractional column positions round those edges.
             + 1.0
@@ -772,6 +781,7 @@ class _NumericFields:
         format="%.3f",
         reset_values=(0.0, 0.0, 0.0),
         layout=None,
+        flat=False,
     ):
         s = self.s
         heading = self.translate(label) + (f" ({unit})" if unit else "")
@@ -821,6 +831,7 @@ class _NumericFields:
                 hi=hi,
                 format=format,
                 reset_value=reset_values[n],
+                flat=flat,
             )
             changed |= edit
         states = [self.numeric_edits[key + axis] for axis in "XYZ"]
@@ -902,6 +913,9 @@ class _NumericFields:
         )
         gap = self.metric("range_number", "columnGap", DESIGN.row_gap)
         imgui.push_style_var(imgui.StyleVar_.item_spacing, (gap * s, DESIGN.row_gap * s))
+        flat = options.pop("flat", False)
+        if flat:
+            imgui.push_style_color(imgui.Col_.button, (0, 0, 0, 0))
         entry_painter = None
         if self.design is not None:
             from mojive.ui.panels import value_edit
@@ -933,6 +947,7 @@ class _NumericFields:
                     unit,
                     toggle_unit=toggle,
                     compact_caption=bounds is None,
+                    flat=flat,
                     format=fmt,
                     lo=low,
                     hi=high,
@@ -988,6 +1003,8 @@ class _NumericFields:
                 imgui.dummy((outer_width, max(s, bottom - outer_y)))
         finally:
             imgui.end_group()
+            if flat:
+                imgui.pop_style_color()
             imgui.pop_style_var(2)
             imgui.pop_font()
         a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()

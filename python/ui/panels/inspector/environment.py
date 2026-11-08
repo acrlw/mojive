@@ -446,7 +446,7 @@ class _Environment:
         if changed:
             ctx.backend.set_flag(flag, value)
 
-    def _camera(self, ctx: PanelContext, node: SceneNode) -> None:
+    def _camera(self, ctx: PanelContext, node: SceneNode, *, compact=False) -> None:
         index = node.camera_index
         if not 0 <= index < len(ctx.session.cameras):
             imgui.text_disabled(ctx.tr("camera data is unavailable"))
@@ -457,7 +457,8 @@ class _Environment:
             imgui.text_disabled(ctx.tr("camera view is unavailable"))
             return
 
-        self._camera_transfer(ctx, info)
+        if not compact:
+            self._camera_transfer(ctx, info)
         identity = (info.camera_id, ctx.session.structure_generation)
         if self._camera_initial_key != identity:
             self._camera_initial_key, self._camera_initial_view = identity, view
@@ -475,7 +476,9 @@ class _Environment:
         height_changed = False
         ortho_height = view.ortho_height
 
-        if _property_section(ctx, "camera transform"):
+        if _property_section(
+            ctx, "camera transform", 0 if compact else imgui.TreeNodeFlags_.default_open
+        ):
             (eye_changed, eye), (target_changed, target), (up_changed, up) = _vector_fields(
                 ctx,
                 node,
@@ -491,6 +494,27 @@ class _Environment:
         if _property_section(ctx, "camera projection") and _begin_property_table(
             "inspector_camera_projection", ctx=ctx
         ):
+            _property_control_row(ctx, ctx.tr("projection"), control_part="segment")
+            imgui.set_next_item_width(-1)
+            projection = 1 if orthographic else 0
+            supported = ctx.backend.caps.orthographic
+            imgui.begin_disabled(not supported)
+            selected_projection = _property_segmented(
+                ctx,
+                f"camera-inspector-projection-{node.node_id}",
+                (ctx.tr("persp"), ctx.tr("ortho")),
+                projection,
+                theme=ctx.theme,
+                icons=("persp", "ortho"),
+            )
+            imgui.end_disabled()
+            if not supported:
+                _property_tooltip(
+                    ctx, f"{ctx.backend.caps.name} {ctx.tr('has no orthographic projection')}"
+                )
+            elif selected_projection != projection:
+                orthographic = selected_projection == 1
+                ortho_changed = True
             fields = []
             for label, value, bounds, default, unit, fmt in (
                 (
@@ -519,6 +543,7 @@ class _Environment:
                         initial=default,
                         fmt=fmt,
                         show_reset=False,
+                        show_track=not compact,
                         unit=unit,
                         angular_degrees=self._camera_angular_degrees,
                         toggle_unit=self._toggle_camera_angle_unit,
@@ -527,27 +552,6 @@ class _Environment:
             fov_changed, fov = fields[0].changed, fields[0].value
             near_changed, near = fields[1].changed, fields[1].value
             far_changed, far = fields[2].changed, fields[2].value
-            _property_control_row(ctx, ctx.tr("projection"), control_part="segment")
-            imgui.set_next_item_width(-1)
-            projection = 1 if orthographic else 0
-            supported = ctx.backend.caps.orthographic
-            imgui.begin_disabled(not supported)
-            selected_projection = _property_segmented(
-                ctx,
-                f"camera-inspector-projection-{node.node_id}",
-                (ctx.tr("persp"), ctx.tr("ortho")),
-                projection,
-                theme=ctx.theme,
-                icons=("persp", "ortho"),
-            )
-            imgui.end_disabled()
-            if not supported:
-                _property_tooltip(
-                    ctx, f"{ctx.backend.caps.name} {ctx.tr('has no orthographic projection')}"
-                )
-            elif selected_projection != projection:
-                orthographic = selected_projection == 1
-                ortho_changed = True
             if orthographic:
                 _property_control_row(ctx, ctx.tr("ortho height"), unit="m")
                 height_edit = _property_value_rail(
@@ -558,6 +562,7 @@ class _Environment:
                     initial=initial.ortho_height,
                     fmt="%.4f",
                     show_reset=False,
+                    show_track=not compact,
                     unit="m",
                 )
                 height_changed, ortho_height = height_edit.changed, height_edit.value
@@ -566,7 +571,7 @@ class _Environment:
         if _property_section(ctx, "camera behavior") and _begin_property_table(
             "insp_camera_behavior", ctx=ctx
         ):
-            if ctx.select_model_camera is not None:
+            if not compact and ctx.select_model_camera is not None:
                 active = ctx.model_camera_id == info.camera_id
                 label = "Editor Camera" if active else "View Camera"
                 _property_control_row(ctx, "camera view", control_part="button")

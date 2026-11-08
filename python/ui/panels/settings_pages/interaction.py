@@ -110,9 +110,8 @@ def capsule_settings(panel, ctx: PanelContext) -> None:
         overlays = replace(overlays, status_duration=duration)
     if (changed or committed) and ctx.set_viewport_overlays is not None:
         ctx.apply_setting(ctx.set_viewport_overlays, overlays, persist=committed)
-    panel._property(ctx.tr("Movable capsules"), control_part="checkbox")
-    changed, movable = panel._checkbox(
-        "##viewport_capsules_movable", bool(overlays.movable), ctx.theme
+    changed, movable = panel._toggle_property(
+        "##viewport_capsules_movable", ctx.tr("Movable capsules"), bool(overlays.movable), ctx.theme
     )
     if changed and ctx.set_viewport_overlays is not None:
         ctx.apply_setting(ctx.set_viewport_overlays, replace(overlays, movable=movable))
@@ -122,9 +121,9 @@ def precise_input_settings(panel, ctx: PanelContext) -> None:
     panel._group_heading(ctx.tr("Input"))
     if not panel._begin_properties("settings_interaction_input"):
         return
-    panel._property(ctx.tr("Keep mode/unit"), control_part="checkbox")
-    changed, remember = panel._checkbox(
+    changed, remember = panel._toggle_property(
         "##remember_precise_input_choices",
+        ctx.tr("Keep mode/unit"),
         bool(ctx.gizmo.remember_precise_input_choices),
         ctx.theme,
     )
@@ -265,16 +264,20 @@ def helper_settings(panel, ctx: PanelContext) -> None:
     panel._group_heading(ctx.tr("Helpers"))
     if not panel._begin_properties("settings_interaction_helpers"):
         return
-    panel._property(ctx.tr("Camera & light icons"), control_part="checkbox")
-    changed, visible = panel._checkbox(
-        "##scene_entity_helpers", ctx.scene_entities.visible, ctx.theme
+    changed, visible = panel._toggle_property(
+        "##scene_entity_helpers",
+        ctx.tr("Camera & light icons"),
+        ctx.scene_entities.visible,
+        ctx.theme,
     )
     if changed:
         ctx.scene_entities.visible = visible
-    panel._property(ctx.tr("Selected frustum / light range"), control_part="checkbox")
     imgui.begin_disabled(not ctx.scene_entities.visible)
-    changed, influence = panel._checkbox(
-        "##selected_influence_volumes", ctx.scene_entities.show_influence, ctx.theme
+    changed, influence = panel._toggle_property(
+        "##selected_influence_volumes",
+        ctx.tr("Selected frustum / light range"),
+        ctx.scene_entities.show_influence,
+        ctx.theme,
     )
     imgui.end_disabled()
     if changed:

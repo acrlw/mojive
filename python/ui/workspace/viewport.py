@@ -183,7 +183,10 @@ def viewport(workspace, preview_name=""):
             bottom_limit=tools_y if horizontal and not collapsed_controls else None,
         )
     app._playback_widget_rect = None
+    from .layers_popup import draw_layers_popup
+
     if not app.viewport_layers.viewport_ui:
+        draw_layers_popup(workspace)
         workspace.rects["overlays"] = overlay
         workspace.input_overlays = list(overlay)
         imgui.pop_clip_rect()
@@ -215,7 +218,7 @@ def viewport(workspace, preview_name=""):
             in (
                 "Camera",
                 "Shading",
-                "Playback",
+                "Simulate",
             )
             and not imgui.is_popup_open(popup)
         ):
@@ -265,35 +268,19 @@ def viewport(workspace, preview_name=""):
                 ):
                     workspace.snap = not workspace.snap
                 if menu_action("viewport-layers", "Viewport layers"):
-                    workspace.activate("Layers")
+                    workspace.layers_popup_requested = True
                 workspace.menus.local_separator()
-                workspace.menus.reveal(("Playback",))
-                workspace.menus.constrain("Playback")
-                with workspace.menus.local_submenu(
-                    "Playback options", key="Playback"
-                ) as playback_open:
+                workspace.menus.reveal(("Simulate",))
+                workspace.menus.constrain("Simulate")
+                with workspace.menus.local_submenu("Simulate", key="Simulate") as playback_open:
                     if playback_open:
-                        session = app.session
-                        if menu_action(
-                            "play", "Pause simulation" if workspace.playing else "Play simulation"
-                        ):
-                            app._toggle_playback()
-                        if menu_action("go-start", "Go to start"):
-                            app._reset_playback()
-                        if menu_action(
-                            "record",
-                            "Record simulation",
-                            checked=session.state_take_recording,
-                            enabled=session.adapter.caps.simulation,
-                        ):
-                            app._toggle_state_take_recording()
-                        workspace.menus.local_separator()
-                        workspace.menus.local_rows(workspace.menus.items("Playback"))
+                        workspace.menus.local_rows(workspace.menus.items("Simulate"))
     else:
         camera_controls(workspace, (x, y, w, h), overlay)
         if transport_visible:
             workspace.transport(x, y, w, shell)
         toolbox(workspace, (x, y, w, h), tools_y, horizontal, wrapped, overlay)
+    draw_layers_popup(workspace)
     workspace.input_overlays = list(overlay)
     if cube_rect is not None:
         overlay.append(cube_rect)
@@ -499,9 +486,9 @@ def transport(workspace, x, y, w, shell):
     corners = action_corners(u, "transport", (6,) * 4)
     pad = corners.padding
     names = (
-        ("previous", "play", "next", "go-start", "playback-options")
+        ("previous", "play", "next", "go-start")
         if compact
-        else ("previous", "play", "next", "time", "go-start", "record", "playback-options")
+        else ("previous", "play", "next", "time", "go-start", "record")
     )
     widths = tuple(80 if name == "time" else 32 if name == "play" else 26 for name in names)
     sizes = tuple(
@@ -637,15 +624,13 @@ def transport(workspace, x, y, w, shell):
             "next": "playback-next",
             "go-start": "playback-reset",
             "record": "playback-record",
-            "playback-options": "playback-more",
         }
         tips = {
             "previous": "Previous frame",
             "play": "Play / pause",
             "next": "Next frame",
-            "go-start": "Go to start",
+            "go-start": "Go to start" if replay else "Reset simulation",
             "record": "Record state take",
-            "playback-options": "Playback options",
         }
         with u.corner_scope(corners.inner_radius, ("button", "icon_button")):
             clicked = u.button(
@@ -657,13 +642,9 @@ def transport(workspace, x, y, w, shell):
                 icon_role="subtle",
                 tooltip=tips[name],
                 enabled=enabled,
-                active=name == "play"
-                or (name == "record" and session.state_take_recording)
-                or (name == "playback-options" and imgui.is_popup_open("Playback")),
+                active=name == "play" or (name == "record" and session.state_take_recording),
             )
-        if name == "playback-options":
-            workspace.menus.popup("Playback", u.hits[name], clicked)
-        elif clicked:
+        if clicked:
             if name == "play":
                 workspace.app._toggle_playback()
             elif name == "go-start":

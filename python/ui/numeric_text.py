@@ -16,6 +16,7 @@ def numeric_text(value, format):
     if parts is None:
         return format % value
     prefix, token, _, _, suffix = parts.groups()
+    prefix, suffix = prefix.replace("%%", "%"), suffix.replace("%%", "%")
     number = token % value
     if number.lstrip().startswith("-") and float(number) == 0:
         number = token % 0
@@ -35,6 +36,7 @@ def fit_numeric_text(value, format, width, measure):
     if parts is None or parts[4] in "diu" or not math.isfinite(value):
         return shown
     prefix, _, precision, kind, suffix = parts.groups()
+    prefix, suffix = prefix.replace("%%", "%"), suffix.replace("%%", "%")
     if value == 0 and kind in "fF":
         for digits in range(max(0, int(precision or 6) - 1), -1, -1):
             candidate = prefix + f"{0:.{digits}f}" + suffix

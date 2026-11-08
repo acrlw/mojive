@@ -57,9 +57,20 @@ class _MeshRecorder:
         self.add_indexed_fill(points, _concave_indices(path), color)
 
 
+def icon_fringe_width(name, size):
+    """Scale the AA budget with the master's stroke, including lighter input diagrams."""
+    from mojive.ui.workspace.widget_icons import GLYPHS, ICON_GRID, ICON_STROKE
+
+    stroke = min(
+        (contour["width"] for contour in GLYPHS[name]["contours"] if contour["stroke"] != "none"),
+        default=ICON_STROKE,
+    )
+    return min(1.0, size / ICON_GRID * stroke / 2)
+
+
 def prepared_icon(name, size):
     """Build temporary scaled vertices and AA fringe for the retained native mesh."""
-    from mojive.ui.workspace.widget_icons import GLYPHS, ICON_GRID, ICON_STROKE
+    from mojive.ui.workspace.widget_icons import GLYPHS, ICON_GRID
 
     if size <= 0:
         return ()
@@ -69,11 +80,7 @@ def prepared_icon(name, size):
         layers = compile_icon_layers(GLYPHS[name]["contours"])
     scale = size / ICON_GRID
     recorder = _MeshRecorder(scale)
-    stroke = min(
-        (contour["width"] for contour in GLYPHS[name]["contours"] if contour["stroke"] != "none"),
-        default=ICON_STROKE,
-    )
-    painter = ImguiIconDraw(ImguiDraw2D(recorder), min(1.0 / scale, stroke / 2))
+    painter = ImguiIconDraw(ImguiDraw2D(recorder), icon_fringe_width(name, size) / scale)
     groups = []
     for layer in layers:
         recorder.operations = []
@@ -168,5 +175,5 @@ def draw_packaged_icon(draw, center, size, name, color, *, stroke_color=None):
                 indices,
                 tint,
                 boundaries=tuple((placed(edge), inside) for edge, inside in boundaries),
-                fringe_width=min(1.0, size / 32),
+                fringe_width=icon_fringe_width(name, size),
             )

@@ -339,7 +339,24 @@ def test_joint_current_tick_keeps_range_color_beneath_limit_ticks(
     assert np.allclose(current_tick[2], range_color)
     assert current_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
     assert tick_kwargs["cap"] == "round"
-    assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
+    if joint_type == "hinge":
+        dial = _RotationDialProjector(
+            camera(),
+            RECT,
+            gizmo._frame.position,
+            gizmo._frame.rotation[:, 2],
+            gizmo._frame.rotation[:, 0],
+            SIZE_PT,
+        )
+        expected = dial.points(
+            (JOINT_RANGE_RADIUS, JOINT_RANGE_RADIUS + JOINT_CURRENT_TICK_PT / SIZE_PT),
+            (current, current),
+        )[:, :2]
+        assert np.asarray(current_tick[:2]) == pytest.approx(expected)
+    else:
+        assert np.linalg.norm(current_tick[1] - current_tick[0]) == pytest.approx(
+            JOINT_CURRENT_TICK_PT
+        )
     current_index = next(
         index
         for index, (name, args, _kwargs) in enumerate(overlay.calls)
@@ -591,7 +608,11 @@ def test_rotation_snap_highlight_matches_the_corresponding_tick_length() -> None
     assert core
     assert len(highlighted) == 1
     start, end = highlighted[0][:2]
-    assert np.linalg.norm(end - start) == pytest.approx(4.0 * DEFAULT_ROTATION_TICK_SCALE)
+    expected = dial.points(
+        (RING_RADIUS, RING_RADIUS + 4.0 * DEFAULT_ROTATION_TICK_SCALE / SIZE_PT),
+        (gizmo._rotation_angle, gizmo._rotation_angle),
+    )[:, :2]
+    assert np.asarray((start, end)) == pytest.approx(expected)
 
 
 def test_rotation_snap_does_not_duplicate_the_limited_hinge_current_tick() -> None:
@@ -2025,6 +2046,24 @@ def test_translation_snap_ruler_does_not_add_primary_current_tick_for_a_joint() 
     )
 
 
+def test_close_slide_snap_ruler_uses_actual_projected_spacing_and_depth():
+    from types import SimpleNamespace
+
+    cam = CameraView(eye=np.array((0.6, 0, 0.8)), target=np.zeros(3), up=np.array((0, 1, 0)))
+    gizmo = ObjectGizmo()
+    gizmo._active = GizmoHandle.Z
+    gizmo._active_joint = SimpleNamespace(type="slide")
+    gizmo.translation_snap_m = 0.01
+    overlay = RecordingDraw2D()
+    gizmo._draw_translation_snap_ruler(overlay, cam, RECT, 1.0)
+    ticks = [
+        args for name, args, kw in overlay.calls if name == "line" and kw.get("cap") == "round"
+    ]
+    assert len(ticks) > 10  # A close ruler must not hide clearly separated centimetre ticks.
+    lengths = [np.linalg.norm(args[1] - args[0]) for args in ticks]
+    assert max(lengths) > min(lengths) * 1.1
+
+
 @pytest.mark.parametrize("style_scale", (1.0, 2.0, 4.0))
 def test_slide_joint_snap_ruler_is_one_continuous_final_axis_overlay(style_scale: float) -> None:
     from types import SimpleNamespace
@@ -2183,7 +2222,10 @@ def test_joint_translation_guide_is_a_primary_dim_segment_with_asymmetric_ticks(
     assert np.allclose(end_tick[2], ACTIVE_HANDLE_COLOR)
     assert connector[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
     assert np.linalg.norm(start_tick[1] - start_tick[0]) == pytest.approx(
-        2.0 * JOINT_DRAG_START_TICK_HALF_PT
+        2.0
+        * JOINT_DRAG_START_TICK_HALF_PT
+        * world_scale(camera(), gizmo._frame.position, RECT[3], 1.0)
+        / world_scale(camera(), gizmo._drag_origin_pos, RECT[3], 1.0)
     )
     assert np.linalg.norm(end_tick[1] - end_tick[0]) == pytest.approx(JOINT_CURRENT_TICK_PT)
     assert end_tick[3] == pytest.approx(JOINT_RANGE_WIDTH_PT)
@@ -2475,7 +2517,7 @@ def test_active_axis_dial_matches_the_idle_full_ring(
 
 
 @pytest.mark.parametrize("distance", [4.0, 12.0], ids=("near", "far"))
-def test_rotation_tick_keeps_its_screen_length_across_camera_distance(
+def test_rotation_tick_projects_both_world_plane_endpoints(
     distance: float,
 ) -> None:
     cam = CameraView(
@@ -2497,7 +2539,73 @@ def test_rotation_tick_keeps_its_screen_length_across_camera_distance(
         9.0,
     )
     assert tick is not None
-    assert np.linalg.norm(tick[1] - tick[0]) == pytest.approx(9.0)
+    world = rotation_dial(
+        center,
+        np.array((0.0, 0.0, 1.0)),
+        np.array((1.0, 0.0, 0.0)),
+        world_scale(cam, center, RECT[3], SIZE_PT),
+        np.array((RING_RADIUS, RING_RADIUS + 9.0 / SIZE_PT)),
+        (0.8, 0.8),
+    )
+    assert np.asarray(tick) == pytest.approx(project(cam, world, RECT)[:, :2])
+
+
+@pytest.mark.parametrize("orthographic", (False, True))
+@pytest.mark.parametrize("scale", (1.0, 1.25, 1.5))
+def test_rotation_ticks_retain_near_far_perspective_and_orthographic_foreshortening(
+    orthographic, scale
+):
+    cam = CameraView(
+        eye=np.array((3.0, 0.0, 2.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 0.0, 1.0)),
+        aspect=RECT[2] / RECT[3],
+        orthographic=orthographic,
+        ortho_height=4,
+    )
+    dial = _RotationDialProjector(cam, RECT, np.zeros(3), (0, 0, 1), (1, 0, 0), SIZE_PT * scale)
+    near, far = (dial.tick(RING_RADIUS, angle, 9 * scale) for angle in (0, np.pi))
+    near_length, far_length = (np.linalg.norm(tick[1] - tick[0]) for tick in (near, far))
+    if orthographic:
+        assert near_length == pytest.approx(far_length)
+        assert near_length < 9 * scale  # The tilted joint plane still foreshortens the marks.
+    else:
+        assert near_length > far_length * 1.05
+
+
+@pytest.mark.parametrize("orthographic", (False, True))
+def test_slide_limit_ticks_keep_a_common_world_length_and_matching_hits(orthographic):
+    cam = CameraView(
+        eye=np.array((2.0, 0.0, 3.0)),
+        target=np.zeros(3),
+        up=np.array((0.0, 1.0, 0.0)),
+        aspect=RECT[2] / RECT[3],
+        orthographic=orthographic,
+        ortho_height=4,
+    )
+    gizmo = ObjectGizmo("translate")
+    gizmo._joint_range = _JointRangeState("slide", 0, -1, 1, joint_id=0, qpos_adr=0)
+    overlay = RecordingDraw2D()
+    gizmo._draw_joint_range(overlay, cam, RECT, 1.0)
+    # This ruler faces the camera; equal world-space tick lengths still shrink
+    # with depth along the joint axis. Picking uses those same painted endpoints.
+    world_half_length = world_scale(cam, np.zeros(3), RECT[3], 6.0)
+    lengths = []
+    for hit, value in zip(gizmo.joint_limit_hits, (-1.0, 1.0), strict=True):
+        points = np.array(((0, -world_half_length, value), (0, world_half_length, value)))
+        expected = project(cam, points, RECT)[:, :2]
+        actual = np.array((hit.tick_start, hit.tick_end))
+        assert actual[np.argsort(actual[:, 1])] == pytest.approx(
+            expected[np.argsort(expected[:, 1])]
+        )
+        assert any(
+            name == "line" and np.allclose(args[:2], actual) for name, args, _ in overlay.calls
+        )
+        lengths.append(np.linalg.norm(actual[1] - actual[0]))
+    if orthographic:
+        assert lengths[0] == pytest.approx(lengths[1])
+    else:
+        assert lengths[1] > lengths[0]
 
 
 @pytest.mark.parametrize("orthographic", [False, True], ids=("perspective", "orthographic"))
@@ -4985,7 +5093,14 @@ def test_normalized_gizmo_input_keeps_keyboard_ownership_until_interruption(inte
         )
         update_gizmo_input(gizmo, session, cam, RECT, stopped)
         assert not gizmo.using
-        assert session.frame.body_xpos[node.body_index] == pytest.approx(position)
+        if interruption == "release":
+            assert session.frame.body_xpos[node.body_index] == pytest.approx(position)
+            assert session.can_undo
+            assert session.submit(cmd.Undo()).ok
+        else:
+            assert not session.can_undo
+        assert session.frame.body_xpos[node.body_index] == pytest.approx(np.zeros(3))
+        assert not session.editing
     finally:
         session.release()
 

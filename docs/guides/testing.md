@@ -32,6 +32,29 @@ matrix; other agent guidance links here.
 
 ## Change mapping
 
+`make ui-popup-review BACKEND=opengl` (or `bgfx`) compares native popup pixels with
+background-first compositing at 100%/125% scale, in both themes and with/without borders.
+It also captures production Layers and Timeline popups through real input, checks sibling
+menu switching and keyboard focus, and exercises independent Settings switches alongside
+multi-selection flag grids. Inspect
+`output/popup-edges/` and `output/electron-alignment/`; retain matching desktop captures
+when investigating native edge artifacts. Geometry assertions alone cannot detect a shadow
+overwriting the background's antialias fringe. Separately, `tests/test_draw2d.py` measures native
+corner chord error across radii and framebuffer densities, including radii beyond the fast-arc
+lookup cutoff. Two identical raster paths can both be too coarse; inspect their silhouette
+as well as their equality.
+
+`make ui-focused-review BACKEND=opengl` (or `bgfx`) exercises resource browsing, camera
+selection, contextual Inspector tabs, compact physics fields, joint/actuator edits and the
+Timeline layout. It captures both themes at normal/fractional UI scale and checks held input,
+Escape, reset and Undo. Camera creation, View/Pilot transactions, layer popup dismissal and
+Output search placement also run through real input. Inspect `output/focused-workspace/`
+and `output/electron-alignment/`. The reference cases use `joint_gizmo` at 1440 × 1000,
+verify geometry visibility, compact editor-camera fields and complete timeline groups at narrow widths.
+Set `MOJIVE_REVIEW_DESIGN=/absolute/path/design-spec.json` to review an isolated copy of a saved
+profile; the capture run does not edit that profile. For native border changes,
+also inspect a visible production window and retain its desktop screenshot there.
+
 `make ui-theme-review BACKEND=opengl` (or `bgfx`) switches and persists the production
 Dark/Light presets through labeled icon segments and the titlebar toggle without changing
 layout or typography. It checks that those obvious controls do not emit redundant help. It also clicks a committed edit's
@@ -59,7 +82,7 @@ PNG captures under `output/control-consistency-2026-10-24/`; no desktop input is
 
 `make ui-menu-review BACKEND=opengl` (or `bgfx`) captures production geometry-mode selectors
 and menus in English and Chinese at normal and fractional scale. It exercises mode selection
-and the playback-speed submenu, and checks debug-helper coverage across selected silhouettes
+and focused simulation actions, and checks debug-helper coverage across selected silhouettes
 without losing depth occlusion. Inspect `output/editor-tail-and-menu-2026-10-24/menus/` and
 `output/editor-tail-and-menu-2026-10-24/outline/`. All windows remain hidden.
 
@@ -117,10 +140,12 @@ at normal scale and Chinese at 2.25 scale. It checks that joint drafts commit on
 Undo restores the source values. Inspect the idle, edited, applied and undone controls under
 `output/inspector/solver/<backend>/` when changing these shared property rows.
 
-`make physics-options-check` exercises **Window > Physics Options...** and the environment
+`make physics-options-check` exercises the classic **Window > Physics Options...** route and the environment
 Inspector in English and Chinese at normal and 150% scale. It checks numeric commit and
 validation, enum and flag writes, Undo/Redo, live worker timestep changes, and workspace/MJCF
 round trips. Inspect `output/physics-options/` for algorithm, physical, and flag sections.
+The native workspace uses **Simulate > Physics settings...**; its routing is covered by
+`tests/gpu/test_native_workspace.py`.
 
 Viewer capture sharing is covered by `tests/test_capture_sharing.py`: saved image/file formats,
 save failures, filename uniqueness, queued requests, cancellation, and asynchronous clipboard
@@ -476,6 +501,12 @@ MuJoCo reference comparisons use approximate renderer-parity thresholds; they do
 pixel-identical shading. Review changed baselines using the workflow above.
 
 ## Joint gizmo edge views
+
+`make joint-gizmo-review BACKEND=opengl` (or `bgfx`) verifies production joint ticks in
+perspective and orthographic views. It checks limit picking after focus, then captures normal
+and Shift drags for hinge and slide joints at fractional scale. Escape restores the starting
+pose; a subsequent released drag commits one undo entry. Inspect `output/joint-tick-perspective/`
+and `output/joint-focus-readability/` for projection, foreshortening and axis clearance.
 
 `make joint-gizmo-profile BACKEND=bgfx` captures a limited hinge from both sides of
 its edge-on fade and measures stationary and continuously changing cameras separately.

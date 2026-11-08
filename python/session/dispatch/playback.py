@@ -161,6 +161,14 @@ def stop_state_take_recording(self: Session, c: cmd.StopStateTakeRecording) -> C
     return CommandResult.good(f"Recorded {len(self._take.frames)} frame(s)")
 
 
+def set_state_take_speed(self: Session, c: cmd.SetStateTakeSpeed) -> CommandResult:
+    factor = float(c.factor)
+    if not np.isfinite(factor) or factor <= 0:
+        return CommandResult.bad("Replay speed must be finite and positive")
+    self._state_take_speed = factor
+    return CommandResult.good()
+
+
 def play_state_take(self: Session, c: cmd.PlayStateTake) -> CommandResult:
     if not self._take.frames:
         return CommandResult.bad("Record a simulation take before replaying it")
@@ -355,6 +363,9 @@ def set_speed(self: Session, c: cmd.SetSpeed) -> CommandResult:
     if not np.isfinite(factor) or factor <= 0.0:
         return CommandResult.bad("simulation speed must be finite and positive")
     self._speed = max(0.05, factor)
+    # Preserve SetSpeed's historical replay behavior for API callers. The UI's
+    # dedicated replay command never changes the live simulation clock.
+    self._state_take_speed = self._speed
     return CommandResult.good(f"Speed ×{self._speed:g}")
 
 

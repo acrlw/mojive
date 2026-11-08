@@ -667,3 +667,19 @@ def test_mujoco_primitive_texture_mapping_uses_object_projection(shape, uniform)
     built = SceneSourceBuilder().set_source(source, CameraView())
     expected = [3, -4.5] if uniform else [1.5, -1.5]
     np.testing.assert_allclose(built.tex_coef[0], [*expected, 2, 0])
+
+
+def test_scene_geometry_visibility_preserves_per_node_and_role_choices():
+    source = make_source(bodies=2)
+    builder = SceneSourceBuilder()
+    builder.set_source(source, CameraView())
+    builder.set_visible(1, False)
+    remaining = builder.scene.count
+    options = {"static": True, "skin": True, "flex_face": False, "flex_skin": True}
+    assert builder.set_visual_options(**options, scene_geometry=False)
+    assert builder.scene.count == 0
+    builder.update(make_frame(source, seed=0), CameraView())
+    assert builder.scene.count == 0
+    assert builder.set_visual_options(**options, scene_geometry=True)
+    assert builder.scene.count == remaining
+    assert builder.scene.infinite_planes == ()

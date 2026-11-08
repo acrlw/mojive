@@ -25,7 +25,7 @@ references and resource roots, must remain editable.
 
 ## World physics options
 
-Open **Window > Physics Options...**, or select **environment** in Hierarchy and choose
+Open **Simulate > Physics settings...**, or select **environment** in Hierarchy and choose
 **Inspector > Physics**. The **Rendering** tab retains lighting, fog, and background
 controls. Physics belongs to the scene's simulation world, not global UI preferences
 or an individual attached model.

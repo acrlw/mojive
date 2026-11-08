@@ -145,7 +145,7 @@ class TimelineEditor(TimelineEditorState):
 
     def set_view_range(self, start: float, end: float) -> bool:
         """Retain a deliberately entered range independently of wheel navigation limits."""
-        if not valid_timeline_range(start, end):
+        if start < 0 or not valid_timeline_range(start, end):
             return False
         self.view_start, self.view_end, self.view_needs_fit = start, end, False
         self.manual_view_range = (start, end)

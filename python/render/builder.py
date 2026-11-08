@@ -88,6 +88,7 @@ class SceneSourceBuilder:
 
         self._overrides: dict[int, bool] = {}
         self._show_static = True
+        self._show_geometry = True
         self._show_skin = True
         self._show_flex_face = False
         self._show_flex_skin = True
@@ -178,9 +179,11 @@ class SceneSourceBuilder:
         convex_hull: bool = False,
         visual_geometry: bool = False,
         collision_geometry: bool = False,
+        scene_geometry: bool = True,
         geometry_style: GeometryStyle | None = None,
     ) -> bool:
         options = (
+            bool(scene_geometry),
             bool(static),
             bool(skin),
             bool(flex_face),
@@ -191,6 +194,7 @@ class SceneSourceBuilder:
             self._geometry_style if geometry_style is None else geometry_style,
         )
         current = (
+            self._show_geometry,
             self._show_static,
             self._show_skin,
             self._show_flex_face,
@@ -203,6 +207,7 @@ class SceneSourceBuilder:
         if options == current:
             return False
         (
+            self._show_geometry,
             self._show_static,
             self._show_skin,
             self._show_flex_face,
@@ -526,6 +531,8 @@ class SceneSourceBuilder:
     def _visible_instances(self) -> np.ndarray:
         src = self._source
         n = src.instance_count
+        if not self._show_geometry:
+            return np.zeros(n, bool)
         keep = np.ones(n, bool)
         explicit = self._instance_views != 0
         roles = src.geom_role if len(src.geom_role) == n else int(GeometryRole.VISUAL)

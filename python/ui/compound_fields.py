@@ -7,6 +7,22 @@ from contextlib import contextmanager
 from imgui_bundle import imgui
 
 
+def end_content_child():
+    """Close a scroll/layout region without painting it as an actionable control."""
+    # EndChild registers a native navigation target and may outline the entire
+    # region after Escape. Keep that navigation/scroll state, but let the actual
+    # controls own visible focus feedback.
+    style = imgui.get_style()
+    color = tuple(style.color_(imgui.Col_.nav_cursor))
+    # EndChild also closes the child's style-stack checkpoint, so this short
+    # paint override cannot push a stack entry inside that window.
+    style.set_color_(imgui.Col_.nav_cursor, (0, 0, 0, 0))
+    try:
+        imgui.end_child()
+    finally:
+        style.set_color_(imgui.Col_.nav_cursor, color)
+
+
 def draw_joined_field_frame(
     draw_list,
     badge_lo,

@@ -25,11 +25,12 @@ from mojive.ui.workspace.design import BODY_SIZE, DESIGN, MONO_SIZE
 from mojive.ui.workspace.property_groups import PropertyGroups
 from mojive.ui.workspace.property_style import (
     advance,
+    draw_toggle_row,
     property_label,
     property_section,
     switch_form_layout,
 )
-from mojive.ui.workspace.widgets import MUTED, TEXT
+from mojive.ui.workspace.widgets import TEXT
 
 # Related scalar/vector sections reserve the same XYZ budget for every row.
 XYZ_COLUMN_TABLES = frozenset(
@@ -38,7 +39,6 @@ XYZ_COLUMN_TABLES = frozenset(
         "body_inertial_properties",
         "insp_geometry_contact",
         "insp_geometry_advanced",
-        "joint_properties_table",
         "joint_advanced_properties_table",
     )
 )
@@ -74,8 +74,8 @@ class NativeInspectorPresentation:
         self._vector_group = False
         self._control_minimum = 96
         self._table_id = ""
-        self._switch_labels = {}
-        self._current_switch_labels = []
+        self._table_labels = {}
+        self._current_table_labels = []
         self.color_edit_open = False
         self.color_edit_started = False
         self.color_edit_action = None
@@ -91,8 +91,8 @@ class NativeInspectorPresentation:
     def begin_table(self, table_id):
         self._control_width = None
         self._table_id = table_id
-        self._current_switch_labels = []
-        self._control_minimum = 164 if table_id == "inspector_camera_projection" else 96
+        self._current_table_labels = []
+        self._control_minimum = 96
         self._vector_group = table_id in XYZ_COLUMN_TABLES
         flags = (
             imgui.TableFlags_.sizing_stretch_same
@@ -106,7 +106,7 @@ class NativeInspectorPresentation:
         return opened
 
     def end_table(self):
-        self._switch_labels[self._table_id] = tuple(self._current_switch_labels)
+        self._table_labels[self._table_id] = tuple(self._current_table_labels)
         self.groups.end()
         self._control_width = None
 
@@ -132,6 +132,39 @@ class NativeInspectorPresentation:
         )
         self.ui.hits[key] = self.ui.hits[scoped_key]
         return result
+
+    def _caption_column(self, shown, width):
+        self._current_table_labels.append(shown)
+        ui, s = self.ui, self.ui.s
+        shared_label_width = None
+        shared_above = None
+        captions = (*self._table_labels.get(self._table_id, ()), *self._current_table_labels)
+        if captions:
+            # Scalar fields and switches share one measured caption column.
+            # Cache captions, never width decisions, so resizing is reversible.
+            label_style = ui.component_style("form_label")
+            label_margin = label_style.edges("margin", s)
+            row_style = ui.component_style("form_row")
+            row_margin = row_style.edges("margin", s)
+            available = max(0, width - row_margin[0] - row_margin[2])
+            shared_label_width = max(
+                DESIGN.label_minimum * s,
+                max(
+                    ui.measure(
+                        text,
+                        label_style.get("fontSize", BODY_SIZE),
+                        translate=False,
+                        font_resolved=True,
+                        style=label_style,
+                    )
+                    for text in captions
+                )
+                + label_margin[0]
+                + label_margin[2],
+            )
+            gap = row_style.get("columnGap", row_style.get("labelGap", DESIGN.label_gap)) * s
+            shared_above = shared_label_width + gap + self._control_minimum * s > available
+        return shared_label_width, shared_above
 
     def row(
         self,
@@ -176,57 +209,29 @@ class NativeInspectorPresentation:
             first = self.ui.form_layout(width, 1, field_part="button_row")
             available = max(s, width - first.fields[0][0])
             minimum_height = measure_button_row(self.ui, available, control_labels).outer_height
-        if toggle:
-            self._current_switch_labels.append(shown)
-        shared_label_width = None
-        shared_above = None
-        captions = (*self._switch_labels.get(self._table_id, ()), *self._current_switch_labels)
-        if captions and not group_vector:
-            # Scalar fields and switches share one measured caption column.
-            # Cache captions, never width decisions, so resizing is reversible.
-            ui = self.ui
-            label_style = ui.component_style(("switch", "form_label"))
-            label_margin = label_style.edges("margin", s)
-            row_style = ui.component_style("form_row")
-            row_margin = row_style.edges("margin", s)
-            available = max(0, width - row_margin[0] - row_margin[2])
-            shared_label_width = max(
-                min(row_style.get("labelWidth", DESIGN.label_width) * s, available * 0.28),
-                max(
-                    ui.measure(
-                        text,
-                        label_style.get("fontSize", BODY_SIZE),
-                        translate=False,
-                        font_resolved=True,
-                        style=label_style,
-                    )
-                    for text in captions
-                )
-                + label_margin[0]
-                + label_margin[2],
-            )
-            gap = row_style.get("columnGap", row_style.get("labelGap", DESIGN.label_gap)) * s
-            shared_above = shared_label_width + gap + self._control_minimum * s > available
+        shared_label_width, shared_above = (
+            (None, None) if group_vector else self._caption_column(shown, width)
+        )
         if not toggle:
             layout = self.ui.form_layout(
                 width,
-                max(3, components) if group_vector else components,
+                max(3, components) if group_vector else 1,
                 axis=group_vector or bool(color_channels),
                 minimum=0 if group_vector else self._control_minimum * s,
                 label_above=shared_above,
                 label_width=shared_label_width,
                 field_part=control_part,
                 minimum_height=minimum_height,
+                field_minimum=None if group_vector else self._control_minimum * s,
             )
-            if components > 1:
-                # The caption shares the group's column, but numbers() owns the
-                # actual plain-field grid. An XYZ estimate can reserve extra rows
-                # even when all of the formatted plain numbers fit inline.
+            if group_vector and components > 1:
+                # The XYZ anchor supplies columns, while the plain group below
+                # owns its actual row count and published height.
                 layout = self.ui.form_layout(
                     width,
                     1,
                     axis=False,
-                    minimum=0 if group_vector else self._control_minimum * s,
+                    minimum=0,
                     label_above=layout.label_above,
                     label_width=layout.label_width,
                     field_part=control_part,
@@ -273,16 +278,18 @@ class NativeInspectorPresentation:
         row_margin = layout.row_margin
         label_width = layout.label_width
         row_height = DESIGN.control_height
-        hit_width, _ = self._draw_label(
-            "property-label-" + label,
-            shown,
-            p.x + layout.label_x,
-            p.y + layout.label_y,
-            label_width,
-            above=above,
-            row_height=layout.label_height / s,
-            parent="switch" if toggle else "form_row",
-        )
+        hit_width = label_width
+        if not toggle or self.ui.design is None:
+            hit_width, _ = self._draw_label(
+                "property-label-" + label,
+                shown,
+                p.x + layout.label_x,
+                p.y + layout.label_y,
+                label_width,
+                above=above,
+                row_height=layout.label_height / s,
+                parent="switch" if toggle else "form_row",
+            )
         published_height = layout.height
         if group_vector and components == 1 and not toggle:
             margin = self.ui.component_style("form_row").edges("margin", s)
@@ -359,29 +366,23 @@ class NativeInspectorPresentation:
                     layout.label_height,
                 ],
             )
-        self._toggle_row = (
-            (
-                [p.x, p.y, width, published_height],
-                [p.x + layout.label_x, p.y + layout.label_y, label_width, layout.label_height],
-            )
-            if toggle
-            else None
-        )
+        self._toggle_row = (p.x, p.y, width, layout, shown) if toggle else None
         advance(self.ui, p.x, p.y + published_height)
-        imgui.set_cursor_screen_pos((p.x, p.y))
-        label_height = layout.fields[0][1] if above else row_height * s
-        imgui.begin_disabled(hit_width <= 0)
-        clicked = imgui.invisible_button(
-            "##property-label-" + label, (max(1, hit_width), max(1, label_height))
-        )
-        imgui.end_disabled()
-        if clicked and toggle_unit:
-            toggle_unit()
-        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            if toggle_unit:
-                imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
-            if self.ui.measure(shown, BODY_SIZE, translate=False) > label_width:
-                self.ui.tooltip(shown, translate=False)
+        if not toggle:
+            imgui.set_cursor_screen_pos((p.x, p.y))
+            label_height = layout.fields[0][1] if above else row_height * s
+            imgui.begin_disabled(hit_width <= 0)
+            clicked = imgui.invisible_button(
+                "##property-label-" + label, (max(1, hit_width), max(1, label_height))
+            )
+            imgui.end_disabled()
+            if clicked and toggle_unit:
+                toggle_unit()
+            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                if toggle_unit:
+                    imgui.set_mouse_cursor(imgui.MouseCursor_.hand)
+                if self.ui.measure(shown, BODY_SIZE, translate=False) > label_width:
+                    self.ui.tooltip(shown, translate=False)
         dx, dy, _, _ = layout.fields[0]
         control_x, control_y = round(p.x + dx), p.y + dy
         self._row = (control_x, control_y, max(0, width - dx - row_margin[2]))
@@ -400,37 +401,6 @@ class NativeInspectorPresentation:
         self._control_width = None
         self._row_unit = ""
         return opened
-
-    def joint_metadata(self, joint):
-        p = imgui.get_cursor_screen_pos()
-        s = self.ui.s
-        width = imgui.get_content_region_avail().x
-        kind = self.ctx.tr(
-            {
-                "hinge": "Hinge joint",
-                "slide": "Slide joint",
-                "ball": "Ball joint",
-                "free": "Free joint",
-            }.get(joint.type, joint.type)
-        )
-        detail = f"Qpos {joint.qpos_adr}  ·  DOF {joint.dof}"
-        kind_width = self.ui.measure(kind, BODY_SIZE, translate=False)
-        detail_width = self.ui.measure(detail, BODY_SIZE, translate=False)
-        inline = kind_width + detail_width + 16 * s <= width
-        self.ui.text(p.x, p.y + 3 * s, kind, TEXT, BODY_SIZE, translate=False)
-        self.ui.text(
-            p.x + width - detail_width if inline else p.x,
-            p.y + (3 if inline else 24) * s,
-            detail,
-            MUTED,
-            BODY_SIZE,
-            translate=False,
-        )
-        imgui.invisible_button("##joint-metadata", (width, (24 if inline else 45) * s))
-        a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-        self.ui.hits["joint-metadata"] = (a.x, a.y, b.x - a.x, b.y - a.y)
-        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            self.ui.tooltip(self.ctx.tr("qpos address") + f": {joint.qpos_adr}\nDOF: {joint.dof}")
 
     def _advance(self, x, y):
         advance(self.ui, x, y)
@@ -590,52 +560,20 @@ class NativeInspectorPresentation:
         return changed, out
 
     def toggle(self, item_id, value):
-        p = imgui.get_cursor_screen_pos()
-        width = imgui.get_content_region_avail().x
-        if self._row is not None:
-            x, y, width = self._row
+        if self._toggle_row is not None and self.ui.design is not None:
+            x, y, width, layout, shown = self._toggle_row
+            updated = draw_toggle_row(self.ui, item_id, shown, value, x, y, width, layout)
         else:
-            x, y = p.x, p.y
-        updated = self.ui.switch(item_id, x, y, value, width=width)
-        design = self.ui.design
-        if (
-            design is not None
-            and self._toggle_row is not None
-            and design.runtime.observes(scoped_parts("switch"))
-        ):
-            row_rect, label_rect = self._toggle_row
-            design.record(
-                item_id + "/label-row",
-                ("switch",),
-                row_rect,
-                "switch_row",
-                labelRect=label_rect,
-                switchRect=list(self.ui.hits[item_id]),
-                consumedFields={
-                    "switch": [
-                        "height",
-                        "fontSize",
-                        "lineHeightMode",
-                        "lineHeight",
-                        "gap",
-                        "columnGap",
-                        "switchWidth",
-                        "switchHeight",
-                        "switchThumb",
-                        "marginLeft",
-                        "marginTop",
-                        "marginBottom",
-                    ]
-                },
-            )
+            p = imgui.get_cursor_screen_pos()
+            x, y, width = self._row or (p.x, p.y, imgui.get_content_region_avail().x)
+            updated = self.ui.switch(item_id, x, y, value, width=width)
         return updated != value, updated
 
     def value_rail(self, item_id, value, bounds, **options):
         active = imgui.is_any_item_active()
         p = imgui.get_cursor_screen_pos()
-        result = self.ui.rail(
-            item_id, p.x, p.y, self._field_width(), value, bounds, show_unit=False, **options
-        )
+        width = self._field_width()
+        result = self.ui.rail(item_id, p.x, p.y, width, value, bounds, show_unit=False, **options)
         self.canceled |= (active or imgui.is_any_item_active()) and imgui.is_key_pressed(
             imgui.Key.escape, False
         )
@@ -959,16 +897,25 @@ class NativeInspectorPresentation:
         gx, gy, body_width = self.groups.row(pos.x, pos.y, imgui.get_content_region_avail().x)
         imgui.set_cursor_screen_pos((gx, gy))
         options.pop("tooltip", None)
+        samples = options.pop("display_samples", ())
+        minimum = (
+            self.ui._numeric_sample_width(tuple(options["fmt"] % value for value in samples))
+            if samples
+            else None
+        )
         if self._vector_group:
             # Related rows use the table's XYZ budget, including scalar label columns.
             options["layout"] = self.ui.form_layout(body_width, 3, axis=True, vector=True)
         if "layout" not in options:
+            caption_width, _ = self._caption_column(
+                _label(self.ctx.tr(label), options.get("unit", "")), body_width
+            )
             options["layout"] = self.ui.vector_layout(
                 body_width,
                 format=options.get("fmt"),
-                label_minimum=self._vector_caption_width(
-                    (_label(self.ctx.tr(label), options.get("unit", "")),)
-                ),
+                label_width=caption_width,
+                label_minimum=caption_width,
+                minimum=minimum,
                 key=f"{node.node_id}-{name}",
             )
         result = self._vector(node, name, label, values, **options)

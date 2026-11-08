@@ -340,7 +340,7 @@ def test_native_glyph_submission_uses_the_measured_value_and_index_sizes(
     values = [
         text
         for text, size, font in submitted
-        if size == pytest.approx(18 * ui.s) and font == ui.mono.font_id
+        if size == pytest.approx(14 * ui.s) and font == ui.mono.font_id
     ]
     assert values == ["0"] * dimension
     if dimension > 1:

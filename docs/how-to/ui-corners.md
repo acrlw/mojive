@@ -504,6 +504,30 @@ does not rebuild its curvature profile.
 
 ## Verification and captures
 
+Native circular rectangle corners must satisfy the same raster precision as circles. Bound
+chord error to 0.125 physical pixels, converting through the current framebuffer density
+before ImGui starts a frame. Application zoom affects shape size rather than the error budget.
+Use adaptive `PathArcTo` instead of a fast lookup call whose fixed sample count cannot satisfy
+large radii. Test the resulting vertices, including large radii beyond the lookup cutoff,
+and inspect real popup and switch edges at normal/fractional scale. Comparing two equally
+coarse renders proves compositing order, not curve quality.
+
+Native temporary non-modal surfaces use the compact menu defaults: an 8-point shell,
+4-point content inset and derived 4-point child corners. Text-only hints have no nested
+control constraint. Explicit component customization and modal nesting remain independent.
+The shadow is an underlay, including coverage beneath the opaque interior. Its fill must
+precede the native surface rather than overlaying an independently sampled hollow inner edge.
+`make ui-popup-review` compares this production ordering against shadow-first native raster
+references in both themes, at normal/fractional scale, with and without borders. Inspect the
+production Layers, Timeline and color popups as well as the enlarged edge captures.
+
+Native floating-window borders share the fill's outer contour. Account for ImGui's half-point
+`AddRect` shift and inset the stroke centerline and radius by half the complete border width.
+Reusing the fill radius after insetting the stroke exposes bright or dark corner slivers.
+Keep this correction in both tracked ImGui and the checked Bundle build recipe. Inspect
+production color popups in both themes and at fractional scale with `make ui-focused-review`,
+then inspect the actual desktop window; framebuffer images do not cover OS compositing.
+
 ```bash
 make check
 make g3-ui

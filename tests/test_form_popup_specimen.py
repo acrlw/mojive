@@ -126,6 +126,6 @@ def test_timeline_form_reference_keeps_its_local_padding_override(reference):
     base = state.frame("form_popup")
     local = state.frame("timeline_form_popup")
     left = right = native_unit(19 * state.ui.s)
-    assert local["frame"][2] - base["frame"][2] == (left + right - 2 * native_unit(8 * state.ui.s))
+    assert local["frame"][2] - base["frame"][2] == (left + right - 2 * native_unit(4 * state.ui.s))
     assert local["content"][0] - local["frame"][0] == left
     assert local["frame"][0] + local["frame"][2] - sum(local["content"][::2]) == right

@@ -77,10 +77,11 @@ def test_scalar_labels_and_fields_align_across_presentations(properties, width):
     generic_label = state.ui.hits["property-label-Distance"]
     # Both presenters expose the same semantic label key, so compare the field
     # origins against their known table origins as well as the resulting bounds.
-    assert origins[1][0] == pytest.approx(origins[0][0], abs=state.ui.s)
+    assert 0 <= origins[1][0] <= origins[0][0] + state.ui.s
     assert origins[1][1] == pytest.approx(origins[0][1], abs=0.01)
     a, b = state.ui.hits["##generic"], state.ui.hits["##inspector"]
-    assert a[2:] == pytest.approx(b[2:], abs=state.ui.s)
+    assert b[0] + b[2] == pytest.approx(a[0] + a[2], abs=state.ui.s)
+    assert b[3] == pytest.approx(a[3], abs=state.ui.s)
     assert generic_label[3] == pytest.approx(DESIGN.body_size * state.ui.s)
 
 
@@ -105,7 +106,11 @@ def test_numeric_arrays_use_the_same_responsive_grid(properties, width):
         state.frame(draw)
     for index in range(len(values)):
         a, b = state.ui.hits[f"##generic-{index}"], state.ui.hits[f"##inspector-{index}"]
-        assert b == pytest.approx((a[0], a[1] + 150 * state.ui.s, a[2], a[3]), abs=1)
+        assert b[1] == pytest.approx(a[1] + 150 * state.ui.s, abs=1)
+        assert b[3] == pytest.approx(a[3], abs=1)
+        assert b[2] <= a[2] + 1
+    widths = {state.ui.hits[f"##inspector-{index}"][2] for index in range(len(values))}
+    assert len(widths) == 1
 
 
 def test_numeric_array_geometry_stays_fixed_when_value_gains_digits(properties):
@@ -203,12 +208,12 @@ def test_related_scalar_and_xyz_rows_share_columns_across_formats(properties, wi
         if reference is None:
             reference = geometry
         assert geometry == pytest.approx(reference)
-        assert fields[-1][0] + fields[-1][2] <= mass[0] + mass[2] + scale
+        assert fields[-1][0] + fields[-1][2] <= 40 * scale + width * scale + scale
+        assert mass[0] + mass[2] == pytest.approx(fields[-1][0] + fields[-1][2], abs=scale)
     if width == 600:
-        assert label[2] < mass[2]
         assert reference[0][1] == reference[1][1] == reference[2][1]
     else:
-        assert label[2] == pytest.approx(mass[2])
+        assert label[2] >= mass[2]
 
 
 def test_switch_rows_share_spacing_and_clickable_labels(properties):

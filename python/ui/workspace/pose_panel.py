@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from math import isfinite
 
@@ -19,6 +20,7 @@ from mojive.ui.pointer_bindings import PointerAction
 from mojive.ui.theme import THEME, mix_color
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import BODY_SIZE, DESIGN
+from mojive.ui.workspace.scalar_card import scalar_card, scalar_value_width
 from mojive.ui.workspace.widgets import MUTED, TEXT, NumericEditState
 
 _QPOS_SIZE = {"hinge": 1, "slide": 1, "ball": 4, "free": 7}
@@ -150,6 +152,7 @@ class NativePoseEditor:
         show_context=False,
         joint_color=None,
         collapsible_poses=False,
+        compact_poses=False,
     ):
         u, s = self.workspace.ui, self.workspace.s
         if initial_qpos is None:
@@ -198,6 +201,7 @@ class NativePoseEditor:
         heading_gap = gap if show_names else 0
         for joint in joints:
             top = y
+            scalar = show_names and joint.type in ("hinge", "slide")
             foldable = collapsible_poses and show_names and joint.type in ("ball", "free")
             owner = (window.id_, joint.joint_id)
             if foldable and owner not in self._expanded:
@@ -217,7 +221,13 @@ class NativePoseEditor:
                 if available and joint.type in ("ball", "free"):
                     if expanded:
                         if vector_layout is None:
-                            vector_layout = u.vector_layout(body_column.width, format="%.3f")
+                            if compact_poses:
+                                minimum = u._numeric_sample_width(("-0.000",), flat=True)
+                                vector_layout = u.vector_layout(
+                                    body_column.width, label_above=True, minimum=minimum
+                                )
+                            else:
+                                vector_layout = u.vector_layout(body_column.width, format="%.3f")
                         row_height = vector_layout.height
                     else:
                         if summary_layout is None:
@@ -232,7 +242,14 @@ class NativePoseEditor:
                         scalar_heights[joint.limited] = u.rail_extent(
                             body_column.width, bounded=joint.limited
                         )
-                    field_height = scalar_heights[joint.limited] if available else 28 * s
+                    if not available:
+                        field_height = 28 * s
+                    elif scalar:
+                        field_height = (
+                            u.rail_height(unit=joint.type == "hinge") if joint.limited else 0
+                        )
+                    else:
+                        field_height = scalar_heights[joint.limited]
             height = (
                 heading_height
                 + heading_gap
@@ -255,6 +272,12 @@ class NativePoseEditor:
             box = u.component_box(
                 "joint", x, top, w, height, key=f"joint-card-{joint.joint_id}", observe=False
             )
+            from .entity_cards import card_controls, card_surface
+
+            if show_names:
+                card_surface(
+                    u, box.frame, selected=_selected_joint(ctx.session.selected_node, joint)
+                )
             bx, y, bw, _ = box.content.tuple()
             fields = Rect(
                 bx + body_column.x,
@@ -264,6 +287,18 @@ class NativePoseEditor:
             )
             with u.component_scope("joint"):
                 heading_layout = self._heading_layout(joint, bw, foldable)
+                if scalar:
+                    heading_layout = _HeadingLayout(
+                        max(
+                            s,
+                            body_column.x
+                            + body_column.width
+                            - scalar_value_width(u, body_column.width, show_reset=False)
+                            - 8 * s,
+                        ),
+                        0,
+                        0,
+                    )
             regions = {
                 "gap": [x, box.outer.bottom, w, item_gap],
                 "rowGap": [
@@ -306,7 +341,10 @@ class NativePoseEditor:
                 else None,
                 alignmentAxis="leading-content" if show_names else "unheaded",
             )
-            with u.component_scope("joint"):
+            with (
+                u.component_scope("joint"),
+                card_controls(u, pads) if show_names else nullcontext(),
+            ):
                 if show_names:
                     self._heading(
                         ctx,
@@ -320,7 +358,7 @@ class NativePoseEditor:
                         heading_height,
                         heading_layout,
                         show_type=show_types,
-                        show_context=show_context,
+                        show_context=show_context and not scalar,
                         expanded=expanded if foldable else None,
                     )
                     y += heading_height + heading_gap
@@ -339,11 +377,12 @@ class NativePoseEditor:
                         joint,
                         node,
                         select_joint,
-                        field_x,
-                        field_y,
-                        field_width,
+                        box.content.x if scalar else field_x,
+                        box.content.y if scalar else field_y,
+                        box.content.width if scalar else field_width,
                         enabled,
                         initial_qpos,
+                        card=scalar,
                     )
                 elif not expanded:
                     self._summary(
@@ -361,14 +400,16 @@ class NativePoseEditor:
                         enabled,
                         vector_layout,
                         gap,
+                        flat=compact_poses,
                     )
             y = bottom
             u.hits[f"pose-fields-{joint.joint_id}"] = (x, top, w, y - top)
         if joints:
             publish_focus_item_hint(ctx)
         else:
-            u.text(x, y + 8 * s, "No matching joints", MUTED)
-            y += 32 * s
+            from .property_style import panel_empty
+
+            y = panel_empty(u, "pose-empty", "No matching joints", x, y, w)
         imgui.set_cursor_screen_pos((x, y))
         imgui.dummy((1, 1))
         return y
@@ -457,7 +498,7 @@ class NativePoseEditor:
             width_limit=width * u.s,
             icon=joint_icon(joint.type),
             label=label,
-            active=node is not None and ctx.session.selected_node is node,
+            active=False,
             icon_color=color,
             translate=False,
             align="left",
@@ -674,7 +715,7 @@ class NativePoseEditor:
                             0.56,
                         )
                     ),
-                    layout.badge_size / (2 * u.s),
+                    u.component_style("axis_input").get("radius", 4),
                     color_resolved=True,
                 )
                 u.component_text(
@@ -721,14 +762,17 @@ class NativePoseEditor:
         self._rotations[joint.joint_id] = (matrix.copy(), rotation.copy())
         return rotation
 
-    def _scalar(self, ctx, joint, node, select_joint, x, y, w, enabled, initial_qpos):
+    def _scalar(
+        self, ctx, joint, node, select_joint, x, y, w, enabled, initial_qpos, *, card=False
+    ):
         u = self.workspace.ui
         angular = joint.type == "hinge"
         lo, hi = joint.range if joint.limited else (0, 0)
         key = "##pose-joint-" + str(joint.joint_id)
         imgui.begin_disabled(not enabled)
         imgui.begin_group()
-        edit = u.rail(
+        painter = (lambda *args, **kwargs: scalar_card(u, *args, **kwargs)) if card else u.rail
+        edit = painter(
             key,
             x,
             y,
@@ -738,8 +782,8 @@ class NativePoseEditor:
             initial=float(initial_qpos[joint.qpos_adr])
             if len(initial_qpos) > joint.qpos_adr
             else float(ctx.session.frame.qpos[joint.qpos_adr]),
-            fmt="%.3f",
             show_reset=False,
+            **({} if card else {"fmt": "%.3f"}),
             unit="rad" if angular else "m",
             angular_degrees=True,
         )
@@ -766,7 +810,7 @@ class NativePoseEditor:
         )
         return y + 36 * u.s
 
-    def _pose(self, ctx, joint, node, select_joint, x, y, w, enabled, layout, gap):
+    def _pose(self, ctx, joint, node, select_joint, x, y, w, enabled, layout, gap, *, flat=False):
         u = self.workspace.ui
         qpos = ctx.session.frame.qpos
         start = joint.qpos_adr
@@ -811,6 +855,7 @@ class NativePoseEditor:
                 format=fmt,
                 reset_values=reset,
                 layout=layout,
+                flat=flat,
             )
             imgui.end_disabled()
             state = u.numeric_edits[key]

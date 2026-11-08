@@ -592,13 +592,14 @@ class _Menus:
             node = next(
                 (
                     node
-                    for node in reversed(self.session.nodes)
-                    if node.type is NodeType.CAMERA and node.name == name
+                    for node in self.session.nodes
+                    if node.type is NodeType.CAMERA
+                    and self.session.cameras[node.camera_index].camera_id == result.entity_id
                 ),
                 None,
             )
             if node is not None:
-                self.session.submit(cmd.Select(node.object_id))
+                self.session.submit(cmd.SelectNode(node.node_id))
 
     def _duplicate_selected(self) -> None:
         node = self._selected_model_element()

@@ -23,6 +23,7 @@ from mojive.ui.workspace.floating import (
     floating_heading_height,
     floating_number,
     floating_segment,
+    floating_segment_width,
     floating_style,
     floating_window,
 )
@@ -197,7 +198,7 @@ class _GizmoInput:
                 self._set_precise_gizmo_absolute(edit, bool(mode_index))
             if len(modes) > 1:
                 imgui.spacing()
-            unit_width = 82.0 * scale if angular else 0.0
+            unit_width = floating_segment_width(self._floating_ui, ("deg", "rad")) if angular else 0
             input_width = float(imgui.get_content_region_avail().x)
             if angular:
                 input_width -= float(imgui.get_style().item_spacing.x) + unit_width

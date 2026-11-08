@@ -103,6 +103,10 @@ recipe. It validates owned vertices, indices and coverage on construction, then 
 with the current origin, color and atlas UV. The bounded Python icon cache owns these buffers;
 they do not retain an ImGui context or draw list. `tests/test_draw2d.py` compares every packaged
 icon's native vertices, indices and antialias coverage with the original submission path.
+Its `draw_behind` entry point inserts meshes before existing native decorations using a retained
+ImGui splitter that reuses its buffers, preserving caller channels and subsequent draws.
+Floating shadows use this path so their hard interior cannot overwrite the surface's antialias fringe. The production
+raster comparison is `make ui-popup-review` on OpenGL and bgfx.
 
 Shared custom widgets use continuous-curvature geometry from `geometry2d/curves.py` through
 the `ui/paint_protocol.py` contract; `ui/imgui_draw.py` adapts that contract to ImGui. To extend it

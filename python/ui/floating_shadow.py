@@ -1,4 +1,4 @@
-"""Cached native meshes for a diffuse shadow outside a floating surface."""
+"""Cached native meshes for a diffuse underlay beneath a floating surface."""
 
 from functools import lru_cache
 from math import ceil, cos, erfc, pi, sin, sqrt
@@ -31,8 +31,8 @@ def _shadow_meshes(width, height, radius, scale):
     segments = max(8, ceil(pi / 2 * sqrt((radius + 32 * scale) / 1.2)))
 
     def contour(distance):
-        # The lower penumbra is wider; the inner edge still follows the native
-        # surface exactly so no shadow is blended over its content or border.
+        # The lower penumbra is wider. The opaque center continues beneath the
+        # native fill; only that fill owns the antialiased surface boundary.
         left, top = -distance, -distance * 0.65
         right, bottom = width + distance, height + distance * 1.35
         corner = radius + distance
@@ -50,7 +50,7 @@ def _shadow_meshes(width, height, radius, scale):
 
     inner = contour(0)
     count = len(inner)
-    indices = []
+    indices = [index for i in range(1, count - 1) for index in (0, i, i + 1)]
     for i in range(count):
         j = (i + 1) % count
         indices.extend((i, j, count + j, i, count + j, count + i))
@@ -69,11 +69,13 @@ def _shadow_colors(color):
 
 
 def draw_surface_shadow(draw, origin, size, radius, scale, color):
-    """Submit the cached falloff in the owning window's normal compositing order."""
+    """Insert the falloff behind the owner's native fill, border and content."""
     meshes = _shadow_meshes(*size, radius, scale)
+    colors = _shadow_colors(color)
     draw.push_clip_rect_full_screen()
     try:
-        for mesh, ink in zip(meshes, _shadow_colors(color), strict=True):
-            mesh.draw(draw, origin, ink)
+        # Prepending reverses submission order; preserve the authored blend order.
+        for index in range(len(meshes) - 1, -1, -1):
+            meshes[index].draw_behind(draw, origin, colors[index])
     finally:
         draw.pop_clip_rect()

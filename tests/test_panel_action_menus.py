@@ -48,6 +48,8 @@ def action_surface(request, tmp_path, monkeypatch):
         header_actions={name: set() for name in LEFT_PANELS},
         header_action=lambda *args: actions.append(args),
         header_add_pending=False,
+        camera_search_visible=False,
+        camera_sorted=False,
         search_visible=False,
         control_search_visible=False,
         filter="All",
@@ -214,9 +216,18 @@ def test_timeline_context_uses_shared_rows_and_preserves_selection_capability(
         selection_count=lambda: 1,
         edit_lane="model",
         delete_selection=lambda *args: calls.append(args),
+        keyframe_by_id={0: object()},
     )
     ctx = SimpleNamespace(
-        session=SimpleNamespace(state_take_recording=False), take_video_active=False
+        session=SimpleNamespace(
+            state_take_recording=False,
+            active_state_take_id=-1,
+            state_takes=(),
+            state_take_times=(),
+            state_take_range=None,
+            adapter=SimpleNamespace(caps=SimpleNamespace(state_snapshots=False)),
+        ),
+        take_video_active=False,
     )
     track = NativeTimelineTrack(state.workspace)
 
@@ -227,7 +238,11 @@ def test_timeline_context_uses_shared_rows_and_preserves_selection_capability(
 
     state.draw = draw
     state.frame(5)
-    row = state.menus.observed["timeline-selection-menu"]["rows"][0]
+    row = next(
+        row
+        for row in state.menus.observed["timeline-selection-menu"]["rows"]
+        if row["label"] == "Delete selection"
+    )
     assert row["label"] == "Delete selection" and row["icon"] == "delete"
     assert row["enabled"] is enabled
     state.click("timeline-delete-selection")

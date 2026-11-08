@@ -90,6 +90,9 @@ class _Navigation:
         # Viewing a scene camera is a persistent choice. Navigation must not
         # silently replace it with the independently stored editor camera.
         if self._model_camera_id >= 0:
+            from .camera_pilot import poll_pilot
+
+            poll_pilot(self, state, keys, dt)
             return
         fwd, right, up = keys.fly
         if fwd or right or up:
@@ -184,6 +187,10 @@ class _Navigation:
         i = int(camera_id)
         if i >= 0 and not any(c.camera_id == i for c in self.session.cameras):
             return
+        from .camera_pilot import finish_pilot
+
+        if not finish_pilot(self):
+            return
         self.track_node(None)
         start = self._camera_view()
         if i < 0:
@@ -238,6 +245,10 @@ class _Navigation:
         self.session.submit(cmd.SetCamera(view))
 
     def _leave_model_camera(self, *, publish: bool = False) -> None:
+        from .camera_pilot import finish_pilot
+
+        if not finish_pilot(self):
+            return
         if self._camera_transition is not None:
             if not publish:
                 self.camera.adopt(self._camera_view(), exact=True)

@@ -12,6 +12,7 @@ from mojive.design.native.geometry import (
     independent_corner_scope,
     part_scope,
 )
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.panels.settings_pages.catalog import settings_category_label
 from mojive.ui.workspace.component_layout import (
     control_frame_size,
@@ -360,13 +361,11 @@ def draw_navigation(panel, ctx, rect, narrow, *, fit_content=False):
                 ):
                     panel._category = category
     finally:
-        imgui.end_child()
+        end_content_child()
     return box.outer.width, height
 
 
 def draw_settings(panel, ctx):
-    from mojive.ui.workspace.settings_panel import _CHECKBOX_PROPERTIES
-
     u, s = panel.workspace.ui, panel.workspace.s
     p, available = imgui.get_cursor_screen_pos(), imgui.get_content_region_avail()
     closed, top = _header(panel, Rect(p.x, p.y, available.x, available.y))
@@ -399,10 +398,10 @@ def draw_settings(panel, ctx):
         },
     )
     with group_scope("Settings/" + panel._category):
-        _draw_page(panel, ctx, page, _CHECKBOX_PROPERTIES)
+        _draw_page(panel, ctx, page)
 
 
-def _draw_page(panel, ctx, page, checkbox_properties):
+def _draw_page(panel, ctx, page):
     u, s = panel.workspace.ui, panel.workspace.s
     style = u.component_style("settings_page")
     # Form fields stay close to their labels when the window is expanded.
@@ -421,12 +420,12 @@ def _draw_page(panel, ctx, page, checkbox_properties):
     fit_native_content_width(imgui.internal.get_current_window())
     try:
         with section_column(u):
-            _draw_page_contents(panel, ctx, style, checkbox_properties)
+            _draw_page_contents(panel, ctx, style)
     finally:
-        imgui.end_child()
+        end_content_child()
 
 
-def _draw_page_contents(panel, ctx, style, checkbox_properties):
+def _draw_page_contents(panel, ctx, style):
     u, s = panel.workspace.ui, panel.workspace.s
     font, title = style.get("fontSize", DESIGN.body_size), style.get("titleSize", DESIGN.title_size)
     line = max(title, style.line_height(title * 1.4)) * s
@@ -443,7 +442,6 @@ def _draw_page_contents(panel, ctx, style, checkbox_properties):
     )
     imgui.dummy((0, line + style.get("titleGap", 20) * s))
     panel._page_content_top = imgui.get_cursor_pos_y()
-    panel._checkbox_labels = frozenset(ctx.tr(label) for label in checkbox_properties)
     dimensions = replace(
         current_design(), body_size=font, row_gap=style.get("rowGap", DESIGN.row_gap)
     )

@@ -6,6 +6,7 @@ from imgui_bundle import imgui
 
 from mojive.adapters.base import FrameNeeds
 from mojive.render.backend import DebugView, RenderFlag
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.localization import LANGUAGE_LABELS, Language, parse_language
 from mojive.ui.panels import (
     Panel,
@@ -111,7 +112,7 @@ class SettingsPanel(Panel):
         imgui.separator()
         if self._search and not settings_category_matches(self._category, self._search):
             imgui.text_disabled(ctx.tr("No matching settings"))
-            imgui.end_child()
+            end_content_child()
             return
         if self._category == "General":
             self._general(ctx)
@@ -125,7 +126,7 @@ class SettingsPanel(Panel):
             self._recording(ctx)
         else:
             self._mujoco_visuals(ctx)
-        imgui.end_child()
+        end_content_child()
 
     def _draw_category_rail(self, ctx: PanelContext, scale: float) -> None:
         imgui.begin_child(
@@ -148,7 +149,7 @@ class SettingsPanel(Panel):
                 self._category = category
             imgui.end_disabled()
         imgui.pop_style_var()
-        imgui.end_child()
+        end_content_child()
 
     def _theme_settings(self, ctx: PanelContext) -> None:
         """Let the workspace add its palette choice to the general property grid."""
@@ -404,6 +405,10 @@ class SettingsPanel(Panel):
         from mojive.ui.theme import THEME
 
         return themed_checkbox(key, value, theme or THEME)
+
+    def _toggle_property(self, key, label, value, theme=None):
+        self._property(label, control_part="checkbox")
+        return self._checkbox(key, value, theme)
 
     @staticmethod
     def _button(*args, **kwargs):

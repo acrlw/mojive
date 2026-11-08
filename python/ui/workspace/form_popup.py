@@ -27,6 +27,7 @@ class FormPopupLayout:
     radius: float
     inner_radius: float
     row_tops: tuple[float, ...]
+    label_inset: float = 0
 
     def row(self, origin, index):
         return Rect(
@@ -37,9 +38,12 @@ class FormPopupLayout:
         )
 
     def field(self, origin, index):
-        row = self.row(origin, index)
+        row = self.content_row(origin, index)
         start = row.x + self.label_width + self.column_gap
         return Rect(start, row.y, max(0, row.right - start), row.height)
+
+    def content_row(self, origin, index):
+        return self.row(origin, index).inset(self.label_inset, 0, 0, 0)
 
 
 @independent_corner_scope()
@@ -47,9 +51,8 @@ def form_corners(ui, part="form_popup", *, control_part="input_number", inner_li
     """Balance the shell, native inset and contained control corners."""
     with part_scope(part, inherit=False):
         scale, style = ui.s, ui.component_style(part)
-        padding_style = style if part == "dialog" else ui.component_style("form_popup")
-        default_padding = 12 if part == "dialog" else 8
-        padding = max(native_edges(padding_style, "padding", scale, (default_padding,) * 4))
+        default_padding = 12 if part == "dialog" else 4
+        padding = max(native_edges(style, "padding", scale, (default_padding,) * 4))
         control = ui.component_style(control_part)
         inner = max(0, control.get("radius", 4) if control.explicit("radius") else 4) * scale
         if inner_limit is not None:
@@ -67,7 +70,7 @@ def form_corners(ui, part="form_popup", *, control_part="input_number", inner_li
 
 @part_scope("form_popup", inherit=False)
 @independent_corner_scope()
-def measure_form_popup(ui, labels, *, field_width, row_height, group_starts=()):
+def measure_form_popup(ui, labels, *, field_width, row_height, group_starts=(), label_inset=0):
     """Resolve all layout extents on the same grid as ImGui's native windows."""
     scale, style = ui.s, ui.component_style("form_popup")
     gap = native_unit(style.get("columnGap", 12) * scale)
@@ -88,9 +91,12 @@ def measure_form_popup(ui, labels, *, field_width, row_height, group_starts=()):
     limit = max(0, min(field_width, row_height) / 2 - 1)
     corners = form_corners(ui, inner_limit=limit)
     padding = corners.padding
-    width = ceil(label_width + gap + field_width + padding[0] + padding[2])
+    width = ceil(label_width + gap + field_width + padding[0] + padding[2] + label_inset)
     width = min(width, native_unit(imgui.get_main_viewport().work_size.x - 16 * scale))
-    label_width = min(label_width, max(0, width - padding[0] - padding[2] - gap - field_width))
+    label_width = min(
+        label_width,
+        max(0, width - padding[0] - padding[2] - gap - field_width - label_inset),
+    )
     tops, bottom = [], padding[1]
     for index in range(len(labels)):
         if index:
@@ -109,6 +115,7 @@ def measure_form_popup(ui, labels, *, field_width, row_height, group_starts=()):
         corners.radius,
         corners.inner_radius,
         tuple(tops),
+        label_inset,
     )
 
 
@@ -132,7 +139,7 @@ def form_popup(ui, key, layout):
         try:
             if opened:
                 draw_floating_shadow(ui)
-            with ui.corner_scope(layout.inner_radius, ("input_number", "axis_input")):
+            with ui.corner_scope(layout.inner_radius, ("input_number", "axis_input", "switch")):
                 yield opened
         finally:
             if opened:

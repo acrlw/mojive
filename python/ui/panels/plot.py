@@ -410,9 +410,9 @@ class PlotPanel(Panel):
         if (shown != text or tooltip) and imgui.is_item_hovered(imgui.HoveredFlags_.delay_normal):
             self._tooltip(tooltip or text, hovered=True)
 
-    def _numeric_style(self, size_scale=18 / 14):
-        # Current values use an 18 pt reference; auxiliary axes use 12 pt with
-        # the same face. Both scale with the owning group's 14 pt body style.
+    def _numeric_style(self, size_scale=1.0):
+        # Current values share the body size; auxiliary axes use a smaller
+        # ratio of the same metric-normalized numeric face.
         return (
             self.presentation.numeric_text_style(size_scale) if self.presentation else nullcontext()
         )

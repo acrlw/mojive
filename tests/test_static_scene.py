@@ -1433,6 +1433,49 @@ def test_take_loop_spanning_last_frame_preserves_speed_and_restores_only_display
     assert session.state_take_cursor == 8
 
 
+def test_take_speed_changes_replay_without_changing_live_simulation_speed():
+    session, adapter = _recorded_take()
+    assert session.submit(cmd.SetStateTakeSpeed(2))
+    assert session.speed == 1
+    assert session.state_take_speed == 2
+    assert session.submit(cmd.SeekStateTake(0))
+    assert session.submit(cmd.PlayStateTake(loop=False))
+    session.tick(FrameNeeds.none(), wall_dt=0.015)
+    assert session.state_take_cursor == 3
+    assert adapter.steps == 3
+    assert session.submit(cmd.PauseStateTake())
+    assert session.submit(cmd.Step())
+    session.tick(FrameNeeds.none())
+    assert adapter.steps == 4
+
+
+def test_simulate_menu_resumes_live_physics_after_take_playback():
+    from types import SimpleNamespace
+
+    from mojive.ui.app import ViewerApp
+    from mojive.ui.workspace.menu_actions import dispatch
+
+    session, _adapter = _recorded_take()
+    assert session.submit(cmd.PlayStateTake())
+    assert session.submit(cmd.PauseStateTake())
+    assert session.playback_source == "take"
+    app = ViewerApp.__new__(ViewerApp)
+    app.session = session
+    dispatch(SimpleNamespace(workspace=SimpleNamespace(app=app)), "simulate")
+    assert not session.paused
+    assert session.playback_source == "simulation"
+    assert not session.state_take_playing
+
+
+@pytest.mark.parametrize("factor", (0, -1, float("nan"), float("inf")))
+def test_invalid_take_speed_preserves_both_clocks(factor):
+    session, _ = _recorded_take()
+    assert session.submit(cmd.SetStateTakeSpeed(0.5))
+    assert not session.submit(cmd.SetStateTakeSpeed(factor))
+    assert session.state_take_speed == 0.5
+    assert session.speed == 1
+
+
 def test_take_playhead_advances_through_gaps_and_resumes_from_the_same_time():
     session, adapter = _recorded_take()
     assert session.submit(cmd.DeleteStateTakeFrames(2, 8))

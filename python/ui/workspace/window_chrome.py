@@ -13,7 +13,7 @@ from mojive.ui.workspace.panel_geometry import floating_panel_geometry
 
 
 def draw_floating_shadow(ui):
-    """Diffuse falloff outside the native fill and its single neutral border."""
+    """Composite diffuse falloff beneath the native fill and its neutral border."""
     window = imgui.internal.get_current_window()
     ink = ui.palette("shadow")
     color = imgui.get_color_u32(tuple(channel / 255 for channel in ink))
@@ -203,6 +203,13 @@ def native_chrome(ui, part):
     imgui.push_style_color(imgui.Col_.text, tuple(channel / 255 for channel in tint))
     imgui.push_style_var(imgui.StyleVar_.frame_padding, padding)
     if part == "dock_tabs":
+        for slot in (
+            imgui.Col_.tab,
+            imgui.Col_.tab_selected,
+            imgui.Col_.tab_dimmed,
+            imgui.Col_.tab_dimmed_selected,
+        ):
+            imgui.push_style_color(slot, (0, 0, 0, 0))
         imgui.push_style_var(
             imgui.StyleVar_.item_inner_spacing,
             (
@@ -215,7 +222,7 @@ def native_chrome(ui, part):
             yield
     finally:
         imgui.pop_style_var(2 if part == "dock_tabs" else 1)
-        imgui.pop_style_color()
+        imgui.pop_style_color(5 if part == "dock_tabs" else 1)
         imgui.pop_font()
 
 
@@ -224,12 +231,15 @@ def draw_dockspace(workspace):
     with native_chrome(ui, "dock_tabs"):
         imgui.push_style_var(imgui.StyleVar_.window_rounding, 0)
         imgui.push_style_var(imgui.StyleVar_.child_rounding, 0)
+        for slot in (imgui.Col_.title_bg, imgui.Col_.title_bg_active):
+            imgui.push_style_color(
+                slot, tuple(channel / 255 for channel in ui.palette("background"))
+            )
         try:
             workspace.window.begin_dockspace()
         finally:
+            imgui.pop_style_color(2)
             imgui.pop_style_var(2)
-        if ui.design is None or not ui.design.runtime.observes(("dock_tabs",)):
-            return
         visited = set()
         for window in imgui.get_current_context().windows:
             node = window.dock_node
@@ -251,6 +261,42 @@ def draw_dockspace(workspace):
                 continue
             rect = bar.bar_rect
             if rect.max.y <= rect.min.y:
+                continue
+            from mojive.ui.workspace.widget_icons import draw_icon
+
+            for tab in bar.tabs:
+                name = tab.window.name.split("###")[-1] if tab.window is not None else ""
+                glyph = {
+                    "Timeline": "diamond",
+                    "Output": "terminal",
+                    "Plot": "waveform",
+                    "Statistics": "performance",
+                }.get(name)
+                if glyph is None:
+                    continue
+                selected = tab.id_ == bar.selected_tab_id
+                tint = ui.palette("text" if selected else "secondary")
+                left = rect.min.x + tab.offset
+                host.draw_list.push_clip_rect(rect.min, rect.max, True)
+                draw_icon(
+                    host.draw_list,
+                    glyph,
+                    left + 8 * ui.s,
+                    rect.min.y + (rect.max.y - rect.min.y - 16 * ui.s) / 2,
+                    16,
+                    tint,
+                    ui.s,
+                )
+                if selected:
+                    ink = imgui.get_color_u32(tuple(c / 255 for c in ui.palette("primary")))
+                    host.draw_list.add_line(
+                        (left + 4 * ui.s, rect.max.y - ui.s),
+                        (left + tab.width - 4 * ui.s, rect.max.y - ui.s),
+                        ink,
+                        2 * ui.s,
+                    )
+                host.draw_list.pop_clip_rect()
+            if ui.design is None or not ui.design.runtime.observes(("dock_tabs",)):
                 continue
             ui.design.record(
                 "dock-tabs/" + str(node.id_),

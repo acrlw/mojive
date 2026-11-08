@@ -44,17 +44,19 @@ def draw(panel, ctx: PanelContext) -> None:
             ctx.apply_setting(ctx.set_recording_config, config)
 
     if panel._begin_properties("settings_recording"):
-        panel._property(ctx.tr("Copy to clipboard"), control_part="checkbox")
-        changed, value = panel._checkbox("##capture_clipboard", config.copy_to_clipboard)
+        changed, value = panel._toggle_property(
+            "##capture_clipboard", ctx.tr("Copy to clipboard"), config.copy_to_clipboard
+        )
         panel._tooltip(ctx.tr("Copy screenshots as images and videos as files after saving."))
         if changed:
             config = replace(config, copy_to_clipboard=value)
             ctx.apply_setting(ctx.set_recording_config, config)
-        panel._property(ctx.tr("Run simulation when recording starts"), control_part="checkbox")
         clock_control = ctx.session.adapter.caps.clock_control
         imgui.begin_disabled(not clock_control)
-        changed, value = panel._checkbox(
-            "##recording_run_simulation", config.run_simulation and clock_control
+        changed, value = panel._toggle_property(
+            "##recording_run_simulation",
+            ctx.tr("Run simulation when recording starts"),
+            config.run_simulation and clock_control,
         )
         imgui.end_disabled()
         if not clock_control and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):

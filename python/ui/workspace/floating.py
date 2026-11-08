@@ -40,14 +40,15 @@ def floating_style(ui, *, part="form_popup"):
             (imgui.Col_.popup_bg, ink),
             (imgui.Col_.title_bg, ink),
             (imgui.Col_.title_bg_active, ink),
+            (imgui.Col_.border, ui.palette("border")),
         )
         values = (
             (imgui.StyleVar_.window_padding, padding[:2]),
             (imgui.StyleVar_.window_min_size, (0, 0)),
             (imgui.StyleVar_.window_rounding, radius),
             (imgui.StyleVar_.popup_rounding, radius),
-            (imgui.StyleVar_.window_border_size, 0),
-            (imgui.StyleVar_.popup_border_size, 0),
+            (imgui.StyleVar_.window_border_size, scale),
+            (imgui.StyleVar_.popup_border_size, scale),
             (imgui.StyleVar_.frame_rounding, field_radius),
             (
                 imgui.StyleVar_.frame_padding,
@@ -80,6 +81,7 @@ def floating_style(ui, *, part="form_popup"):
                         "segment",
                         "select",
                         "select_option",
+                        "switch",
                     ),
                 ),
             ):
@@ -121,6 +123,32 @@ def floating_segment(ui, key, labels, selected, *, theme, width=None):
     pos = imgui.get_cursor_screen_pos()
     width = imgui.get_content_region_avail().x if width is None else width
     return ui.segmented(key, pos.x, pos.y, width / ui.s, labels, selected)
+
+
+def floating_segment_width(ui, labels):
+    """Reserve complete captions using the segment's resolved item style."""
+    from mojive.ui.controls import segmented_control_width
+
+    if ui is None:
+        return segmented_control_width(labels)
+    with ui.component_scope("segment"):
+        shell = ui.component_style("segment")
+        item = ui.component_style("button")
+        padding = item.edges("padding", ui.s, (8, 0, 8, 0))
+        width = (
+            max(ui.measure(label, item.get("fontSize", BODY_SIZE), style=item) for label in labels)
+            + padding[0]
+            + padding[2]
+        )
+        margin, inset = shell.edges("margin", ui.s), shell.edges("padding", ui.s)
+        return (
+            len(labels) * width
+            + (len(labels) - 1) * shell.get("columnGap", 0) * ui.s
+            + margin[0]
+            + margin[2]
+            + inset[0]
+            + inset[2]
+        )
 
 
 def floating_button_width(ui, label):

@@ -72,24 +72,15 @@ def test_filters_and_modal_keep_native_focus_and_localized_copy(
             inputs.sync()
             capture(viewer, target / "assets.png")
             (target / "asset-keys.json").write_text(json.dumps(list(workspace.ui.hits), indent=2))
-            # Expand the localized section through its production hit region.
-            inputs.click("section-" + viewer.app.localizer.text("Model assets"))
-            inputs.sync()
             capture(viewer, target / "assets-inventory.png")
             asset = next(r for r in _records(viewer) if r["key"] == "##asset-filter")
             assert asset["iconSize"] == scene["iconSize"]
             assert asset["hit"][3] == scene["hit"][3]
-            inputs.click("##asset-type")
-            inputs.sync()
-            choices = [r for r in _records(viewer) if r["key"].startswith("##asset-type/choice/")]
-            assert len(choices) > 1
-            assert all(not r["clippedLabel"] for r in choices)
-            capture(viewer, target / "asset-type-popup.png")
-            inputs.click(choices[-1]["key"])
-            assert viewer.app.panels.get("assets")._asset_type != "all"
-            inputs.click("##asset-type")
-            inputs.click("##asset-type/choice/0")
-            assert viewer.app.panels.get("assets")._asset_type == "all"
+            inputs.click("##asset-filter")
+            inputs.event("add_input_characters_utf8", "missing resource")
+            assert "resources-empty" in workspace.ui.hits
+            capture(viewer, target / "assets-filtered.png")
+            inputs.click("##asset-filter-clear")
             workspace.activate("Output")
             output = viewer.app.panels.get("output")
             output.show_search, output._focus_search = True, True

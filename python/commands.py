@@ -151,6 +151,13 @@ class PauseStateTake(Command):
 
 
 @dataclass(frozen=True)
+class SetStateTakeSpeed(Command):
+    """Set recorded-take replay speed independently of the simulation clock."""
+
+    factor: float = 1.0
+
+
+@dataclass(frozen=True)
 class SeekStateTake(Command):
     """Restore one frame from the transient state take."""
 

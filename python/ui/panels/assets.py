@@ -9,6 +9,7 @@ from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.adapters.base import FrameNeeds, ModelAssetInfo, NodeType
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.panels import (
     Panel,
     PanelContext,
@@ -271,7 +272,7 @@ class AssetsPanel(Panel):
                         imgui.text_disabled(str(len(item.references)))
                 imgui.end_table()
             imgui.pop_style_var()
-        imgui.end_child()
+        end_content_child()
         if not visible:
             imgui.text_disabled(ctx.tr("no matching assets"))
 

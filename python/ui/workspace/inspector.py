@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.workspace.design import DESIGN
 from mojive.ui.workspace.inspector_components import draw_component
 from mojive.ui.workspace.property_style import (
@@ -21,6 +22,8 @@ from mojive.ui.workspace.window_chrome import fit_native_content_width
 
 
 def inspector(workspace, x, y, w, h):
+    from .camera_panel import scene_camera_entity, scene_camera_selected
+
     u = workspace.ui
     s = workspace.s
     e = (
@@ -31,6 +34,8 @@ def inspector(workspace, x, y, w, h):
     if workspace.pinned and e is None:
         workspace.pinned = None
         e = workspace.app.entity
+    if not workspace.pinned and scene_camera_selected(workspace):
+        e = scene_camera_entity(workspace)
     from mojive.ui.workspace.inspector_heading import draw_heading
 
     body_y = draw_heading(workspace, e, x, y, w)
@@ -63,10 +68,15 @@ def inspector(workspace, x, y, w, h):
         with section_column(u) as column:
             _draw_body(workspace, e, column.x, column.y, column.width)
     finally:
-        imgui.end_child()
+        end_content_child()
 
 
 def _draw_body(workspace, e, bx, yy, bw):
+    if e.get("scene_camera"):
+        from .camera_panel import camera_properties
+
+        camera_properties(workspace, bx, yy, bw)
+        return
     u, s = workspace.ui, workspace.s
     handled = draw_component(workspace, workspace._panel_context, e, workspace.inspector_tab)
     original = None if handled else workspace.app.initial_entity(e["identity"])

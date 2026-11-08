@@ -127,10 +127,10 @@ class _Guides:
             return
         origin = projected[0, :2]
         direction = projected[1, :2] - origin
-        pixels_per_meter = float(np.linalg.norm(direction))
-        if pixels_per_meter < 1e-6:
+        axis_pixel_length = float(np.linalg.norm(direction))
+        if axis_pixel_length < 1e-6:
             return
-        direction /= pixels_per_meter
+        direction /= axis_pixel_length
         segment = _clip_line_to_rect(origin, direction, rect)
         if segment is None:
             return
@@ -166,19 +166,22 @@ class _Guides:
             return
 
         normal = np.array((-direction[1], direction[0]))
-        ticks_visible = pixels_per_meter * step >= 2.0 * style_scale
         ticks: list[tuple[np.ndarray, np.ndarray, float, bool]] = []
         for index in range(lo, hi + 1):
             distance = index * step
             world = current_position + axis * (distance - current_distance)
-            point = project(cam, (world,), rect)[0]
-            if point[2] <= 0.0:
+            point, adjacent = project(cam, (world, world + axis * step), rect)
+            if min(point[2], adjacent[2]) <= 0.0:
                 continue
-            alpha = _snap_tick_alpha(index - current_step) if ticks_visible else 0.0
+            if np.linalg.norm(adjacent[:2] - point[:2]) < 2.0 * style_scale:
+                continue
+            alpha = _snap_tick_alpha(index - current_step)
             if alpha <= 0.01:
                 continue
             major = abs(distance - round(distance)) < 1e-6
-            half_length = (7.0 if major else 3.5) * style_scale
+            # A common world length at the ruler origin projects with clip-w.
+            # The ratio also covers orthographic and blended projections.
+            half_length = (7.0 if major else 3.5) * style_scale * projected[0, 2] / point[2]
             a = point[:2] - normal * half_length
             b = point[:2] + normal * half_length
             ticks.append((a, b, alpha, False))
@@ -535,7 +538,7 @@ class _Guides:
         if float(np.linalg.norm(tangent)) < 1e-6:
             return
         normal = np.array((-tangent[1], tangent[0]))
-        start_half_tick = JOINT_DRAG_START_TICK_HALF_PT * style_scale
+        start_half_tick = JOINT_DRAG_START_TICK_HALF_PT * style_scale * screen[1, 2] / screen[0, 2]
         end_half_tick = JOINT_CURRENT_TICK_PT * 0.5 * style_scale
         core_width = JOINT_RANGE_WIDTH_PT * style_scale
         end_width = core_width

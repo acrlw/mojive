@@ -116,7 +116,7 @@ def test_authored_status_hint_uses_its_own_metrics_style(tooltip_frame, tmp_path
     runtime = DesignRuntime(SpecificationStore(tmp_path / "design.json"))
     ui.design = DesignPresentation(ui, runtime)
     spec = deepcopy(runtime.spec)
-    spec["tokens"]["control_radius"] = radius
+    spec["parts"]["menu"] = {"radius": radius}
     spec["parts"].update(
         {
             "statusbar": {"fontSize": 32, "fontFamily": "system", "textColor": "#ff0000"},
@@ -156,6 +156,8 @@ def test_status_hint_restores_window_and_stacks_when_painting_fails(
     tooltip_frame, monkeypatch, styled
 ):
     scale, _rows, frame = tooltip_frame
+    monkeypatch.setattr(tooltip_module, "popup_padding", lambda *_: (4 * scale,) * 4)
+    monkeypatch.setattr(tooltip_module, "popup_radius", lambda *_: 8 * scale)
     ui = (
         SimpleNamespace(
             s=scale,

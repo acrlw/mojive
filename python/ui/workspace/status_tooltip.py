@@ -4,6 +4,7 @@ from imgui_bundle import imgui
 
 from mojive.design.native.geometry import independent_corner_scope, part_scope
 from mojive.ui.workspace.design import DESIGN
+from mojive.ui.workspace.menu_geometry import popup_padding, popup_radius
 from mojive.ui.workspace.status_components import metric_tooltip_options
 
 
@@ -18,7 +19,7 @@ def status_tooltip(ui, first_line, *action_lines, scale=1.0):
         scale = ui.s
         padding, row_gap = metric_tooltip_options(ui)
         with independent_corner_scope(), part_scope("status_metrics", inherit=False):
-            radius = ui.component_style("button").get("radius", radius)
+            radius = popup_radius(ui, "menu", popup_padding(ui, "menu")) / scale
             style = ui.component_style("status_metrics")
             font, size = ui.resolve_font(style), style.get("fontSize", 14) * scale
             if style.get("textColor", "inherit") != "inherit":

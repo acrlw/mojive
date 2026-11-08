@@ -44,9 +44,23 @@ public:
             drawList.PrimWriteIdx(static_cast<ImDrawIdx>(base + index));
     }
 
+    void drawBehind(ImDrawList &drawList, const ImVec2 &origin, ImU32 color) {
+        if (mIndices.empty() || !(color & IM_COL32_A_MASK))
+            return;
+        // Begin() has already emitted the native window decorations. Insert
+        // this underlay without repainting their antialiased edge a second time.
+        mUnderlay.Split(&drawList, 2);
+        drawList.CmdBuffer.swap(mUnderlay._Channels[1]._CmdBuffer);
+        drawList.IdxBuffer.swap(mUnderlay._Channels[1]._IdxBuffer);
+        drawList.AddDrawCmd();
+        draw(drawList, origin, color);
+        mUnderlay.Merge(&drawList);
+    }
+
 private:
     std::vector<ImVec2> mPositions;
     std::vector<unsigned int> mIndices;
     std::vector<bool> mOpaque;
+    ImDrawListSplitter mUnderlay;
 };
 } // namespace mojive::imguiBridge

@@ -260,7 +260,20 @@ def test_every_panel_has_owned_groups_and_local_header_edits(
     (directory / "coverage.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     )
-    assert not report["unobservedGroups"]
+    # Retained design-reference groups are not mounted in the focused workspace.
+    # The contact fixture also has no equality section in Control.
+    retained = {
+        "assets_material",
+        "assets_material_list",
+        "cameras_button_row",
+        "cameras_section_header",
+        "cameras_segment",
+        "control_button_row",
+        "control_section_body",
+        "control_section_header",
+        "pose_control_metadata",
+    }
+    assert not (set(report["unobservedGroups"]) - retained)
 
 
 def test_status_readouts_have_independent_divider_sides_and_unit_insets(workspace, backend_name):
@@ -477,38 +490,20 @@ def test_timeline_flows_sequentially_and_all_lanes_are_reachable(workspace):
         "timeline-play-pause",
         "timeline-next",
         "timeline-last",
+        "timeline-loop",
         "timeline-time",
         "timeline-record",
-        "timeline-take",
-        "timeline-snapshot",
         "timeline-video",
-        "##timeline-range-start",
-        "##timeline-range-end",
-        "timeline-loop",
-        "timeline-follow-0",
-        "timeline-fit",
-        "timeline-settings",
-        "collapse-timeline",
+        "timeline-snapshot",
     )
-    window = imgui.internal.find_window_by_name("Timeline")
-    previous = None
-    for key in keys:
-        x, y, w, h = hits[key]
-        assert window.pos.x <= x < x + w <= window.pos.x + window.size.x + 1
-        assert window.pos.y <= y < y + h <= window.pos.y + window.size.y + 1
-        if previous is not None:
-            px, py, pw, ph = previous
-            assert y >= py - 1
-            if abs(y - py) < 1:
-                assert x >= px + pw + DESIGN.timeline_column_gap * shell.s - 1
-            else:
-                assert y >= py + ph + DESIGN.timeline_row_gap * shell.s - 1
-        previous = (x, y, w, h)
-    last_step, time = hits["timeline-last"], hits["timeline-time"]
-    assert time[1] == pytest.approx(last_step[1], abs=1)
-    assert time[0] - (last_step[0] + last_step[2]) == pytest.approx(
-        DESIGN.timeline_column_gap * shell.s, abs=1
-    )
+    gap = shell.ui.metric("timeline_toolbar", "columnGap", DESIGN.timeline_column_gap) * shell.s
+    for first, second in pairwise(keys):
+        a, b = hits[first], hits[second]
+        assert b[1] == pytest.approx(a[1], abs=1)
+        assert b[0] >= a[0] + a[2] + gap - 1
+    start, end = hits["##timeline-range-start"], hits["##timeline-range-end"]
+    assert end[1] == pytest.approx(start[1], abs=1)
+    assert 0 < end[0] - start[0] - start[2] < 32 * shell.s
     # Preserve tuned lane sizes; short panels scroll to the remaining lanes.
     body = next(
         child
@@ -516,12 +511,12 @@ def test_timeline_flows_sequentially_and_all_lanes_are_reachable(workspace):
         if child.active and "Timeline body" in child.name
     )
     for index in range(3):
-        x, y, w, h = shell.ui.hits[f"timeline-lane-label-{index}"]
+        _x, y, _w, h = shell.ui.hits[f"timeline-lane-label-{index}"]
         if y + h > body.inner_clip_rect.max.y + 1:
             assert body.scroll_max.y > 0
             imgui.internal.set_scroll_y(body, body.scroll_max.y)
             viewer.frame()
-            x, y, w, h = shell.ui.hits[f"timeline-lane-label-{index}"]
+            _x, y, _w, h = shell.ui.hits[f"timeline-lane-label-{index}"]
         assert body.inner_clip_rect.min.y - 1 <= y < y + h <= body.inner_clip_rect.max.y + 1
 
 
@@ -709,11 +704,12 @@ def test_native_asset_focus_camera_tools_and_pinned_inspector_keep_production_st
     viewer.frame(8)
     assert shell.left_active == "Assets"
     assert not shell.open["Scene"]
-    assert panel._selected_asset() is not None
-    assert panel._assets == assets
+    assert panel._selected == (model.model_id, material.type, material.name)
+    assert f"resource-{model.model_id}-{material.type}-{material.index}" in shell.ui.hits
     assert imgui.internal.find_window_by_name("Assets").active
     shell.activate("Cameras")
     viewer.frame(8)
+    viewer.click("camera-scene")
     # The native shortcuts coexist with the registered camera parameter/bookmark tools.
     assert imgui.internal.find_window_by_name("Cameras").active
     viewer.click("camera-Top")
@@ -741,46 +737,36 @@ def test_camera_sections_rails_units_and_native_spacing(workspace):
     viewer, shell = workspace, workspace.app.workspace
     shell.activate("Cameras")
     viewer.frame(8)
+    viewer.click("camera-scene")
     tr = viewer.app._panel_context().tr
-    viewer.click("section-" + tr("VIEW DIRECTION"))
     hits = shell.ui.hits
     panel = viewer.panels.get("camera")
     assert panel.presentation is not None
     scale = shell.s
-    window = imgui.internal.find_window_by_name("Cameras")
+    window = imgui.internal.find_window_by_name("Inspector")
     content = next(
         child
         for child in imgui.get_current_context().windows
         if child.active
         and child.parent_window is not None
         and child.parent_window.id_ == window.id_
-        and "Panel content" in child.name
+        and "Inspector content" in child.name
     )
     previous = None
     for name in ("yaw", "pitch", "distance", "fov_y_deg", "far"):
-        rail = hits["##camera-" + name + "-track"]
         value = hits["##camera-" + name + "-value"]
-        unit = hits["##camera-" + name + "-unit"]
-        for x, y, w, h in (rail, value, unit):
-            assert (
-                content.inner_clip_rect.min.x - 1 <= x < x + w <= content.inner_clip_rect.max.x + 1
-            )
-            assert (
-                content.inner_clip_rect.min.y - 1 <= y < y + h <= content.inner_clip_rect.max.y + 1
-            )
-            assert h == pytest.approx(DESIGN.control_height * scale, abs=1)
-        assert rail[1] == pytest.approx(value[1], abs=1)
-        assert unit[1] == pytest.approx(value[1], abs=1)
-        assert value[0] - rail[0] - rail[2] == pytest.approx(DESIGN.row_gap * scale, abs=1)
-        assert value[0] <= unit[0] < unit[0] + unit[2] <= value[0] + value[2]
-        assert value[2] == pytest.approx(DESIGN.rail_entry_width * scale, abs=1)
-        assert rail[2] >= DESIGN.rail_minimum_track_width * scale
-        if previous is not None and name in ("pitch", "distance"):
-            heading = hits["camera-label-" + tr(name)]
-            assert heading[1] - previous[1] - previous[3] == pytest.approx(
-                DESIGN.row_gap * scale, abs=1
-            )
-        previous = rail
+        assert "##camera-" + name + "-track" not in hits
+        x, y, width, height = value
+        assert (
+            content.inner_clip_rect.min.x - 1 <= x < x + width <= content.inner_clip_rect.max.x + 1
+        )
+        assert height == pytest.approx(DESIGN.control_height * scale, abs=1)
+        projection = hits["camera-projection"]
+        assert x == pytest.approx(projection[0], abs=1)
+        assert x + width == pytest.approx(projection[0] + projection[2], abs=1)
+        if previous is not None:
+            assert y >= previous[1] + previous[3] + 4 * scale - 1
+        previous = value
     original = (viewer.app.camera.yaw, viewer.app.camera.pitch, viewer.app.camera.fov_y_deg)
     viewer.click("##camera-yaw-unit")
     assert not panel._angular_degrees
@@ -796,16 +782,8 @@ def test_camera_sections_rails_units_and_native_spacing(workspace):
         viewer.app.camera.pitch,
         viewer.app.camera.fov_y_deg,
     ) == pytest.approx(original)
-    x, y, w, h = hits["##camera-yaw-track"]
-    viewer.event("add_mouse_pos_event", x + w * 0.75, y + h / 2)
-    viewer.event("add_mouse_button_event", 0, True)
-    viewer.event("add_mouse_button_event", 0, False)
-    assert viewer.app.camera.yaw > 0
-    viewer.event("add_mouse_button_event", 1, True)
-    viewer.event("add_mouse_button_event", 1, False)
     from mojive.ui.camera import DEFAULT_YAW
 
-    assert viewer.app.camera.yaw == pytest.approx(DEFAULT_YAW)
     x, y, w, h = hits["##camera-yaw-value"]
     viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
     viewer.event("add_mouse_button_event", 0, True)
@@ -818,10 +796,10 @@ def test_camera_sections_rails_units_and_native_spacing(workspace):
     viewer.event("add_mouse_button_event", 1, False)
     assert viewer.app.camera.yaw == pytest.approx(DEFAULT_YAW)
     viewer.click("section-" + tr("View"))
-    assert "##camera-yaw" not in hits
-    assert "##camera-fov_y_deg" in hits
+    assert "##camera-yaw-value" not in hits
+    assert "##camera-fov_y_deg-value" in hits
     viewer.click("section-" + tr("View"))
-    assert "##camera-yaw" in hits
+    assert "##camera-yaw-value" in hits
 
 
 def _scroll_to_hit(viewer, key, panel_name):
@@ -844,43 +822,26 @@ def _scroll_to_hit(viewer, key, panel_name):
     return content
 
 
-def test_assets_native_sections_and_height_field_draft(workspace):
-    from mojive.ui.workspace.design import DESIGN
-
+def test_resources_list_only_referenced_assets_and_filter_without_mutating_scene(workspace):
     viewer, shell = workspace, workspace.app.workspace
     shell.activate("Assets")
     viewer.frame()
-    tr = viewer.app._panel_context().tr
-    key = "section-" + tr("Model assets")
-    viewer.click(key)
-    options_key = "section-" + tr("Import options")
-    _scroll_to_hit(viewer, options_key, "Assets")
-    viewer.click(options_key)
-    field_key = "section-" + tr("Height-field import size")
-    _scroll_to_hit(viewer, field_key, "Assets")
-    viewer.click(field_key)
+    model = viewer.session.scene_models[0]
+    assets = viewer.session.model_assets(model.model_id)
+    used = [item for item in assets if item.references]
+    assert used
+    keys = {f"resource-{model.model_id}-{item.type}-{item.index}" for item in used}
+    assert keys <= shell.ui.hits.keys()
+    assert not any(key.startswith("material-") for key in shell.ui.hits)
+    assert "##hfield-import-size-0" not in shell.ui.hits
     panel = viewer.panels.get("assets")
-    original = panel._hfield_import_size.copy()
-    control = "##hfield-import-size-0"
-    content = _scroll_to_hit(viewer, control, "Assets")
-    x, y, w, h = shell.ui.hits[control]
-    assert h == pytest.approx(DESIGN.control_height * shell.s, abs=1)
-    assert content.inner_clip_rect.min.x <= x < x + w <= content.inner_clip_rect.max.x + 1
-    viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
-    viewer.event("add_mouse_button_event", 0, True)
-    for step in range(1, 5):
-        viewer.event("add_mouse_pos_event", x + w / 2 + step * 8, y + h / 2)
-    viewer.event("add_mouse_button_event", 0, False)
-    assert panel._hfield_import_size[0] != original[0]
-    viewer.event("add_mouse_pos_event", x + w / 2, y + h / 2)
-    viewer.event("add_mouse_button_event", 1, True)
-    viewer.event("add_mouse_button_event", 1, False)
-    # This is an import draft; restore it without changing scene assets.
-    panel._hfield_import_size[:] = original
+    panel._filter = used[0].name
     viewer.frame()
-    _scroll_to_hit(viewer, field_key, "Assets")
-    viewer.click(field_key)
-    assert control not in shell.ui.hits
+    assert f"resource-{model.model_id}-{used[0].type}-{used[0].index}" in shell.ui.hits
+    assert viewer.session.model_assets(model.model_id) == assets
+    panel._filter = "missing-resource-xyz"
+    viewer.frame()
+    assert not (keys & shell.ui.hits.keys())
 
 
 def test_settings_every_page_uses_native_fields_and_plot_toggles(workspace):
@@ -936,7 +897,7 @@ def test_control_layers_sensor_output_and_statistics_share_native_geometry(works
         viewer.event("add_mouse_pos_event", x + w / 2 + step * 8, y + h / 2)
     viewer.event("add_mouse_button_event", 0, False)
     assert viewer.session.frame.ctrl[0] != original[0]
-    viewer.click("reset-actuators")
+    viewer.click("header-Control-reset")
     np.testing.assert_allclose(viewer.session.frame.ctrl, 0)
     shell.activate("Layers")
     viewer.frame()
@@ -996,9 +957,9 @@ def test_populated_constraints_and_sensor_views_use_real_state(workspace, asset,
     shell.activate(panel_name)
     viewer.frame()
     if panel_name == "Control":
-        header = shell.ui.hits["section-" + viewer.app._panel_context().tr("actuators")]
         empty = shell.ui.hits["control-empty"]
-        assert empty[1] >= header[1] + header[3]
+        assert empty[3] > 0
+        assert "section-" + viewer.app._panel_context().tr("actuators") not in shell.ui.hits
         constraint = viewer.session.equality_constraints[0]
         original = constraint.enabled
         viewer.click(f"equality-{constraint.constraint_id}")
@@ -1094,34 +1055,28 @@ def test_camera_narrow_rails_stack_and_model_source_preserves_editor_camera(work
     viewer, shell = workspace, workspace.app.workspace
     shell.activate("Cameras")
     viewer.frame(8)
+    viewer.click("camera-scene")
     scale = shell.s
-    window = imgui.internal.find_window_by_name("Cameras")
+    window = imgui.internal.find_window_by_name("Inspector")
     imgui.internal.dock_context_queue_undock_window(imgui.get_current_context(), window)
     viewer.frame()
     imgui.get_style().window_min_size = (1, 1)
-    imgui.set_window_size("Cameras", (180 * scale, 740 * scale))
+    imgui.set_window_size("Inspector", (180 * scale, 740 * scale))
     viewer.frame()
-    tr = viewer.app._panel_context().tr
-    viewer.click("section-" + tr("VIEW DIRECTION"))
     hits = shell.ui.hits
     for name in ("yaw", "pitch", "distance", "fov_y_deg", "far"):
-        rail = hits["##camera-" + name + "-track"]
         value = hits["##camera-" + name + "-value"]
-        unit = hits["##camera-" + name + "-unit"]
-        assert value[1] - rail[1] - rail[3] == pytest.approx(DESIGN.row_gap * scale, abs=1)
-        assert value[0] == pytest.approx(rail[0], abs=1)
-        assert value[0] + value[2] == pytest.approx(rail[0] + rail[2], abs=1)
-        assert value[0] <= unit[0] < unit[0] + unit[2] <= value[0] + value[2]
-        assert window.pos.x <= rail[0] < rail[0] + rail[2] <= window.pos.x + window.size.x
+        assert "##camera-" + name + "-track" not in hits
+        assert value[3] == pytest.approx(DESIGN.control_height * scale, abs=1)
+        assert window.pos.x <= value[0] < value[0] + value[2] <= window.pos.x + window.size.x
     original = (viewer.app.camera.yaw, viewer.app.camera.pitch, viewer.app.camera.distance)
     model_camera = viewer.session.cameras[0]
     viewer.app.select_model_camera(model_camera.camera_id)
     viewer.frame()
-    assert "##camera-yaw" not in hits
-    assert "camera-editor" in hits
-    viewer.click("camera-editor")
+    assert "##camera-yaw-value" in hits
+    viewer.click("camera-scene")
     assert viewer.app._model_camera_id == -1
-    assert "##camera-yaw" in hits
+    assert "##camera-yaw-value" in hits
     assert (
         viewer.app.camera.yaw,
         viewer.app.camera.pitch,
@@ -1129,7 +1084,7 @@ def test_camera_narrow_rails_stack_and_model_source_preserves_editor_camera(work
     ) == pytest.approx(original)
 
 
-def test_shared_physics_draft_apply_undo_and_menu_use_native_controls(workspace):
+def test_body_physics_summary_and_global_settings_have_distinct_entry_points(workspace):
     from mojive.tools.ui_runtime import _item_center, _open_main_menu
 
     viewer, shell = workspace, workspace.app.workspace
@@ -1137,41 +1092,10 @@ def test_shared_physics_draft_apply_undo_and_menu_use_native_controls(workspace)
     viewer.session.submit(cmd.SelectNode(node.node_id))
     shell.inspector_tab = "Physics"
     viewer.frame()
-    current = viewer.session.body_properties(node.node_id)
-    x, y, w, h = shell.ui.hits["##body-gravity-compensation"]
-    start = (x + w * 0.7, y + h / 2)
-    viewer.event("add_mouse_pos_event", *start)
-    viewer.event("add_mouse_button_event", 0, True)
-    for step in range(1, 6):
-        viewer.event("add_mouse_pos_event", start[0] + step * 8, start[1])
-    viewer.event("add_mouse_button_event", 0, False)
-    panel = viewer.panels.get("inspector")
-    assert panel._body_property_edit.gravity_compensation != current.gravity_compensation
-    assert viewer.session.body_properties(node.node_id) == current
-    point = _item_center(
-        viewer, "button", viewer.app.localizer.text("Apply") + "##body-properties", reveal=True
-    )
-    viewer.event("add_mouse_pos_event", *point)
-    viewer.event("add_mouse_button_event", 0, True)
-    viewer.event("add_mouse_button_event", 0, False)
-    viewer.frame(12)
-    if viewer.app.model_edits.active:
-        viewer.click("apply-model-edits")
-        viewer.frame(24)
-        assert not viewer.app.model_edits.active
-        assert not viewer.app.model_edits.error
-    assert (
-        viewer.session.body_properties(node.node_id).gravity_compensation
-        != current.gravity_compensation
-    )
-    shell.menus.dispatch("undo")
-    viewer.frame(12)
-    assert (
-        viewer.session.body_properties(node.node_id).gravity_compensation
-        == current.gravity_compensation
-    )
-    _open_main_menu(viewer, "Window")
-    point = _item_center(viewer, "menu_item", "Physics Options...")
+    assert "##body-gravity-compensation" not in shell.ui.hits
+    assert "##body-inertia-mode" not in shell.ui.hits
+    _open_main_menu(viewer, "Simulate")
+    point = _item_center(viewer, "menu_item", "Physics settings...")
     viewer.event("add_mouse_pos_event", *point)
     viewer.event("add_mouse_button_event", 0, True)
     viewer.event("add_mouse_button_event", 0, False)
@@ -1190,7 +1114,7 @@ def test_adopted_dimensions_share_drawing_and_input_geometry(workspace):
     viewer.session.submit(cmd.SelectNode(node.node_id))
     shell.inspector_tab = "Physics"
     viewer.frame()
-    assert shell.ui.hits["##body-gravity-compensation"][3] == pytest.approx(28 * scale, abs=1)
+    assert shell.ui.hits["##body-derived-mass"][3] == pytest.approx(28 * scale, abs=1)
     layout = shell.ui.numeric_layout(600 * scale, 3)
     first, second = layout.fields[:2]
     assert second[0] - first[0] - first[2] == pytest.approx(4 * scale)
@@ -1200,7 +1124,7 @@ def test_adopted_dimensions_share_drawing_and_input_geometry(workspace):
     shell.activate("Timeline")
     viewer.frame(8)
     track = shell.timeline_panel.last_layout
-    assert track.row_height == pytest.approx(36 * scale)
+    assert 28 * scale <= track.row_height <= 36 * scale
     lane = shell.ui.hits["timeline-lane-label-0"]
     assert lane[0] == track.lo[0]
     assert lane[2] == track.channel_width
@@ -1284,7 +1208,7 @@ def test_inspector_tabs_keep_geometry_physics_and_material_controls_separate(
     directory.mkdir(parents=True, exist_ok=True)
     expected = {
         "Properties": {"geometry dimensions", "geometry shape and resource"},
-        "Physics": {"contact properties", "mass, group, and fluid"},
+        "Physics": {"contact properties", "Mass"},
         "Material": {"appearance"},
     }
     for tab, controls in expected.items():

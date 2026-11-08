@@ -175,7 +175,7 @@ def items(menu, name):
             rows += [
                 None,
                 Item("Frame all", "frame", "frame", _shortcut(st.app, InputAction.FRAME_SCENE)),
-                Item("Cameras and saved views", "panel:Cameras", "camera"),
+                Item("Cameras", "panel:Cameras", "camera"),
             ]
         return rows
     if name == "Transform tool":
@@ -204,12 +204,27 @@ def items(menu, name):
     if name == "Simulate":
         return [
             Item(
-                "Pause simulation" if st.playing else "Play simulation",
-                "play",
+                "Pause"
+                if st.playing
+                else "Play replay"
+                if st.app.session.replay_info
+                else "Run simulation",
+                "simulate",
                 "pause" if st.playing else "play",
                 _shortcut(st.app, InputAction.TOGGLE_PAUSE),
             ),
-            Item("Go to start", "start", "reset"),
+            Item(
+                "Go to start" if st.app.session.replay_info else "Reset simulation",
+                "start",
+                "reset",
+            ),
+            Item(
+                "Previous frame",
+                "step:-1",
+                "previous",
+                enabled=not st.playing and st.app.session.can_step_back,
+            ),
+            Item("Next frame", "step:1", "next", enabled=not st.playing and caps.simulation),
             Item(
                 "Stop recording" if st.app.session.state_take_recording else "Record simulation",
                 "record",
@@ -219,32 +234,10 @@ def items(menu, name):
                 checked=st.app.session.state_take_recording,
             ),
             None,
-            Item("Playback speed", submenu="Playback speed"),
-            Item("Physics adapter", "panel:Control"),
             Item(
-                "Physics Options...",
+                "Physics settings...",
                 "physics-options",
                 enabled=caps.simulation or caps.supports("physics.options"),
-            ),
-        ]
-    if name == "Playback speed":
-        return [
-            Item(f"{v:g}× speed", "speed:" + str(v), checkable=True, checked=st.speed == v)
-            for v in (0.25, 0.5, 1, 2)
-        ]
-    if name == "Playback":
-        return [
-            Item("Previous frame", "step:-1", "previous", enabled=not st.playing),
-            Item("Next frame", "step:1", "next", enabled=not st.playing),
-            None,
-            Item("Playback speed", submenu="Playback speed"),
-            Item(
-                "Loop playback",
-                "loop",
-                checkable=True,
-                checked=st.loop,
-                enabled=bool(st.app.session.state_take_times),
-                reason="Record a take first.",
             ),
         ]
     if name == "Window":
@@ -281,11 +274,6 @@ def items(menu, name):
                 checked=st.show_viewport_tab,
             ),
             Item("Settings", "panel:Settings", shortcut="F9"),
-            Item(
-                "Physics Options...",
-                "physics-options",
-                enabled=caps.simulation or caps.supports("physics.options"),
-            ),
         ]
     if name == "Panels":
         unloaded = {
@@ -364,8 +352,8 @@ def items(menu, name):
         ]
     if name == "Shading":
         return [
-            Item(n, "shading:" + n, "shading", checkable=True, checked=menu.shading == n)
-            for n in ("Solid", "Wireframe")
+            Item(n, "shading:" + n, icon, checkable=True, checked=menu.shading == n)
+            for n, icon in (("Solid", "shading"), ("Wireframe", "sphere"))
         ]
     if name == "Help":
         return [

@@ -70,8 +70,9 @@ def test_raw_display_labels_fit_using_the_final_localized_caption(appearance, la
     for _ in range(3):
         rows = frame(draw)
     assert rows["0"]["textPresent"] and rows["0"]["label"] == ui.translate("Visible")
-    assert not rows["1"]["textPresent"]
-    assert "1-label-text" in rows
+    assert rows["1"]["textPresent"]
+    assert rows["1"]["label"] == ui.translate("Transform handles")
+    assert rows["1"]["labelRect"][1] < rows["1"]["switchRect"][1]
 
 
 @pytest.mark.parametrize("family", ("inherit", "mono"))
@@ -102,7 +103,17 @@ def test_authored_switch_caption_font_is_used_for_fit_and_wrapped_paint(
 
     for _ in range(3):
         painted, expected_font = frame(draw)
-    assert painted["textPresent"] is (family == "mono" and width == 158)
+    assert painted["textPresent"]
+    inline = family == "mono" and width == 158
+    assert (
+        abs(
+            painted["labelRect"][1]
+            + painted["labelRect"][3] / 2
+            - painted["switchRect"][1]
+            - painted["switchRect"][3] / 2
+        )
+        < 1
+    ) is inline
     assert fonts and set(fonts) == {expected_font}
 
 

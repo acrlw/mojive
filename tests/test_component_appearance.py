@@ -768,7 +768,9 @@ def test_timeline_lane_icons_use_their_exact_label_style(appearance, monkeypatch
     frame(
         lambda: track._paint(
             SimpleNamespace(edit_lane="model"),
-            SimpleNamespace(style_scale=ui.s, theme=THEME),
+            SimpleNamespace(
+                style_scale=ui.s, theme=THEME, session=SimpleNamespace(scene_snapshots=())
+            ),
             layout,
             None,
             None,
@@ -886,19 +888,19 @@ def test_status_mouse_icons_scale_uniformly_and_measure_without_resizing_the_tex
 
     with part_scope("statusbar"):
         frame(paint)
-    update({"status_hints": {"iconSize": 44, "iconColor": "#ff00ff"}})
+    update({"status_hints": {"iconSize": 36, "iconColor": "#ff00ff"}})
     with part_scope("statusbar"):
         frame(paint)
     assert submissions == ["status-mouse-left", "status-mouse-left"]
-    assert shapes[0][0] == 22 * ui.s
+    assert shapes[0][0] == 18 * ui.s
     assert shapes[1][0] == pytest.approx(shapes[0][0] * 2)
     assert shapes[1][1] == (1, 0, 1, 1)
     assert shapes[1][2] == (1, 0, 1, 0.8)
     assert captions[1] == captions[0]
     assert bounds[1][2] - bounds[0][2] == pytest.approx(
-        (hints.OVERLAY_GEOMETRY.hint_mouse_width + 5) * 22 / 18 * ui.s
+        (hints.OVERLAY_GEOMETRY.hint_mouse_width + 5) * ui.s
     )
-    assert bounds[1][3] >= 44 * ui.s
+    assert bounds[1][3] >= 36 * ui.s
 
 
 def test_component_text_drawer_reuses_the_current_font_without_stack_churn(appearance, monkeypatch):
@@ -1243,7 +1245,7 @@ def test_viewport_camera_group_keeps_one_icon_canvas_with_and_without_caption(
         ui=ui,
         s=ui.s,
         app=SimpleNamespace(camera=SimpleNamespace(orthographic=False)),
-        menus=SimpleNamespace(popup=lambda *args: None),
+        menus=SimpleNamespace(popup=lambda *args: None, shading="Solid"),
         activate=lambda name: None,
     )
     for width in (800, 220):

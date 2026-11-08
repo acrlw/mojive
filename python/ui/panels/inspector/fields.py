@@ -336,6 +336,7 @@ def _property_vector_row(
     reset_values=None,
     label_tooltip: str = "",
     unit: str = "",
+    display_samples=(),
 ) -> tuple[bool, np.ndarray]:
     """Draw one XYZ triplet as a property-table control with joined axis fields."""
 
@@ -354,6 +355,7 @@ def _property_vector_row(
             reset_values=reset_values,
             tooltip=label_tooltip,
             unit=unit,
+            display_samples=display_samples,
         )
     out = np.asarray(values, np.float64).copy()
     resets = (

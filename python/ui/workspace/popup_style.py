@@ -29,6 +29,21 @@ MENU_BG = rgba8("popup")
 POPUP_ROWS = ContextVar("popup_rows", default=None)
 
 
+def menu_trigger(ui, key, *args, popup, menu_set_open, **kwargs):
+    """Switch sibling menus without passing input through unrelated popups."""
+    imgui.push_item_flag(imgui.internal.ItemFlagsPrivate_.no_window_hoverable_check, menu_set_open)
+    try:
+        opened = imgui.is_popup_open(popup)
+        clicked = ui.button(key, *args, active=opened, **kwargs)
+        hovered = imgui.is_item_hovered()
+    finally:
+        imgui.pop_item_flag()
+    if clicked and opened:
+        imgui.internal.close_popup_to_level(0, True)
+        return False
+    return clicked or (menu_set_open and hovered and not opened)
+
+
 def popup_box(ui, outer, *, part="menu"):
     """Use one outer budget for live popups and reference plates."""
     style = ui.component_style(part)

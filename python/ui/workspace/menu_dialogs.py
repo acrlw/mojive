@@ -3,6 +3,7 @@
 from imgui_bundle import imgui
 
 from mojive.design.native.geometry import Rect
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.workspace.component_layout import control_frame_size, control_size
 from mojive.ui.workspace.design import BODY_SIZE
 from mojive.ui.workspace.form_popup import form_corners
@@ -261,7 +262,7 @@ def dialogs(menu):
                 imgui.set_cursor_screen_pos((col_x + pad_x, meta_y + pad_y))
                 draw_fn(label_text)
         u.record_component_box("dialog_body", body, key="guide-dialog-body", fields=body_rows)
-        imgui.end_child()
+        end_content_child()
         imgui.pop_style_var()
         imgui.pop_font()
         imgui.pop_style_color(3)

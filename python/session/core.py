@@ -79,6 +79,7 @@ class Session(_Editing, _Playback, _Source):
         self._asset_path = asset_path
         self._paused = not adapter.caps.simulation
         self._speed = 1.0
+        self._state_take_speed = 1.0
         self._playback_source = "simulation"
         self._sim_time_credit = 0.0
         self._selected = 0

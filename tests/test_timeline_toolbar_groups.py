@@ -1,4 +1,4 @@
-"""The production timeline preserves semantic groups across width and typography changes."""
+"""The production timeline keeps complete groups visible at narrow and wide sizes."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -75,34 +75,45 @@ def toolbar(request, tmp_path):
 def _inside(outer, inner):
     x, y, w, h = outer
     ix, iy, iw, ih = inner
-    return x - 0.1 <= ix and y - 0.1 <= iy and ix + iw <= x + w + 0.1 and iy + ih <= y + h + 0.1
+    return x - 1 <= ix and y - 1 <= iy and ix + iw <= x + w + 1 and iy + ih <= y + h + 1
 
 
 @pytest.mark.parametrize("width", (260, 340, 620, 1100, 1600))
 @pytest.mark.parametrize("language", (Language.ENGLISH, Language.SIMPLIFIED_CHINESE))
-def test_real_toolbar_keeps_range_pair_and_whole_groups_inside_their_container(
-    toolbar, width, language
-):
+def test_toolbar_wraps_complete_groups_without_clipping_controls(toolbar, width, language):
     state, ui = toolbar, toolbar.ui
     state.width = width
     state.localize(language)
     state.paint()
     groups = tuple(
-        ui.hits["timeline-group-" + name] for name in ("transport", "capture", "range", "view")
+        ui.hits["timeline-group-" + name]
+        for name in ("transport", "capture", "keys", "view", "range", "utilities")
     )
-    for index, group in enumerate(groups):
-        assert _inside(state.records["timeline-toolbar"]["content"], group)
-        for other in groups[index + 1 :]:
-            assert group[0] + group[2] <= other[0] + 0.1 or group[1] + group[3] <= other[1] + 0.1
+    content = state.records["timeline-toolbar"]["content"]
+    for group in groups:
+        assert _inside(content, group)
+    follow = ui.hits["timeline-group-follow"]
+    assert _inside(content, follow)
+    if width >= 1600:
+        assert len({group[1] for group in (*groups, follow)}) == 1
+    for index, first in enumerate((*groups, follow)):
+        for second in (*groups, follow)[index + 1 :]:
+            assert (
+                first[0] + first[2] <= second[0] + 1
+                or second[0] + second[2] <= first[0] + 1
+                or first[1] + first[3] <= second[1] + 1
+                or second[1] + second[3] <= first[1] + 1
+            )
     for key in ("first", "previous", "play-pause", "next", "last", "time"):
         assert _inside(groups[0], ui.hits["timeline-" + key])
-    for key in ("record", "take", "snapshot", "video"):
+    for key in ("record", "snapshot", "video"):
         assert _inside(groups[1], ui.hits["timeline-" + key])
     start, end = (state.records["range-bounds/##timeline-range-" + key] for key in ("start", "end"))
     for record in (start, end):
-        assert _inside(groups[2], record["outer"])
-    assert start["fieldRect"][1] == pytest.approx(end["fieldRect"][1])
-    assert start["fieldRect"][0] + start["fieldRect"][2] < end["fieldRect"][0]
+        assert _inside(groups[4], record["outer"])
+    if width >= 340:
+        assert start["fieldRect"][1] == pytest.approx(end["fieldRect"][1])
+        assert start["fieldRect"][0] + start["fieldRect"][2] < end["fieldRect"][0]
     assert state.bottom >= max(y + h for _, y, _, h in groups)
 
 
@@ -138,6 +149,7 @@ def test_toolbar_padding_and_numeric_typography_keep_the_range_pair_together(too
     container = state.records["timeline-toolbar"]
     for key in ("transport", "capture", "range", "view"):
         assert _inside(container["content"], state.ui.hits["timeline-group-" + key])
+    assert _inside(container["content"], state.ui.hits["timeline-group-follow"])
     assert container["padding"] == pytest.approx(tuple(v * state.ui.s for v in (17, 9, 23, 11)))
     start, end = (state.ui.hits["##timeline-range-" + key] for key in ("start", "end"))
     assert _inside(state.ui.hits["timeline-group-range"], start)

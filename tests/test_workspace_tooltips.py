@@ -208,7 +208,7 @@ def test_shortcut_tag_actual_first_window_and_painted_badge_are_concentric(
     badge = next(row for row in state.runtime.observed if row["key"].startswith("status-badge-"))
     x, y, w, h = record["hit"]
     bx, by, bw, bh = badge["hit"]
-    inset = native_unit(6 * ui.s)
+    inset = native_unit(4 * ui.s)
     assert record["nativePadding"] == [inset, inset]
     epsilon = native_epsilon(x, y, w, h, bx, by, bw, bh)
     assert abs(by - y - inset) <= epsilon
@@ -238,7 +238,7 @@ def test_wrapped_shortcut_help_uses_a_compact_row_and_independent_corners(toolti
     record = next(row for row in state.runtime.observed if row.get("kind") == "tooltip")
     x, y, w, h = record["hit"]
     bx, by, bw, bh = record["badgeRect"]
-    inset = native_unit(6 * ui.s)
+    inset = native_unit(4 * ui.s)
     assert record["badgeRadius"] > 0
     assert record["contentSize"][1] > bh
     assert record["contentSize"][0] <= ceil(260 * ui.s) + native_unit(8 * ui.s) + bw
@@ -250,10 +250,10 @@ def test_wrapped_shortcut_help_uses_a_compact_row_and_independent_corners(toolti
 
 
 @pytest.mark.parametrize("radius", (4, 7))
-def test_plain_help_resolves_current_radius_independently_of_its_caller(tooltip_frame, radius):
+def test_plain_help_resolves_menu_radius_independently_of_its_caller(tooltip_frame, radius):
     state, ui = tooltip_frame, tooltip_frame.ui
     spec = deepcopy(state.runtime.spec)
-    spec["tokens"]["control_radius"] = radius
+    spec["parts"]["menu"] = {"radius": radius}
     state.runtime.update_spec(spec)
 
     def paint():

@@ -225,7 +225,13 @@ def test_status_text_vertices_remain_centered_at_fractional_coordinates(canvas, 
 
 @pytest.mark.parametrize("scale", (0.65, 1.0, 1.5))
 @pytest.mark.parametrize("button", ("left", "right", "wheel"))
-def test_mouse_shell_corners_do_not_accumulate_alpha(canvas, monkeypatch, scale, button):
+def test_mouse_shell_corners_do_not_accumulate_alpha(
+    canvas, monkeypatch, backend_name, scale, button
+):
+    from pathlib import Path
+
+    from PIL import Image
+
     from mojive.ui.app import status as app_status
     from mojive.ui.viewport_widgets import OVERLAY_GEOMETRY
     from mojive.ui.workspace.icon_mesh import draw_packaged_icon
@@ -257,6 +263,10 @@ def test_mouse_shell_corners_do_not_accumulate_alpha(canvas, monkeypatch, scale,
     pixels = snap(viewer)
     x0, y0, x1, y1 = (round(v * viewer.window.pixel_scale) for v in crop_rect)
     shell = pixels[y0:y1, x0:x1]
+    output = Path("output/status-mouse-clarity")
+    output.mkdir(parents=True, exist_ok=True)
+    name = "native" if getattr(viewer.app, "workspace", None) is not None else "classic"
+    Image.fromarray(shell).save(output / f"shell-{backend_name}-{name}-{button}-{scale:g}.png")
     # A half-transparent white shell over black cannot exceed one application
     # of its alpha. Canonical meshes scale their complete silhouette uniformly.
     maximum = round(255 * 0.5)
@@ -851,6 +861,12 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
         monkeypatch.setattr(imgui, "drag_float", original_drag_float)
 
         if hasattr(viewer.app, "workspace"):
+            from mojive.tools.native_ui_review import _NativeInput
+
+            with _NativeInput(viewer) as inputs:
+                inputs.click(
+                    "section-" + viewer.app._panel_context().tr("camera transform").upper()
+                )
             hits = viewer.app.workspace.ui.hits
             control_starts = [
                 hits[f"##insp_camera_transform{name}_0_{node.node_id}"][0]
@@ -890,18 +906,30 @@ def test_scene_camera_helper_is_pickable_and_transformable(monkeypatch):
                 captured[f"X##{name}_0_{node.node_id}"][0] for name in ("position", "target", "up")
             ]
         assert max(control_starts) - min(control_starts) <= 1.0
-        projection_y = captured[f"##camera-inspector-projection-{node.node_id}-0"][1]
-        assert captured["##inspector-camera-vertical fov-value"][1] < projection_y
-        assert projection_y < captured["View Camera"][1]
-        assert captured["View Camera"][1] < captured["##camera_preview_enabled"][1]
+        if hasattr(viewer.app, "workspace"):
+            projection = hits[f"camera-inspector-projection-{node.node_id}-0"]
+            assert captured["View Camera"][1] < projection[1]
+            assert projection[1] < captured["##inspector-camera-vertical fov-value"][1]
+            with _NativeInput(viewer) as inputs:
+                inputs.click(
+                    "section-" + viewer.app._panel_context().tr("camera transform").upper()
+                )
+                inputs.sync(4)
+                from mojive.tools.native_ui_review import _reveal
 
-        def choose_orthographic(label, *args, **kwargs):
-            clicked = original_button(label, *args, **kwargs)
-            return clicked or label == f"##camera-inspector-projection-{node.node_id}-1"
+                target_key = f"camera-inspector-projection-{node.node_id}-1"
+                _reveal(inputs, target_key, "Inspector content")
+                inputs.click(target_key)
+                inputs.sync(4)
+        else:
 
-        monkeypatch.setattr(imgui, "button", choose_orthographic)
-        viewer.sync()
-        monkeypatch.setattr(imgui, "button", original_button)
+            def choose_orthographic(label, *args, **kwargs):
+                clicked = original_button(label, *args, **kwargs)
+                return clicked or label == f"##camera-inspector-projection-{node.node_id}-1"
+
+            monkeypatch.setattr(imgui, "button", choose_orthographic)
+            viewer.sync()
+            monkeypatch.setattr(imgui, "button", original_button)
         assert viewer.session.camera_view(camera_id).orthographic
         viewer.sync()
 
@@ -1007,11 +1035,15 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
         assert viewer.recording.phase is RecordingPhase.RECORDING
         assert not imgui.get_current_context().open_popup_stack
         notices.append(viewer.app._status_notice_bounds)
+        # Keep the pointer outside transport after the menu closes so native
+        # hover feedback is not mistaken for a captured popup.
+        imgui.get_io().add_mouse_pos_event(-1000, -1000)
         return surface_image(*args, **kwargs)
 
     monkeypatch.setattr(viewer.app, "_surface_image", capture_surface)
     monkeypatch.setattr(recording, "VideoRecorder", Recorder)
     monkeypatch.setattr(viewer.app, "_capture_output", lambda *args: tmp_path / "menu.mp4")
+    monkeypatch.setattr(viewer.window._input, "process_inputs", lambda: None)
     viewer.configure_recording(RecordingConfig(countdown=0))
     try:
         _open_main_menu(viewer, "View")
@@ -1039,6 +1071,11 @@ def test_zero_countdown_menu_recording_starts_with_a_clean_viewport(canvas, monk
                 ) * imgui.get_io().display_framebuffer_scale.y
                 cutoff = min(cutoff, int(notice_top))
         assert cutoff > clean.shape[0] * 0.5
+        if not np.array_equal(images[0][:cutoff], clean[:cutoff]):
+            from PIL import Image
+
+            Image.fromarray(images[0]).save(tmp_path / "recording-first-frame.png")
+            Image.fromarray(clean).save(tmp_path / "recording-after-stop.png")
         np.testing.assert_array_equal(images[0][:cutoff], clean[:cutoff])
     finally:
         viewer.stop_recording()

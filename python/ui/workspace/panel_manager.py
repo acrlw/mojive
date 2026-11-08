@@ -6,6 +6,7 @@ from dataclasses import replace
 from imgui_bundle import imgui
 
 from mojive.design.groups import component_groups, group_scope
+from mojive.ui.compound_fields import end_content_child
 from mojive.ui.panels import PanelManager, _panel_id
 from mojive.ui.workspace.constants import LEFT_PANELS
 from mojive.ui.workspace.design import DESIGN, current_design, use_design
@@ -235,7 +236,7 @@ class WorkspacePanels(PanelManager):
                                 ):
                                     panel.draw(ctx)
                             finally:
-                                imgui.end_child()
+                                end_content_child()
                             window = imgui.get_current_context().current_window
                             if not window.dock_id:
                                 bar = window.title_bar_rect()

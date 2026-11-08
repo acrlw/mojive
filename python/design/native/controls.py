@@ -34,6 +34,17 @@ from mojive.ui.text_layout import fit_text
 from mojive.ui.workspace.design import DESIGN
 
 
+def _numeric_font_role(style, origin):
+    """Follow group aliases to the numeric role instead of inheriting caption size."""
+    rule = style.catalog.get(origin, {}).get("fields", {}).get("fontSize", {})
+    reference = rule.get("default")
+    while isinstance(reference, dict) and "field" in reference:
+        origin = reference.get("part", origin)
+        rule = style.catalog.get(origin, {}).get("fields", {}).get(reference["field"], {})
+        reference = rule.get("default")
+    return isinstance(reference, dict) and reference.get("token") == "mono_font_size"
+
+
 class NativePrimitives:
     """Use actual ImGui controls for editing and catalogue geometry for every frame."""
 
@@ -87,7 +98,10 @@ class NativePrimitives:
         generic = {"button", "icon_button"}
         font_origin = style.origins.get("fontSize")
         font_rule = style.catalog.get(font_origin, {}).get("fields", {}).get("fontSize", {})
-        inherits_font = font_origin in generic or isinstance(font_rule.get("default"), dict)
+        inherits_font = font_origin in generic or (
+            isinstance(font_rule.get("default"), dict)
+            and not _numeric_font_role(style, font_origin)
+        )
         local_fields = {
             field
             for field in INHERITED_TEXT_FIELDS
@@ -117,8 +131,15 @@ class NativePrimitives:
                     and field not in local_fields
                     and (
                         field != "fontSize"
-                        or isinstance(rule.get("default"), dict)
-                        or any(self._precise_parent(parent) for parent in parents)
+                        or (
+                            isinstance(rule.get("default"), dict)
+                            and not _numeric_font_role(style, style.origins.get(field))
+                        )
+                        or any(
+                            self._precise_parent(parent)
+                            and "fontSize" in style.spec.get("parts", {}).get(parent, {})
+                            for parent in parents
+                        )
                     )
                 ):
                     style.values[field] = layout_engine.inherited(field, style.values[field])
@@ -296,6 +317,20 @@ class NativePrimitives:
             item_id=g.get_item_id() if item_id is None else item_id,
         )
 
+    def _button_hit(self, key, size):
+        """Keep native navigation/input, with one component-owned focus contour."""
+        g = self.imgui
+        get_context = getattr(g, "get_current_context", None)
+        context = get_context() if get_context is not None else None
+        nav_visible = context is None or context.nav_cursor_visible
+        if nav_visible:
+            g.push_style_color(g.Col_.nav_cursor, (0.0, 0.0, 0.0, 0.0))
+        try:
+            return g.invisible_button(key, size, g.ButtonFlags_.enable_nav)
+        finally:
+            if nav_visible:
+                g.pop_style_color()
+
     def _field_paint_visible(self, frame):
         if frame.width <= 0 or frame.height <= 0:
             return False
@@ -442,16 +477,7 @@ class NativePrimitives:
         g.set_cursor_screen_pos((box.frame.x, box.frame.y))
         if not enabled:
             g.begin_disabled(True)
-        # Mouse-driven frames have no navigation cursor to suppress. Avoid a
-        # native style-stack round trip for every tree row and toolbar button.
-        nav_visible = context is None or context.nav_cursor_visible
-        if nav_visible:
-            g.push_style_color(g.Col_.nav_cursor, (0.0, 0.0, 0.0, 0.0))
-        hit = g.invisible_button(
-            key, (max(1.0, box.frame.width), max(1.0, box.frame.height)), g.ButtonFlags_.enable_nav
-        )
-        if nav_visible:
-            g.pop_style_color()
+        hit = self._button_hit(key, (max(1.0, box.frame.width), max(1.0, box.frame.height)))
         paint = ItemPaint.capture(g)
         hovered, held = paint.hovered, paint.active
         tint = None
@@ -544,7 +570,7 @@ class NativePrimitives:
             g.end_disabled()
         from mojive.ui.compound_fields import draw_focus_frame
 
-        if nav_visible:
+        if context is None or context.nav_cursor_visible:
             draw_focus_frame(
                 g.ImVec2(box.frame.x, box.frame.y),
                 g.ImVec2(box.frame.right, box.frame.bottom),
@@ -759,9 +785,7 @@ class NativePrimitives:
                 if out:
                     clear_x = box.frame.right - slot
                     g.set_cursor_screen_pos((clear_x, box.frame.y))
-                    clicked = g.invisible_button(
-                        "##clear-" + key, (slot, box.frame.height), g.ButtonFlags_.enable_nav
-                    )
+                    clicked = self._button_hit("##clear-" + key, (slot, box.frame.height))
                     self.ui.icon(
                         "close",
                         clear_x + (slot - glyph_size) / 2,
@@ -874,6 +898,10 @@ class NativePrimitives:
         minimum_height=0,
     ):
         style = self.style(parts or (("input_number", "axis_input") if axis else "input_number"))
+        compact_axis = bool(axis and not background)
+        if compact_axis:
+            size = style.get("badgeFontSize", 12)
+            style = style.with_overrides({"fontSize": (size, "axis_badge")})
         box = self.field_box(
             style, rect, (3, 0, 3, 0) if axis else (8, 0, 8, 0), minimum_height=minimum_height
         )
@@ -881,6 +909,16 @@ class NativePrimitives:
         with FieldLayer(self.imgui, self.ui.draw, self._field_splitters) as layer:
             g, ui, s = self.imgui, self.ui, self.scale
             axis_size = style.get("axisWidth", 18.0) * s if axis else 0.0
+            if compact_axis:
+                axis_size = max(axis_size, (style.get("fontSize", 12) + 8) * s)
+                height = min(box.frame.height, axis_size)
+                frame = Rect(
+                    box.frame.x,
+                    box.frame.y + (box.frame.height - height) / 2,
+                    box.frame.width,
+                    height,
+                )
+                box = Box(box.outer, frame, frame.inset(*box.padding), box.padding, box.margin)
             badge = min(axis_size, max(0.0, box.frame.width - 1.0))
             reset = False
             empty_frame = box.frame.width <= 0 or box.frame.height <= 0
@@ -888,10 +926,9 @@ class NativePrimitives:
             if axis:
                 axis_rect = Rect(box.frame.x, box.frame.y, badge, box.frame.height)
                 g.set_cursor_screen_pos((axis_rect.x, axis_rect.y))
-                reset = g.invisible_button(
+                reset = self._button_hit(
                     "##" + key + "-reset",
                     (max(1.0, axis_rect.width), max(1.0, axis_rect.height)),
-                    g.ButtonFlags_.enable_nav,
                 )
                 badge_signals = (g.is_item_activated(), g.is_item_active(), g.is_item_deactivated())
                 badge_item_id = g.get_item_id()
@@ -903,7 +940,8 @@ class NativePrimitives:
                     self.aligned_text(badge_style, axis_rect, axis, mono=False, horizontal="center")
                     self.focus_frame(style, axis_rect, item_id=badge_item_id)
                 ui.hits[key + "-reset"] = axis_rect.tuple()
-            numeric_frame = box.frame.inset(badge, 0, 0, 0)
+            badge_gap = min(4 * s, max(0, box.frame.width - badge)) if compact_axis else 0
+            numeric_frame = box.frame.inset(badge + badge_gap, 0, 0, 0)
             content = numeric_frame.inset(*box.padding)
             numeric_box = Box(box.outer, numeric_frame, content, box.padding, box.margin)
             with self.native_field(style, numeric_box, mono=True):
@@ -1015,8 +1053,9 @@ class NativePrimitives:
                     constraint="parent budget exhausted" if empty_frame else None,
                 )
             ui.hits[key + "-frame"] = box.frame.tuple()
+            ui.hits[key + "-numeric"] = numeric_frame.tuple()
             if paint_visible:
-                self.focus_frame(style, box.frame)
+                self.focus_frame(style, numeric_frame if compact_axis else box.frame)
             if hasattr(ui, "numeric_edits"):
                 # Use the existing type so callers continue their atomic command flow.
                 from mojive.ui.workspace.widgets import NumericEditState
@@ -1030,8 +1069,10 @@ class NativePrimitives:
                     result.reset,
                 )
             layer.background()
-            if paint_visible and background:
-                self.field_background(style, box, paint.color(), draw=layer.draw)
+            if paint_visible and (background or (compact_axis and (paint.hovered or paint.active))):
+                self.field_background(
+                    style, numeric_box if compact_axis else box, paint.color(), draw=layer.draw
+                )
             if paint_visible and axis:
                 from mojive.ui.compound_fields import draw_joined_field_frame
                 from mojive.ui.theme import THEME, mix_color
@@ -1040,17 +1081,32 @@ class NativePrimitives:
                 tint = (
                     THEME.axis_color(axis_index) if axis_index is not None else THEME.text_disabled
                 )
+                badge_color = mix_color(
+                    tuple(v / 255 for v in ui.ink(badge_paint.color(), style)),
+                    tint,
+                    0.88 if badge_paint.active else 0.72 if badge_paint.hovered else 0.56,
+                )
+                if not background:
+                    badge_height = min(axis_rect.width, axis_rect.height)
+                    badge_top = axis_rect.y + (axis_rect.height - badge_height) / 2
+                    ui.rect(
+                        axis_rect.x,
+                        badge_top,
+                        axis_rect.width,
+                        badge_height,
+                        tuple(round(v * 255) for v in badge_color),
+                        r=style.get("radius", 4.0),
+                        color_resolved=True,
+                        draw=layer.draw,
+                    )
+                    return result
                 draw_joined_field_frame(
                     layer.draw,
                     g.ImVec2(axis_rect.x, axis_rect.y),
                     g.ImVec2(axis_rect.right, axis_rect.bottom),
                     g.ImVec2(axis_rect.right, axis_rect.y),
                     g.ImVec2(box.frame.right, box.frame.bottom),
-                    badge_color=mix_color(
-                        tuple(v / 255 for v in ui.ink(badge_paint.color(), style)),
-                        tint,
-                        0.88 if badge_paint.active else 0.72 if badge_paint.hovered else 0.56,
-                    ),
+                    badge_color=badge_color,
                     field_color=tuple(v / 255 for v in ui.ink(paint.color(), style)),
                     rounding=style.get("radius", 6.0) * s,
                 )
@@ -1237,13 +1293,12 @@ class NativePrimitives:
         )
         if width is not None:
             hit_width = min(hit_width, max(0, width))
-        hit = g.invisible_button(
+        hit = self._button_hit(
             key,
             (
                 max(1.0, hit_width),
                 max(1.0, row_height),
             ),
-            g.ButtonFlags_.enable_nav,
         )
         out = not value if hit else value
         paint = ItemPaint.capture(g)
@@ -1314,6 +1369,8 @@ class NativePrimitives:
         layout_box=None,
         tooltip="",
         control_x=None,
+        label_rect=None,
+        control_rect=None,
     ):
         g, ui, s = self.imgui, self.ui, self.scale
         style = self.style("switch")
@@ -1335,25 +1392,30 @@ class NativePrimitives:
         g.set_cursor_screen_pos((box.frame.x, box.frame.y))
         empty_frame = box.frame.width <= 0 or box.frame.height <= 0
         g.begin_disabled(not enabled or empty_frame)
-        hit = g.invisible_button(
-            key, (max(1.0, box.frame.width), max(1.0, box.frame.height)), g.ButtonFlags_.enable_nav
-        )
+        hit = self._button_hit(key, (max(1.0, box.frame.width), max(1.0, box.frame.height)))
         out = not value if hit else value
         paint = ItemPaint.capture(g)
+        if label and not paint.disabled and (paint.hovered or paint.active):
+            self.field_background(
+                style, box, rgba8("field_active" if paint.active else "field_hovered")
+            )
+        control = control_rect or box.content
         sx, sy = (
             min(max(box.content.x, control_x), max(box.content.x, box.content.right - width))
             if control_x is not None
             else max(box.content.x, box.content.right - width)
             if label
             else box.content.x,
-            box.content.y + (box.content.height - height) / 2,
+            control.y + (control.height - height) / 2,
         )
+        if control_rect is not None:
+            sx = max(control.x, control.right - width)
         ui.draw.push_clip_rect(
             (box.content.x, box.content.y), (box.content.right, box.content.bottom), True
         )
         draw_switch(ui, sx, sy, width, height, thumb, out, paint)
         if label:
-            label_rect = Rect(
+            label_rect = label_rect or Rect(
                 box.content.x, box.content.y, max(0.0, sx - gap - box.content.x), box.content.height
             )
             label_content = label_rect.inset(*label_style.edges("margin", s))
@@ -1410,9 +1472,7 @@ class NativePrimitives:
         box = style.box(*rect.tuple(), scale=s)
         g.set_cursor_screen_pos((box.frame.x, box.frame.y))
         g.begin_disabled(not enabled)
-        g.invisible_button(
-            key, (max(1.0, box.frame.width), max(1.0, box.frame.height)), g.ButtonFlags_.enable_nav
-        )
+        self._button_hit(key, (max(1.0, box.frame.width), max(1.0, box.frame.height)))
         paint = ItemPaint.capture(g)
         active = g.is_item_active()
         out = value
@@ -1603,7 +1663,16 @@ class NativePrimitives:
         return Box(outer, frame, frame.inset(*proposed.padding), proposed.padding, margin)
 
     def number_shell(
-        self, key, rect, value, unit="", *, toggle_unit=None, compact_caption=False, **kwargs
+        self,
+        key,
+        rect,
+        value,
+        unit="",
+        *,
+        toggle_unit=None,
+        compact_caption=False,
+        flat=False,
+        **kwargs,
     ):
         """Lay out one value/unit caption without changing the native edit transaction."""
         with FieldLayer(self.imgui, self.ui.draw, self._field_splitters) as layer:
@@ -1755,7 +1824,8 @@ class NativePrimitives:
             self.imgui.set_cursor_screen_pos((box.outer.x, box.outer.y))
             self.imgui.internal.item_size((box.outer.width, box.outer.height))
             layer.background()
-            self.field_background(style, box, paint.color(), draw=layer.draw)
+            if not flat or paint.hovered or paint.active:
+                self.field_background(style, box, paint.color(), draw=layer.draw)
             return result
 
     def form_layout(self, rect, count=1, *, vector=False, axis=False):

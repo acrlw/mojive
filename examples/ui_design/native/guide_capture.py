@@ -16,13 +16,18 @@ def _camera_content_window():
         window
         for window in g.get_current_context().windows
         if window.active
-        and "Native specimen/Cameras" in window.name
-        and "/Panel content" in window.name
+        and (
+            ("Native specimen/Cameras" in window.name and "/Panel content" in window.name)
+            or ("Native specimen/Inspector" in window.name and "/Inspector content" in window.name)
+        )
     )
 
 
 def _reveal_camera_control(v, key):
     """Reveal through both the specimen scroll and its clipped Guide page."""
+    # Nested native scroll limits settle after the specimen changes size.
+    for _ in range(3):
+        v.frame()
     trace = []
     for _ in range(16):
         rect = v.ui.hits[key]
@@ -237,6 +242,9 @@ def _capture_context_updates(v, page, click, save, event):
                 raise AssertionError((name, actual, expected))
             report["directions"].append({"name": name, "yaw": actual[0], "pitch": actual[1]})
         save("camera-directions")
+        click(reveal("camera-scene"))
+        page("Inspector")
+        v.values["inspector-size"] = "Medium"
         with TemporaryDirectory(prefix="camera-capture-", dir=v.output) as directory:
             panel.bookmark_directory = Path(directory)
             panel._bookmark_name = ""
@@ -266,7 +274,7 @@ def _capture_context_updates(v, page, click, save, event):
             save("camera-bookmarks-menu")
             event("add_key_event", g.Key.escape, True)
             event("add_key_event", g.Key.escape, False)
-            v.values["camera-size"] = "Narrow"
+            v.values["inspector-size"] = "Narrow"
             v.frame()
             reveal("camera-bookmark-open/" + report["bookmarks"][-1])
             save("camera-bookmarks-narrow")
@@ -334,7 +342,7 @@ def _capture_context_updates(v, page, click, save, event):
             raise AssertionError("Could not select the sample body")
         v.selected["Inspector tabs"] = 1
         save("inertia-automatic")
-        for field in ("mass", "position", "rotation", "inertia"):
+        for field in ("mass", "inertia"):
             if "##body-derived-" + field not in v.ui.hits:
                 raise AssertionError("Automatic inertia field is missing: " + field)
 

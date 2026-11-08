@@ -278,6 +278,7 @@ def test_short_header_reset_slot_does_not_shrink_the_body_column(appearance):
 
 def test_nested_columns_do_not_compound_and_new_child_has_its_own_column(appearance):
     ui, runtime, _update, frame = appearance
+    _update({"cameras_section_header": {"paddingX": 6}})
     runtime.observe_components = True
     states = {}
 
@@ -336,7 +337,7 @@ def test_section_column_restores_horizontal_state_after_exception(appearance):
             ui.section("Standalone", p.x, p.y, imgui.get_content_region_avail().x, True)
             header = _record(ui, runtime, "section-Standalone")
             _close(header["hit"][0], before[0])
-            _close(header["labelRect"][0] - header["hit"][0], 6 * ui.s)
+            _close(header["labelRect"][0] - header["hit"][0], 8 * ui.s)
 
     frame(draw)
 

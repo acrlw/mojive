@@ -18,7 +18,7 @@ from mojive.ui.workspace.navigation import Navigation
 from mojive.ui.workspace.widgets import UI
 
 
-@pytest.mark.parametrize("name", ("Window", "Inspector position", "Simulate", "Playback speed"))
+@pytest.mark.parametrize("name", ("Window", "Inspector position", "Simulate"))
 @pytest.mark.parametrize("surface", ("workspace", "guide"))
 def test_localized_product_menus_keep_command_identity_and_fit_labels(name, surface, monkeypatch):
     from examples.ui_design.native.guide_localization import translate

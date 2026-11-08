@@ -325,7 +325,7 @@ class _Viewport:
                 style_scale=self.window.style_scale,
                 readout_ui=self._floating_ui,
             )
-        if self.viewport_layers.viewport_ui:
+        if self.viewport_layers.viewport_ui and self.viewport_layers.view_cube:
             self.view_cube.draw(overlay, self.window.style_scale)
         self._draw_model_drop_overlay(overlay)
         self._draw_viewport_status(overlay)

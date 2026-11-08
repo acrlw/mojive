@@ -189,9 +189,25 @@ def _joint_advanced_rows(
 class _Physics:
     """Private physics methods of InspectorPanel; state belongs to its owner."""
 
-    def _body_properties(self, ctx: PanelContext, node: SceneNode) -> None:
+    def _body_properties(self, ctx: PanelContext, node: SceneNode, *, compact=False) -> None:
         current = ctx.session.body_properties(node.node_id)
         if current is None:
+            return
+        if compact:
+            if _property_section(ctx, "Mass and inertia") and _begin_property_table(
+                "body_summary", ctx=ctx
+            ):
+                for label, key, values, unit in (
+                    ("mass", "##body-derived-mass", (current.mass,), "kg"),
+                    (
+                        "diagonal inertia",
+                        "##body-derived-inertia",
+                        current.diagonal_inertia,
+                        "kg·m²",
+                    ),
+                ):
+                    _derived_inertial_value(ctx, key, label, values, unit)
+                _end_property_table(ctx)
             return
         generation = ctx.session.structure_generation
         if (
@@ -468,7 +484,7 @@ class _Physics:
             if _property_button(ctx, f"{ctx.tr('Copy error')}##body-properties"):
                 imgui.set_clipboard_text(self._body_property_error)
 
-    def _joint(self, ctx: PanelContext, node: SceneNode) -> None:
+    def _joint(self, ctx: PanelContext, node: SceneNode, *, compact=False) -> None:
         joint = next(
             (item for item in ctx.session.joints if item.joint_id == node.joint_index), None
         )
@@ -476,9 +492,7 @@ class _Physics:
             imgui.text_disabled(ctx.tr("joint metadata is unavailable"))
             return
         presentation = ctx.inspector_presentation
-        if presentation is not None:
-            presentation.joint_metadata(joint)
-        elif _begin_property_table("joint_identity", ctx=ctx):
+        if presentation is None and _begin_property_table("joint_identity", ctx=ctx):
             for label, value in (
                 ("type", joint.type),
                 ("qpos address", str(joint.qpos_adr)),
@@ -490,7 +504,8 @@ class _Physics:
             _end_property_table(ctx)
         if _property_section(ctx, "joint properties"):
             self._joint_properties(ctx, node, joint)
-        self._joint_advanced_properties(ctx, joint)
+        if not compact:
+            self._joint_advanced_properties(ctx, joint)
 
     def _joint_properties(self, ctx: PanelContext, node: SceneNode, joint: JointInfo) -> None:
         editable = bool(
@@ -536,6 +551,7 @@ class _Physics:
                     fmt="%.4f",
                     reset_values=joint.axis,
                     label_tooltip="Axis is expressed in the body frame",
+                    display_samples=(-1.0, 1.0),
                 )
 
             if joint.type in ("hinge", "slide", "ball"):

@@ -84,6 +84,20 @@ def form(owner, ui, engine, style, part, bounds):
 def panels(owner, ui, engine, style, part, bounds):
     s = ui.s
     ui.rect(*bounds.tuple(), surface_ink(ui, part, "background"), r=8, color_resolved=True)
+    if part == "layers_popup":
+        content = style.box(*bounds.tuple(), scale=s).content
+        children = []
+        for index, label in enumerate(("Scene geometry", "Gizmos", "Selection highlight")):
+            key = "reference-layer-" + str(index)
+            result = engine.switch(
+                key,
+                Rect(content.x, content.y + index * 28 * s, content.width, 28 * s),
+                owner.values.get(key, True),
+                label=label,
+            )
+            owner.values[key] = result.value
+            children.append(result.box.frame.tuple())
+        return children
     inner = bounds.inset(16 * s, 16 * s, 16 * s, 16 * s)
     if part in ("panel_body", "dialog_body", "settings_page"):
         return form(owner, ui, engine, style, part, inner)
@@ -444,6 +458,7 @@ SURFACE_RENDERERS = {
         (
             "panel",
             "panel_body",
+            "layers_popup",
             "dialog",
             "dialog_body",
             "settings_layout",

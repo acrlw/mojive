@@ -37,9 +37,11 @@ def test_proportional_face_em_ratio_matches_installed_font_metrics(portable):
         assert ratio == pytest.approx(expected)
 
 
-def test_numeric_font_keeps_its_compact_metrics():
-    _source, ratio = fonts.resolve_fonts(portable=True)[2]
-    assert ratio == 1.0
+def test_numeric_font_uses_the_same_nominal_em_contract_as_body_text():
+    source, ratio = fonts.resolve_fonts(portable=True)[2]
+    with TTFont(source.path, fontNumber=source.index & 0xFFFF) as face:
+        expected = (face["hhea"].ascent - face["hhea"].descent) / face["head"].unitsPerEm
+    assert ratio == pytest.approx(expected)
 
 
 def test_portable_fonts_have_real_bilingual_weights_and_preserved_distribution_files():

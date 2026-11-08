@@ -1,7 +1,5 @@
 """Native Inspector component appearance and real input at the desktop window size."""
 
-from dataclasses import replace
-
 import numpy as np
 import pytest
 from examples.ui_design.native.appearance_review import _inspector_size
@@ -11,7 +9,6 @@ from tests.gpu.test_ui_design_runtime import runtime as runtime
 from mojive import commands as cmd
 from mojive.adapters.base import NodeType
 from mojive.scene.queries import node_world_pose
-from mojive.ui.imgui_draw import ImguiDraw2D
 
 pytestmark = pytest.mark.gpu
 
@@ -104,164 +101,68 @@ def test_light_and_body_share_native_headers_vectors_and_badges(runtime):
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
-def test_camera_and_physics_numeric_rows_keep_clear_vertical_gaps(runtime, monkeypatch, language):
+def test_camera_and_joint_fields_fit_narrow_inspectors(runtime, language):
     study, session = runtime, runtime.preview.session
-    components = {}
-    for method in ("slider_float", "drag_float"):
-        original = getattr(imgui, method)
-
-        def observe(identifier, *args, _original=original, **kwargs):
-            result = _original(identifier, *args, **kwargs)
-            a, b = imgui.get_item_rect_min(), imgui.get_item_rect_max()
-            components[identifier] = (a.x, a.y, b.x - a.x, b.y - a.y)
-            return result
-
-        monkeypatch.setattr(imgui, method, observe)
     study.preview.localizer.set_language(language, persist=False)
     camera = next(node for node in session.nodes if node.type is NodeType.CAMERA)
-    geometry = next(
-        node
-        for node in session.nodes
-        if node.type is NodeType.GEOM and session.geometry_properties(node.node_id) is not None
-    )
-    for node, tab, keys, visible in (
-        (
-            camera,
-            "Properties",
-            tuple("##inspector-camera-" + name for name in ("vertical fov", "near", "far")),
-            "##inspector-camera-far",
-        ),
-        (
-            geometry,
-            "Physics",
-            (
-                "##contact_margin",
-                "##contact_gap",
-                "##contact_solver_mix",
-                "##contact_solver_reference-0",
-                "##contact_impedance_first-0",
-                "##contact_impedance_shape-0",
-            ),
-            "##contact_impedance_shape-0",
-        ),
-    ):
-        _select(study, node)
-        study.inspector_tab = tab
-        study.frame(4)
-        previous_bottom = None
-        for key in keys:
-            x, y, w, h = study.ui.hits[key]
-            if node.type is NodeType.CAMERA:
-                tx, ty, tw, th = components[key]
-                fx, fy, fw, fh = components[key + "-value"]
-                for a, b, width, height in ((tx, ty, tw, th), (fx, fy, fw, fh)):
-                    assert height == pytest.approx(28 * study.s, abs=1), key
-                    assert x <= a < a + width <= x + w + 1, key
-                    assert y <= b < b + height <= y + h + 1, key
-                assert min(tx + tw, fx + fw) <= max(tx, fx) or min(ty + th, fy + fh) <= max(
-                    ty, fy
-                ), key
-                if fy > ty + 1:
-                    assert fy - (ty + th) >= 8 * study.s - 1, key
-                    assert h == pytest.approx(fy + fh - ty, abs=1), key
-                else:
-                    assert h == pytest.approx(fh, abs=1), key
-            else:
-                assert h == pytest.approx(28 * study.s, abs=1), key
-            if previous_bottom is not None:
-                assert y - previous_bottom >= 8 * study.s - 1, key
-            previous_bottom = y + h
-        _visible_hit(study, visible)
-        study.capture(f"inspector-{node.type.value}-{language}-numeric-row-spacing")
-
-
-@pytest.mark.parametrize("language", ("en", "zh_CN"))
-def test_physics_and_joint_fields_reflow_as_uniform_groups(runtime, monkeypatch, language):
-    study, session = runtime, runtime.preview.session
-    study.preview.localizer.set_language(language, persist=False)
-    body = next(node for node in session.nodes if node.name == "hinge_body")
     joint = next(node for node in session.nodes if node.name == "hinge_limited")
     study.command("float")
     study.frame(4)
-    painted = []
-    text = ImguiDraw2D.text
-
-    def observe(draw, position, color, value, **kwargs):
-        painted.append(value)
-        return text(draw, position, color, value, **kwargs)
-
-    monkeypatch.setattr(ImguiDraw2D, "text", observe)
     for width in (284, 344, 704):
         _inspector_size(study, width, 820)
-        _select(study, body)
-        study.inspector_tab = "Physics"
-        painted.clear()
-        study.frame(4)
-        inspector = study.preview.panels.get("inspector")
-        inspector._body_property_edit = replace(
-            session.body_properties(body.node_id), inertia_mode="diagonal"
-        )
-        study.frame(3)
-        if width >= 344:
-            for tab in ("Properties", "Physics", "Material", "Joint"):
-                assert study.ui.translate(tab) in painted, ("Inspector tab was truncated", tab)
-        layouts = []
-        for name in ("body_inertial_position", "body_inertial_rotation", "body_diagonal_inertia"):
-            fields = [study.ui.hits[f"##{name}_{index}_{body.node_id}-frame"] for index in range(3)]
-            label = study.ui.hits["vector-label-" + name]
-            layouts.append([(x - fields[0][0], y - fields[0][1], w, h) for x, y, w, h in fields])
-            above = fields[0][1] >= label[1] + label[3]
-            assert above == (fields[0][0] <= label[0] + 1)
-            assert len({round(field[2], 3) for field in fields}) == 1
-        np.testing.assert_allclose(layouts[0], layouts[1], atol=1)
-        np.testing.assert_allclose(layouts[0], layouts[2], atol=1)
-        properties = session.body_properties(body.node_id)
-        for value in properties.diagonal_inertia:
-            assert f"{value:.6g}" in painted, ("Common inertia value was truncated", value, painted)
-        assert session.selected_node == body
-        study.capture(f"inspector-inertial-{width}-{language}")
-
-        _select(study, joint)
-        study.inspector_tab = "Joint"
-        study.frame(4)
-        if "##joint_armature" not in study.ui.hits:
-            section = "section-" + study.ui.translate("advanced joint properties").upper()
-            _visible_hit(study, section)
-            study.click_hit(section)
-            study.frame(3)
-        starts = []
-        for label, key in (
-            ("damping", "##joint_damping"),
-            ("stiffness", "##joint_stiffness"),
-            ("armature", "##joint_armature"),
-            ("friction loss", "##joint_friction_loss"),
-            ("reference", "##joint_reference"),
-            ("spring reference", "##joint_spring_reference"),
+        for node, keys in (
+            (
+                camera,
+                tuple(
+                    "##inspector-camera-" + name + "-value"
+                    for name in ("vertical fov", "near", "far")
+                ),
+            ),
+            (joint, ("##joint_damping", "##joint_stiffness")),
         ):
-            field = study.ui.hits[key]
-            label_rect = study.ui.hits["property-label-" + label]
-            starts.append((field[0], field[2]))
-            if field[0] > label_rect[0] + study.s:
-                assert field[1] + field[3] / 2 == pytest.approx(
-                    label_rect[1] + label_rect[3] / 2, abs=study.s
-                )
-            else:
-                assert field[1] >= label_rect[1] + label_rect[3] + 4 * study.s
-        np.testing.assert_allclose(starts, [starts[0]] * len(starts), atol=1)
-        ranges = [study.ui.hits[f"##joint_range-{index}"] for index in range(2)]
-        assert ranges[0][2] == pytest.approx(ranges[1][2], abs=1)
-        label = study.ui.hits["property-label-range"]
-        assert ranges[0][0] == pytest.approx(starts[0][0], abs=1)
-        if ranges[0][0] <= label[0] + study.s:
-            assert ranges[0][0] == pytest.approx(label[0], abs=1)
-            assert ranges[0][1] >= label[1] + label[3] + 4 * study.s
-        else:
-            assert ranges[0][0] >= label[0] + label[2] + 12 * study.s - 1
-            assert ranges[0][1] + ranges[0][3] / 2 == pytest.approx(
-                label[1] + label[3] / 2, abs=study.s
-            )
-        _visible_hit(study, "##joint_armature")
-        study.capture(f"inspector-joint-{width}-{language}")
+            _select(study, node)
+            previous = None
+            for key in keys:
+                field = _visible_hit(study, key)
+                assert field[3] == pytest.approx(28 * study.s, abs=1)
+                if node.type is NodeType.CAMERA:
+                    anchor = study.ui.hits[f"camera-inspector-projection-{node.node_id}"]
+                    left, right = anchor[0], anchor[0] + anchor[2]
+                else:
+                    lower, upper = (study.ui.hits[f"##joint_range-{i}"] for i in range(2))
+                    left, right = lower[0], upper[0] + upper[2]
+                assert field[0] == pytest.approx(left, abs=1)
+                assert field[0] + field[2] == pytest.approx(right, abs=1)
+                if previous is not None:
+                    # Revealing the next row may scroll the common content window.
+                    sibling = study.ui.hits[previous]
+                    assert field[1] >= sibling[1] + sibling[3] + 4 * study.s - 1
+                    assert field[0] == pytest.approx(sibling[0], abs=1)
+                    assert field[2] == pytest.approx(sibling[2], abs=1)
+                previous = key
+            study.capture(f"inspector-{node.type.value}-{width}-{language}")
+
+
+@pytest.mark.parametrize("language", ("en", "zh_CN"))
+def test_body_summary_retains_registered_joint_controls_without_advanced_fields(runtime, language):
+    study, session = runtime, runtime.preview.session
+    study.preview.localizer.set_language(language, persist=False)
+    body = next(node for node in session.nodes if node.name == "hinge_body")
+    _select(study, body)
+    study.inspector_tab = "Physics"
+    study.frame(4)
+    assert "##body-derived-mass" in study.ui.hits
+    assert "##body-inertia-mode" not in study.ui.hits
+    assert "##body-gravity-compensation" not in study.ui.hits
+    study.inspector_tab = "Joint"
+    study.frame(4)
+    joint = session.joints_for_body(body.body_index)[0]
+    key = f"##pose-joint-{joint.joint_id}"
+    value, rail = study.ui.hits[key + "-value"], study.ui.hits[key + "-track"]
+    assert value[1] == pytest.approx(rail[1])
+    assert rail[0] + rail[2] <= value[0]
+    assert "##joint_armature" not in study.ui.hits
+    study.capture("inspector-shared-joint-" + language)
 
 
 def test_native_light_fields_preserve_live_edit_undo_escape_and_switch(runtime):

@@ -263,6 +263,9 @@ def test_camera_units_share_the_numeric_field_and_keep_a_space(floating):
     ui = app.workspace.ui
     ui.design.runtime.observe_components = True
     app.workspace.activate("Cameras")
+    from mojive.ui.workspace.camera_panel import select_scene_camera
+
+    select_scene_camera(app.workspace)
     camera = app.panels.get("camera")
     camera._angular_degrees = False
     v.frames()

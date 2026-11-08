@@ -732,6 +732,7 @@ class ViewerApp(
         self._apply_pending_joint_focus()
         self._apply_pending_node_focus()
         self._sync_model_camera()
+        self.backend.set_flag(RenderFlag.SCENE_GEOMETRY, self.viewport_layers.geometry)
         self.backend.update(frame)
 
         selected_node = self.session.selected_node

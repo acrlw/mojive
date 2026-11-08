@@ -11,6 +11,7 @@ from mojive import math3d
 from mojive.adapters.base import NodeType
 from mojive.commands import (
     BeginEditTransaction,
+    CancelEditTransaction,
     ClearSceneModelTransformPreview,
     CommandResult,
     EndEditTransaction,
@@ -880,7 +881,12 @@ class _Dragging:
                 self._model_preview = None
                 self._model_preview_session = None
         if self._edit_session is not None:
-            self._edit_session.submit(EndEditTransaction())
+            result = self._edit_session.submit(
+                EndEditTransaction() if commit else CancelEditTransaction()
+            )
+            if not result.ok:
+                self._verdict = Verdict(False, result.message)
+                self._edit_session.report_message(result.message, level="error")
             self._edit_session = None
         self._using = False
         self._keyboard = False

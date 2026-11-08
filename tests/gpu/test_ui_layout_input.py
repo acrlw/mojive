@@ -432,8 +432,8 @@ def test_timeline_right_drag_and_wheel_have_distinct_effects(viewer):
     point = (lo[0] + (hi[0] - lo[0]) * 0.65, min(lo[1] + 35, window.inner_clip_rect.max.y - 4))
     camera_before = _camera_state(viewer)
     initial = (panel.editor.view_start, panel.editor.view_end)
-    _drag(viewer, point, (60.0, 0.0), button=1)
-    assert panel.editor.view_start < initial[0]
+    _drag(viewer, point, (-60.0, 0.0), button=1)
+    assert panel.editor.view_start > initial[0]
     assert panel.editor.view_end - panel.editor.view_start == pytest.approx(initial[1] - initial[0])
     np.testing.assert_allclose(_camera_state(viewer), camera_before, atol=1e-7)
     span = panel.editor.view_end - panel.editor.view_start
