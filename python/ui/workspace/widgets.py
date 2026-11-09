@@ -1002,12 +1002,14 @@ class UI(ComponentStyles, _NumericFields):
             *[round(channel * 255) for channel in c[:3]],
             round(c[3] * 255 / alpha) if alpha else 0,
         )
-        role: IconRole = "inline" if label else "toolbar"
         style = item_style or self.component_style("segment")
         content = Rect(lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1])
+        if icon and not label:
+            self.role_icon(icon, *content.tuple(), rgba, style=style)
+            return
         if item_style is not None:
             content = content.inset(*(padding or style.edges("padding", self.s)))
-        icon_width = style.get("iconSize", ICON_ROLES[role].canvas_size) * self.s if icon else 0
+        icon_width = style.get("iconSize", icon_role_canvas("inline")) * self.s if icon else 0
         gap = style.get("gap", 5) * self.s if icon and label else 0
         caption_width = imgui.calc_text_size(label).x if label else 0
         content_width = icon_width + gap + caption_width
@@ -1026,7 +1028,7 @@ class UI(ComponentStyles, _NumericFields):
                 icon_width,
                 icon_width,
                 self.style_color(style, "iconColor", rgba),
-                role=role,
+                role="inline",
             )
         if label:
             self.text(

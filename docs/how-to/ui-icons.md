@@ -407,6 +407,10 @@ relative screen position while time scrolls underneath; the concise tooltip expl
 behavior. The three square segments share their selected fill, click targets and keyboard
 focus with captioned segmented controls.
 
+Center icon-only segments on the native button rectangle. Caption padding belongs to the
+label layout. Check the canvas centers against the actual buttons in the full Timeline
+toolbar and its compact overflow at normal and fractional UI scales.
+
 The viewport-rim follow family in `python/ui/icons/glyphs.py` belongs to the earlier
 `ui-feasibility` exploration. It is not the production reference and must not replace the
 native workspace symbols when updating the guide.

@@ -17,6 +17,7 @@ from mojive.session import Session
 from mojive.ui.keyframe_editor.controller import TimelineEditor
 from mojive.ui.localization import Language, Localizer
 from mojive.ui.panels import PanelContext
+from mojive.ui.workspace import widgets
 from mojive.ui.workspace.menus import Menus
 from mojive.ui.workspace.timeline_panel import NativeTimelineToolbar
 from mojive.ui.workspace.widgets import UI
@@ -154,6 +155,43 @@ def test_dynamic_numbers_do_not_resize_toolbar_groups(toolbar):
         assert state.ui.hits["timeline-group-" + key] == before["timeline-group-" + key]
     for key in ("timeline-time", "##timeline-range-start", "##timeline-range-end"):
         assert state.ui.hits[key] == before[key]
+
+
+@pytest.mark.parametrize("width", (340, 1600))
+def test_toolbar_icon_canvases_center_on_native_buttons(toolbar, monkeypatch, width):
+    toolbar.width = width
+    canvases = {}
+    draw_icon = widgets.draw_icon
+
+    def observe(draw, name, x, y, size, tint, scale):
+        half = size * scale / 2
+        canvases[name] = (x + half, y + half)
+        draw_icon(draw, name, x, y, size, tint, scale)
+
+    monkeypatch.setattr(widgets, "draw_icon", observe)
+    toolbar.paint()
+    for key, glyph in (
+        ("timeline-first", "transport-first"),
+        ("timeline-previous", "stepb"),
+        ("timeline-play-pause", "play"),
+        ("timeline-next", "stepf"),
+        ("timeline-last", "transport-last"),
+        ("timeline-loop", "loop"),
+        ("timeline-record", "record"),
+        ("timeline-video", "video"),
+        ("timeline-snapshot", "snapshot"),
+        ("timeline-key-add", "diamond"),
+        ("timeline-key-previous", "previous"),
+        ("timeline-key-next", "next"),
+        ("timeline-fit", "fit"),
+        ("timeline-follow-0", "follow-off"),
+        ("timeline-follow-1", "follow-page"),
+        ("timeline-follow-2", "follow-locked"),
+        ("timeline-settings", "settings"),
+        ("collapse-timeline", "down"),
+    ):
+        x, y, w, h = toolbar.ui.hits[key]
+        assert canvases[glyph] == pytest.approx((x + w / 2, y + h / 2), abs=0.01), key
 
 
 def test_toolbar_padding_and_numeric_typography_keep_the_range_pair_together(toolbar):
