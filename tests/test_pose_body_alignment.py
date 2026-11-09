@@ -13,17 +13,37 @@ from tests.test_ui_design_pose import session as session
 
 pytestmark = pytest.mark.physics
 
-_CASES = (
-    ("hinge", True),
-    ("slide", True),
-    ("ball", False),
-    ("ball", True),
-    ("free", False),
-    ("free", True),
-)
+_CASES = ("ball", "free")
 
 
-def _draw(editor, tmp_path, kind, expanded, *, parts=None):
+@pytest.mark.parametrize("editor", (1, 1.2, 1.25, 2.25), indirect=True)
+@pytest.mark.parametrize("width", (160, 640))
+@pytest.mark.parametrize("kind", ("hinge", "slide"))
+def test_scalar_card_uses_parent_inset_and_aligns_limit_with_heading(
+    editor, tmp_path, monkeypatch, width, kind
+):
+    editor.width = width
+    limits = []
+    draw_text = editor.ui.component_text
+
+    def record(part, rect, label, *args, **kwargs):
+        if part == "control_metadata":
+            limits.append(rect)
+        return draw_text(part, rect, label, *args, **kwargs)
+
+    monkeypatch.setattr(editor.ui, "component_text", record)
+    group, heading = _draw(editor, tmp_path, kind)
+    value = editor.ui.hits[f"##pose-joint-{editor.joint.joint_id}-value"]
+    x, y, w, h = group["content"]
+    assert value[0] >= x
+    assert value[1] == pytest.approx(y)
+    assert value[0] + value[2] == pytest.approx(x + w)
+    assert value[1] + value[3] <= y + h
+    assert limits[0][0] == pytest.approx(heading["iconPosition"][0])
+    assert limits[1][0] + limits[1][2] == pytest.approx(x + w - 4 * editor.ui.s)
+
+
+def _draw(editor, tmp_path, kind, *, parts=None):
     runtime = DesignRuntime(SpecificationStore(tmp_path / "alignment.json"))
     runtime.observe_components = True
     if parts:
@@ -32,11 +52,9 @@ def _draw(editor, tmp_path, kind, expanded, *, parts=None):
         runtime.update_spec(specification)
     editor.ui.design = DesignPresentation(editor.ui, runtime)
     editor.kind = kind
-    editor.show_names = editor.collapsible_poses = True
+    editor.show_names = True
     with group_scope("Pose"):
         editor.frame(2)
-        for owner in editor.panel._expanded:
-            editor.panel._expanded[owner] = expanded
         runtime.observed.clear()
         editor.ui.design.primitives.observed.clear()
         editor.frame(2)
@@ -50,9 +68,9 @@ def _draw(editor, tmp_path, kind, expanded, *, parts=None):
 
 @pytest.mark.parametrize("editor", (1, 1.2, 1.25, 2.25), indirect=True)
 @pytest.mark.parametrize("width", (160, 640))
-@pytest.mark.parametrize("kind,expanded", _CASES)
+@pytest.mark.parametrize("kind", _CASES)
 def test_painted_heading_and_all_body_paths_share_the_icon_content_column(
-    editor, tmp_path, monkeypatch, width, kind, expanded
+    editor, tmp_path, monkeypatch, width, kind
 ):
     editor.width = width
     painted = []
@@ -74,7 +92,7 @@ def test_painted_heading_and_all_body_paths_share_the_icon_content_column(
     monkeypatch.setattr(editor.ui, "vector", record_vector)
     monkeypatch.setattr(editor.ui, "rail", record_rail)
     monkeypatch.setattr(editor.ui, "component_text", record_text)
-    group, heading = _draw(editor, tmp_path, kind, expanded)
+    group, heading = _draw(editor, tmp_path, kind)
     x, _y, width, _height = group["bodyColumn"]
     assert group["alignmentAxis"] == "leading-content"
     assert x == pytest.approx(heading["content"][0])
@@ -88,22 +106,21 @@ def test_painted_heading_and_all_body_paths_share_the_icon_content_column(
         assert 0 < painted_width <= width + 0.001
     joint_id = editor.joint.joint_id
     for key, (field_x, _field_y, field_width, _field_height) in editor.ui.hits.items():
-        if key.startswith((f"##pose-joint-{joint_id}", f"pose-summary-{joint_id}-")):
+        if key.startswith(f"##pose-joint-{joint_id}"):
             assert field_x >= x - 0.001, key
             assert field_x + field_width <= x + width + 0.001, key
 
 
 @pytest.mark.parametrize("editor", (1, 1.2, 1.25, 2.25), indirect=True)
-@pytest.mark.parametrize("kind,expanded", _CASES)
+@pytest.mark.parametrize("kind", _CASES)
 def test_body_column_tracks_authored_heading_edges_without_repeating_joint_padding(
-    editor, tmp_path, kind, expanded
+    editor, tmp_path, kind
 ):
     editor.width = 640
     group, heading = _draw(
         editor,
         tmp_path,
         kind,
-        expanded,
         parts={
             "pose_joint_button": {
                 "paddingLeft": 13,
@@ -141,16 +158,13 @@ def test_unheaded_joint_fields_keep_the_entire_parent_content_width(editor, tmp_
 
 
 @pytest.mark.parametrize("editor", (1, 1.2, 1.25, 2.25), indirect=True)
-@pytest.mark.parametrize("kind,expanded", _CASES)
-def test_authored_joint_width_measures_the_same_body_budget_used_for_paint(
-    editor, tmp_path, kind, expanded
-):
+@pytest.mark.parametrize("kind", _CASES)
+def test_authored_joint_width_measures_the_same_body_budget_used_for_paint(editor, tmp_path, kind):
     editor.width = 640
     group, heading = _draw(
         editor,
         tmp_path,
         kind,
-        expanded,
         parts={"pose_joint": {"widthMode": "fixed", "width": 180}},
     )
     x, y, width, height = group["bodyColumn"]
@@ -159,7 +173,7 @@ def test_authored_joint_width_measures_the_same_body_budget_used_for_paint(
     assert x + width == pytest.approx(group["content"][0] + group["content"][2] - 4 * editor.ui.s)
     joint_id = editor.joint.joint_id
     for key, (fx, fy, fw, fh) in editor.ui.hits.items():
-        if key.startswith((f"##pose-joint-{joint_id}", f"pose-summary-{joint_id}-")):
+        if key.startswith(f"##pose-joint-{joint_id}"):
             assert x - 0.001 <= fx <= fx + fw <= x + width + 0.001, key
             if kind in ("ball", "free"):
                 assert y - 0.001 <= fy <= fy + fh <= y + height + 0.001, key

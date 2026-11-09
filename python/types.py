@@ -131,7 +131,9 @@ class CameraView:
     ``fov_y`` unless positive ``focal_length`` and ``sensor_size`` values provide physical
     intrinsics. Orthographic cameras use ``ortho_height`` as their vertical world extent.
 
-    Angles are radians and clipping distances are world units.
+    Angles are radians and clipping distances are world units. ``output_size`` is an
+    optional (width, height) in pixels for scene captures; ``None`` follows the viewport.
+    An explicit capture size takes precedence over this camera preference.
     """
 
     eye: np.ndarray = field(default_factory=lambda: np.array([4.0, 0.0, 0.0], np.float32))
@@ -147,6 +149,16 @@ class CameraView:
     sensor_size: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
     principal_offset: np.ndarray = field(default_factory=lambda: np.zeros(2, np.float32))
     orthographic_blend: float | None = None
+    output_size: tuple[int, int] | None = None
+
+    def __post_init__(self):
+        if self.output_size is not None:
+            size = tuple(self.output_size)
+            if len(size) != 2 or any(
+                isinstance(v, bool) or not isinstance(v, (int, np.integer)) or v < 1 for v in size
+            ):
+                raise ValueError("Camera output size must contain two positive integers")
+            object.__setattr__(self, "output_size", tuple(map(int, size)))
 
     def view_matrix(self) -> np.ndarray:
         """Return the row-major world-to-camera matrix."""
@@ -534,3 +546,19 @@ class ViewportImage:
         row_from_top = min(int(v * self.height), self.height - 1)
 
         return max(col, 0), self.height - 1 - max(row_from_top, 0)
+
+
+@dataclass(frozen=True)
+class KeyframeProperties:
+    """Complete editable state stored by one model-local keyframe."""
+
+    keyframe_id: int
+    model_id: int
+    name: str
+    time: float
+    qpos: tuple[float, ...]
+    qvel: tuple[float, ...]
+    act: tuple[float, ...]
+    ctrl: tuple[float, ...]
+    mocap_position: tuple[float, ...]
+    mocap_quaternion: tuple[float, ...]

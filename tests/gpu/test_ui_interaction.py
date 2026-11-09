@@ -2142,7 +2142,8 @@ def test_joint_limit_tick_click_sets_the_endpoint_in_the_real_viewer() -> None:
         assert v.app.gizmo.hovered_joint_limit is not None
         assert v.app.gizmo.hovered_joint_limit.label.startswith("MAX")
         x0, y0, x1, y1 = lower_hit.rect
-        click(v, imgui.get_io(), ((x0 + x1) * 0.5, (y0 + y1) * 0.5))
+        assert x0 <= lower_hit.tick_end[0] <= x1 and y0 <= lower_hit.tick_end[1] <= y1
+        click(v, imgui.get_io(), lower_hit.tick_end)
         for _ in range(2):
             v.sync()
 

@@ -214,6 +214,8 @@ def test_timeline_context_uses_shared_rows_and_preserves_selection_capability(
     state, calls = action_surface, []
     editor = SimpleNamespace(
         selection_count=lambda: 1,
+        selected_keyframes={0},
+        can_paste_keyframes=lambda ctx: False,
         edit_lane="model",
         delete_selection=lambda *args: calls.append(args),
         keyframe_by_id={0: object()},

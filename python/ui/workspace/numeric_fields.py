@@ -308,7 +308,10 @@ class _NumericFields:
             truncated = field_hovered and (
                 shown_value != numeric_text(current, format) or text_width > content_width
             )
-            text_x = text_left + max(0, (content_width - text_width) / 2)
+            alignment = style.get("textAlign", "right")
+            text_x = text_left + max(0, content_width - text_width) * (
+                0.5 if alignment == "center" else 1 if alignment in ("right", "end") else 0
+            )
             draw_list.push_clip_rect((text_left, field_lo.y), (text_right, field_hi.y), True)
             self.text(
                 text_x,
@@ -350,11 +353,17 @@ class _NumericFields:
             )
         return (True, reset_value) if reset else (changed, edited if changed else value)
 
-    def numeric_minimum(self, *, axis=True, format=None, sample_values=()):
+    def numeric_minimum(self, *, axis=True, format=None, sample_values=(), compact=False):
         """Reserve a static format budget; samples describe the field's domain."""
         samples = (
             tuple(
-                format % value for value in (0.123456789, -999.999, -0.0123456789, *sample_values)
+                format % value
+                for value in (
+                    0.123456789,
+                    -9.999 if compact else -999.999,
+                    -0.0123456789,
+                    *sample_values,
+                )
             )
             if format
             else ("0.000", "-99999.999")
@@ -753,6 +762,7 @@ class _NumericFields:
             3,
             axis=True,
             vector=True,
+            minimum=self.numeric_minimum(format=format),
             label_above=label_above,
             label_width=label_width,
             label_minimum=label_minimum,

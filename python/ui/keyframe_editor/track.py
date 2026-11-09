@@ -542,7 +542,7 @@ def handle_editor_keys(editor: TimelineEditor, ctx, keyframes, take_times, edita
     claim = ctx.input_claim or InputClaim()
     ctrl, super_key = physical_ctrl_super(io)
     if (
-        not imgui.is_window_focused()
+        not imgui.is_window_focused(imgui.FocusedFlags_.root_and_child_windows)
         or io.want_text_input
         or ctx.popup_owned_frame
         or imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id)
@@ -552,7 +552,7 @@ def handle_editor_keys(editor: TimelineEditor, ctx, keyframes, take_times, edita
         or (io.key_shift and claim.claims_key("shift"))
     ):
         return
-    for key in ("a", "delete", "backspace"):
+    for key in ("a", "c", "v", "d", "delete", "backspace"):
         if not claim.claims_key(key):
             imgui.internal.set_key_owner(
                 getattr(imgui.Key, key),
@@ -573,6 +573,13 @@ def handle_editor_keys(editor: TimelineEditor, ctx, keyframes, take_times, edita
             editor.selected_id = (
                 next(iter(editor.selected_keyframes)) if len(editor.selected_keyframes) == 1 else -1
             )
+    if (ctrl or super_key) and editor.edit_lane == "model":
+        if pressed("c"):
+            editor.copy_keyframes(ctx)
+        elif editable and pressed("v"):
+            editor.paste_keyframes(ctx)
+        elif editable and pressed("d"):
+            editor.paste_keyframes(ctx, duplicate=True)
     if pressed("delete") or pressed("backspace"):
         editor.delete_selection(ctx, editable)
 

@@ -161,12 +161,12 @@ def timeline_status_hints(
     return hints
 
 
-def unique_keyframe_name(existing: set[str]) -> str:
+def unique_keyframe_name(existing: set[str], stem: str = "key") -> str:
     index = 1
-    name = f"key{index}"
+    name = f"{stem}{index}"
     while name in existing:
         index += 1
-        name = f"key{index}"
+        name = f"{stem}{index}"
     return name
 
 

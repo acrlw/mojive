@@ -317,6 +317,7 @@ class _ModelLoadJob:
     path: Path
     command: Any
     completed: Any = None
+    focus_window: str = ""
 
 
 @dataclass(frozen=True)

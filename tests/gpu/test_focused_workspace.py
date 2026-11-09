@@ -10,6 +10,7 @@ from mojive import commands as cmd
 from mojive.adapters.base import NodeType
 from mojive.app.composition import build_workspace
 from mojive.assets import resolve
+from mojive.capture import CaptureSurface
 from mojive.config import LayoutConfig, ViewerConfig
 from mojive.design.themes import select_theme
 from mojive.tools.native_ui_review import _NativeInput
@@ -17,6 +18,155 @@ from mojive.tools.native_workspace import capture
 from mojive.ui.workspace.inspector_components import inspector_tabs
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
+
+
+def test_timeline_keyframe_menu_and_keyboard(backend_name, monkeypatch, tmp_path):
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
+    output = Path("output/focused-completion") / backend_name
+    output.mkdir(parents=True, exist_ok=True)
+    with (
+        build_workspace(
+            resolve("joint_gizmo"),
+            renderer=backend_name,
+            show_window=False,
+            width=1600,
+            height=1000,
+            vsync=False,
+            config=ViewerConfig(
+                layout=LayoutConfig(persistence=False),
+                debug_server=False,
+                threaded_physics=False,
+                live_model_updates=True,
+            ),
+        ) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        app, session, workspace = viewer.app, viewer.session, viewer.app.workspace
+        app.set_language("zh_CN")
+        assert session.submit(cmd.Pause()).ok
+        model_id = session.scene_models[0].model_id
+        assert session.submit(cmd.AddModelKeyframe(model_id, "pose")).ok
+        inputs.sync(10)
+        workspace.activate("Timeline")
+        inputs.sync()
+        editor = workspace.timeline_panel.editor
+        track = workspace.timeline_panel.last_layout
+        inputs.click_at((track.track_left + 80, track.lane_y(0)))
+        modifier = (
+            imgui.Key.mod_super if imgui.get_io().config_mac_osx_behaviors else imgui.Key.mod_ctrl
+        )
+
+        def shortcut(key):
+            inputs.event("add_key_event", modifier, True)
+            inputs.event("add_key_event", key, True)
+            inputs.event("add_key_event", key, False)
+            inputs.event("add_key_event", modifier, False)
+            for _ in range(120):
+                inputs.sync(1)
+                if not app._model_load_queue and app._model_load_future is None:
+                    break
+            inputs.sync()
+
+        shortcut(imgui.Key.a)
+        assert len(editor.selected_keyframes) == 1
+        inputs.event("add_mouse_button_event", 1, True)
+        inputs.event("add_mouse_button_event", 1, False)
+        inputs.sync()
+        assert "timeline-Copy keyframes" in workspace.ui.hits
+        capture(viewer, output / "keyframe-context.png")
+        inputs.click("timeline-Copy keyframes")
+        assert len(editor._clipboard) == 1
+        shortcut(imgui.Key.v)
+        assert len(session.keyframes) == 2
+        shortcut(imgui.Key.d)
+        assert len(session.keyframes) == 3, (
+            editor.selected_keyframes,
+            editor.error,
+            editor.edit_lane,
+            imgui.get_current_context().nav_window.name,
+            len(editor._clipboard),
+            session.document_id,
+        )
+        assert session.submit(cmd.Undo()).ok
+        assert len(session.keyframes) == 2
+        assert session.submit(cmd.Undo()).ok
+        assert len(session.keyframes) == 1
+
+
+def test_camera_optics_and_output_controls(backend_name, monkeypatch, tmp_path):
+    """Native numeric entry edits the camera and controls actual capture dimensions."""
+    monkeypatch.setenv("MOJIVE_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("MOJIVE_UI_SCALE", "1")
+    output = Path("output/focused-completion") / backend_name
+    output.mkdir(parents=True, exist_ok=True)
+    with (
+        build_workspace(
+            resolve("joint_gizmo"),
+            renderer=backend_name,
+            show_window=False,
+            width=1600,
+            height=1100,
+            vsync=False,
+            config=ViewerConfig(
+                layout=LayoutConfig(persistence=False), debug_server=False, threaded_physics=False
+            ),
+        ) as viewer,
+        _NativeInput(viewer) as inputs,
+    ):
+        app, session, workspace = viewer.app, viewer.session, viewer.app.workspace
+        ui = workspace.ui
+        app.set_language("zh_CN")
+        inputs.sync(10)
+        workspace.activate("Cameras")
+        inputs.sync()
+        camera_id = session.cameras[0].camera_id
+        inputs.click(f"camera-select-{camera_id}")
+
+        def enter(key, text):
+            modifier = (
+                imgui.Key.mod_super
+                if imgui.get_io().config_mac_osx_behaviors
+                else imgui.Key.mod_ctrl
+            )
+            inputs.sync(30)
+            inputs.click(key)
+            inputs.click(key)
+            assert imgui.get_io().want_text_input
+            inputs.event("add_key_event", modifier, True)
+            inputs.event("add_key_event", imgui.Key.a, True)
+            inputs.event("add_key_event", imgui.Key.a, False)
+            inputs.event("add_key_event", modifier, False)
+            inputs.event("add_input_characters_utf8", text)
+            inputs.event("add_key_event", imgui.Key.enter, True)
+            inputs.event("add_key_event", imgui.Key.enter, False)
+            inputs.sync()
+
+        enter("##camera-Focal length", "50")
+        np.testing.assert_allclose(session.camera_view(camera_id).focal_length, (0.05, 0.05))
+        enter("##camera-Sensor width", "32")
+        assert session.camera_view(camera_id).sensor_size[0] == pytest.approx(0.032)
+        inputs.click("##camera-output-preset")
+        inputs.click("##camera-output-preset/choice/1")
+        assert session.camera_view(camera_id).output_size == (1280, 720)
+        enter("##camera-output-Width", "640")
+        enter("##camera-output-Height", "480")
+        assert session.camera_view(camera_id).output_size == (640, 480)
+        inputs.click("inspector-camera-view")
+        for _ in range(30):
+            app._dt = 1 / 60
+            app._sync_model_camera()
+            inputs.sync(1)
+        assert app._surface_image(CaptureSurface.SCENE, None).shape[:2] == (480, 640)
+        inputs.move((800, 400))
+        capture(viewer, output / "camera-optics-output.png")
+        projection = f"camera-inspector-projection-{session.selected_node.node_id}"
+        inputs.click(projection + "-1")
+        assert session.camera_view(camera_id).orthographic
+        assert "##inspector-camera-ortho height" in ui.hits
+        assert "##inspector-camera-vertical fov" not in ui.hits
+        assert "##camera-Focal length" not in ui.hits
+        capture(viewer, output / "camera-orthographic.png")
 
 
 @pytest.mark.parametrize("scale", (1, 1.25))
@@ -130,7 +280,10 @@ def test_focused_workspace(backend_name, monkeypatch, tmp_path, scale):
                 workspace.activate("Timeline")
                 inputs.sync()
                 assert "playback-options" not in ui.hits
-                assert "##timeline-speed" in ui.hits
+                if "##timeline-speed" not in ui.hits:
+                    inputs.click("timeline-overflow")
+                    assert "##timeline-speed" in ui.hits
+                    inputs.escape()
                 inputs.move((800, 500))
                 capture(viewer, output / f"{theme}-timeline.png")
     finally:
@@ -283,6 +436,8 @@ def test_electron_layout_and_camera_operations(backend_name, monkeypatch, tmp_pa
             inputs.sync()
             limits = session.state_take_range
             for key in ("##timeline-range-end", "##timeline-zoom"):
+                if key not in ui.hits:
+                    inputs.click("timeline-overflow")
                 before = (editor.view_start, editor.view_end, editor.manual_view_range)
                 x, y, width, height = ui.hits[key]
                 point = x + width / 2, y + height / 2
@@ -295,6 +450,7 @@ def test_electron_layout_and_camera_operations(backend_name, monkeypatch, tmp_pa
                 inputs.event("add_mouse_button_event", 0, False)
                 inputs.sync()
                 assert (editor.view_start, editor.view_end, editor.manual_view_range) == before
+            inputs.escape()
             workspace.activate("Cameras")
             inputs.sync()
             inputs.click(f"camera-more-{camera_id}")
@@ -679,12 +835,21 @@ def test_reference_scene_density_and_layer_operations(backend_name, monkeypatch,
                     "##timeline-range-start",
                     "##timeline-range-end",
                 ):
+                    if key not in ui.hits:
+                        inputs.click("timeline-overflow")
                     rect = ui.hits[key]
-                    assert toolbar[0] - 1 <= rect[0]
-                    assert rect[0] + rect[2] <= toolbar[0] + toolbar[2] + 1
-                    assert toolbar[1] - 1 <= rect[1]
-                    assert rect[1] + rect[3] <= toolbar[1] + toolbar[3] + 1
+                    containers = (toolbar, ui.hits.get("timeline-overflow-content", toolbar))
+                    assert any(
+                        container[0] - 1 <= rect[0]
+                        and rect[0] + rect[2] <= container[0] + container[2] + 1
+                        and container[1] - 1 <= rect[1]
+                        and rect[1] + rect[3] <= container[1] + container[3] + 1
+                        for container in containers
+                    )
                 capture(viewer, output / f"{theme}-timeline.png")
+                if "timeline-overflow-content" in ui.hits:
+                    capture(viewer, output / f"{theme}-timeline-overflow.png")
+                    inputs.escape()
                 inputs.click("timeline-settings")
                 row = ui.hits["timeline-pause-at-end"]
                 label = ui.hits["##timeline-pause-label"]

@@ -381,7 +381,7 @@ def test_long_numeric_display_uses_padded_compact_caption_and_full_hover(
         assert float(number) == pytest.approx(numeric.value, rel=0.2)
     assert clip[0] >= x + 8 * s - 0.5
     assert clip[2] <= x + width - 8 * s + 0.5
-    assert position[0] + text_width / 2 == pytest.approx((clip[0] + clip[2]) / 2, abs=0.5)
+    assert position[0] + text_width == pytest.approx(clip[2], abs=0.5)
     assert vertices
     for vx, vy in vertices:
         assert clip[0] - 0.5 <= vx <= clip[2] + 0.5
@@ -400,7 +400,7 @@ def test_long_numeric_display_uses_padded_compact_caption_and_full_hover(
 @pytest.mark.parametrize("language", ("en", "zh_CN"))
 @pytest.mark.parametrize("axis", ("X", None))
 @pytest.mark.parametrize("value", (0.0, 12.34))
-def test_short_numeric_display_is_centered_inside_padded_content(
+def test_short_numeric_display_is_right_aligned_inside_padded_content(
     numeric, monkeypatch, language, axis, value
 ):
     numeric.axis, numeric.value = axis, value
@@ -423,8 +423,8 @@ def test_short_numeric_display_is_centered_inside_padded_content(
     assert shown == numeric.format % value
     assert clip_lo == pytest.approx(x + 8 * numeric.ui.s, abs=0.5)
     assert clip_hi == pytest.approx(x + width - 8 * numeric.ui.s, abs=0.5)
-    assert text_x + text_width / 2 == pytest.approx((clip_lo + clip_hi) / 2, abs=0.5)
-    assert text_x > clip_lo and text_x + text_width < clip_hi
+    assert text_x + text_width == pytest.approx(clip_hi, abs=0.5)
+    assert text_x > clip_lo and text_x + text_width <= clip_hi + 0.5
 
 
 @pytest.mark.parametrize("language", ("en", "zh_CN"))

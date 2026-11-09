@@ -244,6 +244,31 @@ class NativeTimelineTrack:
                             if len(editor.selected_keyframes) == 1
                             else -1
                         )
+                if editor.edit_lane == "model":
+                    for label, icon, enabled, action in (
+                        (
+                            "Copy keyframes",
+                            "copy",
+                            bool(editor.selected_keyframes),
+                            lambda: editor.copy_keyframes(ctx),
+                        ),
+                        (
+                            "Paste keyframes",
+                            "paste",
+                            editable and not busy and editor.can_paste_keyframes(ctx),
+                            lambda: editor.paste_keyframes(ctx),
+                        ),
+                        (
+                            "Duplicate keyframes",
+                            "copy",
+                            editable and not busy and bool(editor.selected_keyframes),
+                            lambda: editor.paste_keyframes(ctx, duplicate=True),
+                        ),
+                    ):
+                        if menus.local_item(
+                            label, key="timeline-" + label, icon=icon, enabled=enabled
+                        )[0]:
+                            action()
                 if menus.local_item(
                     "Delete selection",
                     "Delete",
@@ -468,7 +493,7 @@ class NativeTimelineTrack:
                     ui.rect(
                         *label_box.frame.tuple(),
                         tuple(round(v * 255) for v in with_alpha(color, 0.09)),
-                        0,
+                        label_style.get("radius", 0),
                     )
                 extent = label_style.get("iconSize", 14) * scale
                 gap = (

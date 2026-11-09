@@ -520,7 +520,9 @@ def test_viewport_recording_streams_and_finalizes_frames(monkeypatch, capsys) ->
     app.window = SimpleNamespace(points_to_pixels=lambda rect: rect)
     app._viewport_rect = (0, 0, 2, 1)
     app._scene_capture = SimpleNamespace(read=lambda *args, **kwargs: np.zeros((1, 2, 3), np.uint8))
-    app._camera_view = lambda: None
+    from mojive.types import CameraView
+
+    app._camera_view = CameraView
     app.localizer = SimpleNamespace(text=lambda value: value)
     app.session = SimpleNamespace(
         report_message=lambda message, level, **kwargs: events.append((message, level))

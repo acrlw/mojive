@@ -266,6 +266,7 @@ def _camera_document(camera: CameraView) -> dict:
         "focal_length": camera.focal_length.tolist(),
         "sensor_size": camera.sensor_size.tolist(),
         "principal_offset": camera.principal_offset.tolist(),
+        "output_size": camera.output_size,
     }
 
 
@@ -283,6 +284,7 @@ def _camera_from_document(item: dict) -> CameraView:
         focal_length=_f32(item["focal_length"], (2,)),
         sensor_size=_f32(item["sensor_size"], (2,)),
         principal_offset=_f32(item["principal_offset"], (2,)),
+        output_size=tuple(item["output_size"]) if item.get("output_size") else None,
     )
 
 

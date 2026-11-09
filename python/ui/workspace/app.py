@@ -169,6 +169,10 @@ class WorkspaceApp(ViewerApp):
         self.scrollbar_visibility.set_idle_seconds(value)
 
     def _draw_main_menu(self):
+        if self._model_edit_focus_restore:
+            # Let the panel host restore focus when it rebuilds the dock window.
+            self.workspace.focus_next = self._model_edit_focus_restore.rsplit("###", 1)[-1]
+            self._model_edit_focus_restore = ""
         self.scrollbar_visibility.update()
         self.scrollbar_visibility.sync_visible(self.workspace.open)
         self.projection.refresh_document()

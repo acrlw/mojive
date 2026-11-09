@@ -535,7 +535,7 @@ class NativeInspectorPresentation:
             width,
             count,
             axis=False,
-            minimum=self.ui.numeric_minimum(axis=False, format=fmt),
+            minimum=self.ui.numeric_minimum(axis=False, format=fmt, compact=True),
         )
         changed = False
         out = list(values)
@@ -860,7 +860,9 @@ class NativeInspectorPresentation:
     def vectors(self, node, table_id, rows, editable, *, units=()):
         result = []
         minimum = max(
-            self.ui.numeric_minimum(format=_number_format(row[3], units[index] if units else ""))
+            self.ui.numeric_minimum(
+                format=_number_format(row[3], units[index] if units else ""), compact=True
+            )
             for index, row in enumerate(rows)
         )
         layout = self.ui.vector_layout(

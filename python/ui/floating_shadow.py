@@ -5,12 +5,18 @@ from math import ceil, cos, erfc, pi, sin, sqrt
 
 from imgui_bundle import imgui
 
+# Logical points. A single diffuse layer, shared by all temporary surfaces.
+_OFFSET = (0, 8)
+_BLUR = 24
+_SPREAD = -4
+
 
 def _falloff_layers():
     # The Gaussian tail is convex outside the surface. A positive sum of linear
     # ramps approximates it without stepped opacity bands or a blur render pass.
-    distances = (0, 4, 8, 14, 22, 32)
-    opacity = (*(erfc(d / (sqrt(2) * 10)) for d in distances[:-1]), 0.0)
+    sigma = _BLUR / 2
+    distances = tuple(sigma * step for step in (0, 0.4, 0.8, 1.4, 2.2, 3.2))
+    opacity = (*(0.5 * erfc(d / (sqrt(2) * sigma)) for d in distances[:-1]), 0.0)
     slopes = (
         *(
             (opacity[i + 1] - opacity[i]) / (distances[i + 1] - distances[i])
@@ -27,14 +33,16 @@ _LAYERS = _falloff_layers()
 @lru_cache(maxsize=128)
 def _shadow_meshes(width, height, radius, scale):
     """Retain local native vertices; moving a window does not rebuild its shadow."""
-    radius = max(0, min(radius, width / 2, height / 2))
-    segments = max(8, ceil(pi / 2 * sqrt((radius + 32 * scale) / 1.2)))
+    spread = max(_SPREAD * scale, -min(width, height) / 2)
+    radius = max(0, min(radius + spread, width / 2 + spread, height / 2 + spread))
+    segments = max(8, ceil(pi / 2 * sqrt((radius + _LAYERS[-1][0] * scale) / 1.2)))
 
     def contour(distance):
-        # The lower penumbra is wider. The opaque center continues beneath the
-        # native fill; only that fill owns the antialiased surface boundary.
-        left, top = -distance, -distance * 0.65
-        right, bottom = width + distance, height + distance * 1.35
+        # Translate the contracted caster, rather than stretching its falloff.
+        # The center remains filled beneath the native antialiased surface.
+        dx, dy = _OFFSET[0] * scale, _OFFSET[1] * scale
+        left, top = dx - spread - distance, dy - spread - distance
+        right, bottom = dx + width + spread + distance, dy + height + spread + distance
         corner = radius + distance
         points = []
         for cx, cy, start in (

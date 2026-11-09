@@ -84,11 +84,12 @@ def test_range_fields_share_the_view_domain_for_zero_or_one_take_frame(
 
     monkeypatch.setattr(imgui, "drag_float", observe)
     state.frame(3)
-    expected = (0, 10) if len(times) < 2 else (times[0], times[-1])
+    view_fields = appearance == "native" or len(times) < 2
+    expected = (0, 10) if view_fields else (times[0], times[-1])
     assert tuple(incoming["##timeline-range-" + name] for name in ("start", "end")) == expected
     state.text("##timeline-range-end", "7200")
     state.frame(2)
-    if len(times) < 2:
+    if view_fields:
         assert (editor.view_start, editor.view_end) == (0, 7200)
         assert incoming["##timeline-range-end"] == 7200
     else:
@@ -112,7 +113,7 @@ def test_repeated_real_wheel_events_stop_at_readable_minimum_and_maximum(
     editor.view_start, editor.view_end, editor.view_needs_fit = -4.99e7, 9.63e7, False
     state.frame(2)
     assert editor.view_end - editor.view_start == pytest.approx(60)
-    assert abs((editor.view_start + editor.view_end) / 2) < 1
+    assert (editor.view_start, editor.view_end) == (0, 60)
     layout = state.panel.last_layout
     state.event(
         "add_mouse_pos_event", sum(layout.time_bounds) / 2, layout.lo[1] + layout.ruler_height / 2
@@ -158,8 +159,8 @@ def test_manual_long_and_submillisecond_ranges_render_without_ruler_overlap(
     labels, component_text = [], state.ui.component_text
 
     def observe(part, rect, caption, *args, **kwargs):
-        if part == "timeline_ruler":
-            labels.append((rect.x, rect.x + imgui.calc_text_size(caption).x, caption))
+        if part == "timeline_ruler" and caption.endswith(" " + state.ctx.tr("seconds")):
+            labels.append((rect.x, rect.right, caption))
         return component_text(part, rect, caption, *args, **kwargs)
 
     monkeypatch.setattr(state.ui, "component_text", observe)

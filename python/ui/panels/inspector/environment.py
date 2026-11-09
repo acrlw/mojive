@@ -469,7 +469,24 @@ class _Environment:
         up = np.asarray(view.up, np.float64).copy()
         eye_changed = target_changed = up_changed = False
         fov_changed = near_changed = far_changed = ortho_changed = False
-        fov = float(view.fov_y)
+        fov = (
+            float(2 * np.arctan(view.sensor_size[1] / (2 * view.focal_length[1])))
+            if view.uses_intrinsics()
+            else float(view.fov_y)
+        )
+        sensor = (
+            view.sensor_size.copy()
+            if view.uses_intrinsics()
+            else np.array((0.036, 0.036 / max(view.aspect, 1e-6)))
+        )
+        focal = (
+            view.focal_length.copy()
+            if view.uses_intrinsics()
+            else np.full(2, sensor[1] / (2 * np.tan(fov / 2)))
+        )
+        lens_changed = False
+        output_size = view.output_size
+        output_changed = False
         near = float(view.near)
         far = float(view.far)
         orthographic = view.orthographic
@@ -515,19 +532,25 @@ class _Environment:
             elif selected_projection != projection:
                 orthographic = selected_projection == 1
                 ortho_changed = True
-            fields = []
-            for label, value, bounds, default, unit, fmt in (
-                (
-                    "vertical fov",
-                    fov,
-                    (np.radians(1.0), np.radians(179.0)),
-                    initial.fov_y,
-                    "rad",
-                    "%.2f",
-                ),
+            parameters = (
+                (("ortho height", ortho_height, (1e-4, 1e6), initial.ortho_height, "m", "%.4f"),)
+                if orthographic
+                else (
+                    (
+                        "vertical fov",
+                        fov,
+                        (np.radians(1.0), np.radians(179.0)),
+                        initial.fov_y,
+                        "rad",
+                        "%.2f",
+                    ),
+                )
+            ) + (
                 ("near", near, (1e-5, far - 1e-5), initial.near, "m", "%.5f"),
                 ("far", far, (near + 1e-5, 1e7), initial.far, "m", "%.3f"),
-            ):
+            )
+            fields = []
+            for label, value, bounds, default, unit, fmt in parameters:
                 _property_control_row(
                     ctx,
                     ctx.tr(label),
@@ -549,23 +572,55 @@ class _Environment:
                         toggle_unit=self._toggle_camera_angle_unit,
                     )
                 )
-            fov_changed, fov = fields[0].changed, fields[0].value
+            if orthographic:
+                height_changed, ortho_height = fields[0].changed, fields[0].value
+            else:
+                fov_changed, fov = fields[0].changed, fields[0].value
+                if fov_changed:
+                    focal *= (sensor[1] / (2 * np.tan(fov / 2))) / focal[1]
+                for label, value in (
+                    ("Focal length", float(focal[1] * 1000)),
+                    ("Sensor width", float(sensor[0] * 1000)),
+                ):
+                    _property_control_row(ctx, ctx.tr(label), unit="mm")
+                    edited, updated = _property_numeric(
+                        ctx, "##camera-" + label, value, 0.1, 0.1, 2000.0, "%.2f"
+                    )
+                    if edited:
+                        if label == "Focal length":
+                            focal *= updated / value
+                        else:
+                            sensor *= updated / value
+                        lens_changed = True
+                if lens_changed:
+                    fov = float(2 * np.arctan(sensor[1] / (2 * focal[1])))
             near_changed, near = fields[1].changed, fields[1].value
             far_changed, far = fields[2].changed, fields[2].value
-            if orthographic:
-                _property_control_row(ctx, ctx.tr("ortho height"), unit="m")
-                height_edit = _property_value_rail(
-                    ctx,
-                    "##camera_ortho_height",
-                    float(view.ortho_height),
-                    (1e-4, 1e6),
-                    initial=initial.ortho_height,
-                    fmt="%.4f",
-                    show_reset=False,
-                    show_track=not compact,
-                    unit="m",
-                )
-                height_changed, ortho_height = height_edit.changed, height_edit.value
+            _end_property_table(ctx)
+
+        if _property_section(ctx, "Output resolution") and _begin_property_table(
+            "camera-output", ctx=ctx
+        ):
+            sizes = (None, (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160))
+            labels = (ctx.tr("Viewport"), "1280 × 720", "1920 × 1080", "2560 × 1440", "3840 × 2160")
+            if output_size not in sizes:
+                sizes += (output_size,)
+                labels += (ctx.tr("Custom"),)
+            _property_control_row(ctx, "Preset", control_part="select")
+            changed, index = _property_combo(
+                ctx, "##camera-output-preset", sizes.index(output_size), labels
+            )
+            if changed:
+                output_size, output_changed = sizes[index], True
+            if output_size is not None:
+                dimensions = list(output_size)
+                for index, label in enumerate(("Width", "Height")):
+                    _property_control_row(ctx, label, unit="px")
+                    changed, dimensions[index] = _property_integer(
+                        ctx, "##camera-output-" + label, dimensions[index], 1, 1, 8192, "%d"
+                    )
+                    output_changed |= changed
+                output_size = tuple(dimensions)
             _end_property_table(ctx)
 
         if _property_section(ctx, "camera behavior") and _begin_property_table(
@@ -614,6 +669,8 @@ class _Environment:
                 far_changed,
                 ortho_changed,
                 height_changed,
+                lens_changed,
+                output_changed,
             )
         ):
             self._submit_edit(
@@ -630,6 +687,12 @@ class _Environment:
                         far=max(float(far), float(near) + 1e-5),
                         orthographic=orthographic,
                         ortho_height=float(ortho_height),
+                        focal_length=focal.astype(np.float32)
+                        if lens_changed or view.uses_intrinsics()
+                        else view.focal_length,
+                        sensor_size=sensor.astype(np.float32) if lens_changed else view.sensor_size,
+                        output_size=output_size,
+                        aspect=output_size[0] / output_size[1] if output_size else view.aspect,
                     ),
                 ),
             )

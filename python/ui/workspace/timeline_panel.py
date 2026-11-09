@@ -76,8 +76,6 @@ class _RangeEdit:
 
     key: str
     take_id: int
-    selected: tuple[int, int] | None
-    loop_enabled: bool
     view: tuple[float, float, bool]
     manual_view_range: tuple[float, float] | None
 
@@ -190,7 +188,7 @@ class NativeTimelineToolbar(TimelineToolbar):
 
     @part_scope("timeline_toolbar")
     def draw_compact_toolbar(self, editor, ctx, take_times):
-        """Keep complete semantic groups visible, wrapping only when necessary."""
+        """Keep transport visible and move complete secondary groups into overflow."""
         from mojive.ui.workspace.labeled_input import measure_labeled_input
         from mojive.ui.workspace.timeline_header import toolbar_group_layout
 
@@ -215,70 +213,157 @@ class NativeTimelineToolbar(TimelineToolbar):
         )
         groups = (
             ("transport", (control,) * 6 + ((90 * scale, number_height),)),
-            ("capture", (control,) * 3),
+            ("record", (control,)),
+            ("capture", (control,) * 2),
             ("keys", (control,) * 3),
             ("view", ((68 * scale, number_height), (76 * scale, number_height), control)),
             ("follow", ((84 * scale, 28 * scale),)),
             ("range", tuple((item.width, item.height) for item in range_sizes)),
             ("utilities", (control,) * 2),
         )
+        # Keep the transport on one row. Secondary groups retain their real
+        # controls in a measured overflow form rather than growing the dock.
+        primary, overflow = list(groups), []
+        group_gap = style.get("columnGap", style.get("gap", 4)) * scale
+
+        def required(items):
+            return sum(
+                sum(size[0] for size in sizes) + group_gap * (len(sizes) + 1) for _, sizes in items
+            )
+
+        for name in ("range", "follow", "view", "keys", "capture"):
+            if required(primary) + (32 * scale if overflow else 0) <= content_width:
+                break
+            group = next(item for item in primary if item[0] == name)
+            primary.remove(group)
+            overflow.insert(0, group)
+        if required(primary) + (32 * scale if overflow else 0) > content_width:
+            # At very narrow docks keep playback and recording directly accessible.
+            # Only the two endpoint jumps move; previous/next remain beside Play.
+            primary[0] = ("transport-compact", (control,) * 4 + ((90 * scale, number_height),))
+            overflow.insert(0, ("transport-ends", (control,) * 2))
+        if overflow:
+            primary.insert(-1, ("overflow", (control,)))
         box, layout, bounds = toolbar_group_layout(
             ui,
             origin.x,
             origin.y,
             available,
-            tuple(sizes for _, sizes in groups),
+            tuple(sizes for _, sizes in primary),
             column_gap=4,
             row_gap=4,
         )
-        for (name, _), rect in zip(groups, bounds, strict=True):
-            ui.hits["timeline-group-" + name] = rect.tuple()
         rows = _ToolbarRows(origin, box.content.width, scale, placements=layout.rectangles)
-        for name in ("first", "previous", "play-pause", "next", "last"):
-            x, y, width = rows.place(28)
-            self._draw_transport(
-                editor,
-                ctx,
-                take_times,
-                x,
-                y,
-                4,
-                names=(name,),
-                compact_play=True,
-                width_limit=width * scale,
+        for (name, _), rect in zip(primary, bounds, strict=True):
+            ui.hits["timeline-group-" + ("transport" if name == "transport-compact" else name)] = (
+                rect.tuple()
             )
-        x, y, width = rows.place(28)
-        self._draw_loop(ctx, take_times, x, y, width)
-        x, y, width = rows.place(90)
-        self._draw_time(editor, ctx, x, y, width=width)
-        x, y, width = rows.place(28)
-        self._draw_record(editor, ctx, x, y, compact=True, width_limit=width * scale)
-        for name in ("video", "snapshot"):
-            x, y, width = rows.place(28)
-            self._draw_capture(editor, ctx, name, x, y, width, "")
-        for name in ("add", "previous", "next"):
-            x, y, width = rows.place(28)
-            self._draw_key_action(editor, ctx, name, x, y, width)
-        x, y, width = rows.place(68)
-        self._draw_speed(ctx, x, y, width)
-        x, y, width = rows.place(76)
-        self._draw_zoom(editor, ctx, take_times, x, y, width)
-        x, y, width = rows.place(28)
-        self._draw_fit(editor, ctx, x, y, width_limit=width * scale)
-        x, y, _ = rows.place(84)
-        self._draw_follow(editor, ctx, x, y)
-        self._draw_range(editor, ctx, take_times, rows, field_width=range_budget)
-        x, y, width = rows.place(28)
-        imgui.set_cursor_screen_pos((x, y))
-        self._draw_settings(ctx, width_limit=width * scale)
-        x, y, width = rows.place(28)
-        imgui.set_cursor_screen_pos((x, y))
-        self._collapse(ctx, width_limit=width * scale)
+            self._draw_group(name, editor, ctx, take_times, rows, range_budget)
         ui.hits["timeline-tools"] = box.content.tuple()
+        if overflow:
+            self._draw_overflow(editor, ctx, take_times, overflow)
         imgui.set_cursor_screen_pos((origin.x, math.ceil(box.outer.bottom)))
         imgui.push_style_var(imgui.StyleVar_.item_spacing, (0, 0))
         imgui.dummy((box.outer.width, 0))
         imgui.pop_style_var()
+
+    def _draw_group(self, group, editor, ctx, take_times, rows, range_budget):
+        scale = ctx.style_scale
+        if group in ("transport", "transport-compact", "transport-ends"):
+            names = (
+                ("previous", "play-pause", "next")
+                if group == "transport-compact"
+                else ("first", "last")
+                if group == "transport-ends"
+                else ("first", "previous", "play-pause", "next", "last")
+            )
+            for name in names:
+                x, y, width = rows.place(28)
+                self._draw_transport(
+                    editor,
+                    ctx,
+                    take_times,
+                    x,
+                    y,
+                    4,
+                    names=(name,),
+                    compact_play=True,
+                    width_limit=width * scale,
+                )
+            if group == "transport-ends":
+                return
+            x, y, width = rows.place(28)
+            self._draw_loop(ctx, take_times, x, y, width)
+            x, y, width = rows.place(90)
+            self._draw_time(editor, ctx, x, y, width=width)
+        elif group == "record":
+            x, y, width = rows.place(28)
+            self._draw_record(editor, ctx, x, y, compact=True, width_limit=width * scale)
+        elif group == "capture":
+            for name in ("video", "snapshot"):
+                x, y, width = rows.place(28)
+                self._draw_capture(editor, ctx, name, x, y, width, "")
+        elif group == "keys":
+            for name in ("add", "previous", "next"):
+                x, y, width = rows.place(28)
+                self._draw_key_action(editor, ctx, name, x, y, width)
+        elif group == "view":
+            x, y, width = rows.place(68)
+            self._draw_speed(ctx, x, y, width)
+            x, y, width = rows.place(76)
+            self._draw_zoom(editor, ctx, take_times, x, y, width)
+            x, y, width = rows.place(28)
+            self._draw_fit(editor, ctx, x, y, width_limit=width * scale)
+        elif group == "follow":
+            x, y, _ = rows.place(84)
+            self._draw_follow(editor, ctx, x, y)
+        elif group == "range":
+            self._draw_range(editor, ctx, take_times, rows, field_width=range_budget)
+        elif group == "utilities":
+            x, y, width = rows.place(28)
+            imgui.set_cursor_screen_pos((x, y))
+            self._draw_settings(ctx, width_limit=width * scale)
+            x, y, width = rows.place(28)
+            imgui.set_cursor_screen_pos((x, y))
+            self._collapse(ctx, width_limit=width * scale)
+        elif group == "overflow":
+            x, y, width = rows.place(28)
+            if self.workspace.ui.button(
+                "timeline-overflow", x, y, width, 28, icon="more", tooltip="Timeline controls"
+            ):
+                imgui.open_popup("timeline-overflow")
+
+    def _draw_overflow(self, editor, ctx, take_times, groups):
+        ui, scale = self.workspace.ui, ctx.style_scale
+        if not imgui.is_popup_open("timeline-overflow"):
+            return
+        width = max(sum(w for w, _ in sizes) + 4 * scale * (len(sizes) - 1) for _, sizes in groups)
+        height = max(h for _, sizes in groups for _, h in sizes)
+        with part_scope("form_popup", inherit=False):
+            layout = measure_form_popup(
+                ui, ("",) * len(groups), field_width=width, row_height=height
+            )
+            with form_popup(ui, "timeline-overflow", layout) as opened:
+                if opened:
+                    origin = imgui.get_window_pos()
+                    ui.hits["timeline-overflow-content"] = (
+                        origin.x,
+                        origin.y,
+                        layout.width,
+                        layout.height,
+                    )
+                    for index, (name, sizes) in enumerate(groups):
+                        row = layout.row(origin, index)
+                        rectangles, x = [], row.x
+                        for w, h in sizes:
+                            rectangles.append(Rect(x, row.y, w, h))
+                            x += w + 4 * scale
+                        rows = _ToolbarRows(
+                            imgui.ImVec2(row.x, row.y), row.width, scale, placements=rectangles
+                        )
+                        ui.hits["timeline-group-" + name] = row.tuple()
+                        ui.hits["timeline-overflow-group-" + name] = row.tuple()
+                        self._draw_group(name, editor, ctx, take_times, rows, row.width)
 
     def _draw_speed(self, ctx, x, y, width):
         ui = self.workspace.ui
@@ -742,7 +827,6 @@ class NativeTimelineToolbar(TimelineToolbar):
 
     def _draw_range(self, editor, ctx, take_times, rows, *, field_width=None):
         labels = self._range_labels(ctx, take_times)
-        limits = ctx.session.state_take_range
         endpoints = self._range_endpoints(editor, ctx, take_times)
         range_format = timeline_range_format(*endpoints, suffix=" s")
         changed, values, canceled = False, [], False
@@ -763,8 +847,6 @@ class NativeTimelineToolbar(TimelineToolbar):
                 self._range_edit = _RangeEdit(
                     key,
                     ctx.session.active_state_take_id,
-                    limits,
-                    ctx.session.state_take_loop_enabled,
                     (editor.view_start, editor.view_end, editor.view_needs_fit),
                     editor.manual_view_range,
                 )
@@ -828,7 +910,10 @@ class NativeTimelineToolbar(TimelineToolbar):
                 box.content.height,
             )
         else:
-            ui.component_text("form_label", row, label, MUTED, align="start", translate=False)
+            from .property_style import popup_row_box
+
+            content = popup_row_box(ui, row).content
+            ui.component_text("form_label", content, label, MUTED, align="start", translate=False)
             imgui.set_cursor_screen_pos((row.x, row.y))
             clicked = imgui.invisible_button("##timeline-pause-label", (row.width / 2, row.height))
             value = ui.switch(

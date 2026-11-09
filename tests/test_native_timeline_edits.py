@@ -55,7 +55,8 @@ def timeline_edits(request):
             ui.numeric_edits.clear()
             rows = _ToolbarRows(imgui.get_cursor_screen_pos(), 700 * ui.s, ui.s)
             if state.mode == "recording":
-                toolbar._draw_recording_fields(ctx)
+                _labels, layout = toolbar.settings_layout(ctx)
+                toolbar._draw_recording_fields(ctx, layout, imgui.get_cursor_screen_pos())
             else:
                 toolbar._draw_range(editor, ctx, session.state_take_times, rows)
             imgui.end()
@@ -120,7 +121,7 @@ def test_empty_take_range_escape_restores_view(timeline_edits):
 
 @pytest.mark.parametrize("selected", (None, (5, 30)))
 @pytest.mark.parametrize("loop", (False, True))
-def test_take_range_escape_restores_range_and_independent_loop(timeline_edits, selected, loop):
+def test_take_view_range_escape_preserves_independent_loop(timeline_edits, selected, loop):
     state = timeline_edits
     assert state.session.submit(cmd.StartStateTakeRecording()).ok
     for _ in range(40):
@@ -129,9 +130,12 @@ def test_take_range_escape_restores_range_and_independent_loop(timeline_edits, s
     assert state.session.submit(cmd.SetStateTakeRange(*(selected or (None, None)))).ok
     assert state.session.submit(cmd.SetStateTakeLoopEnabled(loop)).ok
     state.mode = "range"
+    state.editor.set_view_range(0, 10)
     state.frame(3)
     state.drag("##timeline-range-start", 10)
-    assert state.session.state_take_range != selected
+    assert state.editor.view_start > 0
+    assert state.session.state_take_range == selected
     state.cancel()
+    assert (state.editor.view_start, state.editor.view_end) == (0, 10)
     assert state.session.state_take_range == selected
     assert state.session.state_take_loop_enabled is loop

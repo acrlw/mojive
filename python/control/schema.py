@@ -146,6 +146,7 @@ CAMERA_FIELDS = {
     "focal_length": array({"type": "number", "minimum": 0}, 2),
     "sensor_size": array({"type": "number", "minimum": 0}, 2),
     "principal_offset": VECTOR2,
+    "output_size": {"anyOf": [array({"type": "integer", "minimum": 1}, 2), {"type": "null"}]},
     "orthographic_blend": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
 }
 CAMERA = obj(CAMERA_FIELDS)

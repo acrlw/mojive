@@ -284,7 +284,8 @@ def test_color_popup_shadow_follows_the_actual_native_corner(layout, monkeypatch
     assert actual_radius == 24 * ui.s
     (x, y), (width, height), radius, scale, points = shadows[-1]
     assert radius == actual_radius
-    assert (x, y + radius) in points
-    assert (x + width, y + height - radius) in points
-    assert min(px for px, _ in points) == pytest.approx(x - 32 * scale)
-    assert max(py for _, py in points) == pytest.approx(y + height + 43.2 * scale)
+    # The contracted caster is translated down by the adopted shadow recipe.
+    assert (x + 4 * scale, y + radius + 8 * scale) in points
+    assert (x + width - 4 * scale, y + height - radius + 8 * scale) in points
+    assert min(px for px, _ in points) == pytest.approx(x - 34.4 * scale)
+    assert max(py for _, py in points) == pytest.approx(y + height + 42.4 * scale)

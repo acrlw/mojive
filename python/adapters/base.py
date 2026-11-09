@@ -14,6 +14,7 @@ from ..types import (
     CameraView,
     Environment,
     GeometryView,
+    KeyframeProperties,
     Light,
     LightSet,
     Material,
@@ -332,22 +333,6 @@ class KeyframeInfo:
     name: str
     time: float
     model_id: int = -1
-
-
-@dataclass(frozen=True)
-class KeyframeProperties:
-    """Complete editable state stored by one model-local keyframe."""
-
-    keyframe_id: int
-    model_id: int
-    name: str
-    time: float
-    qpos: tuple[float, ...]
-    qvel: tuple[float, ...]
-    act: tuple[float, ...]
-    ctrl: tuple[float, ...]
-    mocap_position: tuple[float, ...]
-    mocap_quaternion: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -1231,8 +1216,10 @@ class SceneAdapterBase:
         """Return complete editable state for one model-local keyframe."""
         return None
 
-    def add_model_keyframe(self, model_id: int, name: str) -> int:
-        """Capture current model-local state in a new keyframe."""
+    def add_model_keyframe(
+        self, model_id: int, name: str, *, state: KeyframeProperties | None = None
+    ) -> int:
+        """Create a keyframe from supplied model-local values or the current state."""
         return -1
 
     def set_keyframe_properties(self, properties: KeyframeProperties) -> bool:
@@ -1837,7 +1824,9 @@ class KeyframeEditing(Protocol):
     def load_keyframe(self, keyframe_id: int) -> bool: ...
 
     def keyframe_properties(self, keyframe_id: int) -> KeyframeProperties | None: ...
-    def add_model_keyframe(self, model_id: int, name: str) -> int: ...
+    def add_model_keyframe(
+        self, model_id: int, name: str, *, state: KeyframeProperties | None = None
+    ) -> int: ...
     def set_keyframe_properties(self, properties: KeyframeProperties) -> bool: ...
     def remove_model_keyframe(self, keyframe_id: int) -> bool: ...
 

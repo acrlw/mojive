@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from examples.ui_design.native.docking_study import Study
 from examples.ui_design.native.navigation import (
-    GEOMETRY_ICONS,
     GEOMETRY_VIEWS,
     NODE_ICONS,
     Navigation,
@@ -269,41 +268,37 @@ def test_scene_geometry_segments_keep_labels_and_dispatch_keyboard_presets(
 ):
     state, ui = navigation, navigation.study.ui
     ui.translate = state.ctx.translate = Localizer(Language(language)).text
-    captions = {}
-    original = ui._segment_label
+    submitted = {}
+    original = ui.segmented
 
-    def observe(draw, lo, hi, color, scale, icon, label):
-        captions[icon] = label
-        return original(draw, lo, hi, color, scale, icon, label)
+    def observe(*args, **kwargs):
+        submitted.update(
+            labels=args[4], icons=kwargs.get("icons"), show_labels=kwargs["show_labels"]
+        )
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(ui, "_segment_label", observe)
+    monkeypatch.setattr(ui, "segmented", observe)
     imgui.get_io().display_size = (width * ui.s, 760 * ui.s)
     state.frame(3)
-    assert ui.hits["scene-geometry"][2] == pytest.approx((width - 24) * ui.s, abs=0.5)
-    assert ui.hits["scene-geometry"][3] == pytest.approx(28 * ui.s)
-    assert "scene-geometry-default" in ui.hits
+    group = ui.hits["scene-geometry"]
+    assert group[2] == pytest.approx((width - 24) * ui.s, abs=0.5)
+    assert submitted["labels"] == tuple(state.ctx.tr(view.value.title()) for view in GEOMETRY_VIEWS)
+    assert submitted["show_labels"]
     rects = [ui.hits["scene-geometry-" + view.value] for view in GEOMETRY_VIEWS]
-    labels_fit = (
-        sum(
-            ui.measure(state.ctx.tr(view.value.title())) + (18 + 5 + 12) * ui.s
-            for view in GEOMETRY_VIEWS
-        )
-        <= ui.hits["scene-geometry"][2]
-    )
+    inline = len({rect[1] for rect in rects}) == 1
+    assert group[3] == pytest.approx(28 * ui.s * (1 if inline else len(rects)))
     for index, (x, y, w, h) in enumerate(rects):
-        label = state.ctx.tr(GEOMETRY_VIEWS[index].value.title())
-        icon = GEOMETRY_ICONS[index]
-        assert captions[icon] == (label if labels_fit else "")
-        if captions[icon]:
-            assert ui.measure(label) + (18 + 5 + 12) * ui.s <= w + 0.5
         assert h == pytest.approx(28 * ui.s)
+        assert group[0] <= x < x + w <= group[0] + group[2] + 0.5
+        assert ui.measure(submitted["labels"][index]) <= w
         if index:
-            px, py, pw, _ = rects[index - 1]
-            assert (x, y) == pytest.approx((px + pw, py))
+            px, py, pw, ph = rects[index - 1]
+            assert (x, y) == pytest.approx((px + pw, py) if inline else (px, py + ph))
     state.click("scene-geometry-visual")
     state.event("add_mouse_pos_event", -100, -100)
-    state.event("add_key_event", imgui.Key.right_arrow, True)
-    state.event("add_key_event", imgui.Key.right_arrow, False)
+    direction = imgui.Key.right_arrow if inline else imgui.Key.down_arrow
+    state.event("add_key_event", direction, True)
+    state.event("add_key_event", direction, False)
     state.frame(2)
     state.event("add_key_event", imgui.Key.space, True)
     state.event("add_key_event", imgui.Key.space, False)

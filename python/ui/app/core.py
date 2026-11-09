@@ -272,6 +272,7 @@ class ViewerApp(
         self._show_model_load_error = False
         self._model_load_executor: ThreadPoolExecutor | None = None
         self._model_load_future: Future[Any] | None = None
+        self._model_edit_focus_restore = ""
         self._model_load_job: _ModelLoadJob | None = None
         self._model_load_queue: list[_ModelLoadJob] = []
         self._model_load_started = 0.0

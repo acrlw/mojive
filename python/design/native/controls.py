@@ -1014,7 +1014,7 @@ class NativePrimitives:
                     content,
                     shown,
                     mono=True,
-                    horizontal=style.get("textAlign", "center"),
+                    horizontal=style.get("textAlign", "right"),
                     fit_line=True,
                 )
             if (
@@ -1045,7 +1045,7 @@ class NativePrimitives:
                     box,
                     "input_number",
                     fontSize=style.get("fontSize", 14.0),
-                    textAlign=style.get("textAlign", "center"),
+                    textAlign=style.get("textAlign", "right"),
                     axisWidth=badge,
                     numericRect=numeric_frame.tuple(),
                     emptyContent=content.width <= 0 or content.height <= 0,
@@ -1725,7 +1725,7 @@ class NativePrimitives:
                     content,
                     number_width + gap + suffix_width,
                     line_height,
-                    horizontal=numeric.get("textAlign", "center"),
+                    horizontal=numeric.get("textAlign", "right"),
                     vertical=style.get("alignItems", "center"),
                 )
                 suffix_rect = Rect(

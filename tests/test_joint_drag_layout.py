@@ -1,4 +1,4 @@
-"""Unbounded joint fields share the native centered numeric caption layout."""
+"""Unbounded joint fields share the native right-aligned numeric caption layout."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -81,7 +81,7 @@ def joint_field(request, tmp_path, monkeypatch):
 @pytest.mark.parametrize("width", (96, 320, 700))
 @pytest.mark.parametrize("unit", ("rad", "m", ""))
 @pytest.mark.parametrize("value", (0.0, 1.25, -12345.678))
-def test_unbounded_joint_caption_is_centered_without_changing_field_bounds(
+def test_unbounded_joint_caption_is_right_aligned_without_changing_field_bounds(
     joint_field, width, unit, value
 ):
     state = joint_field
@@ -95,9 +95,8 @@ def test_unbounded_joint_caption_is_centered_without_changing_field_bounds(
     assert state.value == value
     numeric = state.records["##joint-value"]
     cx, cy, cw, ch = numeric["content"]
-    left = min(row[1] for row in state.painted)
     right = max(row[1] + row[3] for row in state.painted)
-    assert (left + right) / 2 == pytest.approx(cx + cw / 2, abs=0.01)
+    assert right == pytest.approx(cx + cw, abs=0.01)
     for _text, x, y, text_width, text_height in state.painted:
         assert y + text_height / 2 == pytest.approx(cy + ch / 2, abs=0.01)
         assert cx - 0.01 <= x <= x + text_width <= cx + cw + 0.01
@@ -146,7 +145,7 @@ def test_unbounded_caption_respects_authored_alignment_and_content_insets(joint_
         assert y + height / 2 == pytest.approx(cy + ch / 2)
 
 
-def test_unbounded_joint_drag_preserves_native_editing_and_centered_caption(joint_field):
+def test_unbounded_joint_drag_preserves_native_editing_and_right_aligned_caption(joint_field):
     state = joint_field
     x, y, width, height = state.ui.hits["joint-value"]
     io = imgui.get_io()
@@ -161,8 +160,7 @@ def test_unbounded_joint_drag_preserves_native_editing_and_centered_caption(join
     assert state.ui.hits["joint-value"] == (x, y, width, height)
     numeric = state.records["##joint-value"]
     cx, _cy, cw, _ch = numeric["content"]
-    left = min(row[1] for row in state.painted)
     right = max(row[1] + row[3] for row in state.painted)
-    assert (left + right) / 2 == pytest.approx(cx + cw / 2, abs=0.01)
+    assert right == pytest.approx(cx + cw, abs=0.01)
     io.add_mouse_button_event(0, False)
     state.frame()

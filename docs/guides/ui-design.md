@@ -446,8 +446,10 @@ Use switches for independent Boolean settings that apply immediately, with one f
 label/control hit target. Keep checkboxes for sets of selectable items, flags and visual-group
 membership. Choose the semantic control explicitly; never infer it from translated captions
 or the number of currently visible options.
-Floating surfaces have a broad, continuous Gaussian-like shadow falloff beneath that border, slightly heavier
-below the surface. Reuse local native gradient meshes when moving or repainting a window;
+Floating surfaces use the adopted soft downward shadow: offset (0, 8), blur 24,
+spread -4 logical points and 20% black opacity in both themes. The shared native mesh approximates
+the Gaussian falloff with cached ramps; offset translates the caster rather than stretching it.
+Reuse local native gradient meshes when moving or repainting a window;
 do not rebuild blur textures every frame. Avoid narrow linear fringes that read as another
 border, stepped outline rings, or an accent halo around an entire popup. Each popup owner
 paints its shadow once, before its native background and edge; the renderer needs no extra blur
@@ -563,10 +565,10 @@ callers own domain commands.
 
 Icon-and-text buttons measure the same resolved icon canvas, font, gap and padding used for
 painting. An icon-size change must not silently remove filter counts. Pose uses independent
-spacing roles: 12 points from the joint heading to its content, 4 from an above-row summary
-caption to XYZ, 12 between Position and Rotation groups, and 20 between joint entries. Resolve
-these through `rowGap`, `summaryLabelGap`, `summaryGroupGap`, and `gap` respectively. Include each
-gap in both measurement and painting; inline summary captions have no vertical caption gap.
+spacing roles from the adopted joint card and vector row: heading/content spacing, the
+vector caption gap, Position/Rotation separation, and inter-card spacing. Navigation always
+exposes editable XYZ values; it has no folded read-only pose or redundant DoF heading.
+Inspector reuses joined transform-style fields rather than navigation's flat numeric cells.
 
 ## Stable fields and component behavior
 
@@ -577,7 +579,7 @@ as selects and numeric fields; reflow only when the measured content cannot fit.
 | Surface | Required behavior |
 |---|---|
 | Property rows | One label/control grid; vertically aligned captions; labels shrink or move above controls according to measured budgets. Boolean rows fit their actual caption and switch, independently of XYZ field minima. |
-| XYZ and color fields | Joined axis badge and field form one surface. Use stable format budgets and equal columns. Use a complete vector/channel row or a complete stack, not an accidental two-plus-one layout. |
+| XYZ and color fields | Joined axis badge and field form one surface. Use stable format budgets and equal columns. Compact Inspector fields budget a signed single-digit value at the declared precision; wider live values use the shared numeric text fitting without changing column geometry. Use a complete vector/channel row or a complete stack, not an accidental two-plus-one layout. |
 | Numeric text | Value changes do not choose another layout. Reduce display precision or use complete scientific notation within the allocated field; viewing a value never rounds stored data. Editing retains full precision and native caret/scrolling. Units belong to the shared field presentation. |
 | Status metrics | Stable text boxes, digit cells, decimal anchors, and unit ends. Keep label/value/unit gaps and divider clearances independently adjustable. Compact large steps/time values, expose the exact value on hover, and copy the exact value on right-click. |
 | Projection changes | Menu and view-cube actions share the camera's eased projection transition and target-scale matching. Reversing an unfinished transition starts at its current blend. Programmatic camera restoration can remain immediate. |
@@ -835,8 +837,27 @@ fields, and preserve unrelated choices.
 
 Empty panel content shares one muted body-text presenter with an 8-point vertical inset and
 no additional horizontal indentation. Inspector and navigation joint cards use the same
-presenter and interaction contract. Scalar Inspector fields reserve a stable format budget
-rather than stretching across the whole panel; labels share a measured column. Camera view
+presenter and interaction contract. Scalar Inspector fields fill the shared field column;
+ranges and vectors divide the same column using stable format budgets. Numeric values align
+right within their padded field content, including scalar, range, XYZ and value/unit controls.
+Labels share a measured column; segmented option captions remain centered. Camera view
 actions animate through the existing eased camera transition, while capture uses the final view.
 The take selector keeps selection and deletion together; the lane's adjacent plus creates a take.
 Deleting the active take selects a remaining take, and deleting the last restores the empty lane.
+
+### Responsive timeline and camera properties
+
+The timeline retains one toolbar row at normal dock widths. Complete secondary groups move
+into the shared overflow form when they cannot fit; playback and recording remain visible and controls
+keep their adopted size. The view-range endpoints stay together, and a popup must not increase
+the dock's content height. At narrow widths, first/last jumps move into overflow before the
+primary transport wraps as a complete group.
+Copy/paste and duplicate preserve immutable model-local keyframe state and relative times,
+using the same atomic command transaction as other model edits. Never guess created IDs from
+list indices; query committed identities after completion.
+
+Camera projection fields are contextual: perspective exposes vertical FOV, focal length and
+sensor width; orthographic exposes vertical extent. Lens edits preserve existing intrinsic
+ratios and principal offsets. Output resolution belongs to the camera, survives scene and
+bookmark serialization, and supplies pure-scene captures unless an explicit capture size is
+requested. The viewport option follows the current capture surface size.

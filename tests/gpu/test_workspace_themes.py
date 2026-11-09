@@ -460,7 +460,19 @@ def test_theme_notice_badges_and_settings_consistency(backend_name, monkeypatch,
                             ("geometry_style_properties/row/", "contact_style_properties/row/")
                         )
                     ]
-                    assert len(aligned_rows) >= 8
+                    assert {r["key"].rsplit("/", 1)[-1] for r in aligned_rows} == {
+                        "碰撞体颜色",
+                        "外观不透明度",
+                        "碰撞体不透明度",
+                        "形状",
+                        "颜色",
+                        "大小",
+                    }
+                    switches = {r["key"]: r for r in _records(viewer) if r["kind"] == "switch_row"}
+                    for key in ("##contact_enabled", "##contact_model_color"):
+                        switch = switches[key + "/label-row"]
+                        sx, _sy, sw, _sh = switch["switchRect"]
+                        assert sx + sw == pytest.approx(field[0] + field[2], abs=scale)
                     for other in aligned_rows:
                         other_field = other["fields"][1]
                         assert (other_field[0], other_field[2]) == pytest.approx(

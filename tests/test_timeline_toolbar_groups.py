@@ -42,7 +42,7 @@ def toolbar(request, tmp_path):
     workspace = SimpleNamespace(ui=ui, s=ui.s)
     workspace.menus = Menus(workspace, ())
     panel, editor = NativeTimelineToolbar(workspace), TimelineEditor()
-    state = SimpleNamespace(ui=ui, runtime=runtime, editor=editor, width=1000)
+    state = SimpleNamespace(ui=ui, runtime=runtime, editor=editor, width=1000, overflow=True)
 
     def paint():
         imgui.new_frame()
@@ -53,6 +53,8 @@ def toolbar(request, tmp_path):
         runtime.observed.clear()
         ui.hits.clear()
         with group_scope("Timeline"):
+            if state.overflow:
+                imgui.open_popup("timeline-overflow")
             panel.draw_compact_toolbar(editor, ctx, ())
         state.records = {
             row["key"]: row for row in (*runtime.observed, *ui.design.primitives.observed)
@@ -91,22 +93,41 @@ def test_toolbar_wraps_complete_groups_without_clipping_controls(toolbar, width,
     )
     content = state.records["timeline-toolbar"]["content"]
     for group in groups:
-        assert _inside(content, group)
+        assert _inside(content, group) or _inside(ui.hits["timeline-overflow-content"], group)
     follow = ui.hits["timeline-group-follow"]
-    assert _inside(content, follow)
+    assert _inside(content, follow) or _inside(ui.hits["timeline-overflow-content"], follow)
+    if width >= 620:
+        assert content[3] == pytest.approx(28 * ui.s)
     if width >= 1600:
         assert len({group[1] for group in (*groups, follow)}) == 1
-    for index, first in enumerate((*groups, follow)):
-        for second in (*groups, follow)[index + 1 :]:
+    named = tuple(
+        zip(
+            ("transport", "capture", "keys", "view", "range", "utilities", "follow"),
+            (*groups, follow),
+            strict=True,
+        )
+    )
+    for index, (name, first) in enumerate(named):
+        for other, second in named[index + 1 :]:
+            if ("timeline-overflow-group-" + name in ui.hits) != (
+                "timeline-overflow-group-" + other in ui.hits
+            ):
+                continue
             assert (
                 first[0] + first[2] <= second[0] + 1
                 or second[0] + second[2] <= first[0] + 1
                 or first[1] + first[3] <= second[1] + 1
                 or second[1] + second[3] <= first[1] + 1
             )
-    for key in ("first", "previous", "play-pause", "next", "last", "time"):
+    for key in ("first", "last"):
+        assert _inside(
+            ui.hits.get("timeline-overflow-group-transport-ends", groups[0]),
+            ui.hits["timeline-" + key],
+        )
+    for key in ("previous", "play-pause", "next", "time"):
         assert _inside(groups[0], ui.hits["timeline-" + key])
-    for key in ("record", "snapshot", "video"):
+    assert _inside(content, ui.hits["timeline-record"])
+    for key in ("snapshot", "video"):
         assert _inside(groups[1], ui.hits["timeline-" + key])
     start, end = (state.records["range-bounds/##timeline-range-" + key] for key in ("start", "end"))
     for record in (start, end):
@@ -114,7 +135,11 @@ def test_toolbar_wraps_complete_groups_without_clipping_controls(toolbar, width,
     if width >= 340:
         assert start["fieldRect"][1] == pytest.approx(end["fieldRect"][1])
         assert start["fieldRect"][0] + start["fieldRect"][2] < end["fieldRect"][0]
-    assert state.bottom >= max(y + h for _, y, _, h in groups)
+    assert state.bottom >= max(
+        rect[1] + rect[3]
+        for name, rect in named
+        if "timeline-overflow-group-" + name not in ui.hits
+    )
 
 
 def test_dynamic_numbers_do_not_resize_toolbar_groups(toolbar):
@@ -148,8 +173,13 @@ def test_toolbar_padding_and_numeric_typography_keep_the_range_pair_together(too
     state.paint()
     container = state.records["timeline-toolbar"]
     for key in ("transport", "capture", "range", "view"):
-        assert _inside(container["content"], state.ui.hits["timeline-group-" + key])
-    assert _inside(container["content"], state.ui.hits["timeline-group-follow"])
+        group = state.ui.hits["timeline-group-" + key]
+        assert _inside(container["content"], group) or _inside(
+            state.ui.hits["timeline-overflow-content"], group
+        )
+    assert _inside(
+        state.ui.hits["timeline-overflow-content"], state.ui.hits["timeline-group-follow"]
+    )
     assert container["padding"] == pytest.approx(tuple(v * state.ui.s for v in (17, 9, 23, 11)))
     start, end = (state.ui.hits["##timeline-range-" + key] for key in ("start", "end"))
     assert _inside(state.ui.hits["timeline-group-range"], start)

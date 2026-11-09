@@ -122,7 +122,11 @@ def test_actual_selector_and_selected_lane_paints_use_the_body_corner_budget(
         for record in reversed(state.runtime.observed)
         if record["key"].startswith("timeline-lane-label-") and record["background"]
     )
-    for frame in (selector, tuple(lane["hit"])):
+    # A single model has a plain caption; only the multi-model selector is a control.
+    frames = [tuple(lane["hit"])]
+    if len(state.session.scene_models) > 1:
+        frames.append(selector)
+    for frame in frames:
         radii = [radius for painted, radius in paints if painted == frame]
         assert radii
         assert all(abs(radius - expected) <= native_epsilon(radius, expected) for radius in radii)

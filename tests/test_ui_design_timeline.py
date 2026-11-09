@@ -409,7 +409,8 @@ def test_track_wheel_after_loop_reveal_zooms_without_scrolling_body(timeline, he
 
 def test_recording_options_preview_and_commit_through_context(timeline):
     state = timeline
-    state.panel.panel.toolbar._draw_settings = NativeTimelineToolbar(state.study)._draw_settings
+    toolbar = NativeTimelineToolbar(state.study)
+    state.panel.panel.toolbar._draw_settings = toolbar._draw_settings
     state.ctx.recording_config = RecordingConfig()
 
     def update(value, *, persist=True):
@@ -436,7 +437,8 @@ def test_settings_labels_share_left_edge_and_fields_fill_compact_popup(
     timeline, native_fonts, language, monkeypatch
 ):
     state, ui = timeline, timeline.study.ui
-    state.panel.panel.toolbar._draw_settings = NativeTimelineToolbar(state.study)._draw_settings
+    toolbar = NativeTimelineToolbar(state.study)
+    state.panel.panel.toolbar._draw_settings = toolbar._draw_settings
     ui.translate = state.ctx.translate = Localizer(Language(language)).text
     state.ctx.recording_config = RecordingConfig()
     labels, popup = {}, {}
@@ -458,12 +460,13 @@ def test_settings_labels_share_left_edge_and_fields_fill_compact_popup(
     state.frame(3)
     state.click("timeline-settings")
     scale = ui.s
-    left = popup["x"] + 12 * scale
+    _labels, layout = toolbar.settings_layout(state.ctx)
+    left = popup["x"] + layout.padding[0] + layout.label_inset
     for caption in ("Pause at last frame", "Start delay (s)", "End hold (s)"):
         assert labels[state.ctx.tr(caption)][0] == pytest.approx(left)
     for key in ("timeline-pause-at-end", "##timeline-countdown", "##timeline-end_hold"):
         x, _, width, _ = ui.hits[key]
-        assert x + width == pytest.approx(popup["x"] + popup["width"] - 12 * scale)
+        assert x + width == pytest.approx(popup["x"] + popup["width"] - layout.padding[2])
     assert popup["width"] <= imgui.get_io().display_size.x - 16 * scale
     assert popup["height"] / scale < 140
     before = state.session.state_take_pause_at_end

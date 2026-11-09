@@ -12,6 +12,7 @@ from .types import (
     CameraView,
     Environment,
     GeometryView,
+    KeyframeProperties,
     Light,
     Material,
     MeshKey,
@@ -458,6 +459,7 @@ class AddModelKeyframe(Command):
 
     model_id: int
     name: str
+    state: KeyframeProperties | None = None
 
 
 @dataclass(frozen=True)

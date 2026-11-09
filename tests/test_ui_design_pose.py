@@ -177,11 +177,9 @@ def editor(request, session, monkeypatch):
         kind="ball",
         width=320,
         show_names=False,
-        show_types=False,
         shared=False,
         shared_panel=JointsPanel(),
         duplicate=False,
-        collapsible_poses=False,
     )
     drag_float = imgui.drag_float
 
@@ -223,8 +221,6 @@ def editor(request, session, monkeypatch):
                     select_joint=select,
                     initial_qpos=session.source.initial_qpos,
                     show_names=state.show_names,
-                    show_types=state.show_types,
-                    collapsible_poses=state.collapsible_poses,
                 )
             state.primary_hits = dict(ui.hits)
             imgui.end()
@@ -285,11 +281,11 @@ def editor(request, session, monkeypatch):
 
 @pytest.mark.physics
 @pytest.mark.parametrize("width", (160, 320))
-def test_inspected_body_joint_name_and_type_share_a_nonoverlapping_heading(
+def test_inspected_body_joint_heading_keeps_name_and_value_without_duplicate_type(
     editor, monkeypatch, width
 ):
     editor.kind, editor.width = "hinge", width
-    editor.show_names = editor.show_types = True
+    editor.show_names = True
     captions = []
     original = editor.ui.component_text
 
@@ -301,11 +297,10 @@ def test_inspected_body_joint_name_and_type_share_a_nonoverlapping_heading(
     monkeypatch.setattr(editor.ui, "component_text", record)
     editor.frame(2)
     name = editor.ui.hits[f"pose-joint-{editor.joint.joint_id}"]
-    type_rect = captions[-1]
-    assert name[0] + name[2] <= type_rect[0]
-    assert name[1] == type_rect[1]
-    assert type_rect[0] + type_rect[2] <= editor.width * editor.ui.s
-    assert name[2] > 0 and type_rect[2] > 0
+    value = editor.ui.hits[f"##pose-joint-{editor.joint.joint_id}-value"]
+    assert not captions
+    assert name[0] + name[2] <= value[0]
+    assert name[2] > 0
 
 
 @pytest.mark.physics

@@ -75,6 +75,4 @@ def test_joint_identity_distinguishes_body_inspection_from_joint_inspection(
     )
     navigation.draw_pose(ctx, 0, 0, 300, node_id=None if kind is None else 7)
     assert calls[0]["show_names"] is names
-    assert calls[0]["show_types"] is False
     assert calls[0]["compact_poses"] is (kind is None)
-    assert not calls[0]["show_context"]

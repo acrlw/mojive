@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from mojive import commands as cmd
@@ -34,6 +34,7 @@ class TimelineCommands(Protocol):
     take_video_active: bool
     style_scale: float
     input_claim: InputClaim | None
+    model_keyframe_names: Callable[[int], set[str]] | None
 
     def submit(self, command: cmd.Command) -> cmd.CommandResult: ...
     def submit_model_edit(
@@ -97,6 +98,9 @@ class TimelineEditor(TimelineEditorState):
         self.marker_index = TimelineMarkerIndex(())
         self.snapshot_index = TimelineMarkerIndex(())
         self.snapshot_cache = None
+        self._clipboard = ()
+        self._clipboard_document = None
+        self._clipboard_model = -1
 
     def capture_snapshot(self, ctx: TimelineCommands) -> None:
         """Select a captured snapshot only after Session accepts the capture."""
@@ -353,6 +357,75 @@ class TimelineEditor(TimelineEditorState):
                 for key in sorted(self.selected_keyframes, reverse=True)
             )
             ctx.submit_model_edits(commands, self.snapshot_removed, label="Delete model keyframes")
+
+    def copy_keyframes(self, ctx):
+        """Retain immutable model-local values, independent of later key edits."""
+        keys = tuple(
+            ctx.session.keyframe_properties(key) for key in sorted(self.selected_keyframes)
+        )
+        if not keys or any(key is None for key in keys):
+            self.error = ctx.tr("Keyframe state is no longer available")
+            return False
+        self._clipboard = tuple(sorted(keys, key=lambda key: (key.time, key.keyframe_id)))
+        self._clipboard_document = ctx.session.document_id
+        self._clipboard_model = self.model_id
+        self.error = ""
+        return True
+
+    def can_paste_keyframes(self, ctx):
+        return bool(
+            self._clipboard
+            and self._clipboard_document == ctx.session.document_id
+            and self._clipboard_model == self.model_id
+        )
+
+    def paste_keyframes(self, ctx, *, duplicate=False):
+        if ctx.session.state_take_recording or ctx.take_video_active or not ctx.session.paused:
+            return
+        if duplicate and not self.copy_keyframes(ctx):
+            return
+        if not self.can_paste_keyframes(ctx):
+            return
+        from mojive.ui.keyframe_editor.controls import unique_keyframe_name
+
+        names = (
+            set(ctx.model_keyframe_names(self.model_id))
+            if ctx.model_keyframe_names is not None
+            else {key.name for key in self.keyframes(ctx)[0]}
+        )
+        commands = []
+        start = self._clipboard[0].time
+        target = max(0.0, self.playhead)
+        if duplicate:
+            target = max(target, self._clipboard[-1].time + 0.1)
+        for key in self._clipboard:
+            name = unique_keyframe_name(names, key.name + "_copy")
+            names.add(name)
+            commands.append(
+                cmd.AddModelKeyframe(
+                    self.model_id, name, replace(key, name=name, time=target + key.time - start)
+                )
+            )
+        document_id, model_id = ctx.session.document_id, self.model_id
+        pasted_names = {command.name for command in commands}
+
+        def completed(result):
+            if document_id != ctx.session.document_id or model_id != self.model_id:
+                return
+            self.error = "" if result.ok else result.message
+            if result.ok:
+                # A draft can succeed before compiling. Select only identities
+                # actually returned by the committed model's public query.
+                keys = tuple(
+                    key for key in ctx.session.model_keyframes(model_id) if key.name in pasted_names
+                )
+                if len(keys) == len(commands):
+                    self.selected_keyframes = {key.keyframe_id for key in keys}
+                    self.selected_id = keys[-1].keyframe_id
+                    self.selection_generation = -1
+                    self.view_needs_fit = True
+
+        ctx.submit_model_edits(tuple(commands), completed, label="Paste model keyframes")
 
     def selection_count(self):
         if self.edit_lane == "take" and self.take_selection is not None:

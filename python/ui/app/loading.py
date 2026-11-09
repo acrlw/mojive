@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.scene.workspace import missing_resource_entries
@@ -202,6 +205,11 @@ class _Loading:
                 thread_name_prefix="mojive-model-loader",
             )
         job = self._model_load_queue.pop(0)
+        context = imgui.get_current_context()
+        if job.action == "edit" and context is not None and context.nav_window is not None:
+            # Loading frames omit the editor windows. Retain the command's input
+            # owner so the next shortcut does not target an unrelated panel.
+            job = replace(job, focus_window=context.nav_window.root_window.name)
         self._model_load_job = job
         self._model_load_started = time.monotonic()
         log.info("{} {}", self._model_load_verb(job.action), job.path)
@@ -259,6 +267,8 @@ class _Loading:
         self._model_prepared_resources = None
         if job.completed is not None:
             job.completed(result)
+        if job.focus_window:
+            self._model_edit_focus_restore = job.focus_window
         if self._close_after_model_load:
             self._close_after_model_load = False
             self._request_document_action("quit")

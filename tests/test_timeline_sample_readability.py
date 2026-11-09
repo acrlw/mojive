@@ -3,6 +3,7 @@
 from itertools import pairwise
 
 import pytest
+from imgui_bundle import imgui
 
 from mojive import commands as cmd
 from mojive.design.native.presentation import DesignPresentation
@@ -46,6 +47,12 @@ def _view(state, first, last):
     state.panel.editor.set_follow_mode("off")
     assert state.panel.editor.set_view_range(first, last)
     state.frame(3)
+
+
+def _show_range(state):
+    if "##timeline-range-start" not in state.ui.hits:
+        x, y, w, h = state.ui.hits["timeline-overflow"]
+        state.click_at((x + w / 2, y + h / 2))
 
 
 @pytest.mark.parametrize("native_fonts", (True,))
@@ -168,17 +175,21 @@ def test_current_time_can_precede_an_offscreen_loop_without_changing_its_timesta
 
     monkeypatch.setattr(state.ui, "component_text", text)
     state.frame()
+    _show_range(state)
     context = _latest(state, "timeline-range-context")
     playhead = _latest(state, "timeline-playhead")
-    assert context["rangeKind"] == "loop"
-    assert context["timeRange"] == pytest.approx((0.184, 0.344))
+    assert context["rangeKind"] == "view"
+    assert context["timeRange"] == [0, 0.112]
+    assert state.session.state_take_range == (23, 43)
     assert context["viewRange"] == [0, 0.112]
     assert playhead["time"] == pytest.approx(0.032)
     assert playhead["time"] == times[4]
-    assert {"Loop start", "Loop end"} <= set(labels)
+    assert {"View", "–"} <= set(labels)
     assert playhead["playheadX"] == pytest.approx(
         timeline_time_to_x(times[4], 0, 0.112, *state.panel.last_layout.time_bounds)
     )
+    state.event("add_key_event", imgui.Key.escape, True)
+    state.event("add_key_event", imgui.Key.escape, False)
     state.click_at(
         (
             state.ui.hits["timeline-play-pause"][0] + 4,
@@ -203,7 +214,8 @@ def test_empty_timeline_range_identifies_the_view_instead_of_a_recording(
 
     monkeypatch.setattr(state.ui, "component_text", text)
     state.frame()
+    _show_range(state)
     context = _latest(state, "timeline-range-context")
     assert context["rangeKind"] == "view"
     assert context["timeRange"] == [0.184, 0.344]
-    assert {"View start", "View end"} <= set(labels)
+    assert {"View", "–"} <= set(labels)

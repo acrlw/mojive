@@ -42,7 +42,7 @@
     "error_surface": "#331A1C",
     "purple_bright": "#C7B4CF",
     "switch_thumb": "#E6E8EB",
-    "shadow": "#00000038"
+    "shadow": "#00000033"
   },
   "light": {
     "brand": "#4C7040",
@@ -87,6 +87,6 @@
     "error_surface": "#F9E6E1",
     "purple_bright": "#795687",
     "switch_thumb": "#FAFCF8",
-    "shadow": "#0000001C"
+    "shadow": "#00000033"
   }
 }

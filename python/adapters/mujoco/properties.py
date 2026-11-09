@@ -911,6 +911,10 @@ class _ModelProperties:
             focal_length=intrinsics[:2].copy(),
             sensor_size=sensor_size.copy(),
             principal_offset=intrinsics[2:4].copy(),
+            output_size=tuple(map(int, m.cam_resolution[i]))
+            if np.any(m.cam_resolution[i] > 1)
+            else None,
+            aspect=float(m.cam_resolution[i, 0]) / max(1, int(m.cam_resolution[i, 1])),
         )
 
     def set_camera_view(self, camera_id: int, camera: CameraView) -> bool:
@@ -963,6 +967,8 @@ class _ModelProperties:
             element.sensor_size = zeros
             element.principal_length = zeros
             element.principal_pixel = zeros
+        element.resolution = camera.output_size or (1, 1)
+        self._m.cam_resolution[i] = element.resolution
         self._mark_model_edited(model_id)
 
         self._m.cam_pos[i] = local_position

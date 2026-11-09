@@ -508,13 +508,16 @@ class _Capture:
     ) -> np.ndarray:
         if surface is CaptureSurface.SCENE:
             x, y, width, height = self.window.points_to_pixels(self._viewport_rect)
-            size = getattr(self, "_fixed_render_size", None) or (
-                max(1, round(x + width) - round(x)),
-                max(1, round(y + height) - round(y)),
+            view = self._camera_view()
+            size = (
+                getattr(self, "_fixed_render_size", None)
+                or view.output_size
+                or (
+                    max(1, round(x + width) - round(x)),
+                    max(1, round(y + height) - round(y)),
+                )
             )
-            return self._scene_capture.read(
-                self.backend, self.session, self._camera_view(), size=size, out=out
-            )
+            return self._scene_capture.read(self.backend, self.session, view, size=size, out=out)
         else:
             if presented is None:
                 raise RuntimeError("window readback did not produce an image")

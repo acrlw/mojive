@@ -210,7 +210,9 @@ class _Keyframes:
             mocap_quaternion.reshape(-1),
         )
 
-    def add_model_keyframe(self, model_id: int, name: str) -> int:
+    def add_model_keyframe(
+        self, model_id: int, name: str, *, state: KeyframeProperties | None = None
+    ) -> int:
         value = str(name).strip()
         source_spec = self._spec_for_model(model_id)
         values = self._capture_model_keyframe_values(model_id)
@@ -221,10 +223,34 @@ class _Keyframes:
             or any(key.name == value for key in source_spec.keys)
         ):
             return -1
+        time = float(self._d.time)
+        if state is not None:
+            if state.model_id != model_id:
+                return -1
+            imported = tuple(
+                np.asarray(v, np.float64).reshape(-1)
+                for v in (
+                    state.qpos,
+                    state.qvel,
+                    state.act,
+                    state.ctrl,
+                    state.mocap_position,
+                    state.mocap_quaternion,
+                )
+            )
+            time = float(state.time)
+            if (
+                not np.isfinite(time)
+                or time < 0
+                or any(not np.isfinite(v).all() for v in imported)
+                or tuple(v.size for v in imported) != tuple(v.size for v in values)
+            ):
+                return -1
+            values = imported
         working = source_spec.copy()
         working.add_key(
             name=value,
-            time=float(self._d.time),
+            time=time,
             qpos=values[0],
             qvel=values[1],
             act=values[2],

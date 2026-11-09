@@ -674,8 +674,6 @@ class Navigation:
                 select_joint=self.select_joint,
                 initial_qpos=self.joints._initial_qpos,
                 show_names=show_identity or len(joints) > 1,
-                show_types=False,
-                show_context=False,
                 joint_color=node_accent(ctx.theme, "joint"),
                 compact_poses=node_id is None,
             )

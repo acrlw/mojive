@@ -12,6 +12,7 @@ from mojive.assets import resolve
 from mojive.config import LayoutConfig, ViewerConfig
 from mojive.tools.native_ui_review import _NativeInput, _records
 from mojive.tools.native_workspace import capture
+from mojive.ui.workspace.popup_style import popup_padding, popup_radius
 
 pytestmark = [pytest.mark.gpu, pytest.mark.physics]
 OUTPUT = Path(__file__).resolve().parents[2] / "output/control-consistency-2026-10-24"
@@ -104,7 +105,9 @@ def test_filters_and_modal_keep_native_focus_and_localized_copy(
             inputs.hover("tool-scale")
             assert "尺寸" in native_text
             tooltip = next(r for r in _records(viewer) if r.get("kind") == "tooltip")
-            assert tooltip["nativeRadius"] == pytest.approx(4 * scale)
+            assert tooltip["nativeRadius"] == pytest.approx(
+                popup_radius(workspace.ui, "menu", popup_padding(workspace.ui, "menu"))
+            )
             capture(viewer, target / "dimension-tooltip.png")
             inputs.move((0, 0))
             workspace.activate("Control")

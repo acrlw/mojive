@@ -285,6 +285,7 @@ class _MjcfExport:
                 focal_length=camera.focal_length if camera.uses_intrinsics() else None,
                 sensor_size=camera.sensor_size if camera.uses_intrinsics() else None,
                 principal_length=camera.principal_offset if camera.uses_intrinsics() else None,
+                resolution=camera.output_size,
             )
 
         light_names = {
