@@ -430,7 +430,8 @@ def test_navigation_width_moves_the_page_without_changing_other_groups(settings,
         return {row["key"]: row for row in runtime.observed}
 
     initial = geometry()
-    for width in (180, 260, 0):
+    minimum = 0
+    for width in (1, 180, 260, 0):
         spec = deepcopy(runtime.spec)
         spec["parts"]["settings_nav"] = {"navWidth": width}
         runtime.update_spec(spec)
@@ -438,8 +439,11 @@ def test_navigation_width_moves_the_page_without_changing_other_groups(settings,
         settings.frame(2)
         rows = geometry()
         nav = rows["settings-navigation"]["outer"]
-        if width:
-            assert nav[2] == pytest.approx(width * settings.s)
+        if width == 1:
+            minimum = nav[2]
+            assert settings.s < minimum < 260 * settings.s
+        elif width:
+            assert nav[2] == pytest.approx(max(minimum, width * settings.s))
         else:
             assert nav == initial["settings-navigation"]["outer"]
         assert rows["settings-layout"]["windowRect"] == initial["settings-layout"]["windowRect"]
